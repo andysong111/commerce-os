@@ -81,10 +81,17 @@ function isManualApplyReadyForFinalPriceLocal(result) {
 
 function isManualApplyPriceRepairRequiredLocal(result) {
   const summary = result?.summary ?? {};
+  const priceRepairRequired =
+    summary.price_repair_required === true ||
+    String(summary.price_repair_required ?? "").toLowerCase() === "true";
+  if (priceRepairRequired) return true;
+  const realApplyExecuted =
+    summary.real_apply_executed === true ||
+    String(summary.real_apply_executed ?? "").toLowerCase() === "true";
   return (
-    isFinalManualApplyResultLocal(result) &&
-    summary.real_apply_executed === true &&
+    realApplyExecuted &&
     Number(summary.title_batch_request_count) > 0 &&
+    isFinalManualApplyResultLocal(result) &&
     result?.status !== "queued" &&
     result?.status !== "running" &&
     summary.dry_run !== true &&
@@ -95,13 +102,18 @@ function isManualApplyPriceRepairRequiredLocal(result) {
 const realFailureFixture = {
   status: "failed",
   phase: "failed",
-  requestId: "apply-real-1",
+  requestId: "keyword-apply-20260724T181434Z-35333a",
   summary: {
     status: "failed",
+    phase: "failed",
+    dry_run: false,
     real_apply_executed: true,
     title_batch_request_count: 1,
+    title_retry_request_count: 1,
     title_apply_success_count: 0,
-    title_apply_unverified_count: 36,
+    title_apply_not_applied_count: 36,
+    title_apply_unverified_count: 0,
+    search_apply_success_count: 6,
     failed_item_count: 36,
     requires_final_price_pass: false,
   },
@@ -110,7 +122,7 @@ const realFailureFixture = {
 test("real failed title verification still requires price repair but is not launch-ready", () => {
   assert.equal(isManualApplyPriceRepairRequiredLocal(realFailureFixture), true);
   assert.equal(isManualApplyReadyForFinalPriceLocal(realFailureFixture), false);
-  assert.match(functionBlock("isManualApplyPriceRepairRequired"), /real_apply_executed === true/);
+  assert.match(functionBlock("isManualApplyPriceRepairRequired"), /realApplyExecuted/);
   assert.match(functionBlock("isManualApplyPriceRepairRequired"), /Number\(summary\.title_batch_request_count\) > 0/);
   assert.doesNotMatch(functionBlock("isManualApplyPriceRepairRequired"), /requires_final_price_pass/);
   assert.match(effectBlock, /!manualApplyPriceRepairRequired/);
@@ -181,4 +193,12 @@ test("unified button starts repair instead of resending manual title apply", () 
   assert.match(unifiedHandlerBlock, /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/);
   assert.doesNotMatch(unifiedHandlerBlock, /applyManualCandidates\(/);
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
+});
+
+test("restored exact manual apply request is fetched once without resending titles", () => {
+  assert.match(source, /restoredManualApplyResultFetchedRef = useRef<string>\(""\)/);
+  assert.match(source, /restoredSession\?\.keywordRealApplyRequestId/);
+  assert.match(source, /fetchManualApplyResult\(restoredRealApplyRequestId\)/);
+  assert.match(source, /request_id=\$\{encodeURIComponent\(requestId\)\}&mode=apply/);
+  assert.doesNotMatch(source, /\/api\/keyword-shopling-apply\/actions-result"/);
 });

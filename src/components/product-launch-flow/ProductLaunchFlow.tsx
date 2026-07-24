@@ -312,6 +312,7 @@ export function ProductLaunchFlow() {
   const autoPriceStartedForUploadRequestRef = useRef<string>("");
   const autoKeywordStartedForPriceRequestRef = useRef<string>("");
   const autoKeywordImportedArtifactRef = useRef<string>("");
+  const restoredManualApplyResultFetchedRef = useRef<string>("");
   const finalPriceStartedForRealApplyRequestRef = useRef<string>("");
 
   const uploadResultRows = useMemo(
@@ -1135,6 +1136,25 @@ export function ProductLaunchFlow() {
     },
     [manualApplyRequestId, manualApplyRunUrl],
   );
+
+  useEffect(() => {
+    const restoredRealApplyRequestId =
+      restoredSession?.keywordRealApplyRequestId ?? "";
+    if (!restoredRealApplyRequestId || manualApplyResult || manualApplyPolling)
+      return;
+    if (
+      restoredManualApplyResultFetchedRef.current === restoredRealApplyRequestId
+    )
+      return;
+    restoredManualApplyResultFetchedRef.current = restoredRealApplyRequestId;
+    setManualApplyRequestId(restoredRealApplyRequestId);
+    void fetchManualApplyResult(restoredRealApplyRequestId);
+  }, [
+    fetchManualApplyResult,
+    manualApplyPolling,
+    manualApplyResult,
+    restoredSession?.keywordRealApplyRequestId,
+  ]);
 
   useEffect(() => {
     if (!manualApplyPolling) return;
@@ -2790,13 +2810,20 @@ function isManualApplyPriceRepairRequired(
   result: ManualApplyActionsResult | null,
 ) {
   const summary = result?.summary ?? {};
+  const priceRepairRequired =
+    summary.price_repair_required === true ||
+    String(summary.price_repair_required ?? "").toLowerCase() === "true";
+  if (priceRepairRequired) return true;
   const dryRun =
     summary.dry_run === true ||
     String(summary.dry_run ?? "").toLowerCase() === "true";
+  const realApplyExecuted =
+    summary.real_apply_executed === true ||
+    String(summary.real_apply_executed ?? "").toLowerCase() === "true";
   return (
-    isFinalManualApplyResult(result) &&
-    summary.real_apply_executed === true &&
+    realApplyExecuted &&
     Number(summary.title_batch_request_count) > 0 &&
+    isFinalManualApplyResult(result) &&
     result?.status !== "queued" &&
     result?.status !== "running" &&
     !dryRun

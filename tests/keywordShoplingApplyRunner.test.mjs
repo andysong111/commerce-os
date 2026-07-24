@@ -7,7 +7,77 @@ import {
   dispatchKeywordShoplingApplyActions,
   extractKeywordShoplingApplyArtifact,
   fetchKeywordShoplingApplyActionsResult,
+  safeJson,
+  safeRow,
 } from "../src/lib/keywordShoplingApplyRunner.ts";
+
+
+test("safeJson preserves artifact contract fields and drops raw secrets", () => {
+  const allowed = {
+    real_apply_executed: true,
+    price_repair_required: "true",
+    title_batch_request_count: 1,
+    title_retry_request_count: 1,
+    search_batch_request_count: 2,
+    title_readback_verified_goods_key_count: 36,
+    title_readback_auth_failure_goods_key_count: 0,
+    title_readback_http_failure_goods_key_count: 0,
+    title_readback_parse_failure_goods_key_count: 0,
+    title_visible_verified_count: 36,
+    title_visible_mismatch_count: 0,
+    title_visible_unavailable_count: 0,
+    shopling_http_request_count: 42,
+    elapsed_seconds: 12.5,
+  };
+  const sanitized = safeJson({
+    ...allowed,
+    cookies: "secret",
+    credentials: "secret",
+    request_xml: "<request />",
+    response_xml: "<response />",
+    response_html: "<html />",
+    authorization: "Bearer secret",
+    unknown_raw_payload: "raw",
+  });
+  for (const [key, value] of Object.entries(allowed)) {
+    assert.equal(sanitized[key], value);
+  }
+  for (const key of [
+    "cookies",
+    "credentials",
+    "request_xml",
+    "response_xml",
+    "response_html",
+    "authorization",
+    "unknown_raw_payload",
+  ]) {
+    assert.equal(Object.hasOwn(sanitized, key), false);
+  }
+});
+
+test("safeRow preserves readback diagnostics and drops Cookie or HTML fields", () => {
+  const sanitized = safeRow({
+    goods_key: "123",
+    title_api_response_status: "ok",
+    title_api_response_code: "0000",
+    title_api_response_msg: "success",
+    title_readback_status: "not_applied",
+    title_readback_error_code: "VISIBLE_MISMATCH",
+    title_readback_attempt_count: 3,
+    Cookie: "secret",
+    response_html: "<html />",
+    html: "<html />",
+  });
+  assert.deepEqual(sanitized, {
+    goods_key: "123",
+    title_api_response_status: "ok",
+    title_api_response_code: "0000",
+    title_api_response_msg: "success",
+    title_readback_status: "not_applied",
+    title_readback_error_code: "VISIBLE_MISMATCH",
+    title_readback_attempt_count: 3,
+  });
+});
 
 function withEnv(fn) {
   const old = { ...process.env };
