@@ -39,12 +39,26 @@ export type KeywordApplySummary = Partial<
       | "title_apply_unverified_count"
       | "title_apply_not_applied_count"
       | "search_apply_success_count"
-      | "search_apply_not_applied_count",
+      | "search_apply_not_applied_count"
+      | "title_batch_request_count"
+      | "title_retry_request_count"
+      | "search_batch_request_count"
+      | "title_readback_verified_goods_key_count"
+      | "title_readback_auth_failure_goods_key_count"
+      | "title_readback_http_failure_goods_key_count"
+      | "title_readback_parse_failure_goods_key_count"
+      | "title_visible_verified_count"
+      | "title_visible_mismatch_count"
+      | "title_visible_unavailable_count"
+      | "shopling_http_request_count"
+      | "elapsed_seconds",
       unknown
     >
   > & {
     dry_run?: unknown;
     requires_final_price_pass?: unknown;
+    real_apply_executed?: unknown;
+    price_repair_required?: unknown;
     phase?: unknown;
     errors?: unknown;
     warnings?: unknown;
@@ -285,7 +299,7 @@ export async function dispatchKeywordShoplingApplyActions(input: {
   };
 }
 
-function safeJson(value: unknown): KeywordApplySummary {
+export function safeJson(value: unknown): KeywordApplySummary {
   const allowed = [
     "request_id",
     "mode",
@@ -301,6 +315,20 @@ function safeJson(value: unknown): KeywordApplySummary {
     "title_apply_not_applied_count",
     "search_apply_success_count",
     "search_apply_not_applied_count",
+    "real_apply_executed",
+    "price_repair_required",
+    "title_batch_request_count",
+    "title_retry_request_count",
+    "search_batch_request_count",
+    "title_readback_verified_goods_key_count",
+    "title_readback_auth_failure_goods_key_count",
+    "title_readback_http_failure_goods_key_count",
+    "title_readback_parse_failure_goods_key_count",
+    "title_visible_verified_count",
+    "title_visible_mismatch_count",
+    "title_visible_unavailable_count",
+    "shopling_http_request_count",
+    "elapsed_seconds",
     "requires_final_price_pass",
     "dry_run",
     "errors",
@@ -315,7 +343,7 @@ function safeJson(value: unknown): KeywordApplySummary {
       )[key];
   return out;
 }
-function safeRow(row: unknown): KeywordApplyRow | null {
+export function safeRow(row: unknown): KeywordApplyRow | null {
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
   const allowed = [
     "goods_key",
@@ -330,6 +358,12 @@ function safeRow(row: unknown): KeywordApplyRow | null {
     "mall_goods_cd_present",
     "link_seq_present",
     "title_payload_field_used",
+    "title_api_response_status",
+    "title_api_response_code",
+    "title_api_response_msg",
+    "title_readback_status",
+    "title_readback_error_code",
+    "title_readback_attempt_count",
     "code",
     "msg",
     "message",
