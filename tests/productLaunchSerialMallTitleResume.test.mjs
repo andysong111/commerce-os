@@ -30,6 +30,18 @@ const resultBlock = between(
   "const fetchManualApplyResult = useCallback",
   "\n  useEffect(() => {\n    const restoredRealApplyRequestId",
 );
+const uploadBlock = between(
+  "const runUploadRequest = useCallback",
+  "\n  const runUpload = async",
+);
+const applyBlock = between(
+  "const applyManualCandidates = useCallback",
+  "\n  const resumeSerialMallTitleApply = useCallback",
+);
+const restoreBlock = between(
+  "useEffect(() => {\n    const restoredRealApplyRequestId",
+  "\n  useEffect(() => {\n    if (!manualApplyPolling) return;",
+);
 
 test("pending verification exposes an enabled dedicated resume action", () => {
   assert.match(source, /"누락 상품명만 순차 이어서 반영"/);
@@ -107,19 +119,22 @@ test("resume request identity is recoverable and persisted as the real apply", (
   );
   assert.match(
     resumeBlock,
-    /setManualApplyRequestId\(requestId\);\n\s+setSerialMallTitleResumeRequestId\(requestId\);\n\s+setKeywordApplyState/,
+    /setManualApplyRequestId\(requestId\);\n\s+setSerialMallTitleResumeRequestId\(requestId\);\n\s+setHandledResumePriceRepairRequestId\(""\)/,
   );
   assert.match(
     source,
     /keywordRealApplyRequestId:\n\s+manualApplyRequestId \|\|/,
   );
-  assert.match(source, /serialMallTitleResumeRequestId,\n\s+finalPriceRequestId/);
+  assert.match(
+    source,
+    /serialMallTitleResumeRequestId,\n\s+handledResumePriceRepairRequestId,\n\s+finalPriceRequestId/,
+  );
 });
 
 test("restored resume polls its exact id until a terminal artifact", () => {
   assert.match(
-    source,
-    /restoredSession\?\.serialMallTitleResumeRequestId \?\?\n\s+restoredSession\?\.keywordRealApplyRequestId/,
+    restoreBlock,
+    /serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
   );
   assert.match(
     source,
@@ -155,8 +170,60 @@ test("previous final-price success is retained until a terminal repair-required 
   );
   assert.match(
     resultBlock,
-    /handledResumePriceRepairRequestIdRef\.current !== requestId/,
+    /handledResumePriceRepairRequestId !== requestId/,
   );
+});
+
+test("handled resume price repair identity survives reload", () => {
+  assert.match(source, /handledResumePriceRepairRequestId\?: string/);
+  assert.match(
+    source,
+    /useState\(restoredSession\?\.handledResumePriceRepairRequestId \?\? ""\)/,
+  );
+  assert.match(
+    resultBlock,
+    /handledResumePriceRepairRequestId !== requestId[\s\S]*setHandledResumePriceRepairRequestId\(requestId\)[\s\S]*setFinalPriceRequestId\(""\)/,
+  );
+  assert.match(source, /handledResumePriceRepairRequestId,\n\s+finalPriceRequestId/);
+  assert.doesNotMatch(source, /handledResumePriceRepairRequestIdRef/);
+});
+
+test("a fresh upload drops every prior manual apply and resume identity", () => {
+  for (const reset of [
+    'setManualApplyRequestId("")',
+    "setManualApplyResult(null)",
+    "setManualApplyPolling(false)",
+    "setManualApplyPollCount(0)",
+    "setManualApplyLastCheckedAt(null)",
+    "setManualApplyNextCheckIn(0)",
+    'setManualApplyActionsUrl("")',
+    'setManualApplyRunUrl("")',
+    'setManualApplyCommandPreview("")',
+    'setManualApplyErrorMessage("")',
+    'setSerialMallTitleResumeRequestId("")',
+    'setHandledResumePriceRepairRequestId("")',
+    'restoredManualApplyResultFetchedRef.current = ""',
+  ]) assert.equal(uploadBlock.includes(reset), true, `missing ${reset}`);
+  assert.doesNotMatch(
+    source,
+    /keywordApplyState\?\.realApplyRequestId \|\|\n\s+restoredSession\?\.keywordRealApplyRequestId/,
+  );
+  assert.doesNotMatch(restoreBlock, /restoredSession\?\./);
+});
+
+test("a regular apply clears stale manual and resume state before dispatch", () => {
+  const dispatchIndex = applyBlock.indexOf(
+    'fetch("/api/keyword-shopling-apply/run"',
+  );
+  assert.notEqual(dispatchIndex, -1);
+  const beforeDispatch = applyBlock.slice(0, dispatchIndex);
+  for (const reset of [
+    'setManualApplyRequestId("")',
+    "setManualApplyResult(null)",
+    "setManualApplyPolling(false)",
+    'setSerialMallTitleResumeRequestId("")',
+    'setHandledResumePriceRepairRequestId("")',
+  ]) assert.equal(beforeDispatch.includes(reset), true, `missing ${reset}`);
 });
 
 test("terminal no-repair resume preserves price and verified success can complete", () => {
