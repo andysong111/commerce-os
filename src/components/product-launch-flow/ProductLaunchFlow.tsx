@@ -18,6 +18,13 @@ import {
   type KeywordExecutionPreflightResult,
 } from "@/lib/keywordReviewExecutionPreflight";
 import {
+  buildManualRemainingRetryExecutionPlan,
+  collectAcceptedManualTitleTargetKeys,
+  hasCompletedManualRemaining,
+  isTerminalManualTitleResult,
+  shouldPollRestoredManualTitle,
+} from "@/lib/productLaunchManualTitleState.mjs";
+import {
   FormEvent,
   useCallback,
   useEffect,
@@ -186,6 +193,7 @@ type ProductLaunchSessionV2 = {
   manualTitleOperatorConfirmedComplete?: boolean;
   manualTitleResult?: ManualApplyActionsResult | null;
   manualTitleCanaryResult?: ManualApplyActionsResult | null;
+  manualTitleAcceptedRemainingTargetKeys?: string[];
   handledResumePriceRepairRequestId?: string;
   finalPriceRequestId?: string;
   uploadResult?: UploadActionsResult | null;
@@ -340,12 +348,14 @@ export function ProductLaunchFlow() {
           ? restoredSession.manualTitleResult
           : null),
     );
+  const [
+    manualTitleAcceptedRemainingTargetKeys,
+    setManualTitleAcceptedRemainingTargetKeys,
+  ] = useState<string[]>(
+    restoredSession?.manualTitleAcceptedRemainingTargetKeys ?? [],
+  );
   const [manualApplyPolling, setManualApplyPolling] = useState(
-    !!(
-      restoredSession?.manualTitleRemainingRequestId ??
-      restoredSession?.manualTitleCanaryRequestId ??
-      restoredSession?.keywordRealApplyRequestId
-    ),
+    shouldPollRestoredManualTitle(restoredSession),
   );
   const [manualApplyPollCount, setManualApplyPollCount] = useState(0);
   const [manualApplyLastCheckedAt, setManualApplyLastCheckedAt] =
@@ -588,6 +598,7 @@ export function ProductLaunchFlow() {
     setManualApplyRequestId("");
     setManualTitleCanaryRequestId("");
     setManualTitleRemainingRequestId("");
+    setManualTitleAcceptedRemainingTargetKeys([]);
     setManualTitleOperatorConfirmedComplete(false);
     setManualTitleCanaryResult(null);
     setManualApplyResult(null);
@@ -1180,6 +1191,11 @@ export function ProductLaunchFlow() {
         ).json();
         if (activeManualApplyRequestIdRef.current !== requestId) return;
         setManualApplyResult(data);
+        if (data?.summary?.title_apply_phase === "manual_remaining") {
+          setManualTitleAcceptedRemainingTargetKeys((current) =>
+            collectAcceptedManualTitleTargetKeys(current, data),
+          );
+        }
         setManualApplyRunUrl(
           String(
             data.runUrl || data.githubActionsUrl || manualApplyRunUrl || "",
@@ -1352,6 +1368,7 @@ export function ProductLaunchFlow() {
     setManualApplyRequestId("");
     setManualTitleCanaryRequestId("");
     setManualTitleRemainingRequestId("");
+    setManualTitleAcceptedRemainingTargetKeys([]);
     setManualApplyResult(null);
     setManualApplyPolling(false);
     setManualApplyPollCount(0);
@@ -1525,8 +1542,10 @@ export function ProductLaunchFlow() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          execution_plan_json:
-            buildCompactKeywordApplyExecutionPlan(preflightResult),
+          execution_plan_json: buildManualRemainingRetryExecutionPlan(
+            preflightResult.eligibleItems,
+            manualTitleAcceptedRemainingTargetKeys,
+          ),
           mode: "apply",
           title_apply_phase: "manual_remaining",
           confirmation_text: MANUAL_REMAINING_CONFIRMATION_TEXT,
@@ -1599,6 +1618,7 @@ export function ProductLaunchFlow() {
     manualApplyResult,
     manualTitleCanaryResult,
     manualTitleRemainingRequestId,
+    manualTitleAcceptedRemainingTargetKeys,
     manualKeywordOverridesByGoodsKey,
     manualTitleOverridesByGoodsKey,
     seedKeywordsByGoodsKey,
@@ -1795,10 +1815,10 @@ export function ProductLaunchFlow() {
     manualTitleSummary?.status === "waiting_manual_confirmation" &&
     manualApplyResult?.phase === "artifact_ready" &&
     Number(manualTitleSummary.failed_item_count) === 0 &&
-    Number(manualTitleSummary.title_write_request_count) ===
-      titleTargetCount - 1 &&
-    Number(manualTitleSummary.manual_api_accepted_count) ===
-      titleTargetCount - 1 &&
+    hasCompletedManualRemaining(
+      manualTitleAcceptedRemainingTargetKeys,
+      titleTargetCount,
+    ) &&
     manualTitleSummary.manual_verification_required === true;
   const manualTitleFlowComplete =
     isSuccessfulUploadResult(uploadActionsResult, uploadRows.length) &&
@@ -1985,6 +2005,7 @@ export function ProductLaunchFlow() {
       manualTitleOperatorConfirmedComplete,
       manualTitleResult: manualApplyResult,
       manualTitleCanaryResult,
+      manualTitleAcceptedRemainingTargetKeys,
       handledResumePriceRepairRequestId,
       finalPriceRequestId,
       uploadResult: uploadActionsResult,
@@ -2010,6 +2031,7 @@ export function ProductLaunchFlow() {
     manualTitleRemainingRequestId,
     manualTitleOperatorConfirmedComplete,
     manualTitleCanaryResult,
+    manualTitleAcceptedRemainingTargetKeys,
     priceActionsResult,
     priceRequestId,
     restoredSession,
@@ -2094,6 +2116,7 @@ export function ProductLaunchFlow() {
     setManualTitleRemainingRequestId("");
     setManualTitleOperatorConfirmedComplete(false);
     setManualTitleCanaryResult(null);
+    setManualTitleAcceptedRemainingTargetKeys([]);
     setManualApplyActionsUrl("");
     setManualApplyRunUrl("");
     setManualApplyCommandPreview("");
@@ -3352,20 +3375,7 @@ function summarizeManualApplyResult(result: ManualApplyActionsResult | null) {
 }
 
 function isFinalManualApplyResult(result: ManualApplyActionsResult | null) {
-  const value = String(
-    result?.phase ?? result?.status ?? result?.summary?.status ?? "",
-  );
-  return [
-    "artifact_ready",
-    "failed",
-    "blocked",
-    "completed_no_artifact",
-    "error",
-    "success",
-    "partial_failure",
-    "success_with_verification_warning",
-    "partial_success_unverified",
-  ].includes(value);
+  return isTerminalManualTitleResult(result);
 }
 
 function isRetryableManualApplyResult(result: ManualApplyActionsResult | null) {
