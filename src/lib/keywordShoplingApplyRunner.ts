@@ -7,6 +7,12 @@ export const KEYWORD_SHOPLING_APPLY_ARTIFACT_NAME =
   "keyword-shopling-apply-result";
 export const KEYWORD_SHOPLING_APPLY_CONFIRMATION_TEXT =
   "APPLY_KEYWORD_RESULTS_TO_SHOPLING";
+export const MANUAL_REMAINING_CONFIRMATION_TEXT =
+  "CONFIRM_MANUAL_CANARY_VISIBLE_AND_PRICE_OK";
+export type TitleApplyPhase =
+  | "verified_serial"
+  | "manual_canary"
+  | "manual_remaining";
 
 type Config = { repo: string; workflow: string; ref: string; token: string };
 type Mode = "dry_run" | "apply";
@@ -76,6 +82,13 @@ export type KeywordApplySummary = Partial<
     title_stage_status?: unknown;
     serial_failure_goods_key?: unknown;
     serial_failure_mall_key?: unknown;
+    title_apply_phase?: unknown;
+    manual_canary_goods_key?: unknown;
+    manual_canary_mall_key?: unknown;
+    manual_canary_requested_title?: unknown;
+    manual_canary_post_count?: unknown;
+    manual_verification_required?: unknown;
+    manual_api_accepted_count?: unknown;
   };
 export type KeywordApplyRow = Record<string, unknown>;
 
@@ -207,6 +220,9 @@ export function validateKeywordShoplingApplyInput(input: {
   mode?: unknown;
   confirmation_text?: unknown;
   max_items?: unknown;
+  title_apply_phase?: unknown;
+  confirmed_canary_goods_key?: unknown;
+  confirmed_canary_mall_key?: unknown;
 }) {
   if (
     typeof input.execution_plan_json !== "string" ||
@@ -223,17 +239,46 @@ export function validateKeywordShoplingApplyInput(input: {
     typeof input.confirmation_text === "string"
       ? input.confirmation_text.trim()
       : "";
+  const titleApplyPhase = (input.title_apply_phase ??
+    "verified_serial") as TitleApplyPhase;
+  if (
+    !["verified_serial", "manual_canary", "manual_remaining"].includes(
+      titleApplyPhase,
+    )
+  )
+    throw new Error("title_apply_phase 값이 올바르지 않습니다.");
+  const confirmedCanaryGoodsKey =
+    typeof input.confirmed_canary_goods_key === "string"
+      ? input.confirmed_canary_goods_key.trim()
+      : "";
+  const confirmedCanaryMallKey =
+    typeof input.confirmed_canary_mall_key === "string"
+      ? input.confirmed_canary_mall_key.trim()
+      : "";
+  const requiredConfirmation =
+    titleApplyPhase === "manual_remaining"
+      ? MANUAL_REMAINING_CONFIRMATION_TEXT
+      : KEYWORD_SHOPLING_APPLY_CONFIRMATION_TEXT;
   if (
     input.mode === "apply" &&
-    confirmationText !== KEYWORD_SHOPLING_APPLY_CONFIRMATION_TEXT
+    confirmationText !== requiredConfirmation
   )
     throw new Error("실제 반영은 정확한 확인문구가 필요합니다.");
+  if (input.mode === "apply" && titleApplyPhase === "manual_remaining") {
+    if (!confirmedCanaryGoodsKey || !confirmedCanaryMallKey)
+      throw new Error("확인한 canary goods_key와 mall_key가 필요합니다.");
+    if (!SHOPLING_MALL_KEY_PATTERN.test(confirmedCanaryMallKey))
+      throw new Error("confirmed_canary_mall_key 형식이 올바르지 않습니다.");
+  }
   return {
     executionPlanJson: input.execution_plan_json,
     mode: input.mode as Mode,
     confirmationText,
     maxItems,
     itemCount: itemCountFromPlan(input.execution_plan_json),
+    titleApplyPhase,
+    confirmedCanaryGoodsKey,
+    confirmedCanaryMallKey,
   };
 }
 
@@ -242,6 +287,9 @@ export function buildKeywordShoplingApplyDispatchRequest(input: {
   mode?: unknown;
   confirmation_text?: unknown;
   max_items?: unknown;
+  title_apply_phase?: unknown;
+  confirmed_canary_goods_key?: unknown;
+  confirmed_canary_mall_key?: unknown;
 }) {
   const parsed = validateKeywordShoplingApplyInput(input);
   const config = getConfig();
@@ -260,9 +308,12 @@ export function buildKeywordShoplingApplyDispatchRequest(input: {
         confirmation_text: parsed.confirmationText,
         request_id: requestId,
         max_items: String(parsed.maxItems),
+        title_apply_phase: parsed.titleApplyPhase,
+        confirmed_canary_goods_key: parsed.confirmedCanaryGoodsKey,
+        confirmed_canary_mall_key: parsed.confirmedCanaryMallKey,
       },
     },
-    commandPreview: `GitHub Actions: workflow=${config.workflow} mode=${parsed.mode} item_count=${parsed.itemCount ?? "unknown"} max_items=${parsed.maxItems} request_id=${requestId}`,
+    commandPreview: `GitHub Actions: workflow=${config.workflow} mode=${parsed.mode} title_apply_phase=${parsed.titleApplyPhase} item_count=${parsed.itemCount ?? "unknown"} max_items=${parsed.maxItems} request_id=${requestId}`,
   };
 }
 export async function dispatchKeywordShoplingApplyActions(input: {
@@ -270,6 +321,9 @@ export async function dispatchKeywordShoplingApplyActions(input: {
   mode?: unknown;
   confirmation_text?: unknown;
   max_items?: unknown;
+  title_apply_phase?: unknown;
+  confirmed_canary_goods_key?: unknown;
+  confirmed_canary_mall_key?: unknown;
 }) {
   if (!enabled())
     return {
@@ -362,6 +416,13 @@ export function safeJson(value: unknown): KeywordApplySummary {
     "errors",
     "warnings",
     "created_at",
+    "title_apply_phase",
+    "manual_canary_goods_key",
+    "manual_canary_mall_key",
+    "manual_canary_requested_title",
+    "manual_canary_post_count",
+    "manual_verification_required",
+    "manual_api_accepted_count",
   ];
   const out: KeywordApplySummary = {};
   if (value && typeof value === "object" && !Array.isArray(value))
