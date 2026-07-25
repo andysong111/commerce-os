@@ -147,6 +147,22 @@ test("restored resume polls its exact id until a terminal artifact", () => {
   );
 });
 
+test("every restored real apply request starts exact-id polling", () => {
+  assert.match(
+    restoreBlock,
+    /useState\(\n\s*!!restoredSession\?\.keywordRealApplyRequestId,\n\s*\)/,
+  );
+  assert.match(
+    source,
+    /fetchManualApplyResult\(\n\s*serialMallTitleResumeRequestId \|\| manualApplyRequestId,\n\s*\)/,
+  );
+  assert.equal(
+    (source.match(/fetchManualApplyResult\(/g) ?? []).length,
+    1,
+    "only the polling effect may perform the initial result fetch",
+  );
+});
+
 test("result polling permits only one in-flight fetch per request id", () => {
   assert.match(
     source,
@@ -163,6 +179,21 @@ test("result polling permits only one in-flight fetch per request id", () => {
   assert.match(
     resultBlock,
     /finally \{\n\s+manualApplyResultFetchInFlightRef\.current\.delete\(requestId\)/,
+  );
+});
+
+test("stale manual apply responses cannot mutate current request state", () => {
+  assert.match(
+    source,
+    /const activeManualApplyRequestIdRef = useRef\(\n\s*restoredSession\?\.keywordRealApplyRequestId \?\? "",\n\s*\)/,
+  );
+  assert.match(
+    resultBlock,
+    /const data = await[\s\S]*activeManualApplyRequestIdRef\.current !== requestId\) return;[\s\S]*setManualApplyResult\(data\)/,
+  );
+  assert.match(
+    resultBlock,
+    /catch \(error\) \{\n\s*if \(activeManualApplyRequestIdRef\.current !== requestId\) return;/,
   );
 });
 
@@ -225,7 +256,7 @@ test("a fresh upload drops every prior manual apply and resume identity", () => 
     'setManualApplyErrorMessage("")',
     'setSerialMallTitleResumeRequestId("")',
     'setHandledResumePriceRepairRequestId("")',
-    "manualApplyResultFetchInFlightRef.current.clear()",
+    'activeManualApplyRequestIdRef.current = ""',
     'handledResumePriceRepairRequestIdRef.current = ""',
   ]) assert.equal(uploadBlock.includes(reset), true, `missing ${reset}`);
   assert.doesNotMatch(
@@ -242,6 +273,7 @@ test("a regular apply clears stale manual and resume state before dispatch", () 
   assert.notEqual(dispatchIndex, -1);
   const beforeDispatch = applyBlock.slice(0, dispatchIndex);
   for (const reset of [
+    'activeManualApplyRequestIdRef.current = ""',
     'setManualApplyRequestId("")',
     "setManualApplyResult(null)",
     "setManualApplyPolling(false)",
@@ -255,6 +287,14 @@ test("a regular apply clears stale manual and resume state before dispatch", () 
     afterDispatch,
     /const requestId = String\(json\.requestId \|\| ""\)[\s\S]*setKeywordApplyState\(\{[\s\S]*realApplyRequestId: requestId/,
   );
+});
+
+test("a fresh start clears the active manual apply identity", () => {
+  const clearBlock = between(
+    "const clearProductLaunchFailureState =",
+    "\n  const resetProductLaunchSession =",
+  );
+  assert.match(clearBlock, /activeManualApplyRequestIdRef\.current = ""/);
 });
 
 test("terminal no-repair resume preserves price and verified success can complete", () => {
