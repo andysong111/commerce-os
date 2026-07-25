@@ -127,14 +127,14 @@ test("resume request identity is recoverable and persisted as the real apply", (
   );
   assert.match(
     source,
-    /serialMallTitleResumeRequestId,\n\s+handledResumePriceRepairRequestId,\n\s+finalPriceRequestId/,
+    /serialMallTitleResumeRequestId,[\s\S]*handledResumePriceRepairRequestId,[\s\S]*finalPriceRequestId/,
   );
 });
 
 test("restored resume polls its exact id until a terminal artifact", () => {
   assert.match(
     restoreBlock,
-    /restoredSession\?\.keywordRealApplyRequestId \?\? ""/,
+    /restoredSession\?\.keywordRealApplyRequestId \?\?\s*""/,
   );
   assert.match(
     source,
@@ -150,7 +150,7 @@ test("restored resume polls its exact id until a terminal artifact", () => {
 test("every restored real apply request starts exact-id polling", () => {
   assert.match(
     restoreBlock,
-    /useState\(\n\s*!!restoredSession\?\.keywordRealApplyRequestId,\n\s*\)/,
+    /const \[manualApplyPolling, setManualApplyPolling\] = useState\([\s\S]*restoredSession\?\.manualTitleRemainingRequestId[\s\S]*restoredSession\?\.keywordRealApplyRequestId/,
   );
   assert.match(
     source,
@@ -185,7 +185,7 @@ test("result polling permits only one in-flight fetch per request id", () => {
 test("stale manual apply responses cannot mutate current request state", () => {
   assert.match(
     source,
-    /const activeManualApplyRequestIdRef = useRef\(\n\s*restoredSession\?\.keywordRealApplyRequestId \?\? "",\n\s*\)/,
+    /const activeManualApplyRequestIdRef = useRef\([\s\S]*restoredSession\?\.keywordRealApplyRequestId \?\?\n\s*""/,
   );
   assert.match(
     resultBlock,
@@ -218,7 +218,7 @@ test("only terminal results or the regular-request poll cap stop polling", () =>
   );
   assert.match(
     pollingBlock,
-    /next >= ACTIVE_MAX_POLLS && !serialMallTitleResumeRequestId[\s\S]*setManualApplyPolling\(false\)/,
+    /next >= ACTIVE_MAX_POLLS &&[\s\S]*!serialMallTitleResumeRequestId &&[\s\S]*!manualTitleRemainingRequestId[\s\S]*setManualApplyPolling\(false\)/,
   );
   assert.equal(
     (resultBlock.match(/setManualApplyPolling\(false\)/g) ?? []).length,

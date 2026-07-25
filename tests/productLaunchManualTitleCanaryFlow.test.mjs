@@ -28,3 +28,59 @@ test("manual title phases bypass automatic final price repair and persist operat
   assert.match(source, /manualTitleCanaryRequestId/);
   assert.match(source, /manualTitleRemainingRequestId/);
 });
+
+test("manual dispatch guards allow only terminal failure retries", () => {
+  assert.match(source, /manualTitleCanaryDispatchingRef\.current/);
+  assert.match(source, /manualTitleRemainingDispatchingRef\.current/);
+  assert.match(source, /isRetryableManualApplyResult\(manualApplyResult\)/);
+  assert.match(
+    source,
+    /\[[\s\S]*"failed",[\s\S]*"blocked",[\s\S]*"error",[\s\S]*"partial_failure",[\s\S]*"completed_no_artifact"[\s\S]*\]\.includes\(status\)/,
+  );
+  assert.match(
+    source,
+    /manualTitleRemainingRequestId &&\n\s+!isRetryableManualApplyResult\(manualApplyResult\)/,
+  );
+});
+
+test("remaining uses an independent guard and releases it only on terminal or dispatch failure", () => {
+  assert.match(
+    source,
+    /manualTitleRemainingRequestId === requestId\)\n\s+manualTitleRemainingDispatchingRef\.current = false/,
+  );
+  assert.doesNotMatch(
+    source.slice(
+      source.indexOf("const applyManualTitleRemaining"),
+      source.indexOf("const resumeSerialMallTitleApply"),
+    ),
+    /serialMallTitleResumeDispatchingRef\.current = true/,
+  );
+});
+
+test("remaining exact-id polling is uncapped and survives reload", () => {
+  assert.match(source, /restoredSession\?\.manualTitleRemainingRequestId/);
+  assert.match(
+    source,
+    /next >= ACTIVE_MAX_POLLS &&[\s\S]*!serialMallTitleResumeRequestId &&[\s\S]*!manualTitleRemainingRequestId/,
+  );
+  assert.match(source, /manualApplyResultFetchInFlightRef\.current\.has\(requestId\)/);
+  assert.match(source, /activeManualApplyRequestIdRef\.current !== requestId\) return/);
+});
+
+test("verified serial and manual phases retain separate handlers", () => {
+  assert.match(
+    source,
+    /if \(priceRepairCompletedVerificationPending\) \{\n\s+void resumeSerialMallTitleApply\(\)/,
+  );
+  assert.match(
+    source,
+    /title_apply_phase === "manual_remaining"\)\n\s+void applyManualTitleRemaining\(\)/,
+  );
+});
+
+test("manual retry path cannot automatically invoke price repair", () => {
+  assert.match(
+    source,
+    /if \(!isManualTitlePhase && manualApplyPriceRepairRequired && !finalPriceDone\)/,
+  );
+});

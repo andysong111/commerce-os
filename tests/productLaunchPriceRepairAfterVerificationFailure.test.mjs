@@ -268,7 +268,7 @@ test("unified button starts repair instead of resending manual title apply", () 
     unifiedHandlerBlock,
     /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/,
   );
-  assert.doesNotMatch(unifiedHandlerBlock, /applyManualCandidates\(/);
+  assert.match(unifiedHandlerBlock, /isRetryableManualApplyResult\(manualApplyResult\)/);
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
 });
 

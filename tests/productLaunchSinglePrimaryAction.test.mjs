@@ -77,7 +77,7 @@ test("unified handler does not call manual apply again during final-price stage"
     unifiedHandlerBlock,
     /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/,
   );
-  assert.doesNotMatch(unifiedHandlerBlock, /applyManualCandidates\(/);
+  assert.match(unifiedHandlerBlock, /isRetryableManualApplyResult\(manualApplyResult\)/);
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
 });
 
