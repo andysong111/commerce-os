@@ -51,6 +51,15 @@ export type KeywordApplySummary = Partial<
       | "title_visible_mismatch_count"
       | "title_visible_unavailable_count"
       | "shopling_http_request_count"
+      | "search_preverified_goods_key_count"
+      | "search_write_goods_key_count"
+      | "title_preverified_row_count"
+      | "title_write_request_count"
+      | "title_write_verified_count"
+      | "title_write_failed_count"
+      | "title_goods_key_completed_count"
+      | "title_goods_key_pending_count"
+      | "duplicate_write_suppressed_count"
       | "elapsed_seconds",
       unknown
     >
@@ -62,6 +71,11 @@ export type KeywordApplySummary = Partial<
     phase?: unknown;
     errors?: unknown;
     warnings?: unknown;
+    execution_strategy?: unknown;
+    title_canary_status?: unknown;
+    title_stage_status?: unknown;
+    serial_failure_goods_key?: unknown;
+    serial_failure_mall_key?: unknown;
   };
 export type KeywordApplyRow = Record<string, unknown>;
 
@@ -328,6 +342,20 @@ export function safeJson(value: unknown): KeywordApplySummary {
     "title_visible_mismatch_count",
     "title_visible_unavailable_count",
     "shopling_http_request_count",
+    "execution_strategy",
+    "search_preverified_goods_key_count",
+    "search_write_goods_key_count",
+    "title_preverified_row_count",
+    "title_write_request_count",
+    "title_write_verified_count",
+    "title_write_failed_count",
+    "title_goods_key_completed_count",
+    "title_goods_key_pending_count",
+    "title_canary_status",
+    "title_stage_status",
+    "serial_failure_goods_key",
+    "serial_failure_mall_key",
+    "duplicate_write_suppressed_count",
     "elapsed_seconds",
     "requires_final_price_pass",
     "dry_run",
@@ -364,6 +392,8 @@ export function safeRow(row: unknown): KeywordApplyRow | null {
     "title_readback_status",
     "title_readback_error_code",
     "title_readback_attempt_count",
+    "title_write_status",
+    "title_write_attempt_count",
     "code",
     "msg",
     "message",

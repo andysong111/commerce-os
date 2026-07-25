@@ -11,7 +11,6 @@ import {
   safeRow,
 } from "../src/lib/keywordShoplingApplyRunner.ts";
 
-
 test("safeJson preserves artifact contract fields and drops raw secrets", () => {
   const allowed = {
     real_apply_executed: true,
@@ -307,6 +306,50 @@ test("artifact parsing keeps title/search apply status fields", () => {
   assert.equal(result.applyResults[0].mall_title_apply_status, "not_applied");
   assert.equal(result.applyResults[0].verification_status, "unverified");
   assert.equal(result.applyResults[0].message, "title not applied");
+});
+
+test("artifact parsing preserves serial saga diagnostics without secret payloads", () => {
+  const serialFields = [
+    "execution_strategy",
+    "search_preverified_goods_key_count",
+    "search_write_goods_key_count",
+    "title_preverified_row_count",
+    "title_write_request_count",
+    "title_write_verified_count",
+    "title_write_failed_count",
+    "title_goods_key_completed_count",
+    "title_goods_key_pending_count",
+    "title_canary_status",
+    "title_stage_status",
+    "serial_failure_goods_key",
+    "serial_failure_mall_key",
+    "duplicate_write_suppressed_count",
+  ];
+  const summary = Object.fromEntries(
+    serialFields.map((key, index) => [key, index]),
+  );
+  summary.Cookie = "secret";
+  const zip = zipSync({
+    "output/shopling_apply/result_summary.json": strToU8(
+      JSON.stringify(summary),
+    ),
+    "output/shopling_apply/apply_results.jsonl": strToU8(
+      JSON.stringify({
+        title_write_status: "preverified",
+        title_write_attempt_count: 0,
+        Cookie: "secret",
+        response_html: "<secret>",
+      }) + "\n",
+    ),
+  });
+  const result = extractKeywordShoplingApplyArtifact(zip);
+  for (const field of serialFields)
+    assert.equal(result.summary[field], summary[field]);
+  assert.equal(result.applyResults[0].title_write_status, "preverified");
+  assert.equal(result.applyResults[0].title_write_attempt_count, 0);
+  assert.equal(result.summary.Cookie, undefined);
+  assert.equal(result.applyResults[0].Cookie, undefined);
+  assert.equal(result.applyResults[0].response_html, undefined);
 });
 
 test("keyword review queue UI contains apply runner source strings and guards", async () => {

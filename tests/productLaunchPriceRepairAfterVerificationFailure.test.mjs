@@ -122,52 +122,117 @@ const realFailureFixture = {
 test("real failed title verification still requires price repair but is not launch-ready", () => {
   assert.equal(isManualApplyPriceRepairRequiredLocal(realFailureFixture), true);
   assert.equal(isManualApplyReadyForFinalPriceLocal(realFailureFixture), false);
-  assert.match(functionBlock("isManualApplyPriceRepairRequired"), /realApplyExecuted/);
-  assert.match(functionBlock("isManualApplyPriceRepairRequired"), /Number\(summary\.title_batch_request_count\) > 0/);
-  assert.doesNotMatch(functionBlock("isManualApplyPriceRepairRequired"), /requires_final_price_pass/);
+  assert.match(
+    functionBlock("isManualApplyPriceRepairRequired"),
+    /realApplyExecuted/,
+  );
+  assert.match(
+    functionBlock("isManualApplyPriceRepairRequired"),
+    /Number\(summary\.title_batch_request_count\) > 0/,
+  );
+  assert.doesNotMatch(
+    functionBlock("isManualApplyPriceRepairRequired"),
+    /requires_final_price_pass/,
+  );
   assert.match(effectBlock, /!manualApplyPriceRepairRequired/);
   assert.doesNotMatch(effectBlock, /!manualApplyReadyForFinalPrice/);
 });
 
 test("blocked result with no title batch does not repair price", () => {
-  assert.equal(isManualApplyPriceRepairRequiredLocal({ status: "blocked", summary: { real_apply_executed: true, title_batch_request_count: 0 } }), false);
+  assert.equal(
+    isManualApplyPriceRepairRequiredLocal({
+      status: "blocked",
+      summary: { real_apply_executed: true, title_batch_request_count: 0 },
+    }),
+    false,
+  );
 });
 
 test("config error before title request does not repair price", () => {
-  assert.equal(isManualApplyPriceRepairRequiredLocal({ status: "error", summary: { real_apply_executed: false, title_batch_request_count: 0 } }), false);
+  assert.equal(
+    isManualApplyPriceRepairRequiredLocal({
+      status: "error",
+      summary: { real_apply_executed: false, title_batch_request_count: 0 },
+    }),
+    false,
+  );
 });
 
 test("dry_run does not repair price", () => {
   for (const dry_run of [true, "true"]) {
-    assert.equal(isManualApplyPriceRepairRequiredLocal({ status: "success", summary: { real_apply_executed: true, title_batch_request_count: 1, dry_run } }), false);
+    assert.equal(
+      isManualApplyPriceRepairRequiredLocal({
+        status: "success",
+        summary: {
+          real_apply_executed: true,
+          title_batch_request_count: 1,
+          dry_run,
+        },
+      }),
+      false,
+    );
   }
 });
 
 test("queued or running result does not repair price", () => {
   for (const status of ["queued", "running"]) {
-    assert.equal(isManualApplyPriceRepairRequiredLocal({ status, summary: { real_apply_executed: true, title_batch_request_count: 1 } }), false);
+    assert.equal(
+      isManualApplyPriceRepairRequiredLocal({
+        status,
+        summary: { real_apply_executed: true, title_batch_request_count: 1 },
+      }),
+      false,
+    );
   }
 });
 
 test("same apply requestId cannot dispatch price twice and polling blocks duplicate clicks", () => {
-  assert.match(effectBlock, /manualApplyResult\?\.requestId !== realApplyRequestId/);
-  assert.match(effectBlock, /finalPriceStartedForRealApplyRequestRef\.current === realApplyRequestId/);
-  assert.match(effectBlock, /finalPriceStartedForRealApplyRequestRef\.current = realApplyRequestId/);
-  const runFinalPriceBlock = between("const runFinalPriceModify = useCallback", "\n  }, [");
+  assert.match(
+    effectBlock,
+    /manualApplyResult\?\.requestId !== realApplyRequestId/,
+  );
+  assert.match(
+    effectBlock,
+    /finalPriceStartedForRealApplyRequestRef\.current === realApplyRequestId/,
+  );
+  assert.match(
+    effectBlock,
+    /finalPriceStartedForRealApplyRequestRef\.current = realApplyRequestId/,
+  );
+  const runFinalPriceBlock = between(
+    "const runFinalPriceModify = useCallback",
+    "\n  }, [",
+  );
   assert.match(runFinalPriceBlock, /finalPricePolling/);
 });
 
 test("price repair success enters explicit verification-pending state, not launch complete", () => {
-  const pendingSnippet = between("const priceRepairCompletedVerificationPending =", ";\n  const actualApplyDone");
-  assert.match(pendingSnippet, /manualApplyPriceRepairRequired &&\n\s+finalPriceDone &&\n\s+!manualApplyReadyForFinalPrice/);
-  const actualApplySnippet = between("const actualApplyDone =", ";\n  const priceIssueState");
+  const pendingSnippet = between(
+    "const priceRepairCompletedVerificationPending =",
+    ";\n  const actualApplyDone",
+  );
+  assert.match(
+    pendingSnippet,
+    /finalPriceDone &&\n\s+!manualApplyReadyForFinalPrice/,
+  );
+  assert.match(
+    pendingSnippet,
+    /manualApplyPriceRepairRequired \|\|\n\s+!!serialMallTitleResumeRequestId/,
+  );
+  const actualApplySnippet = between(
+    "const actualApplyDone =",
+    ";\n  const priceIssueState",
+  );
   assert.match(actualApplySnippet, /manualApplyReadyForFinalPrice/);
   assert.doesNotMatch(actualApplySnippet, /manualApplyPriceRepairRequired/);
-  assert.match(launchCockpitBlock, /priceRepairCompletedVerificationPending\n\s+\? "가격 복구 완료 · 상품명 검증 필요"/);
-  assert.doesNotMatch(launchCockpitBlock, /finalPriceDone && !manualApplyReadyForFinalPrice\n\s+\? "가격 복구 완료 · 상품명 검증 필요"/);
+  assert.match(launchCockpitBlock, /"누락 상품명만 순차 이어서 반영"/);
+  assert.doesNotMatch(
+    launchCockpitBlock,
+    /finalPriceDone && !manualApplyReadyForFinalPrice\n\s+\? "가격 복구 완료 · 상품명 검증 필요"/,
+  );
 });
 
-test("real failure fixture with final price done disables button and blocks resend", () => {
+test("real failure fixture with final price done enables dedicated serial resume", () => {
   const finalPriceDone = true;
   const manualApplyPriceRepairRequired =
     isManualApplyPriceRepairRequiredLocal(realFailureFixture);
@@ -183,22 +248,47 @@ test("real failure fixture with final price done disables button and blocks rese
   assert.equal(manualApplyReadyForFinalPrice, false);
   assert.equal(priceRepairCompletedVerificationPending, true);
   assert.equal(actualApplyDone, false);
-  assert.match(launchCockpitBlock, /finalPriceActive \|\| priceRepairCompletedVerificationPending \|\| actualApplyDone\n\s+\? true/);
-  assert.match(unifiedHandlerBlock, /finalPriceActive \|\| priceRepairCompletedVerificationPending/);
+  assert.match(
+    launchCockpitBlock,
+    /finalPriceActive \|\| serialMallTitleResumeActive \|\| actualApplyDone\n\s+\? true/,
+  );
+  assert.match(
+    unifiedHandlerBlock,
+    /if \(priceRepairCompletedVerificationPending\) \{\n\s+void resumeSerialMallTitleApply\(\);/,
+  );
 });
 
 test("unified button starts repair instead of resending manual title apply", () => {
-  assert.match(unifiedHandlerBlock, /manualApplyPriceRepairRequired && !finalPriceDone/);
+  assert.match(
+    unifiedHandlerBlock,
+    /manualApplyPriceRepairRequired && !finalPriceDone/,
+  );
   assert.match(unifiedHandlerBlock, /void runFinalPriceModify\(\);/);
-  assert.match(unifiedHandlerBlock, /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/);
+  assert.match(
+    unifiedHandlerBlock,
+    /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/,
+  );
   assert.doesNotMatch(unifiedHandlerBlock, /applyManualCandidates\(/);
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
 });
 
-test("restored exact manual apply request is fetched once without resending titles", () => {
-  assert.match(source, /restoredManualApplyResultFetchedRef = useRef<string>\(""\)/);
+test("restored exact manual apply request is polled once at a time without resending titles", () => {
+  assert.match(
+    source,
+    /manualApplyResultFetchInFlightRef = useRef<Set<string>>\(new Set\(\)\)/,
+  );
   assert.match(source, /restoredSession\?\.keywordRealApplyRequestId/);
-  assert.match(source, /fetchManualApplyResult\(restoredRealApplyRequestId\)/);
-  assert.match(source, /request_id=\$\{encodeURIComponent\(requestId\)\}&mode=apply/);
+  assert.match(
+    source,
+    /fetchManualApplyResult\(\n\s+serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
+  );
+  assert.match(
+    source,
+    /manualApplyResultFetchInFlightRef\.current\.has\(requestId\)/,
+  );
+  assert.match(
+    source,
+    /request_id=\$\{encodeURIComponent\(requestId\)\}&mode=apply/,
+  );
   assert.doesNotMatch(source, /\/api\/keyword-shopling-apply\/actions-result"/);
 });

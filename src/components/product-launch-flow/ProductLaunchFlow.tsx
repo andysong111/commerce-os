@@ -178,6 +178,8 @@ type ProductLaunchSessionV2 = {
   keywordRunId?: string;
   keywordDryRunRequestId?: string;
   keywordRealApplyRequestId?: string;
+  serialMallTitleResumeRequestId?: string;
+  handledResumePriceRepairRequestId?: string;
   finalPriceRequestId?: string;
   uploadResult?: UploadActionsResult | null;
   priceResult?: PriceActionsResult | null;
@@ -297,13 +299,23 @@ export function ProductLaunchFlow() {
   const [manualApplyRequestId, setManualApplyRequestId] = useState(
     restoredSession?.keywordRealApplyRequestId ?? "",
   );
+  const [
+    serialMallTitleResumeRequestId,
+    setSerialMallTitleResumeRequestId,
+  ] = useState(restoredSession?.serialMallTitleResumeRequestId ?? "");
+  const [
+    handledResumePriceRepairRequestId,
+    setHandledResumePriceRepairRequestId,
+  ] = useState(restoredSession?.handledResumePriceRepairRequestId ?? "");
   const [manualApplyActionsUrl, setManualApplyActionsUrl] = useState("");
   const [manualApplyRunUrl, setManualApplyRunUrl] = useState("");
   const [manualApplyCommandPreview, setManualApplyCommandPreview] =
     useState("");
   const [manualApplyResult, setManualApplyResult] =
     useState<ManualApplyActionsResult | null>(null);
-  const [manualApplyPolling, setManualApplyPolling] = useState(false);
+  const [manualApplyPolling, setManualApplyPolling] = useState(
+    !!restoredSession?.keywordRealApplyRequestId,
+  );
   const [manualApplyPollCount, setManualApplyPollCount] = useState(0);
   const [manualApplyLastCheckedAt, setManualApplyLastCheckedAt] =
     useState<Date | null>(null);
@@ -312,8 +324,17 @@ export function ProductLaunchFlow() {
   const autoPriceStartedForUploadRequestRef = useRef<string>("");
   const autoKeywordStartedForPriceRequestRef = useRef<string>("");
   const autoKeywordImportedArtifactRef = useRef<string>("");
-  const restoredManualApplyResultFetchedRef = useRef<string>("");
+  const manualApplyResultFetchInFlightRef = useRef<Set<string>>(new Set());
+  const activeManualApplyRequestIdRef = useRef(
+    restoredSession?.keywordRealApplyRequestId ?? "",
+  );
+  const handledResumePriceRepairRequestIdRef = useRef(
+    restoredSession?.handledResumePriceRepairRequestId ?? "",
+  );
   const finalPriceStartedForRealApplyRequestRef = useRef<string>("");
+  const serialMallTitleResumeDispatchingRef = useRef(
+    !!restoredSession?.serialMallTitleResumeRequestId,
+  );
 
   const uploadResultRows = useMemo(
     () => extractUploadRows(uploadActionsResult),
@@ -511,6 +532,7 @@ export function ProductLaunchFlow() {
 
   const runUploadRequest = useCallback(async () => {
     if (uploadRunning || !rowExpression.trim()) return;
+    activeManualApplyRequestIdRef.current = "";
     setUploadRunning(true);
     setUploadRunResult(null);
     setUploadActionsResult(null);
@@ -524,6 +546,20 @@ export function ProductLaunchFlow() {
     setFinalPriceRunResult(null);
     setFinalPriceActionsResult(null);
     finalPriceStartedForRealApplyRequestRef.current = "";
+    setManualApplyRequestId("");
+    setManualApplyResult(null);
+    setManualApplyPolling(false);
+    setManualApplyPollCount(0);
+    setManualApplyLastCheckedAt(null);
+    setManualApplyNextCheckIn(0);
+    setManualApplyActionsUrl("");
+    setManualApplyRunUrl("");
+    setManualApplyCommandPreview("");
+    setManualApplyErrorMessage("");
+    serialMallTitleResumeDispatchingRef.current = false;
+    setSerialMallTitleResumeRequestId("");
+    handledResumePriceRepairRequestIdRef.current = "";
+    setHandledResumePriceRepairRequestId("");
     autoPriceStartedForUploadRequestRef.current = "";
     autoKeywordStartedForPriceRequestRef.current = "";
     try {
@@ -1086,13 +1122,18 @@ export function ProductLaunchFlow() {
     async (requestIdOverride?: string) => {
       const requestId = requestIdOverride || manualApplyRequestId;
       if (!requestId) return;
-      setManualApplyErrorMessage("");
+      if (activeManualApplyRequestIdRef.current !== requestId) return;
+      if (manualApplyResultFetchInFlightRef.current.has(requestId)) return;
+      manualApplyResultFetchInFlightRef.current.add(requestId);
+      if (activeManualApplyRequestIdRef.current === requestId)
+        setManualApplyErrorMessage("");
       try {
         const data = await (
           await fetch(
             `/api/keyword-shopling-apply/actions-result?request_id=${encodeURIComponent(requestId)}&mode=apply`,
           )
         ).json();
+        if (activeManualApplyRequestIdRef.current !== requestId) return;
         setManualApplyResult(data);
         setManualApplyRunUrl(
           String(
@@ -1123,38 +1164,41 @@ export function ProductLaunchFlow() {
               summary.titleNotAppliedCount + summary.titleFailedCount,
             lastUpdatedAt: new Date().toISOString(),
           });
+          if (serialMallTitleResumeRequestId === requestId) {
+            if (
+              isManualApplyPriceRepairRequired(data) &&
+              handledResumePriceRepairRequestIdRef.current !== requestId
+            ) {
+              handledResumePriceRepairRequestIdRef.current = requestId;
+              setHandledResumePriceRepairRequestId(requestId);
+              setFinalPriceRequestId("");
+              setFinalPriceRunResult(null);
+              setFinalPriceActionsResult(null);
+              setFinalPricePolling(false);
+              setFinalPricePollCount(0);
+              setFinalPriceLastCheckedAt(null);
+              finalPriceStartedForRealApplyRequestRef.current = "";
+            }
+            serialMallTitleResumeDispatchingRef.current = false;
+          }
         }
       } catch (error) {
+        if (activeManualApplyRequestIdRef.current !== requestId) return;
         setManualApplyErrorMessage(
           error instanceof Error
             ? error.message
             : "실제 반영 결과를 가져오는 중 오류가 발생했습니다.",
         );
-        setManualApplyPolling(false);
-        setManualApplyNextCheckIn(0);
+      } finally {
+        manualApplyResultFetchInFlightRef.current.delete(requestId);
       }
     },
-    [manualApplyRequestId, manualApplyRunUrl],
+    [
+      manualApplyRequestId,
+      manualApplyRunUrl,
+      serialMallTitleResumeRequestId,
+    ],
   );
-
-  useEffect(() => {
-    const restoredRealApplyRequestId =
-      restoredSession?.keywordRealApplyRequestId ?? "";
-    if (!restoredRealApplyRequestId || manualApplyResult || manualApplyPolling)
-      return;
-    if (
-      restoredManualApplyResultFetchedRef.current === restoredRealApplyRequestId
-    )
-      return;
-    restoredManualApplyResultFetchedRef.current = restoredRealApplyRequestId;
-    setManualApplyRequestId(restoredRealApplyRequestId);
-    void fetchManualApplyResult(restoredRealApplyRequestId);
-  }, [
-    fetchManualApplyResult,
-    manualApplyPolling,
-    manualApplyResult,
-    restoredSession?.keywordRealApplyRequestId,
-  ]);
 
   useEffect(() => {
     if (!manualApplyPolling) return;
@@ -1168,7 +1212,8 @@ export function ProductLaunchFlow() {
   useEffect(() => {
     if (!manualApplyPolling) return;
     if (
-      manualApplyPollCount >= ACTIVE_MAX_POLLS ||
+      (manualApplyPollCount >= ACTIVE_MAX_POLLS &&
+        !serialMallTitleResumeRequestId) ||
       isFinalManualApplyResult(manualApplyResult)
     )
       return;
@@ -1176,7 +1221,7 @@ export function ProductLaunchFlow() {
       () => {
         setManualApplyPollCount((count) => {
           const next = count + 1;
-          if (next >= ACTIVE_MAX_POLLS) {
+          if (next >= ACTIVE_MAX_POLLS && !serialMallTitleResumeRequestId) {
             setManualApplyPolling(false);
             setManualApplyNextCheckIn(0);
           } else {
@@ -1184,7 +1229,9 @@ export function ProductLaunchFlow() {
           }
           return next;
         });
-        void fetchManualApplyResult();
+        void fetchManualApplyResult(
+          serialMallTitleResumeRequestId || manualApplyRequestId,
+        );
       },
       manualApplyPollCount === 0 ? 0 : ACTIVE_POLL_INTERVAL_MS,
     );
@@ -1194,10 +1241,28 @@ export function ProductLaunchFlow() {
     manualApplyPollCount,
     manualApplyPolling,
     manualApplyResult,
+    manualApplyRequestId,
+    serialMallTitleResumeRequestId,
   ]);
 
   const applyManualCandidates = useCallback(async () => {
     if (!manualPreflightResult || manualApplyBusy) return;
+    activeManualApplyRequestIdRef.current = "";
+    setSerialMallTitleResumeRequestId("");
+    serialMallTitleResumeDispatchingRef.current = false;
+    handledResumePriceRepairRequestIdRef.current = "";
+    setHandledResumePriceRepairRequestId("");
+    setManualApplyRequestId("");
+    setManualApplyResult(null);
+    setManualApplyPolling(false);
+    setManualApplyPollCount(0);
+    setManualApplyLastCheckedAt(null);
+    setManualApplyNextCheckIn(0);
+    setManualApplyActionsUrl("");
+    setManualApplyRunUrl("");
+    setManualApplyCommandPreview("");
+    setManualApplyErrorMessage("");
+    setKeywordApplyState(null);
     setManualApplyBusy(true);
     setFinalPriceRequestId("");
     setFinalPriceRunResult(null);
@@ -1221,6 +1286,7 @@ export function ProductLaunchFlow() {
       });
       const json = await response.json();
       const requestId = String(json.requestId || "");
+      activeManualApplyRequestIdRef.current = requestId;
       setManualApplyRequestId(requestId);
       setManualApplyActionsUrl(
         String(json.githubActionsUrl || json.runUrl || ""),
@@ -1260,6 +1326,132 @@ export function ProductLaunchFlow() {
       setManualApplyBusy(false);
     }
   }, [manualApplyBusy, manualPreflightResult]);
+
+  const resumeSerialMallTitleApply = useCallback(async () => {
+    if (
+      serialMallTitleResumeDispatchingRef.current ||
+      manualApplyBusy ||
+      manualApplyPolling ||
+      finalPriceRunning ||
+      finalPriceFetching ||
+      finalPricePolling
+    )
+      return;
+    activeManualApplyRequestIdRef.current = "";
+    serialMallTitleResumeDispatchingRef.current = true;
+    setManualApplyBusy(true);
+    try {
+      // Rebuild from the operator's current title/search inputs and current upload rows.
+      const previewResult = buildKeywordShoplingPayloadPreview(
+        buildManualReviewedRows(),
+        {
+          expandProductGroupMarkets: true,
+          manualTitleOverridesByGoodsKey,
+          manualKeywordOverridesByGoodsKey,
+          seedKeywordsByGoodsKey,
+        },
+      );
+      const preflightResult = buildKeywordExecutionPreflight(
+        { previewResult, finalConfirmationText: "" },
+        {
+          ...DEFAULT_KEYWORD_EXECUTION_PREFLIGHT_CONFIG,
+          maxRows: 100,
+          confirmationText: APPLY_CONFIRMATION_TEXT,
+        },
+      );
+      setManualPreviewResult(previewResult);
+      setManualPreflightResult(preflightResult);
+      const { summary } = preflightResult;
+      if (
+        summary.blockedCount > 0 ||
+        summary.coverageMismatchGoodsKeyCount > 0 ||
+        summary.generatedTitleTargetCount !==
+          summary.expectedTitleTargetCount ||
+        summary.eligibleCount !== summary.expectedTitleTargetCount ||
+        summary.eligibleCount === 0 ||
+        summary.eligibleCount > 100
+      ) {
+        setManualApplyErrorMessage(
+          "현재 입력값의 쇼핑몰 상품명 범위가 예상 범위와 정확히 일치하지 않습니다.",
+        );
+        serialMallTitleResumeDispatchingRef.current = false;
+        return;
+      }
+      const response = await fetch("/api/keyword-shopling-apply/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          execution_plan_json:
+            buildCompactKeywordApplyExecutionPlan(preflightResult),
+          mode: "apply",
+          confirmation_text: APPLY_CONFIRMATION_TEXT,
+          max_items: 100,
+        }),
+      });
+      const json = await response.json();
+      const requestId = String(json.requestId || "");
+      if (!response.ok || json.status === "error" || !requestId) {
+        setManualApplyErrorMessage(
+          json.message || "상품명 순차 이어서 반영 요청을 시작하지 못했습니다.",
+        );
+        serialMallTitleResumeDispatchingRef.current = false;
+        return;
+      }
+      activeManualApplyRequestIdRef.current = requestId;
+      setManualApplyRequestId(requestId);
+      setSerialMallTitleResumeRequestId(requestId);
+      handledResumePriceRepairRequestIdRef.current = "";
+      setHandledResumePriceRepairRequestId("");
+      setKeywordApplyState({
+        dryRunStatus: "success",
+        realApplyStatus: "queued",
+        appliedCount: 0,
+        failedCount: 0,
+        warningCount: preflightResult.warnings.length,
+        requestId,
+        dryRunRequestId: "",
+        realApplyRequestId: requestId,
+        blankMallTitleBlockedCount: 0,
+        lastUpdatedAt: new Date().toISOString(),
+      });
+      setManualApplyActionsUrl(
+        String(json.githubActionsUrl || json.runUrl || ""),
+      );
+      setManualApplyRunUrl(String(json.runUrl || json.githubActionsUrl || ""));
+      setManualApplyCommandPreview(String(json.commandPreview || ""));
+      setManualApplyResult({
+        status: "pending",
+        phase: json.phase || "queued",
+        requestId,
+        runUrl: json.runUrl || json.githubActionsUrl,
+        githubActionsUrl: json.githubActionsUrl,
+        message: "누락 상품명을 한 행씩 확인하여 순차 반영 중입니다.",
+      });
+      setManualApplyPollCount(0);
+      setManualApplyLastCheckedAt(null);
+      setManualApplyNextCheckIn(0);
+      setManualApplyPolling(true);
+    } catch (error) {
+      setManualApplyErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "상품명 순차 반영 요청 중 오류가 발생했습니다.",
+      );
+      serialMallTitleResumeDispatchingRef.current = false;
+    } finally {
+      setManualApplyBusy(false);
+    }
+  }, [
+    buildManualReviewedRows,
+    finalPriceFetching,
+    finalPricePolling,
+    finalPriceRunning,
+    manualApplyBusy,
+    manualApplyPolling,
+    manualKeywordOverridesByGoodsKey,
+    manualTitleOverridesByGoodsKey,
+    seedKeywordsByGoodsKey,
+  ]);
 
   void openInlineKeywordReview;
 
@@ -1322,10 +1514,13 @@ export function ProductLaunchFlow() {
     getPriceCounts(finalPriceActionsResult, goodsKeys.length).failCount > 0;
   const finalPriceActive =
     finalPriceRunning || finalPriceFetching || finalPricePolling;
+  const serialMallTitleResumeActive =
+    manualApplyBusy || manualApplyPolling;
   const priceRepairCompletedVerificationPending =
-    manualApplyPriceRepairRequired &&
     finalPriceDone &&
-    !manualApplyReadyForFinalPrice;
+    !manualApplyReadyForFinalPrice &&
+    (manualApplyPriceRepairRequired ||
+      !!serialMallTitleResumeRequestId);
   const actualApplyDone =
     isSuccessfulPriceResult(priceActionsResult) &&
     manualApplyReadyForFinalPrice &&
@@ -1447,6 +1642,7 @@ export function ProductLaunchFlow() {
       !!uploadRequestId ||
       !!priceRequestId ||
       !!finalPriceRequestId ||
+      !!serialMallTitleResumeRequestId ||
       !!uploadActionsResult ||
       !!priceActionsResult ||
       !!keywordRunsResult ||
@@ -1474,9 +1670,11 @@ export function ProductLaunchFlow() {
         restoredSession?.keywordDryRunRequestId ??
         "",
       keywordRealApplyRequestId:
-        keywordApplyState?.realApplyRequestId ??
-        restoredSession?.keywordRealApplyRequestId ??
+        manualApplyRequestId ||
+        keywordApplyState?.realApplyRequestId ||
         "",
+      serialMallTitleResumeRequestId,
+      handledResumePriceRepairRequestId,
       finalPriceRequestId,
       uploadResult: uploadActionsResult,
       priceResult: priceActionsResult,
@@ -1490,15 +1688,18 @@ export function ProductLaunchFlow() {
     derivedStage,
     finalPriceActionsResult,
     finalPriceRequestId,
+    handledResumePriceRepairRequestId,
     keywordApplyState?.dryRunRequestId,
     keywordApplyState?.realApplyRequestId,
     keywordDispatchResult?.expectedArtifactName,
     keywordRunsResult,
+    manualApplyRequestId,
     priceActionsResult,
     priceRequestId,
     restoredSession,
     rowExpression,
     seedKeywordsBySourceRow,
+    serialMallTitleResumeRequestId,
     uploadActionsResult,
     uploadRequestId,
   ]);
@@ -1543,6 +1744,7 @@ export function ProductLaunchFlow() {
   const clearProductLaunchFailureState = (options: {
     keepRowExpression: boolean;
   }) => {
+    activeManualApplyRequestIdRef.current = "";
     const preservedRowExpression = rowExpression;
     clearProductLaunchSession();
     setSessionRestored(false);
@@ -1611,6 +1813,10 @@ export function ProductLaunchFlow() {
     autoKeywordStartedForPriceRequestRef.current = "";
     autoKeywordImportedArtifactRef.current = "";
     finalPriceStartedForRealApplyRequestRef.current = "";
+    serialMallTitleResumeDispatchingRef.current = false;
+    setSerialMallTitleResumeRequestId("");
+    handledResumePriceRepairRequestIdRef.current = "";
+    setHandledResumePriceRepairRequestId("");
   };
   const resetProductLaunchSession = () => {
     clearProductLaunchFailureState({ keepRowExpression: false });
@@ -1661,7 +1867,12 @@ export function ProductLaunchFlow() {
   };
 
   const handleUnifiedProductLaunchAction = () => {
-    if (finalPriceActive || priceRepairCompletedVerificationPending) return;
+    if (finalPriceActive) return;
+
+    if (priceRepairCompletedVerificationPending) {
+      void resumeSerialMallTitleApply();
+      return;
+    }
 
     if (manualApplyPriceRepairRequired && !finalPriceDone) {
       void runFinalPriceModify();
@@ -1923,6 +2134,7 @@ export function ProductLaunchFlow() {
         priceRepairCompletedVerificationPending={
           priceRepairCompletedVerificationPending
         }
+        serialMallTitleResumeActive={serialMallTitleResumeActive}
         finalPriceFailed={finalPriceFailed}
         actualApplyDone={actualApplyDone}
       />
@@ -3155,6 +3367,7 @@ function LaunchCockpit({
   finalPriceDone,
   manualApplyPriceRepairRequired,
   priceRepairCompletedVerificationPending,
+  serialMallTitleResumeActive,
   finalPriceFailed,
   actualApplyDone,
 }: {
@@ -3197,6 +3410,7 @@ function LaunchCockpit({
   finalPriceDone: boolean;
   manualApplyPriceRepairRequired: boolean;
   priceRepairCompletedVerificationPending: boolean;
+  serialMallTitleResumeActive: boolean;
   finalPriceFailed: boolean;
   actualApplyDone: boolean;
   uploadProgress: {
@@ -3232,7 +3446,9 @@ function LaunchCockpit({
         : manualApplyPriceRepairRequired && !finalPriceDone
           ? "가격 안전복구 시작"
           : priceRepairCompletedVerificationPending
-            ? "가격 복구 완료 · 상품명 검증 필요"
+            ? serialMallTitleResumeActive
+              ? "누락 상품명 순차 반영 확인 중"
+              : "누락 상품명만 순차 이어서 반영"
             : normalPrimaryLabel;
   const normalStepDisabled =
     primaryAction === "upload"
@@ -3254,7 +3470,7 @@ function LaunchCockpit({
     manualApplyPriceRepairRequired && !finalPriceDone && !finalPriceActive;
   // prettier-ignore
   const disabled =
-    finalPriceActive || priceRepairCompletedVerificationPending || actualApplyDone
+    finalPriceActive || serialMallTitleResumeActive || actualApplyDone
       ? true
       : finalPriceReady
         ? false
