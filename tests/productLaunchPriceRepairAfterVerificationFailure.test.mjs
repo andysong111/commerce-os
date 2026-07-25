@@ -217,7 +217,7 @@ test("price repair success enters explicit verification-pending state, not launc
   );
   assert.match(
     pendingSnippet,
-    /manualApplyPriceRepairRequired \|\|\n\s+!!serialMallTitleResumeRequestIdRef\.current/,
+    /manualApplyPriceRepairRequired \|\|\n\s+!!serialMallTitleResumeRequestId/,
   );
   const actualApplySnippet = between(
     "const actualApplyDone =",

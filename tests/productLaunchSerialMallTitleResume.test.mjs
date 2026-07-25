@@ -96,15 +96,66 @@ test("a synchronous ref blocks double click and polling cannot dispatch", () => 
   );
 });
 
+test("resume request identity is recoverable and persisted as the real apply", () => {
+  assert.match(
+    source,
+    /serialMallTitleResumeRequestId\?: string/,
+  );
+  assert.match(
+    source,
+    /useState\(restoredSession\?\.serialMallTitleResumeRequestId \?\? ""\)/,
+  );
+  assert.match(
+    resumeBlock,
+    /setManualApplyRequestId\(requestId\);\n\s+setSerialMallTitleResumeRequestId\(requestId\);\n\s+setKeywordApplyState/,
+  );
+  assert.match(
+    source,
+    /keywordRealApplyRequestId:\n\s+manualApplyRequestId \|\|/,
+  );
+  assert.match(source, /serialMallTitleResumeRequestId,\n\s+finalPriceRequestId/);
+});
+
+test("restored resume polls its exact id until a terminal artifact", () => {
+  assert.match(
+    source,
+    /restoredSession\?\.serialMallTitleResumeRequestId \?\?\n\s+restoredSession\?\.keywordRealApplyRequestId/,
+  );
+  assert.match(
+    source,
+    /fetchManualApplyResult\(\n\s+serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
+  );
+  assert.match(
+    source,
+    /manualApplyPollCount >= ACTIVE_MAX_POLLS &&\n\s+!serialMallTitleResumeRequestId/,
+  );
+});
+
+test("transient resume fetch errors keep the dispatch guard and polling", () => {
+  const catchBlock = resultBlock.slice(resultBlock.indexOf("} catch (error)"));
+  assert.doesNotMatch(
+    catchBlock,
+    /serialMallTitleResumeDispatchingRef\.current = false/,
+  );
+  assert.match(
+    catchBlock,
+    /serialMallTitleResumeRequestId !== requestId/,
+  );
+});
+
 test("previous final-price success is retained until a terminal repair-required artifact", () => {
   assert.doesNotMatch(resumeBlock, /setFinalPriceActionsResult\(null\)/);
   assert.match(
     resultBlock,
-    /isManualApplyPriceRepairRequired\(data\)[\s\S]*setFinalPriceActionsResult\(null\)/,
+    /serialMallTitleResumeRequestId === requestId[\s\S]*isManualApplyPriceRepairRequired\(data\)[\s\S]*setFinalPriceActionsResult\(null\)/,
   );
   assert.match(
     resultBlock,
     /finalPriceStartedForRealApplyRequestRef\.current = ""/,
+  );
+  assert.match(
+    resultBlock,
+    /handledResumePriceRepairRequestIdRef\.current !== requestId/,
   );
 });
 
