@@ -70,6 +70,8 @@ const UPLOAD_MAX_POLLS = 24;
 const ACTIVE_POLL_INTERVAL_MS = 5_000;
 const ACTIVE_MAX_POLLS = 24;
 const APPLY_CONFIRMATION_TEXT = "APPLY_KEYWORD_RESULTS_TO_SHOPLING";
+const MANUAL_REMAINING_CONFIRMATION_TEXT =
+  "CONFIRM_MANUAL_CANARY_VISIBLE_AND_PRICE_OK";
 
 const PRODUCT_LAUNCH_INLINE_REVIEW_COPY = [APPLY_CONFIRMATION_TEXT] as const;
 
@@ -179,6 +181,10 @@ type ProductLaunchSessionV2 = {
   keywordDryRunRequestId?: string;
   keywordRealApplyRequestId?: string;
   serialMallTitleResumeRequestId?: string;
+  manualTitleCanaryRequestId?: string;
+  manualTitleRemainingRequestId?: string;
+  manualTitleOperatorConfirmedComplete?: boolean;
+  manualTitleResult?: ManualApplyActionsResult | null;
   handledResumePriceRepairRequestId?: string;
   finalPriceRequestId?: string;
   uploadResult?: UploadActionsResult | null;
@@ -297,8 +303,18 @@ export function ProductLaunchFlow() {
     useState<KeywordExecutionPreflightResult | null>(null);
   const [manualApplyBusy, setManualApplyBusy] = useState(false);
   const [manualApplyRequestId, setManualApplyRequestId] = useState(
-    restoredSession?.keywordRealApplyRequestId ?? "",
+    restoredSession?.manualTitleRemainingRequestId ??
+      restoredSession?.manualTitleCanaryRequestId ??
+      restoredSession?.keywordRealApplyRequestId ??
+      "",
   );
+  const [manualTitleCanaryRequestId, setManualTitleCanaryRequestId] = useState(
+    restoredSession?.manualTitleCanaryRequestId ?? "",
+  );
+  const [manualTitleRemainingRequestId, setManualTitleRemainingRequestId] =
+    useState(restoredSession?.manualTitleRemainingRequestId ?? "");
+  const [manualTitleOperatorConfirmedComplete, setManualTitleOperatorConfirmedComplete] =
+    useState(restoredSession?.manualTitleOperatorConfirmedComplete === true);
   const [
     serialMallTitleResumeRequestId,
     setSerialMallTitleResumeRequestId,
@@ -312,9 +328,11 @@ export function ProductLaunchFlow() {
   const [manualApplyCommandPreview, setManualApplyCommandPreview] =
     useState("");
   const [manualApplyResult, setManualApplyResult] =
-    useState<ManualApplyActionsResult | null>(null);
+    useState<ManualApplyActionsResult | null>(restoredSession?.manualTitleResult ?? null);
   const [manualApplyPolling, setManualApplyPolling] = useState(
-    !!restoredSession?.keywordRealApplyRequestId,
+    !!(restoredSession?.manualTitleRemainingRequestId ??
+      restoredSession?.manualTitleCanaryRequestId ??
+      restoredSession?.keywordRealApplyRequestId),
   );
   const [manualApplyPollCount, setManualApplyPollCount] = useState(0);
   const [manualApplyLastCheckedAt, setManualApplyLastCheckedAt] =
@@ -326,7 +344,10 @@ export function ProductLaunchFlow() {
   const autoKeywordImportedArtifactRef = useRef<string>("");
   const manualApplyResultFetchInFlightRef = useRef<Set<string>>(new Set());
   const activeManualApplyRequestIdRef = useRef(
-    restoredSession?.keywordRealApplyRequestId ?? "",
+    restoredSession?.manualTitleRemainingRequestId ??
+      restoredSession?.manualTitleCanaryRequestId ??
+      restoredSession?.keywordRealApplyRequestId ??
+      "",
   );
   const handledResumePriceRepairRequestIdRef = useRef(
     restoredSession?.handledResumePriceRepairRequestId ?? "",
@@ -547,6 +568,10 @@ export function ProductLaunchFlow() {
     setFinalPriceActionsResult(null);
     finalPriceStartedForRealApplyRequestRef.current = "";
     setManualApplyRequestId("");
+    setManualTitleCanaryRequestId("");
+    setManualTitleRemainingRequestId("");
+    setManualTitleOperatorConfirmedComplete(false);
+    setManualApplyResult(null);
     setManualApplyResult(null);
     setManualApplyPolling(false);
     setManualApplyPollCount(0);
@@ -1245,8 +1270,36 @@ export function ProductLaunchFlow() {
     serialMallTitleResumeRequestId,
   ]);
 
-  const applyManualCandidates = useCallback(async () => {
-    if (!manualPreflightResult || manualApplyBusy) return;
+  const applyManualTitleCanary = useCallback(async () => {
+    if (!manualPreflightResult || manualApplyBusy || manualTitleCanaryRequestId) return;
+    const currentPreview = buildKeywordShoplingPayloadPreview(
+      buildManualReviewedRows(),
+      {
+        expandProductGroupMarkets: true,
+        manualTitleOverridesByGoodsKey,
+        manualKeywordOverridesByGoodsKey,
+        seedKeywordsByGoodsKey,
+      },
+    );
+    const currentPreflight = buildKeywordExecutionPreflight(
+      { previewResult: currentPreview, finalConfirmationText: "" },
+      {
+        ...DEFAULT_KEYWORD_EXECUTION_PREFLIGHT_CONFIG,
+        maxRows: 100,
+        confirmationText: APPLY_CONFIRMATION_TEXT,
+      },
+    );
+    setManualPreviewResult(currentPreview);
+    setManualPreflightResult(currentPreflight);
+    const { summary } = currentPreflight;
+    if (
+      summary.blockedCount > 0 ||
+      summary.coverageMismatchGoodsKeyCount > 0 ||
+      summary.generatedTitleTargetCount !== summary.expectedTitleTargetCount ||
+      summary.eligibleCount !== summary.expectedTitleTargetCount ||
+      summary.eligibleCount === 0 ||
+      summary.eligibleCount > 100
+    ) return;
     activeManualApplyRequestIdRef.current = "";
     setSerialMallTitleResumeRequestId("");
     serialMallTitleResumeDispatchingRef.current = false;
@@ -1277,9 +1330,10 @@ export function ProductLaunchFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           execution_plan_json: buildCompactKeywordApplyExecutionPlan(
-            manualPreflightResult,
+            currentPreflight,
           ),
           mode: "apply",
+          title_apply_phase: "manual_canary",
           confirmation_text: APPLY_CONFIRMATION_TEXT,
           max_items: 100,
         }),
@@ -1288,6 +1342,7 @@ export function ProductLaunchFlow() {
       const requestId = String(json.requestId || "");
       activeManualApplyRequestIdRef.current = requestId;
       setManualApplyRequestId(requestId);
+      setManualTitleCanaryRequestId(requestId);
       setManualApplyActionsUrl(
         String(json.githubActionsUrl || json.runUrl || ""),
       );
@@ -1309,7 +1364,7 @@ export function ProductLaunchFlow() {
         realApplyStatus: json.status === "error" ? "failed" : "queued",
         appliedCount: 0,
         failedCount: 0,
-        warningCount: manualPreflightResult.warnings.length,
+        warningCount: currentPreflight.warnings.length,
         requestId,
         dryRunRequestId: "",
         realApplyRequestId: requestId,
@@ -1325,9 +1380,17 @@ export function ProductLaunchFlow() {
     } finally {
       setManualApplyBusy(false);
     }
-  }, [manualApplyBusy, manualPreflightResult]);
+  }, [
+    buildManualReviewedRows,
+    manualApplyBusy,
+    manualKeywordOverridesByGoodsKey,
+    manualPreflightResult,
+    manualTitleCanaryRequestId,
+    manualTitleOverridesByGoodsKey,
+    seedKeywordsByGoodsKey,
+  ]);
 
-  const resumeSerialMallTitleApply = useCallback(async () => {
+  const applyManualTitleRemaining = useCallback(async () => {
     if (
       serialMallTitleResumeDispatchingRef.current ||
       manualApplyBusy ||
@@ -1337,6 +1400,20 @@ export function ProductLaunchFlow() {
       finalPricePolling
     )
       return;
+    const canarySummary = manualApplyResult?.summary;
+    const canaryGoodsKey = String(canarySummary?.manual_canary_goods_key ?? "").trim();
+    const canaryMallKey = String(canarySummary?.manual_canary_mall_key ?? "").trim();
+    if (
+      manualTitleRemainingRequestId ||
+      canarySummary?.title_apply_phase !== "manual_canary" ||
+      canarySummary?.status !== "waiting_manual_confirmation" ||
+      manualApplyResult?.phase !== "artifact_ready" ||
+      Number(canarySummary?.manual_canary_post_count) !== 1 ||
+      Number(canarySummary?.manual_api_accepted_count) !== 1 ||
+      Number(canarySummary?.failed_item_count) !== 0 ||
+      canarySummary?.manual_verification_required !== true ||
+      !canaryGoodsKey || !/^SMALL_\d{5}$/.test(canaryMallKey)
+    ) return;
     activeManualApplyRequestIdRef.current = "";
     serialMallTitleResumeDispatchingRef.current = true;
     setManualApplyBusy(true);
@@ -1384,7 +1461,10 @@ export function ProductLaunchFlow() {
           execution_plan_json:
             buildCompactKeywordApplyExecutionPlan(preflightResult),
           mode: "apply",
-          confirmation_text: APPLY_CONFIRMATION_TEXT,
+          title_apply_phase: "manual_remaining",
+          confirmation_text: MANUAL_REMAINING_CONFIRMATION_TEXT,
+          confirmed_canary_goods_key: canaryGoodsKey,
+          confirmed_canary_mall_key: canaryMallKey,
           max_items: 100,
         }),
       });
@@ -1399,7 +1479,7 @@ export function ProductLaunchFlow() {
       }
       activeManualApplyRequestIdRef.current = requestId;
       setManualApplyRequestId(requestId);
-      setSerialMallTitleResumeRequestId(requestId);
+      setManualTitleRemainingRequestId(requestId);
       handledResumePriceRepairRequestIdRef.current = "";
       setHandledResumePriceRepairRequestId("");
       setKeywordApplyState({
@@ -1425,7 +1505,7 @@ export function ProductLaunchFlow() {
         requestId,
         runUrl: json.runUrl || json.githubActionsUrl,
         githubActionsUrl: json.githubActionsUrl,
-        message: "누락 상품명을 한 행씩 확인하여 순차 반영 중입니다.",
+        message: "canary를 제외한 나머지 상품명을 한 행씩 순차 반영 중입니다.",
       });
       setManualApplyPollCount(0);
       setManualApplyLastCheckedAt(null);
@@ -1448,6 +1528,8 @@ export function ProductLaunchFlow() {
     finalPriceRunning,
     manualApplyBusy,
     manualApplyPolling,
+    manualApplyResult,
+    manualTitleRemainingRequestId,
     manualKeywordOverridesByGoodsKey,
     manualTitleOverridesByGoodsKey,
     seedKeywordsByGoodsKey,
@@ -1499,6 +1581,30 @@ export function ProductLaunchFlow() {
     goodsKeys,
     buildGoodsKeyGroupMap(uploadRows),
   );
+  const manualTitleSummary = manualApplyResult?.summary;
+  const manualTitleCanaryReady =
+    manualTitleSummary?.title_apply_phase === "manual_canary" &&
+    manualTitleSummary?.status === "waiting_manual_confirmation" &&
+    manualApplyResult?.phase === "artifact_ready" &&
+    Number(manualTitleSummary.manual_canary_post_count) === 1 &&
+    Number(manualTitleSummary.manual_api_accepted_count) === 1 &&
+    Number(manualTitleSummary.failed_item_count) === 0 &&
+    manualTitleSummary.manual_verification_required === true &&
+    String(manualTitleSummary.manual_canary_goods_key ?? "").trim() !== "" &&
+    String(manualTitleSummary.manual_canary_mall_key ?? "").trim() !== "";
+  const manualTitleRemainingReady =
+    manualTitleSummary?.title_apply_phase === "manual_remaining" &&
+    manualTitleSummary?.status === "waiting_manual_confirmation" &&
+    manualApplyResult?.phase === "artifact_ready" &&
+    Number(manualTitleSummary.failed_item_count) === 0 &&
+    Number(manualTitleSummary.title_write_request_count) === titleTargetCount - 1 &&
+    Number(manualTitleSummary.manual_api_accepted_count) === titleTargetCount - 1 &&
+    manualTitleSummary.manual_verification_required === true;
+  const manualTitleFlowComplete =
+    isSuccessfulUploadResult(uploadActionsResult, uploadRows.length) &&
+    isSuccessfulPriceResult(priceActionsResult) &&
+    manualTitleRemainingReady &&
+    manualTitleOperatorConfirmedComplete;
   const manualApplyReadyForFinalPrice =
     isManualApplyReadyForFinalPrice(manualApplyResult);
   const manualApplyPriceRepairRequired =
@@ -1521,10 +1627,10 @@ export function ProductLaunchFlow() {
     !manualApplyReadyForFinalPrice &&
     (manualApplyPriceRepairRequired ||
       !!serialMallTitleResumeRequestId);
-  const actualApplyDone =
-    isSuccessfulPriceResult(priceActionsResult) &&
-    manualApplyReadyForFinalPrice &&
-    finalPriceDone;
+  const actualApplyDone = manualTitleFlowComplete ||
+    (isSuccessfulPriceResult(priceActionsResult) &&
+      manualApplyReadyForFinalPrice &&
+      finalPriceDone);
   const priceIssueState = getPriceIssueState(
     finalPriceActionsResult ?? priceActionsResult,
   );
@@ -1643,6 +1749,8 @@ export function ProductLaunchFlow() {
       !!priceRequestId ||
       !!finalPriceRequestId ||
       !!serialMallTitleResumeRequestId ||
+      !!manualTitleCanaryRequestId ||
+      !!manualTitleRemainingRequestId ||
       !!uploadActionsResult ||
       !!priceActionsResult ||
       !!keywordRunsResult ||
@@ -1674,6 +1782,10 @@ export function ProductLaunchFlow() {
         keywordApplyState?.realApplyRequestId ||
         "",
       serialMallTitleResumeRequestId,
+      manualTitleCanaryRequestId,
+      manualTitleRemainingRequestId,
+      manualTitleOperatorConfirmedComplete,
+      manualTitleResult: manualApplyResult,
       handledResumePriceRepairRequestId,
       finalPriceRequestId,
       uploadResult: uploadActionsResult,
@@ -1694,6 +1806,10 @@ export function ProductLaunchFlow() {
     keywordDispatchResult?.expectedArtifactName,
     keywordRunsResult,
     manualApplyRequestId,
+    manualApplyResult,
+    manualTitleCanaryRequestId,
+    manualTitleRemainingRequestId,
+    manualTitleOperatorConfirmedComplete,
     priceActionsResult,
     priceRequestId,
     restoredSession,
@@ -1774,6 +1890,9 @@ export function ProductLaunchFlow() {
     setManualPreflightResult(null);
     setManualApplyBusy(false);
     setManualApplyRequestId("");
+    setManualTitleCanaryRequestId("");
+    setManualTitleRemainingRequestId("");
+    setManualTitleOperatorConfirmedComplete(false);
     setManualApplyActionsUrl("");
     setManualApplyRunUrl("");
     setManualApplyCommandPreview("");
@@ -1862,15 +1981,25 @@ export function ProductLaunchFlow() {
       manualPreflightResult.summary.eligibleCount > 0 &&
       manualPreflightResult.summary.blockedCount === 0
     )
-      void applyManualCandidates();
+      void applyManualTitleCanary();
     else confirmManualCandidates();
   };
 
   const handleUnifiedProductLaunchAction = () => {
     if (finalPriceActive) return;
 
+    if (manualTitleRemainingReady && !manualTitleOperatorConfirmedComplete) {
+      setManualTitleOperatorConfirmedComplete(true);
+      return;
+    }
+
+    if (manualTitleCanaryReady) {
+      void applyManualTitleRemaining();
+      return;
+    }
+
     if (priceRepairCompletedVerificationPending) {
-      void resumeSerialMallTitleApply();
+      void applyManualTitleRemaining();
       return;
     }
 
@@ -1954,6 +2083,9 @@ export function ProductLaunchFlow() {
 
   useEffect(() => {
     const realApplyRequestId = manualApplyRequestId;
+    const isManualTitlePhase =
+      manualApplyResult?.summary?.title_apply_phase === "manual_canary" ||
+      manualApplyResult?.summary?.title_apply_phase === "manual_remaining";
     // Launch completion still requires manualApplyReadyForFinalPrice.
     if (
       manualApplyPolling ||
@@ -1963,6 +2095,7 @@ export function ProductLaunchFlow() {
       manualApplyResult?.requestId !== realApplyRequestId
     )
       return;
+    if (isManualTitlePhase) return;
     if (
       finalPriceActive ||
       finalPriceDone ||
@@ -1987,6 +2120,7 @@ export function ProductLaunchFlow() {
     manualApplyPriceRepairRequired,
     manualApplyRequestId,
     manualApplyResult?.requestId,
+    manualApplyResult?.summary?.title_apply_phase,
     runFinalPriceModify,
   ]);
 
@@ -2070,6 +2204,15 @@ export function ProductLaunchFlow() {
         nextCheckIn={manualApplyNextCheckIn}
         errorMessage={manualApplyErrorMessage}
       />
+      {manualTitleCanaryReady ? (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+          <h2 className="font-black text-slate-950">시험 적용 결과 수동 확인</h2>
+          <p>goods_key: {String(manualTitleSummary?.manual_canary_goods_key)}</p>
+          <p>mall_key: {String(manualTitleSummary?.manual_canary_mall_key)}</p>
+          <p>요청 상품명: {String(manualTitleSummary?.manual_canary_requested_title ?? "")}</p>
+          <p className="mt-2 text-sm">샵플링에서 표시 상품명과 가격을 직접 확인한 뒤 아래 버튼을 누르세요.</p>
+        </section>
+      ) : null}
       <LaunchCockpit
         steps={cockpit.steps}
         currentStage={derivedStage}
@@ -2137,6 +2280,10 @@ export function ProductLaunchFlow() {
         serialMallTitleResumeActive={serialMallTitleResumeActive}
         finalPriceFailed={finalPriceFailed}
         actualApplyDone={actualApplyDone}
+        manualTitleCanaryReady={manualTitleCanaryReady}
+        manualTitleRemainingReady={manualTitleRemainingReady}
+        manualTitleCanaryActive={manualApplyPolling && !!manualTitleCanaryRequestId && !manualTitleRemainingRequestId}
+        manualTitleRemainingActive={manualApplyPolling && !!manualTitleRemainingRequestId}
       />
       {cockpit.primaryAction === "failed" ? (
         <ErrorDrawer
@@ -3370,6 +3517,10 @@ function LaunchCockpit({
   serialMallTitleResumeActive,
   finalPriceFailed,
   actualApplyDone,
+  manualTitleCanaryReady,
+  manualTitleRemainingReady,
+  manualTitleCanaryActive,
+  manualTitleRemainingActive,
 }: {
   steps: CockpitStep[];
   currentStage: string;
@@ -3413,6 +3564,10 @@ function LaunchCockpit({
   serialMallTitleResumeActive: boolean;
   finalPriceFailed: boolean;
   actualApplyDone: boolean;
+  manualTitleCanaryReady: boolean;
+  manualTitleRemainingReady: boolean;
+  manualTitleCanaryActive: boolean;
+  manualTitleRemainingActive: boolean;
   uploadProgress: {
     active: boolean;
     phase: string;
@@ -3437,7 +3592,15 @@ function LaunchCockpit({
     manualPreviewStatus,
     manualPreflightResult,
   );
-  const primaryLabel = finalPriceActive
+  const primaryLabel = manualTitleCanaryActive
+    ? "상품명 1건 시험 적용 확인 중"
+    : manualTitleRemainingActive
+      ? "나머지 상품명 순차 적용 확인 중"
+      : manualTitleCanaryReady
+        ? "상품명·가격 정상 확인 · 나머지 적용"
+        : manualTitleRemainingReady
+          ? "전체 상품명·가격 확인 완료"
+          : finalPriceActive
     ? "가격 안전복구 확인 중"
     : actualApplyDone
       ? "출시 완료"
@@ -3449,7 +3612,9 @@ function LaunchCockpit({
             ? serialMallTitleResumeActive
               ? "누락 상품명 순차 반영 확인 중"
               : "누락 상품명만 순차 이어서 반영"
-            : normalPrimaryLabel;
+            : manualPreflightResult && primaryAction !== "upload" && primaryAction !== "price"
+              ? "최종 상품명 1건 시험 적용"
+              : normalPrimaryLabel;
   const normalStepDisabled =
     primaryAction === "upload"
       ? !rowIsValid || uploadBusy
@@ -3470,8 +3635,10 @@ function LaunchCockpit({
     manualApplyPriceRepairRequired && !finalPriceDone && !finalPriceActive;
   // prettier-ignore
   const disabled =
-    finalPriceActive || serialMallTitleResumeActive || actualApplyDone
+    finalPriceActive || manualTitleCanaryActive || manualTitleRemainingActive || actualApplyDone
       ? true
+      : manualTitleCanaryReady || manualTitleRemainingReady
+        ? false
       : finalPriceReady
         ? false
         : normalStepDisabled;

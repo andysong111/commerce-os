@@ -217,6 +217,49 @@ test("apply dispatch trims confirmation and still requires exact confirmation", 
     );
   }));
 
+test("title apply phases are validated and forwarded without leaking canary keys in preview", () =>
+  withEnv(() => {
+    const canary = buildKeywordShoplingApplyDispatchRequest({
+      execution_plan_json: plan,
+      mode: "apply",
+      title_apply_phase: "manual_canary",
+      confirmation_text: "APPLY_KEYWORD_RESULTS_TO_SHOPLING",
+      max_items: 20,
+    });
+    assert.equal(canary.body.inputs.title_apply_phase, "manual_canary");
+    assert.equal(canary.body.inputs.confirmed_canary_goods_key, "");
+
+    assert.throws(() => buildKeywordShoplingApplyDispatchRequest({
+      execution_plan_json: plan,
+      mode: "apply",
+      title_apply_phase: "manual_remaining",
+      confirmation_text: "APPLY_KEYWORD_RESULTS_TO_SHOPLING",
+      confirmed_canary_goods_key: "goods-secret",
+      confirmed_canary_mall_key: "SMALL_00004",
+      max_items: 20,
+    }), /확인문구/);
+
+    const remaining = buildKeywordShoplingApplyDispatchRequest({
+      execution_plan_json: plan,
+      mode: "apply",
+      title_apply_phase: "manual_remaining",
+      confirmation_text: "CONFIRM_MANUAL_CANARY_VISIBLE_AND_PRICE_OK",
+      confirmed_canary_goods_key: "goods-secret",
+      confirmed_canary_mall_key: "SMALL_00004",
+      max_items: 20,
+    });
+    assert.equal(remaining.body.inputs.confirmed_canary_goods_key, "goods-secret");
+    assert.equal(remaining.body.inputs.confirmed_canary_mall_key, "SMALL_00004");
+    assert.doesNotMatch(remaining.commandPreview, /goods-secret|SMALL_00004/);
+    assert.throws(() => buildKeywordShoplingApplyDispatchRequest({
+      execution_plan_json: plan,
+      mode: "apply",
+      title_apply_phase: "invalid",
+      confirmation_text: "APPLY_KEYWORD_RESULTS_TO_SHOPLING",
+      max_items: 20,
+    }), /title_apply_phase/);
+  }));
+
 test("artifact parsing extracts nested JSON/JSONL and omits raw XML/secrets", () => {
   const zip = zipSync({
     "output/shopling_apply/result_summary.json": strToU8(
