@@ -197,15 +197,33 @@ test("stale manual apply responses cannot mutate current request state", () => {
   );
 });
 
-test("transient resume fetch errors keep the dispatch guard and polling", () => {
+test("transient active-request fetch errors always keep polling", () => {
   const catchBlock = resultBlock.slice(resultBlock.indexOf("} catch (error)"));
   assert.doesNotMatch(
     catchBlock,
     /serialMallTitleResumeDispatchingRef\.current = false/,
   );
+  assert.doesNotMatch(catchBlock, /setManualApplyPolling\(false\)/);
+  assert.doesNotMatch(catchBlock, /setManualApplyNextCheckIn\(0\)/);
+});
+
+test("only terminal results or the regular-request poll cap stop polling", () => {
+  const pollingBlock = between(
+    "useEffect(() => {\n    if (!manualApplyPolling) return;\n    if (",
+    "\n\n  const applyManualCandidates = useCallback",
+  );
   assert.match(
-    catchBlock,
-    /serialMallTitleResumeRequestId !== requestId/,
+    resultBlock,
+    /isFinalManualApplyResult\(data\)[\s\S]*setManualApplyPolling\(false\)/,
+  );
+  assert.match(
+    pollingBlock,
+    /next >= ACTIVE_MAX_POLLS && !serialMallTitleResumeRequestId[\s\S]*setManualApplyPolling\(false\)/,
+  );
+  assert.equal(
+    (resultBlock.match(/setManualApplyPolling\(false\)/g) ?? []).length,
+    1,
+    "result fetching stops only for a terminal artifact",
   );
 });
 

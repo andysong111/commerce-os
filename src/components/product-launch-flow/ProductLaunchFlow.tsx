@@ -1189,10 +1189,6 @@ export function ProductLaunchFlow() {
             ? error.message
             : "실제 반영 결과를 가져오는 중 오류가 발생했습니다.",
         );
-        if (serialMallTitleResumeRequestId !== requestId) {
-          setManualApplyPolling(false);
-          setManualApplyNextCheckIn(0);
-        }
       } finally {
         manualApplyResultFetchInFlightRef.current.delete(requestId);
       }
