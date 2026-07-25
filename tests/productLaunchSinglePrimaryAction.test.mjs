@@ -54,38 +54,72 @@ test("LaunchCockpit still contains one main primary button", () => {
 
 test("LaunchCockpit receives handleUnifiedProductLaunchAction", () => {
   assert.match(cockpitCallBlock, /onNext=\{handleUnifiedProductLaunchAction\}/);
-  assert.doesNotMatch(cockpitCallBlock, /onNext=\{handleProductLaunchPrimaryAction\}/);
+  assert.doesNotMatch(
+    cockpitCallBlock,
+    /onNext=\{handleProductLaunchPrimaryAction\}/,
+  );
 });
 
 test("unified handler calls runFinalPriceModify when price repair is required", () => {
-  assert.match(unifiedHandlerBlock, /manualApplyPriceRepairRequired && !finalPriceDone/);
-  assert.doesNotMatch(unifiedHandlerBlock, /manualApplyReadyForFinalPrice && !finalPriceDone/);
+  assert.match(
+    unifiedHandlerBlock,
+    /manualApplyPriceRepairRequired && !finalPriceDone/,
+  );
+  assert.doesNotMatch(
+    unifiedHandlerBlock,
+    /manualApplyReadyForFinalPrice && !finalPriceDone/,
+  );
   assert.match(unifiedHandlerBlock, /void runFinalPriceModify\(\);/);
 });
 
 test("unified handler does not call manual apply again during final-price stage", () => {
-  assert.match(unifiedHandlerBlock, /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/);
+  assert.match(
+    unifiedHandlerBlock,
+    /return;\n    }\n\n    handleProductLaunchPrimaryAction\(\);/,
+  );
   assert.doesNotMatch(unifiedHandlerBlock, /applyManualCandidates\(/);
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
 });
 
 test("final-price active disables the retained button", () => {
-  assert.match(cockpitBlock, /finalPriceActive \|\| priceRepairCompletedVerificationPending \|\| actualApplyDone\n\s+\? true/);
+  assert.match(
+    cockpitBlock,
+    /finalPriceActive \|\| serialMallTitleResumeActive \|\| actualApplyDone\n\s+\? true/,
+  );
 });
 
 test("completed launch disables the retained button", () => {
-  assert.match(cockpitBlock, /finalPriceActive \|\| priceRepairCompletedVerificationPending \|\| actualApplyDone\n\s+\? true/);
+  assert.match(
+    cockpitBlock,
+    /finalPriceActive \|\| serialMallTitleResumeActive \|\| actualApplyDone\n\s+\? true/,
+  );
 });
 
-test("price repair completed verification pending disables the retained button", () => {
-  assert.match(source, /const priceRepairCompletedVerificationPending =\n\s+manualApplyPriceRepairRequired &&\n\s+finalPriceDone &&\n\s+!manualApplyReadyForFinalPrice;/);
-  assert.match(unifiedHandlerBlock, /finalPriceActive \|\| priceRepairCompletedVerificationPending/);
-  assert.match(cockpitBlock, /priceRepairCompletedVerificationPending \|\| actualApplyDone/);
+test("price repair completed verification pending uses the dedicated resume", () => {
+  assert.match(
+    source,
+    /const priceRepairCompletedVerificationPending =\n\s+finalPriceDone &&\n\s+!manualApplyReadyForFinalPrice/,
+  );
+  assert.match(
+    unifiedHandlerBlock,
+    /if \(priceRepairCompletedVerificationPending\)/,
+  );
+  assert.match(unifiedHandlerBlock, /resumeSerialMallTitleApply/);
+  assert.doesNotMatch(
+    cockpitBlock,
+    /priceRepairCompletedVerificationPending \|\| actualApplyDone/,
+  );
 });
 
 test("price repair labels use required and retry states", () => {
-  assert.match(cockpitBlock, /manualApplyPriceRepairRequired && !finalPriceDone && finalPriceFailed\n\s+\? "가격 안전복구 다시 실행"/);
-  assert.match(cockpitBlock, /manualApplyPriceRepairRequired && !finalPriceDone\n\s+\? "가격 안전복구 시작"/);
+  assert.match(
+    cockpitBlock,
+    /manualApplyPriceRepairRequired && !finalPriceDone && finalPriceFailed\n\s+\? "가격 안전복구 다시 실행"/,
+  );
+  assert.match(
+    cockpitBlock,
+    /manualApplyPriceRepairRequired && !finalPriceDone\n\s+\? "가격 안전복구 시작"/,
+  );
 });
 
 test("final-price dispatch error participates in retry state", () => {
@@ -104,7 +138,10 @@ test("final-price dispatch error participates in retry state", () => {
 });
 
 test("normal upload button label remains", () => {
-  assert.match(source, /if \(primaryAction === "upload"\) return "상품출시 진행 시작";/);
+  assert.match(
+    source,
+    /if \(primaryAction === "upload"\) return "상품출시 진행 시작";/,
+  );
 });
 
 test("normal price button label remains", () => {
@@ -121,11 +158,18 @@ test("final-price safety guards from PR #252 remain", () => {
     "manualApplyResult?.requestId !== realApplyRequestId",
     "finalPriceRunning ||\n      finalPriceFetching ||\n      finalPricePolling ||\n      goodsKeys.length === 0",
     "finalPriceRunResult ||\n      finalPriceActionsResult",
-    "goods_key: goodsKeys.join(\",\")",
+    'goods_key: goodsKeys.join(",")',
     "goods_key_group_json: buildGoodsKeyGroupJson(uploadRows)",
     "policy_overrides: []",
-  ]) assert.equal(source.includes(snippet), true, `missing ${snippet}`);
-  assert.doesNotMatch(between("useEffect(() => {\n    const realApplyRequestId = manualApplyRequestId;", "\n  return ("), /autopilotEnabled/);
+  ])
+    assert.equal(source.includes(snippet), true, `missing ${snippet}`);
+  assert.doesNotMatch(
+    between(
+      "useEffect(() => {\n    const realApplyRequestId = manualApplyRequestId;",
+      "\n  return (",
+    ),
+    /autopilotEnabled/,
+  );
 });
 
 test("clean-checkout guard does not inspect git status", () => {
@@ -135,7 +179,8 @@ test("clean-checkout guard does not inspect git status", () => {
     "exec" + "Sync",
     "git status --" + "porcelain",
     "assertUnchanged" + "OnlyAllowedFiles",
-  ]) assert.doesNotMatch(testSource, new RegExp(forbiddenSnippet));
+  ])
+    assert.doesNotMatch(testSource, new RegExp(forbiddenSnippet));
 });
 
 test("legacy test anchor dead code is removed", () => {
