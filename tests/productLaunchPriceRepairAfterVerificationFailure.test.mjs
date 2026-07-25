@@ -272,13 +272,20 @@ test("unified button starts repair instead of resending manual title apply", () 
   assert.doesNotMatch(unifiedHandlerBlock, /confirmManualCandidates\(/);
 });
 
-test("restored exact manual apply request is fetched once without resending titles", () => {
+test("restored exact manual apply request is polled once at a time without resending titles", () => {
   assert.match(
     source,
-    /restoredManualApplyResultFetchedRef = useRef<string>\(""\)/,
+    /manualApplyResultFetchInFlightRef = useRef<Set<string>>\(new Set\(\)\)/,
   );
   assert.match(source, /restoredSession\?\.keywordRealApplyRequestId/);
-  assert.match(source, /fetchManualApplyResult\(restoredRealApplyRequestId\)/);
+  assert.match(
+    source,
+    /fetchManualApplyResult\(\n\s+serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
+  );
+  assert.match(
+    source,
+    /manualApplyResultFetchInFlightRef\.current\.has\(requestId\)/,
+  );
   assert.match(
     source,
     /request_id=\$\{encodeURIComponent\(requestId\)\}&mode=apply/,

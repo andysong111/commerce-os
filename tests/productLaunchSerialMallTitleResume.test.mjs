@@ -28,7 +28,7 @@ const unifiedBlock = between(
 );
 const resultBlock = between(
   "const fetchManualApplyResult = useCallback",
-  "\n  useEffect(() => {\n    const restoredRealApplyRequestId",
+  "\n  useEffect(() => {\n    if (!manualApplyPolling) return;",
 );
 const uploadBlock = between(
   "const runUploadRequest = useCallback",
@@ -39,7 +39,7 @@ const applyBlock = between(
   "\n  const resumeSerialMallTitleApply = useCallback",
 );
 const restoreBlock = between(
-  "useEffect(() => {\n    const restoredRealApplyRequestId",
+  "const [manualApplyRequestId, setManualApplyRequestId]",
   "\n  useEffect(() => {\n    if (!manualApplyPolling) return;",
 );
 
@@ -119,7 +119,7 @@ test("resume request identity is recoverable and persisted as the real apply", (
   );
   assert.match(
     resumeBlock,
-    /setManualApplyRequestId\(requestId\);\n\s+setSerialMallTitleResumeRequestId\(requestId\);\n\s+setHandledResumePriceRepairRequestId\(""\)/,
+    /setManualApplyRequestId\(requestId\);\n\s+setSerialMallTitleResumeRequestId\(requestId\);\n\s+handledResumePriceRepairRequestIdRef\.current = "";\n\s+setHandledResumePriceRepairRequestId\(""\)/,
   );
   assert.match(
     source,
@@ -134,15 +134,35 @@ test("resume request identity is recoverable and persisted as the real apply", (
 test("restored resume polls its exact id until a terminal artifact", () => {
   assert.match(
     restoreBlock,
-    /serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
+    /restoredSession\?\.keywordRealApplyRequestId \?\? ""/,
   );
   assert.match(
     source,
     /fetchManualApplyResult\(\n\s+serialMallTitleResumeRequestId \|\| manualApplyRequestId/,
   );
+  assert.doesNotMatch(source, /restoredRealApplyRequestId/);
   assert.match(
     source,
     /manualApplyPollCount >= ACTIVE_MAX_POLLS &&\n\s+!serialMallTitleResumeRequestId/,
+  );
+});
+
+test("result polling permits only one in-flight fetch per request id", () => {
+  assert.match(
+    source,
+    /const manualApplyResultFetchInFlightRef = useRef<Set<string>>\(new Set\(\)\)/,
+  );
+  assert.match(
+    resultBlock,
+    /manualApplyResultFetchInFlightRef\.current\.has\(requestId\)/,
+  );
+  assert.match(
+    resultBlock,
+    /manualApplyResultFetchInFlightRef\.current\.add\(requestId\)/,
+  );
+  assert.match(
+    resultBlock,
+    /finally \{\n\s+manualApplyResultFetchInFlightRef\.current\.delete\(requestId\)/,
   );
 });
 
@@ -170,7 +190,7 @@ test("previous final-price success is retained until a terminal repair-required 
   );
   assert.match(
     resultBlock,
-    /handledResumePriceRepairRequestId !== requestId/,
+    /handledResumePriceRepairRequestIdRef\.current !== requestId/,
   );
 });
 
@@ -182,10 +202,13 @@ test("handled resume price repair identity survives reload", () => {
   );
   assert.match(
     resultBlock,
-    /handledResumePriceRepairRequestId !== requestId[\s\S]*setHandledResumePriceRepairRequestId\(requestId\)[\s\S]*setFinalPriceRequestId\(""\)/,
+    /handledResumePriceRepairRequestIdRef\.current !== requestId[\s\S]*handledResumePriceRepairRequestIdRef\.current = requestId[\s\S]*setHandledResumePriceRepairRequestId\(requestId\)[\s\S]*setFinalPriceRequestId\(""\)/,
   );
   assert.match(source, /handledResumePriceRepairRequestId,\n\s+finalPriceRequestId/);
-  assert.doesNotMatch(source, /handledResumePriceRepairRequestIdRef/);
+  assert.match(
+    source,
+    /const handledResumePriceRepairRequestIdRef = useRef\(\n\s+restoredSession\?\.handledResumePriceRepairRequestId \?\? ""/,
+  );
 });
 
 test("a fresh upload drops every prior manual apply and resume identity", () => {
@@ -202,13 +225,14 @@ test("a fresh upload drops every prior manual apply and resume identity", () => 
     'setManualApplyErrorMessage("")',
     'setSerialMallTitleResumeRequestId("")',
     'setHandledResumePriceRepairRequestId("")',
-    'restoredManualApplyResultFetchedRef.current = ""',
+    "manualApplyResultFetchInFlightRef.current.clear()",
+    'handledResumePriceRepairRequestIdRef.current = ""',
   ]) assert.equal(uploadBlock.includes(reset), true, `missing ${reset}`);
   assert.doesNotMatch(
     source,
     /keywordApplyState\?\.realApplyRequestId \|\|\n\s+restoredSession\?\.keywordRealApplyRequestId/,
   );
-  assert.doesNotMatch(restoreBlock, /restoredSession\?\./);
+  assert.doesNotMatch(source, /restoredRealApplyRequestId/);
 });
 
 test("a regular apply clears stale manual and resume state before dispatch", () => {
@@ -223,7 +247,14 @@ test("a regular apply clears stale manual and resume state before dispatch", () 
     "setManualApplyPolling(false)",
     'setSerialMallTitleResumeRequestId("")',
     'setHandledResumePriceRepairRequestId("")',
+    'handledResumePriceRepairRequestIdRef.current = ""',
+    "setKeywordApplyState(null)",
   ]) assert.equal(beforeDispatch.includes(reset), true, `missing ${reset}`);
+  const afterDispatch = applyBlock.slice(dispatchIndex);
+  assert.match(
+    afterDispatch,
+    /const requestId = String\(json\.requestId \|\| ""\)[\s\S]*setKeywordApplyState\(\{[\s\S]*realApplyRequestId: requestId/,
+  );
 });
 
 test("terminal no-repair resume preserves price and verified success can complete", () => {

@@ -324,7 +324,10 @@ export function ProductLaunchFlow() {
   const autoPriceStartedForUploadRequestRef = useRef<string>("");
   const autoKeywordStartedForPriceRequestRef = useRef<string>("");
   const autoKeywordImportedArtifactRef = useRef<string>("");
-  const restoredManualApplyResultFetchedRef = useRef<string>("");
+  const manualApplyResultFetchInFlightRef = useRef<Set<string>>(new Set());
+  const handledResumePriceRepairRequestIdRef = useRef(
+    restoredSession?.handledResumePriceRepairRequestId ?? "",
+  );
   const finalPriceStartedForRealApplyRequestRef = useRef<string>("");
   const serialMallTitleResumeDispatchingRef = useRef(
     !!restoredSession?.serialMallTitleResumeRequestId,
@@ -551,8 +554,9 @@ export function ProductLaunchFlow() {
     setManualApplyErrorMessage("");
     serialMallTitleResumeDispatchingRef.current = false;
     setSerialMallTitleResumeRequestId("");
+    handledResumePriceRepairRequestIdRef.current = "";
     setHandledResumePriceRepairRequestId("");
-    restoredManualApplyResultFetchedRef.current = "";
+    manualApplyResultFetchInFlightRef.current.clear();
     autoPriceStartedForUploadRequestRef.current = "";
     autoKeywordStartedForPriceRequestRef.current = "";
     try {
@@ -1115,6 +1119,8 @@ export function ProductLaunchFlow() {
     async (requestIdOverride?: string) => {
       const requestId = requestIdOverride || manualApplyRequestId;
       if (!requestId) return;
+      if (manualApplyResultFetchInFlightRef.current.has(requestId)) return;
+      manualApplyResultFetchInFlightRef.current.add(requestId);
       setManualApplyErrorMessage("");
       try {
         const data = await (
@@ -1155,8 +1161,9 @@ export function ProductLaunchFlow() {
           if (serialMallTitleResumeRequestId === requestId) {
             if (
               isManualApplyPriceRepairRequired(data) &&
-              handledResumePriceRepairRequestId !== requestId
+              handledResumePriceRepairRequestIdRef.current !== requestId
             ) {
+              handledResumePriceRepairRequestIdRef.current = requestId;
               setHandledResumePriceRepairRequestId(requestId);
               setFinalPriceRequestId("");
               setFinalPriceRunResult(null);
@@ -1179,33 +1186,16 @@ export function ProductLaunchFlow() {
           setManualApplyPolling(false);
           setManualApplyNextCheckIn(0);
         }
+      } finally {
+        manualApplyResultFetchInFlightRef.current.delete(requestId);
       }
     },
     [
       manualApplyRequestId,
       manualApplyRunUrl,
-      handledResumePriceRepairRequestId,
       serialMallTitleResumeRequestId,
     ],
   );
-
-  useEffect(() => {
-    const restoredRealApplyRequestId =
-      serialMallTitleResumeRequestId || manualApplyRequestId;
-    if (!restoredRealApplyRequestId || manualApplyResult) return;
-    if (
-      restoredManualApplyResultFetchedRef.current === restoredRealApplyRequestId
-    )
-      return;
-    restoredManualApplyResultFetchedRef.current = restoredRealApplyRequestId;
-    setManualApplyRequestId(restoredRealApplyRequestId);
-    void fetchManualApplyResult(restoredRealApplyRequestId);
-  }, [
-    fetchManualApplyResult,
-    manualApplyResult,
-    manualApplyRequestId,
-    serialMallTitleResumeRequestId,
-  ]);
 
   useEffect(() => {
     if (!manualApplyPolling) return;
@@ -1256,8 +1246,9 @@ export function ProductLaunchFlow() {
     if (!manualPreflightResult || manualApplyBusy) return;
     setSerialMallTitleResumeRequestId("");
     serialMallTitleResumeDispatchingRef.current = false;
+    handledResumePriceRepairRequestIdRef.current = "";
     setHandledResumePriceRepairRequestId("");
-    restoredManualApplyResultFetchedRef.current = "";
+    manualApplyResultFetchInFlightRef.current.clear();
     setManualApplyRequestId("");
     setManualApplyResult(null);
     setManualApplyPolling(false);
@@ -1268,6 +1259,7 @@ export function ProductLaunchFlow() {
     setManualApplyRunUrl("");
     setManualApplyCommandPreview("");
     setManualApplyErrorMessage("");
+    setKeywordApplyState(null);
     setManualApplyBusy(true);
     setFinalPriceRequestId("");
     setFinalPriceRunResult(null);
@@ -1402,6 +1394,7 @@ export function ProductLaunchFlow() {
       }
       setManualApplyRequestId(requestId);
       setSerialMallTitleResumeRequestId(requestId);
+      handledResumePriceRepairRequestIdRef.current = "";
       setHandledResumePriceRepairRequestId("");
       setKeywordApplyState({
         dryRunStatus: "success",
@@ -1815,8 +1808,9 @@ export function ProductLaunchFlow() {
     finalPriceStartedForRealApplyRequestRef.current = "";
     serialMallTitleResumeDispatchingRef.current = false;
     setSerialMallTitleResumeRequestId("");
+    handledResumePriceRepairRequestIdRef.current = "";
     setHandledResumePriceRepairRequestId("");
-    restoredManualApplyResultFetchedRef.current = "";
+    manualApplyResultFetchInFlightRef.current.clear();
   };
   const resetProductLaunchSession = () => {
     clearProductLaunchFailureState({ keepRowExpression: false });
