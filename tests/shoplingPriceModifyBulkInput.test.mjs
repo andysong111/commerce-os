@@ -75,6 +75,9 @@ test("UI contract remains local-only and keeps the existing runner", async () =>
   ]);
   assert.match(page, /<ShoplingPriceModifyRunner \/>/); assert.match(page, /ShoplingPriceModifyBulkInputPreview/);
   for (const phrase of ["고정 양식", "실제 가격을 수정하지 않습니다", "파일 업로드", "직접 붙여넣기", "실행 전 미리보기"]) assert.match(component, new RegExp(phrase));
+  assert.doesNotMatch(component, /setSelection\(null\)/);
+  assert.match(component, /const onPaste[\s\S]*?catch \(caught\) \{ setError/);
+  assert.match(component, /const onFile[\s\S]*?catch \(caught\) \{ setError/);
   const newCode = component + library;
   assert.doesNotMatch(newCode, /fetch\s*\(/); assert.doesNotMatch(newCode, /\/api\/shopling-price-modify\/bulk/); assert.doesNotMatch(newCode, /supabase/i); assert.doesNotMatch(newCode, /https?:\/\//);
 });
