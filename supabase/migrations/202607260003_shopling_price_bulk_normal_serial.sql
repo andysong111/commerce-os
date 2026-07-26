@@ -68,7 +68,7 @@ create or replace function public.finish_shopling_price_bulk_normal_chunk(p_job_
 declare v_chunk public.shopling_price_bulk_chunks; v_failed text[]:=coalesce(p_failed_keys,array[]::text[]); v_remaining int;
 begin
  if auth.role()<>'service_role' then raise exception 'service_role required'; end if;
- select c.* into v_chunk from public.shopling_price_bulk_chunks c join public.shopling_price_bulk_jobs j on j.id=c.job_id where c.job_id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.request_id=p_request_id and c.status in ('running','dispatch_uncertain') for update of c;
+ select c.* into v_chunk from public.shopling_price_bulk_chunks c join public.shopling_price_bulk_jobs j on j.id=c.job_id where c.job_id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.request_id=p_request_id and c.status in ('dispatching','running','dispatch_uncertain') for update of c;
  if v_chunk.id is null then raise exception 'normal result transition not allowed'; end if;
  if exists(select 1 from unnest(v_failed) k where not exists(select 1 from jsonb_array_elements_text(v_chunk.goods_keys) as x(value) where x.value=k)) then raise exception 'failed key outside chunk'; end if;
  if p_success and cardinality(v_failed)>0 then raise exception 'success cannot include failed keys'; end if;

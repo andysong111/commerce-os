@@ -119,12 +119,47 @@ test("dispatch payload includes goods_keys, request_id, batch 80, policy_overrid
 }));
 
 test("result fetch builds workflow runs URL and validates env/request_id", async () => withEnv(baseEnv, async () => {
-  assert.match(buildShoplingPriceModifyActionsRunsUrl(20).url, /actions\/workflows\/shopling-price-modify\.yml\/runs\?branch=main&event=workflow_dispatch&per_page=20/);
+  assert.match(buildShoplingPriceModifyActionsRunsUrl(20, 2).url, /actions\/workflows\/shopling-price-modify\.yml\/runs\?branch=main&event=workflow_dispatch&per_page=20&page=2/);
   const invalid = await fetchShoplingPriceModifyActionsResult("bad/slash");
   assert.equal(invalid.status, "error");
   delete process.env.SHOPLING_PRICE_MODIFY_REPO;
   const missing = await fetchShoplingPriceModifyActionsResult();
   assert.equal(missing.status, "error");
+}));
+
+test("exact result fetch searches a bounded second page while latest fetch stays on page one", async () => withEnv(baseEnv, async () => {
+  const mismatchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: "price-modify-mismatch" })) });
+  const matchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: "price-modify-page-two", ok_count: 1, fail_count: 0 })) });
+  const calls = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const text = String(url); calls.push(text);
+    if (text.includes("/runs?")) {
+      const page = new URL(text).searchParams.get("page");
+      if (page === "1") return Response.json({ workflow_runs: [{ id: 1, status: "completed", conclusion: "success" }, ...Array.from({ length: 99 }, (_, index) => ({ id: 100 + index, status: "queued" }))] });
+      if (page === "2") return Response.json({ workflow_runs: [{ id: 2, status: "completed", conclusion: "success", html_url: "https://github.test/run/2" }] });
+      throw new Error(`unexpected page ${page}`);
+    }
+    if (text.endsWith("/1/artifacts")) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: "https://download.test/mismatch.zip" }] });
+    if (text.endsWith("/2/artifacts")) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: "https://download.test/match.zip" }] });
+    if (text.endsWith("mismatch.zip")) return new Response(mismatchZip);
+    if (text.endsWith("match.zip")) return new Response(matchZip);
+    throw new Error(`unexpected URL ${text}`);
+  };
+  try {
+    const exact = await fetchShoplingPriceModifyActionsResult("price-modify-page-two");
+    assert.equal(exact.status, "success");
+    assert.equal(exact.runId, 2);
+    assert.equal(calls.filter((url) => url.includes("/runs?")).length, 2);
+    assert.ok(calls.some((url) => /[?&]page=1(?:&|$)/.test(url)));
+    assert.ok(calls.some((url) => /[?&]page=2(?:&|$)/.test(url)));
+
+    calls.length = 0;
+    const latest = await fetchShoplingPriceModifyActionsResult();
+    assert.equal(latest.status, "success");
+    assert.equal(calls.filter((url) => url.includes("/runs?")).length, 1);
+    assert.equal(calls.some((url) => /[?&]page=2(?:&|$)/.test(url)), false);
+  } finally { globalThis.fetch = oldFetch; }
 }));
 
 test("extracts result_summary.json from root, exact, and nested paths", () => {

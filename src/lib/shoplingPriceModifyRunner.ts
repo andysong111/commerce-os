@@ -8,6 +8,7 @@ export const SHOPLING_PRICE_MODIFY_MAX_TARGET_COUNT = 1200;
 export const SHOPLING_PRICE_MODIFY_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,120}$/;
 const GOODS_KEY_PATTERN = /^\d+$/;
 const ARTIFACT_NAME = "shopling-price-modify-result-summary";
+const EXACT_RESULT_MAX_PAGES = 5;
 
 export const SHOPLING_PRICE_MODIFY_ALLOWED_MALLS = [
   ["SMALL_00001", "옥션"], ["SMALL_00002", "지마켓"], ["SMALL_00003", "11번가"], ["SMALL_00004", "스마트스토어"],
@@ -129,9 +130,9 @@ export function isValidShoplingPriceModifyRequestId(requestId: string) { return 
 function headers(token: string) { return { Accept: "application/vnd.github+json", Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28" }; }
 async function readJson(response: Response) { const text = await response.text(); if (!response.ok) throw new Error(`GitHub API 요청에 실패했습니다. status=${response.status}${text ? ` body=${text.slice(0, 300)}` : ""}`); return text ? JSON.parse(text) : {}; }
 
-export function buildShoplingPriceModifyActionsRunsUrl(perPage = 10) {
+export function buildShoplingPriceModifyActionsRunsUrl(perPage = 10, page = 1) {
   const config = getConfig(); const [owner, repoName] = config.repo.split("/");
-  const params = new URLSearchParams({ branch: config.ref, event: "workflow_dispatch", per_page: String(perPage) });
+  const params = new URLSearchParams({ branch: config.ref, event: "workflow_dispatch", per_page: String(perPage), page: String(page) });
   return { url: `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/${encodeURIComponent(config.workflow)}/runs?${params.toString()}`, token: config.token };
 }
 
@@ -185,21 +186,28 @@ export function extractShoplingPriceModifyResultSummary(zipBytes: Uint8Array) { 
 export async function fetchShoplingPriceModifyActionsResult(requestId?: string): Promise<ShoplingPriceModifyActionsResult> {
   if (requestId && !isValidShoplingPriceModifyRequestId(requestId)) return { status: "error", message: "요청 추적 ID 형식이 올바르지 않습니다.", requestId };
   if (process.env.SHOPLING_PRICE_MODIFY_ENABLED !== "1") return { status: "error", message: "SHOPLING_PRICE_MODIFY_ENABLED=1 인 경우에만 최근 실행 결과를 가져올 수 있습니다.", requestId };
-  let runsRequest; try { runsRequest = buildShoplingPriceModifyActionsRunsUrl(requestId ? 20 : 10); } catch (error) { return { status: "error", message: error instanceof Error ? error.message : "GitHub Actions 설정이 올바르지 않습니다.", requestId }; }
+  const perPage = requestId ? 100 : 10;
+  const maxPages = requestId ? EXACT_RESULT_MAX_PAGES : 1;
+  let runsRequest; try { runsRequest = buildShoplingPriceModifyActionsRunsUrl(perPage, 1); } catch (error) { return { status: "error", message: error instanceof Error ? error.message : "GitHub Actions 설정이 올바르지 않습니다.", requestId }; }
   try {
-    const runsJson = await readJson(await fetch(runsRequest.url, { headers: headers(runsRequest.token) }));
-    const completedRuns = (Array.isArray(runsJson.workflow_runs) ? runsJson.workflow_runs : []).filter((run: GithubWorkflowRun) => run?.status === "completed");
-    for (const run of completedRuns) {
-      const runId = Number(run.id); if (!Number.isFinite(runId)) continue;
-      const artifactsJson = await readJson(await fetch(`https://api.github.com/repos/${process.env.SHOPLING_PRICE_MODIFY_REPO?.trim()}/actions/runs/${runId}/artifacts`, { headers: headers(runsRequest.token) }));
-      const artifact = (Array.isArray(artifactsJson.artifacts) ? artifactsJson.artifacts : []).find((item: GithubArtifact) => item?.name === ARTIFACT_NAME);
-      if (!artifact?.archive_download_url) continue;
-      const zipResponse = await fetch(artifact.archive_download_url, { headers: headers(runsRequest.token) });
-      if (!zipResponse.ok) continue;
-      const summary = extractShoplingPriceModifyResultSummary(new Uint8Array(await zipResponse.arrayBuffer()));
-      const summaryRequestId = typeof summary.request_id === "string" ? summary.request_id : undefined;
-      if (requestId && summaryRequestId !== requestId) continue;
-      return { status: "success", requestId: summaryRequestId ?? requestId, runId, runUrl: run.html_url, runConclusion: typeof run.conclusion === "string" ? run.conclusion : null, runStatus: "completed", artifactName: artifact.name, summary };
+    for (let page = 1; page <= maxPages; page += 1) {
+      const pageRequest = page === 1 ? runsRequest : buildShoplingPriceModifyActionsRunsUrl(perPage, page);
+      const runsJson = await readJson(await fetch(pageRequest.url, { headers: headers(pageRequest.token) }));
+      const workflowRuns = Array.isArray(runsJson.workflow_runs) ? runsJson.workflow_runs : [];
+      const completedRuns = workflowRuns.filter((run: GithubWorkflowRun) => run?.status === "completed");
+      for (const run of completedRuns) {
+        const runId = Number(run.id); if (!Number.isFinite(runId)) continue;
+        const artifactsJson = await readJson(await fetch(`https://api.github.com/repos/${process.env.SHOPLING_PRICE_MODIFY_REPO?.trim()}/actions/runs/${runId}/artifacts`, { headers: headers(pageRequest.token) }));
+        const artifact = (Array.isArray(artifactsJson.artifacts) ? artifactsJson.artifacts : []).find((item: GithubArtifact) => item?.name === ARTIFACT_NAME);
+        if (!artifact?.archive_download_url) continue;
+        const zipResponse = await fetch(artifact.archive_download_url, { headers: headers(pageRequest.token) });
+        if (!zipResponse.ok) continue;
+        const summary = extractShoplingPriceModifyResultSummary(new Uint8Array(await zipResponse.arrayBuffer()));
+        const summaryRequestId = typeof summary.request_id === "string" ? summary.request_id : undefined;
+        if (requestId && summaryRequestId !== requestId) continue;
+        return { status: "success", requestId: summaryRequestId ?? requestId, runId, runUrl: run.html_url, runConclusion: typeof run.conclusion === "string" ? run.conclusion : null, runStatus: "completed", artifactName: artifact.name, summary };
+      }
+      if (workflowRuns.length === 0 || workflowRuns.length < perPage) break;
     }
     return { status: "pending", message: "해당 요청 추적 ID의 완료 결과가 아직 없습니다. GitHub Actions 실행이 끝난 뒤 다시 확인하세요.", requestId };
   } catch (error) { return { status: "error", message: error instanceof Error ? error.message : "최근 실행 결과를 가져오는 중 오류가 발생했습니다.", requestId }; }
