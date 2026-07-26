@@ -48,7 +48,7 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
   private async execute(): Promise<AdminResult> {
     const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
       method: "GET",
-      headers: adminHeaders(this.secretKey),
+      headers: createSupabaseAdminHeaders(this.secretKey),
       cache: "no-store",
     });
     return readAdminResponse(response);
@@ -56,8 +56,8 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
 }
 
 export async function createSupabaseAdminClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
-  const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(/\/$/, "");
+  const supabaseSecretKey = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
 
   if (!supabaseUrl || !supabaseSecretKey) return null;
 
@@ -65,7 +65,7 @@ export async function createSupabaseAdminClient() {
     rpc: async (name: string, parameters: Record<string, unknown>): Promise<AdminResult> => {
       const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
         method: "POST",
-        headers: adminHeaders(supabaseSecretKey),
+        headers: createSupabaseAdminHeaders(supabaseSecretKey),
         body: JSON.stringify(parameters),
         cache: "no-store",
       });
@@ -75,13 +75,21 @@ export async function createSupabaseAdminClient() {
   };
 }
 
-function adminHeaders(secretKey: string) {
-  return {
+export function createSupabaseAdminHeaders(secretKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
     apikey: secretKey,
-    Authorization: `Bearer ${secretKey}`,
     Accept: "application/json",
     "Content-Type": "application/json",
   };
+
+  // New sb_secret_ keys are opaque API keys, not JWTs. Sending them as
+  // Authorization: Bearer makes PostgREST reject the request as Invalid JWT.
+  // Legacy service_role keys are JWTs and still require the bearer header.
+  if (!secretKey.startsWith("sb_secret_")) {
+    headers.Authorization = `Bearer ${secretKey}`;
+  }
+
+  return headers;
 }
 
 async function readAdminResponse(response: Response): Promise<AdminResult> {
