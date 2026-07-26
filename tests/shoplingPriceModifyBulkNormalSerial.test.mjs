@@ -35,6 +35,13 @@ test("normal APIs separate approval, one dispatch and exact-result completion", 
   assert.match(advance, /normal\.advance\.failure_transition/);
   assert.match(result, /fetchShoplingPriceModifyActionsResult\(requestId\)[\s\S]*finish_shopling_price_bulk_normal_chunk/);
   assert.match(result, /NORMAL_FINISH_EMPTY/);
+  assert.match(result, /\["dispatching","running","dispatch_uncertain"\]/);
+  assert.match(result, /started_at,updated_at/);
+  assert.match(result, /decideNormalDispatchingReconciliation[\s\S]*reconciliation==="wait"[\s\S]*status:"pending"/);
+  assert.match(result, /block_shopling_price_bulk_normal_uncertain/);
+  assert.match(result, /NORMAL_DISPATCHING_RECONCILE_FAILED/);
+  assert.match(result, /normal\.result\.dispatching_reconcile/);
+  assert.doesNotMatch(result, /dispatchShoplingPriceBulkNormal/);
   assert.match(helper, /goodsKeys.length < 1 \|\| goodsKeys.length > 50/);
   assert.match(helper, /dispatch\.body\.inputs\.request_id = requestId/);
 });
@@ -59,4 +66,10 @@ test("UI requires explicit approval and uses a timeout-only resumable serial loo
   assert.match(ui, /실패 또는 불확실 상태에서 자동 중단/);
   assert.match(ui, /item_status_counts\.succeeded \* 100/);
   assert.match(ui, /카나리만 포함된 작업이 완료되었습니다/);
+  assert.match(ui, /activeNormal[\s\S]*dispatch_uncertain[\s\S]*normal\/\$\{endpoint\}/);
+  assert.match(ui, /recoveringUncertain \? "result"/);
+  assert.match(ui, /일반 청크 전송 여부 확인 중/);
+  assert.match(ui, /새 실행을 만들지 않고 기존 request_id의 결과만 확인합니다/);
+  assert.match(ui, /canary\?\.status === "dispatch_uncertain"/);
+  assert.doesNotMatch(ui, /current_active_chunk\?\.chunk_type === "canary"/);
 });
