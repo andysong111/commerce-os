@@ -37,7 +37,7 @@ test("normal APIs separate approval, one dispatch and exact-result completion", 
   assert.match(result, /NORMAL_FINISH_EMPTY/);
   assert.match(result, /\["dispatching","running","dispatch_uncertain"\]/);
   assert.match(result, /started_at,updated_at/);
-  assert.match(result, /Date\.now\(\)-startedAt<120_000[\s\S]*status:"pending"/);
+  assert.match(result, /decideNormalDispatchingReconciliation[\s\S]*reconciliation==="wait"[\s\S]*status:"pending"/);
   assert.match(result, /block_shopling_price_bulk_normal_uncertain/);
   assert.match(result, /NORMAL_DISPATCHING_RECONCILE_FAILED/);
   assert.match(result, /normal\.result\.dispatching_reconcile/);
@@ -70,5 +70,6 @@ test("UI requires explicit approval and uses a timeout-only resumable serial loo
   assert.match(ui, /recoveringUncertain \? "result"/);
   assert.match(ui, /일반 청크 전송 여부 확인 중/);
   assert.match(ui, /새 실행을 만들지 않고 기존 request_id의 결과만 확인합니다/);
-  assert.match(ui, /current_active_chunk\?\.chunk_type === "canary"/);
+  assert.match(ui, /canary\?\.status === "dispatch_uncertain"/);
+  assert.doesNotMatch(ui, /current_active_chunk\?\.chunk_type === "canary"/);
 });

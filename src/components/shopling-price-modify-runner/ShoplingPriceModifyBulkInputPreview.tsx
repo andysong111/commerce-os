@@ -388,7 +388,7 @@ function SavedJobs({
         <button type="button" disabled={acting} onClick={() => void runCanary()} className="mt-3 rounded-lg bg-red-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "처리 중..." : `카나리 ${detail.job.canary_size ?? Math.min(detail.job.valid_count, 10)}개 실제 실행`}</button>
       </div>}
 
-      {(new Set(["canary_dispatching", "canary_running"]).has(detail.job.status) || (detail.job.status === "dispatch_uncertain" && detail.current_active_chunk?.chunk_type === "canary")) && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+      {(new Set(["canary_dispatching", "canary_running"]).has(detail.job.status) || (detail.job.status === "dispatch_uncertain" && canary?.status === "dispatch_uncertain")) && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
         <p className="font-bold text-amber-900">{detail.job.status === "dispatch_uncertain" ? "중복 실행 금지: 전송 여부가 불확실합니다." : "카나리 결과를 수동으로 확인하세요."}</p>
         <p className="mt-1 text-sm text-amber-800">결과 확인은 같은 request_id만 조회하며 새 실행을 만들지 않습니다.</p>
         <button type="button" disabled={acting || detail.job.status === "canary_dispatching"} onClick={() => void checkCanary()} className="mt-3 rounded-lg bg-amber-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "확인 중..." : "카나리 결과 확인"}</button>

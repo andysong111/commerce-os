@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { analyzeShoplingPriceBulkNormalResult } from "@/lib/shoplingPriceModifyBulkNormal";
 import { fetchShoplingPriceModifyActionsResult } from "@/lib/shoplingPriceModifyRunner";
+import { decideNormalDispatchingReconciliation } from "@/lib/shoplingPriceModifyBulkReconciliation";
 export const runtime="nodejs";
 export async function POST(_request:Request,{params}:{params:Promise<{jobId:string}>}) {
  const auth=await normalSession();if(auth.response)return auth.response;const {jobId}=await params;
@@ -16,10 +17,10 @@ export async function POST(_request:Request,{params}:{params:Promise<{jobId:stri
  if(!requestId||keys.length===0)return normalError("일반 청크 요청 정보가 불완전합니다.",409,"CHUNK_CONTEXT_INVALID","normal.result.chunk_query");
  const actions=await fetchShoplingPriceModifyActionsResult(requestId);
  if(actions.status==="pending") {
-  if(chunk.status==="dispatching") {
-   const startedAt=typeof chunk.started_at==="string"?Date.parse(chunk.started_at):Number.NaN;
-   if(Number.isFinite(startedAt)&&Date.now()-startedAt<120_000)return NextResponse.json({status:"pending",request_id:requestId,message:"전송 예약 직후입니다. 기존 request_id 결과만 계속 확인합니다."});
-   const reason=Number.isFinite(startedAt)?"dispatching 상태가 120초 이상 지속되어 재전송을 차단합니다.":"dispatching 시작 시각이 없어 안전하게 재전송을 차단합니다.";
+  const reconciliation=decideNormalDispatchingReconciliation({chunkStatus:chunk.status,startedAt:chunk.started_at,now:Date.now()});
+  if(reconciliation==="wait")return NextResponse.json({status:"pending",request_id:requestId,message:"전송 예약 직후입니다. 기존 request_id 결과만 계속 확인합니다."});
+  if(reconciliation==="block_uncertain") {
+   const reason=typeof chunk.started_at==="string"&&Number.isFinite(Date.parse(chunk.started_at))?"dispatching 상태가 120초 이상 지속되어 재전송을 차단합니다.":"dispatching 시작 시각이 없어 안전하게 재전송을 차단합니다.";
    const blocked=await auth.admin!.rpc("block_shopling_price_bulk_normal_uncertain",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_error:reason});
    if(blocked.error)return normalError("일반 청크 전송 상태를 안전하게 차단하지 못했습니다.",500,"NORMAL_DISPATCHING_RECONCILE_FAILED","normal.result.dispatching_reconcile",blocked.error);
    return NextResponse.json({status:"pending",request_id:requestId,message:"전송 여부가 불확실하여 재전송을 차단했습니다. 기존 request_id 결과만 계속 확인합니다."});
