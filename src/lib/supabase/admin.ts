@@ -1,8 +1,11 @@
-type AdminResult = { data: unknown; error: { message: string } | null };
+type AdminResult = { data: unknown; error: { message: string } | null; count: number | null };
 type OrderOptions = { ascending?: boolean };
+type SelectOptions = { count?: "exact"; head?: boolean };
 
 class SupabaseRestQuery implements PromiseLike<AdminResult> {
   private readonly params = new URLSearchParams();
+  private count: "exact" | undefined;
+  private head = false;
 
   constructor(
     private readonly baseUrl: string,
@@ -10,13 +13,25 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     private readonly table: string,
   ) {}
 
-  select(columns = "*") {
+  select(columns = "*", options: SelectOptions = {}) {
     this.params.set("select", columns);
+    this.count = options.count;
+    this.head = options.head === true;
     return this;
   }
 
   eq(column: string, value: unknown) {
     this.params.append(column, `eq.${String(value)}`);
+    return this;
+  }
+
+  in(column: string, values: readonly unknown[]) {
+    if (values.length === 0) throw new TypeError("Supabase REST in filter requires at least one value.");
+    const encodedValues = values.map((value) => {
+      const text = String(value);
+      return /^[A-Za-z0-9_]+$/.test(text) ? text : `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    });
+    this.params.append(column, `in.(${encodedValues.join(",")})`);
     return this;
   }
 
@@ -35,7 +50,7 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     const result = await this.execute();
     if (result.error) return result;
     const rows = Array.isArray(result.data) ? result.data : [];
-    return { data: rows[0] ?? null, error: null };
+    return { data: rows[0] ?? null, error: null, count: result.count };
   }
 
   then<TResult1 = AdminResult, TResult2 = never>(
@@ -46,9 +61,11 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
   }
 
   private async execute(): Promise<AdminResult> {
+    const headers = createSupabaseAdminHeaders(this.secretKey);
+    if (this.count === "exact") headers.Prefer = "count=exact";
     const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
-      method: "GET",
-      headers: createSupabaseAdminHeaders(this.secretKey),
+      method: this.head ? "HEAD" : "GET",
+      headers,
       cache: "no-store",
     });
     return readAdminResponse(response);
@@ -106,7 +123,8 @@ async function readAdminResponse(response: Response): Promise<AdminResult> {
     const message = body && typeof body === "object" && "message" in body && typeof (body as { message?: unknown }).message === "string"
       ? (body as { message: string }).message
       : `Supabase REST 요청에 실패했습니다. status=${response.status}`;
-    return { data: null, error: { message } };
+    return { data: null, error: { message }, count: null };
   }
-  return { data: body, error: null };
+  const total = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
+  return { data: body, error: null, count: total === undefined ? null : Number(total) };
 }

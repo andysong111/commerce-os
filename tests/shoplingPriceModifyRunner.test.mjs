@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { zipSync, strToU8 } from "fflate";
-import {
+import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
+const {
   buildShoplingPriceModifyActionsRunsUrl,
   buildShoplingPriceModifyDispatchRequest,
   dispatchShoplingPriceModifyActions,
@@ -9,9 +10,10 @@ import {
   fetchShoplingPriceModifyActionsResult,
   generateShoplingPriceModifyRequestId,
   parseShoplingPriceModifyGoodsKeys,
+  parseShoplingPriceModifyRequestTimestamp,
   validateGoodsKeyGroupJson,
   validateShoplingPriceModifyPolicyOverrides,
-} from "../src/lib/shoplingPriceModifyRunner.ts";
+} = await importTranspiledTypeScript(new URL("../src/lib/shoplingPriceModifyRunner.ts", import.meta.url));
 
 const ENV_KEYS = ["SHOPLING_PRICE_MODIFY_ENABLED", "SHOPLING_PRICE_MODIFY_REPO", "SHOPLING_PRICE_MODIFY_WORKFLOW", "SHOPLING_PRICE_MODIFY_REF", "SHOPLING_PRICE_MODIFY_ACTIONS_TOKEN", "GITHUB_ACTIONS_TOKEN"];
 function withEnv(env, fn) {
@@ -72,6 +74,9 @@ test("request_id is generated with expected prefix and pattern", () => {
   const requestId = generateShoplingPriceModifyRequestId(new Date("2026-06-23T10:30:00Z"));
   assert.match(requestId, /^price-modify-/);
   assert.match(requestId, /^[A-Za-z0-9._:-]{1,120}$/);
+  assert.equal(parseShoplingPriceModifyRequestTimestamp("price-modify-20260726T161200Z-abcdef")?.toISOString(), "2026-07-26T16:12:00.000Z");
+  assert.equal(parseShoplingPriceModifyRequestTimestamp("price-modify-page-two"), null);
+  assert.equal(parseShoplingPriceModifyRequestTimestamp("price-modify-20260230T161200Z-abcdef"), null);
 });
 
 test("dispatch payload includes goods_keys, request_id, batch 80, policy_overrides_json and does not expose token", async () => withEnv(baseEnv, async () => {
@@ -109,7 +114,7 @@ test("dispatch payload includes goods_keys, request_id, batch 80, policy_overrid
     assert.equal(inputs.base_consumer_price, "15000");
     assert.equal(inputs.base_sell_price, "12000");
     assert.equal(inputs.base_purchase_price, "7000");
-    return new Response("", { status: 204 });
+    return new Response(null, { status: 204 });
   };
   try {
     const result = await dispatchShoplingPriceModifyActions("121031", undefined, undefined, { base_consumer_price: "15000", base_sell_price: "12000", base_purchase_price: "7000" });
@@ -119,12 +124,84 @@ test("dispatch payload includes goods_keys, request_id, batch 80, policy_overrid
 }));
 
 test("result fetch builds workflow runs URL and validates env/request_id", async () => withEnv(baseEnv, async () => {
-  assert.match(buildShoplingPriceModifyActionsRunsUrl(20).url, /actions\/workflows\/shopling-price-modify\.yml\/runs\?branch=main&event=workflow_dispatch&per_page=20/);
+  assert.match(buildShoplingPriceModifyActionsRunsUrl(20, 2).url, /actions\/workflows\/shopling-price-modify\.yml\/runs\?branch=main&event=workflow_dispatch&per_page=20&page=2/);
+  const filtered = new URL(buildShoplingPriceModifyActionsRunsUrl({ perPage: 100, page: 2, status: "completed", created: "2026-07-26T16:07:00.000Z..2026-07-26T16:27:00.000Z" }).url);
+  assert.equal(filtered.searchParams.get("branch"), "main");
+  assert.equal(filtered.searchParams.get("event"), "workflow_dispatch");
+  assert.equal(filtered.searchParams.get("per_page"), "100");
+  assert.equal(filtered.searchParams.get("page"), "2");
+  assert.equal(filtered.searchParams.get("status"), "completed");
+  assert.equal(filtered.searchParams.get("created"), "2026-07-26T16:07:00.000Z..2026-07-26T16:27:00.000Z");
+  assert.equal(filtered.href.includes("secret-token"), false);
   const invalid = await fetchShoplingPriceModifyActionsResult("bad/slash");
   assert.equal(invalid.status, "error");
   delete process.env.SHOPLING_PRICE_MODIFY_REPO;
   const missing = await fetchShoplingPriceModifyActionsResult();
   assert.equal(missing.status, "error");
+}));
+
+test("exact result fetch searches a bounded second page while latest fetch stays on page one", async () => withEnv(baseEnv, async () => {
+  const mismatchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: "price-modify-mismatch" })) });
+  const exactRequestId = "price-modify-20260726T161200Z-abcdef";
+  const matchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: exactRequestId, ok_count: 1, fail_count: 0 })) });
+  const calls = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const text = String(url); calls.push(text);
+    if (text.includes("/runs?")) {
+      const page = new URL(text).searchParams.get("page");
+      if (page === "1") return Response.json({ workflow_runs: [{ id: 1, status: "completed", conclusion: "success" }, ...Array.from({ length: 99 }, (_, index) => ({ id: 100 + index, status: "queued" }))] });
+      if (page === "2") return Response.json({ workflow_runs: [{ id: 2, status: "completed", conclusion: "success", html_url: "https://github.test/run/2" }] });
+      throw new Error(`unexpected page ${page}`);
+    }
+    if (text.endsWith("/1/artifacts")) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: "https://download.test/mismatch.zip" }] });
+    if (text.endsWith("/2/artifacts")) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: "https://download.test/match.zip" }] });
+    if (text.endsWith("mismatch.zip")) return new Response(mismatchZip);
+    if (text.endsWith("match.zip")) return new Response(matchZip);
+    throw new Error(`unexpected URL ${text}`);
+  };
+  try {
+    const exact = await fetchShoplingPriceModifyActionsResult(exactRequestId);
+    assert.equal(exact.status, "success");
+    assert.equal(exact.runId, 2);
+    assert.equal(calls.filter((url) => url.includes("/runs?")).length, 2);
+    assert.ok(calls.some((url) => /[?&]page=1(?:&|$)/.test(url)));
+    assert.ok(calls.some((url) => /[?&]page=2(?:&|$)/.test(url)));
+    const exactUrl = new URL(calls.find((url) => url.includes("/runs?")));
+    assert.equal(exactUrl.searchParams.get("status"), "completed");
+    assert.equal(exactUrl.searchParams.get("created"), "2026-07-26T16:07:00.000Z..2026-07-26T16:27:00.000Z");
+
+    calls.length = 0;
+    const latest = await fetchShoplingPriceModifyActionsResult();
+    assert.equal(latest.status, "success");
+    assert.equal(calls.filter((url) => url.includes("/runs?")).length, 1);
+    assert.equal(calls.some((url) => /[?&]page=2(?:&|$)/.test(url)), false);
+  } finally { globalThis.fetch = oldFetch; }
+}));
+
+test("exact result fallback and artifact candidates remain bounded", async () => withEnv(baseEnv, async () => {
+  const calls = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const text = String(url); calls.push(text);
+    if (text.includes("/runs?")) return Response.json({ workflow_runs: Array.from({ length: 21 }, (_, index) => ({ id: index + 1, status: "completed" })) });
+    throw new Error(`artifact lookup must not occur after candidate limit: ${text}`);
+  };
+  try {
+    const bounded = await fetchShoplingPriceModifyActionsResult("price-modify-20260726T161200Z-abcdef");
+    assert.equal(bounded.status, "pending");
+    assert.equal(calls.length, 1);
+
+    calls.length = 0;
+    globalThis.fetch = async (url) => { calls.push(String(url)); return Response.json({ workflow_runs: [] }); };
+    assert.equal((await fetchShoplingPriceModifyActionsResult("price-modify-legacy-id")).status, "pending");
+    const fallbackUrl = new URL(calls[0]);
+    assert.equal(fallbackUrl.searchParams.get("status"), "completed");
+    assert.equal(fallbackUrl.searchParams.get("per_page"), "50");
+    assert.equal(fallbackUrl.searchParams.get("page"), "1");
+    assert.equal(fallbackUrl.searchParams.has("created"), false);
+    assert.equal(calls.length, 1);
+  } finally { globalThis.fetch = oldFetch; }
 }));
 
 test("extracts result_summary.json from root, exact, and nested paths", () => {

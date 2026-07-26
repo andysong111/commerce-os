@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { ShoplingPriceModifyBulkErrorPanel } from "@/components/shopling-price-modify-runner/ShoplingPriceModifyBulkErrorPanel";
 import {
   parseShoplingPriceBulkFile,
@@ -42,7 +42,8 @@ type Chunk = {
   completed_at?: string | null;
   updated_at?: string;
 };
-type Detail = { job: Job; chunks: Chunk[]; first_goods_keys: string[]; last_goods_keys: string[] };
+type StatusCounts = { pending: number; succeeded: number; failed: number };
+type Detail = { job: Job; chunks: Chunk[]; first_goods_keys: string[]; last_goods_keys: string[]; item_status_counts: StatusCounts; chunk_status_counts: StatusCounts & { dispatching: number; running: number; dispatch_uncertain: number }; normal_chunk_count: number; current_active_chunk: Chunk | null };
 
 const STORAGE_KEY = "shoplingPriceModifyBulkRecentJobId";
 
@@ -53,6 +54,9 @@ const STATUS_LABELS: Record<string, string> = {
   canary_succeeded: "카나리 성공 · 일반 실행 승인 대기",
   canary_failed: "카나리 실패 · 점검 필요",
   dispatch_uncertain: "전송 여부 불확실 · 중복 실행 금지",
+  normal_running: "일반 청크 직렬 실행 중",
+  normal_succeeded: "전체 가격설정 완료",
+  normal_failed: "일반 청크 실패 · 자동 실행 중단",
   cancelled: "취소됨",
 };
 
@@ -79,6 +83,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
   const [acting, setActing] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const normalBusyRef = useRef(false);
 
   const clearError = useCallback(() => {
     setError("");
@@ -255,10 +260,44 @@ export function ShoplingPriceModifyBulkInputPreview() {
     }
   };
 
+  const approveNormal = async () => {
+    if (!detail || acting || normalBusyRef.current) return;
+    const count = Math.max(0, detail.job.valid_count - (detail.job.canary_size ?? 0));
+    if (!window.confirm(`카나리 가격이 정상인지 샵플링에서 확인했습니까?\n\n일반 상품 ${count}개를 최대 50개씩 한 청크만 순차 실행합니다.\n각 청크의 성공 결과가 확인된 후에만 다음 청크가 실행됩니다.\n실패 또는 전송 여부 불확실 상태에서는 즉시 중단됩니다.\n\n이 작업은 실제 상품 가격을 변경합니다.\n계속하시겠습니까?`)) return;
+    normalBusyRef.current = true; setActing(true); clearError();
+    try {
+      const body = await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/normal/approve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "CONFIRM_NORMAL_BULK_EXECUTION" }) }, "bulk_normal.approve");
+      setNotice(String(body.message ?? "일반 청크 실행이 승인되었습니다.")); await refresh(detail.job.id);
+    } catch (caught) { handleError(caught, "일반 청크 승인에 실패했습니다.", "bulk_normal.approve"); }
+    finally { normalBusyRef.current = false; setActing(false); }
+  };
+
+  const activeNormal = detail?.current_active_chunk?.chunk_type === "normal" ? detail.current_active_chunk : null;
+  useEffect(() => {
+    if (!detail) return;
+    const recoveringUncertain = detail.job.status === "dispatch_uncertain" && activeNormal?.status === "dispatch_uncertain";
+    if (detail.job.status !== "normal_running" && !recoveringUncertain) return;
+    const jobId = detail.job.id;
+    const active = activeNormal;
+    const delay = active ? 12000 : 1200;
+    const timer = window.setTimeout(async () => {
+      if (normalBusyRef.current) return;
+      normalBusyRef.current = true;
+      try {
+        const endpoint = recoveringUncertain ? "result" : active ? "result" : "advance";
+        const body = await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/normal/${endpoint}`, { method: "POST" }, `bulk_normal.${endpoint}`);
+        if (body.status !== "pending") setNotice(String(body.message ?? "일반 청크 상태가 갱신되었습니다."));
+        await refresh(jobId);
+      } catch (caught) { handleError(caught, "일반 청크 직렬 실행이 중단되었습니다.", "bulk_normal.serial"); await refresh(jobId); }
+      finally { normalBusyRef.current = false; }
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [activeNormal, detail, handleError, refresh]);
+
   return <div className="space-y-8">
     <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2>
-      <p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 준비 작업 저장만으로는 가격을 수정하지 않습니다.</p>
+      <p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 준비 작업 저장만으로는 가격을 수정하지 않습니다. 이 단계에서는 실제 가격을 수정하지 않습니다.</p>
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="rounded-xl border p-4">
           <h3 className="font-bold">엑셀·CSV 업로드</h3>
@@ -281,7 +320,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
         ? <Preview selection={selection} saving={saving} save={save} />
         : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">파일을 업로드하거나 goods_key를 붙여넣으면 실행 전 미리보기가 표시됩니다.</p>}
     </section>
-    <SavedJobs jobs={jobs} detail={detail} acting={acting} select={loadDetail} runCanary={runCanary} checkCanary={checkCanary} />
+    <SavedJobs jobs={jobs} detail={detail} acting={acting} select={loadDetail} runCanary={runCanary} checkCanary={checkCanary} approveNormal={approveNormal} />
   </div>;
 }
 
@@ -315,6 +354,7 @@ function SavedJobs({
   select,
   runCanary,
   checkCanary,
+  approveNormal,
 }: {
   jobs: Job[];
   detail: Detail | null;
@@ -322,8 +362,10 @@ function SavedJobs({
   select: (id: string) => Promise<void>;
   runCanary: () => Promise<void>;
   checkCanary: () => Promise<void>;
+  approveNormal: () => Promise<void>;
 }) {
   const canary = detail?.chunks.find((chunk) => chunk.chunk_index === 0 && chunk.chunk_type === "canary");
+  const normal = detail?.chunks.filter((chunk) => chunk.chunk_type === "normal") ?? [];
   return <section className="rounded-2xl border bg-white p-6 shadow-sm">
     <h2 className="text-xl font-bold">저장된 Bulk 작업</h2>
     {detail && <div className="mt-5 rounded-xl border border-blue-200 p-5">
@@ -333,6 +375,9 @@ function SavedJobs({
         ["원본 항목 수", detail.job.original_count], ["유효 goods_key 수", detail.job.valid_count], ["중복 제외 수", detail.job.duplicate_count],
         ["invalid 제외 수", detail.job.invalid_count], ["카나리 상품 수", detail.job.canary_size ?? 0], ["normal chunk 수", detail.job.total_chunk_count - 1],
         ["총 chunk 수", detail.job.total_chunk_count], ["생성시간", new Date(detail.job.created_at).toLocaleString("ko-KR")], ["최근 갱신시간", new Date(detail.job.updated_at).toLocaleString("ko-KR")],
+        ["성공 상품 수", detail.item_status_counts.succeeded], ["실패 상품 수", detail.item_status_counts.failed], ["대기 상품 수", detail.item_status_counts.pending],
+        ["normal 성공 청크", normal.filter((chunk) => chunk.status === "succeeded").length], ["normal 실패 청크", normal.filter((chunk) => chunk.status === "failed").length], ["normal 대기 청크", normal.filter((chunk) => chunk.status === "pending").length],
+        ["진행률", `${detail.job.valid_count ? Math.floor(detail.item_status_counts.succeeded * 100 / detail.job.valid_count) : 0}%`],
       ].map(([key, value]) => <div className="rounded bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="break-all font-semibold">{value}</dd></div>)}</dl>
 
       {detail.job.last_error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">마지막 오류: {detail.job.last_error}</p>}
@@ -343,13 +388,26 @@ function SavedJobs({
         <button type="button" disabled={acting} onClick={() => void runCanary()} className="mt-3 rounded-lg bg-red-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "처리 중..." : `카나리 ${detail.job.canary_size ?? Math.min(detail.job.valid_count, 10)}개 실제 실행`}</button>
       </div>}
 
-      {new Set(["canary_dispatching", "canary_running", "dispatch_uncertain"]).has(detail.job.status) && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+      {(new Set(["canary_dispatching", "canary_running"]).has(detail.job.status) || (detail.job.status === "dispatch_uncertain" && canary?.status === "dispatch_uncertain")) && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
         <p className="font-bold text-amber-900">{detail.job.status === "dispatch_uncertain" ? "중복 실행 금지: 전송 여부가 불확실합니다." : "카나리 결과를 수동으로 확인하세요."}</p>
         <p className="mt-1 text-sm text-amber-800">결과 확인은 같은 request_id만 조회하며 새 실행을 만들지 않습니다.</p>
         <button type="button" disabled={acting || detail.job.status === "canary_dispatching"} onClick={() => void checkCanary()} className="mt-3 rounded-lg bg-amber-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "확인 중..." : "카나리 결과 확인"}</button>
       </div>}
 
-      {detail.job.status === "canary_succeeded" && <p className="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4 font-bold text-emerald-900">카나리가 성공했습니다. 일반 청크는 아직 실행되지 않았으며 다음 단계의 전체 실행 승인 기능을 기다립니다.</p>}
+      {detail.job.status === "dispatch_uncertain" && detail.current_active_chunk?.chunk_type === "normal" && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <p className="font-bold text-amber-900">일반 청크 전송 여부 확인 중</p>
+        <p className="mt-1 text-sm text-amber-800">새 실행을 만들지 않고 기존 request_id의 결과만 확인합니다.<br />중복 실행을 방지하기 위해 재전송하지 않습니다.</p>
+      </div>}
+
+      {detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0 && <p className="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4 font-bold text-emerald-900">카나리만 포함된 작업이 완료되었습니다.</p>}
+      {detail.job.status === "canary_succeeded" && detail.normal_chunk_count > 0 && <div className="mt-5 rounded-xl border-2 border-red-400 bg-red-50 p-5">
+        <h3 className="text-lg font-bold text-red-950">일반 상품 직렬 실행 승인</h3>
+        <ul className="mt-2 list-disc pl-5 text-sm text-red-900"><li>일반 상품 수: {detail.job.valid_count - (detail.job.canary_size ?? 0)}개</li><li>normal 청크 수: {detail.normal_chunk_count}개</li><li>청크당 최대 50개</li><li>한 번에 실행되는 청크 수: 1개</li><li>성공 확인 후 다음 청크 진행</li><li>실패 또는 불확실 상태에서 자동 중단</li></ul>
+        <button type="button" disabled={acting} onClick={() => void approveNormal()} className="mt-4 rounded-lg bg-red-700 px-5 py-3 font-bold text-white disabled:opacity-50">일반 상품 {detail.job.valid_count - (detail.job.canary_size ?? 0)}개 직렬 실행 승인</button>
+      </div>}
+      {detail.job.status === "normal_running" && <div className="mt-5 rounded-xl border border-blue-400 bg-blue-50 p-4 text-blue-950"><p className="font-bold">Bulk 일반 청크 직렬 실행 중 — 한 번에 한 청크만 실행합니다.</p><p className="mt-1 text-sm">브라우저를 닫아도 시작된 GitHub Actions는 계속됩니다. 다음 청크 진행은 일시정지되며 다시 접속하면 저장된 상태부터 자동 재개됩니다.</p></div>}
+      {detail.job.status === "normal_succeeded" && <p className="mt-5 rounded-xl border-2 border-emerald-500 bg-emerald-50 p-5 text-lg font-bold text-emerald-950">모든 상품의 가격설정 작업이 완료되었습니다.</p>}
+      {detail.job.status === "normal_failed" && <p className="mt-5 rounded-xl border border-red-400 bg-red-50 p-4 font-bold text-red-950">일반 청크가 실패하여 자동 실행을 중단했습니다. 자동 재시도하지 않습니다.</p>}
       {detail.job.status === "canary_failed" && <p className="mt-5 rounded-xl border border-red-300 bg-red-50 p-4 font-bold text-red-900">카나리가 실패했습니다. 자동 재시도와 일반 청크 실행은 차단되어 있습니다.</p>}
 
       {canary && <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm">
@@ -359,6 +417,8 @@ function SavedJobs({
         {canary.actions_url && <a className="mt-2 inline-block text-blue-700 underline" href={canary.actions_url} target="_blank" rel="noreferrer">GitHub Actions 열기</a>}
         {canary.last_error && <p className="mt-2 text-red-700">청크 오류: {canary.last_error}</p>}
       </div>}
+
+      {detail.current_active_chunk && <div className="mt-4 rounded-xl bg-blue-50 p-4 text-sm"><h3 className="font-bold">현재 실행 청크</h3><p>chunk_index: {detail.current_active_chunk.chunk_index} · 상품 수: {detail.current_active_chunk.goods_key_count}</p><p className="break-all">request_id: {detail.current_active_chunk.request_id}</p>{detail.current_active_chunk.actions_url && <a className="text-blue-700 underline" href={detail.current_active_chunk.actions_url} target="_blank" rel="noreferrer">GitHub Actions 열기</a>}</div>}
 
       <div className="grid lg:grid-cols-2"><PreviewList title="goods_key 첫 20개" values={detail.first_goods_keys} /><PreviewList title="goods_key 마지막 5개" values={detail.last_goods_keys} /></div>
     </div>}
