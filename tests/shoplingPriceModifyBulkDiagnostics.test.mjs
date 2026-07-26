@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { normalErrorDetail } from "../src/lib/shoplingPriceModifyBulkApi.ts";
+import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
+
+const { normalErrorDetail } = await importTranspiledTypeScript(
+  new URL("../src/lib/shoplingPriceModifyBulkError.ts", import.meta.url),
+);
 
 
 test("normal diagnostics serialize objects and redact Supabase credentials", () => {

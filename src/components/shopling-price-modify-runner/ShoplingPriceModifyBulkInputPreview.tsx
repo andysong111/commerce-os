@@ -294,7 +294,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
   return <div className="space-y-8">
     <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
       <h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2>
-      <p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 준비 작업 저장만으로는 가격을 수정하지 않습니다.</p>
+      <p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 준비 작업 저장만으로는 가격을 수정하지 않습니다. 이 단계에서는 실제 가격을 수정하지 않습니다.</p>
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
         <div className="rounded-xl border p-4">
           <h3 className="font-bold">엑셀·CSV 업로드</h3>

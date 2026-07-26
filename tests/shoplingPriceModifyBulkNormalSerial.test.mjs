@@ -39,6 +39,15 @@ test("normal APIs separate approval, one dispatch and exact-result completion", 
   assert.match(helper, /dispatch\.body\.inputs\.request_id = requestId/);
 });
 
+test("job detail counts existing item columns and exposes every item status count", async () => {
+  const route = await read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/route.ts");
+  assert.doesNotMatch(route, /select\("id", \{ count: "exact", head: true \}\)/);
+  assert.equal((route.match(/select\("goods_key", \{ count: "exact", head: true \}\)/g) ?? []).length, 3);
+  assert.match(route, /pending: pendingItems\.count \?\? 0/);
+  assert.match(route, /succeeded: succeededItems\.count \?\? 0/);
+  assert.match(route, /failed: failedItems\.count \?\? 0/);
+});
+
 test("UI requires explicit approval and uses a timeout-only resumable serial loop", async () => {
   const ui = await read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx");
   assert.match(ui, /일반 상품 직렬 실행 승인/);
