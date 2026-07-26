@@ -16,7 +16,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   if (!rawAdmin) return NextResponse.json({ error: "Supabase 서버 설정이 필요합니다." }, { status: 503 });
   const admin = rawAdmin as Admin; const { jobId } = await params;
   const jobResult = await admin.from("shopling_price_bulk_jobs").select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,created_at,updated_at").eq("id", jobId).eq("owner_id", auth.user.id).maybeSingle();
-  if (jobResult.error || !jobResult.data) return missing();
+  if (jobResult.error) return NextResponse.json({ error: "Bulk 작업 조회에 실패했습니다." }, { status: 500 });
+  if (!jobResult.data) return missing();
   const [chunks, first, last] = await Promise.all([
     admin.from("shopling_price_bulk_chunks").select("chunk_index,chunk_type,goods_key_count,status").eq("job_id", jobId).order("chunk_index", { ascending: true }),
     admin.from("shopling_price_bulk_items").select("goods_key,ordinal").eq("job_id", jobId).order("ordinal", { ascending: true }).limit(20),
