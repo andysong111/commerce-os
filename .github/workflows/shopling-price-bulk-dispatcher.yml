@@ -1,0 +1,22 @@
+name: Shopling price bulk scheduler
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+concurrency:
+  group: shopling-price-bulk-scheduler
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call scheduler safely
+        env:
+          BASE_URL: ${{ secrets.OPS_CENTER_BASE_URL }}
+          CRON_SECRET: ${{ secrets.SHOPLING_PRICE_BULK_CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$BASE_URL" || { echo 'OPS_CENTER_BASE_URL is empty'; exit 1; }
+          test -n "$CRON_SECRET" || { echo 'SHOPLING_PRICE_BULK_CRON_SECRET is empty'; exit 1; }
+          code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 10 --max-time 60 -X POST -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL/api/cron/shopling-price-bulk")
+          case "$code" in 2*) echo "scheduler accepted ($code)";; *) echo "scheduler failed ($code)"; exit 1;; esac

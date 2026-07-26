@@ -150,7 +150,7 @@ export function validateGoodsKeyGroupJson(input?: unknown) {
   return JSON.stringify(normalized);
 }
 
-export function buildShoplingPriceModifyDispatchRequest(goodsKeyInput: string, policyOverridesInput?: unknown, goodsKeyGroupJsonInput?: unknown, basePriceInput?: { base_consumer_price?: unknown; base_sell_price?: unknown; base_purchase_price?: unknown; base_prices_json?: unknown }) {
+export function buildShoplingPriceModifyDispatchRequest(goodsKeyInput: string, policyOverridesInput?: unknown, goodsKeyGroupJsonInput?: unknown, basePriceInput?: { base_consumer_price?: unknown; base_sell_price?: unknown; base_purchase_price?: unknown; base_prices_json?: unknown }, reservedRequestId?: string) {
   const parsed = parseShoplingPriceModifyGoodsKeys(goodsKeyInput);
   const policyOverrides = validateShoplingPriceModifyPolicyOverrides(policyOverridesInput);
   const policyOverridesJson = policyOverrides.length > 0 ? JSON.stringify(policyOverrides) : "";
@@ -160,7 +160,8 @@ export function buildShoplingPriceModifyDispatchRequest(goodsKeyInput: string, p
   const basePurchasePrice = typeof basePriceInput?.base_purchase_price === "string" || typeof basePriceInput?.base_purchase_price === "number" ? String(basePriceInput.base_purchase_price).trim() : "";
   const basePricesJson = typeof basePriceInput?.base_prices_json === "string" ? basePriceInput.base_prices_json.trim() : "";
   const config = getConfig(); const [owner, repoName] = config.repo.split("/");
-  const requestId = generateShoplingPriceModifyRequestId();
+  const requestId = reservedRequestId ?? generateShoplingPriceModifyRequestId();
+  if (!isValidShoplingPriceModifyRequestId(requestId)) throw new Error("예약 request_id 형식이 올바르지 않습니다.");
   return {
     url: `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/${encodeURIComponent(config.workflow)}/dispatches`,
     githubActionsUrl: `https://github.com/${config.repo}/actions/workflows/${encodeURIComponent(config.workflow)}`,
@@ -169,6 +170,15 @@ export function buildShoplingPriceModifyDispatchRequest(goodsKeyInput: string, p
     body: { ref: config.ref, inputs: { goods_keys: parsed.goodsKeysCsv, request_id: requestId, batch: SHOPLING_PRICE_MODIFY_BATCH, policy_overrides_json: policyOverridesJson, goods_key_group_json: goodsKeyGroupJson, base_consumer_price: baseConsumerPrice, base_sell_price: baseSellPrice, base_purchase_price: basePurchasePrice, base_prices_json: basePricesJson } },
     commandPreview: `GitHub Actions: ${config.workflow} goods_keys=${parsed.goodsKeysCsv} batch=${SHOPLING_PRICE_MODIFY_BATCH} policy_override_count=${policyOverrides.length} goods_key_group_count=${goodsKeyGroupJson ? Object.keys(JSON.parse(goodsKeyGroupJson)).length : 0} base_price_inputs=${[baseConsumerPrice, baseSellPrice, basePurchasePrice].filter(Boolean).length} base_prices_json=${basePricesJson ? "provided" : "empty"} request_id=${requestId}`,
   };
+}
+
+export async function dispatchReservedShoplingPriceModifyActions(goodsKeys: string[], policyOverrides: unknown, requestId: string) {
+  const request = buildShoplingPriceModifyDispatchRequest(goodsKeys.join(","), policyOverrides, undefined, undefined, requestId);
+  try {
+    const response = await fetch(request.url, { method: "POST", headers: { ...headers(request.token), "Content-Type": "application/json" }, body: JSON.stringify(request.body) });
+    if (response.status === 200 || response.status === 204) return { status: "queued" as const, requestId, githubActionsUrl: request.githubActionsUrl };
+    return { status: response.status >= 400 && response.status < 500 ? "rejected" as const : "uncertain" as const, requestId, message: `GitHub dispatch status=${response.status}` };
+  } catch (error) { return { status: "uncertain" as const, requestId, message: error instanceof Error ? error.message : "GitHub dispatch 응답을 확인하지 못했습니다." }; }
 }
 
 export async function dispatchShoplingPriceModifyActions(goodsKeyInput: string, policyOverridesInput?: unknown, goodsKeyGroupJsonInput?: unknown, basePriceInput?: { base_consumer_price?: unknown; base_sell_price?: unknown; base_purchase_price?: unknown; base_prices_json?: unknown }) {
