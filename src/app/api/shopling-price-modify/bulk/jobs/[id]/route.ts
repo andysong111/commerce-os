@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server";
+import { ownedJob, requireBulkUser } from "@/lib/shoplingPriceModifyBulkServer";
+export async function GET(_:Request,{params}:{params:Promise<{id:string}>}) { const auth=await requireBulkUser(); if(!auth.ok)return NextResponse.json({message:auth.message},{status:auth.status}); const {id}=await params; const job=await ownedJob(auth.db,auth.userId,id); if(!job)return NextResponse.json({message:"권한이 없거나 작업이 없습니다."},{status:403}); const [chunks,items]=await Promise.all([auth.db.from("shopling_price_bulk_chunks").select("*").eq("job_id",id).order("sequence"),auth.db.from("shopling_price_bulk_items").select("*").eq("job_id",id).order("ordinal")]); return NextResponse.json({job,chunks:chunks.data,items:items.data}); }

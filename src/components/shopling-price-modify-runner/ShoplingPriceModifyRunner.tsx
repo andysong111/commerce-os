@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { parseShoplingPriceBulkInput, splitShoplingPriceBulkChunks } from "@/lib/shoplingPriceModifyBulk";
+import { parseBulkFile } from "@/lib/shoplingPriceModifyBulkFile";
 
 const CURRENT_REQUEST_ID_STORAGE_KEY = "shoplingPriceModify.currentRequestId";
 const ROUND_UP_UNITS = [0, 1, 10, 100, 1000] as const;
@@ -31,6 +33,15 @@ function newPolicy(existing: PolicyOverride[]): PolicyOverride {
 }
 
 export function ShoplingPriceModifyRunner() {
+  const [input,setInput]=useState(""); const [fileResult,setFileResult]=useState<ReturnType<typeof parseShoplingPriceBulkInput>|null>(null); const [error,setError]=useState(""); const [creating,setCreating]=useState(false);
+  const parsed=useMemo(()=>fileResult??parseShoplingPriceBulkInput(input),[fileResult,input]);
+  const chunks=splitShoplingPriceBulkChunks(parsed.goodsKeys);
+  async function upload(file?:File) { if(!file)return;setError("");try{setFileResult(await parseBulkFile(file));setInput("");}catch(value){setFileResult(null);setError(value instanceof Error?value.message:"파일을 읽을 수 없습니다.");} }
+  async function create() { if(!parsed.validCount||creating)return; if(!window.confirm(`총 ${parsed.validCount}개 상품의 샵플링 상품 기본가격과 24개 쇼핑몰별 가격을 순차 수정합니다. 첫 10개 카나리 성공 후 자동으로 계속 진행합니다. 계속하시겠습니까?`))return;setCreating(true);setError("");try{const response=await fetch("/api/shopling-price-modify/bulk/jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({goods_keys:parsed.goodsKeys,policy_overrides:[]})});const body=await response.json();if(!response.ok)throw new Error(body.message);setError(`작업 ${body.id}이 생성되었습니다.`);}catch(value){setError(value instanceof Error?value.message:"작업 생성 실패");}finally{setCreating(false);} }
+  return <div className="space-y-6"><section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-lg font-bold">1. 엑셀·CSV 업로드</h2><input type="file" accept=".xlsx,.csv" onChange={(event)=>void upload(event.target.files?.[0])} className="mt-3"/><p className="mt-2 text-xs text-slate-500">.xlsx 첫 시트 또는 .csv, 최대 5MB. 파일은 브라우저에서만 읽고 goods_key만 전송합니다.</p><h2 className="mt-6 text-lg font-bold">2. 직접 붙여넣기</h2><textarea value={input} onChange={(event)=>{setInput(event.target.value);setFileResult(null);}} placeholder="121031,121032 121033" className="mt-2 min-h-32 w-full rounded-lg border border-slate-300 p-3"/><h2 className="mt-6 text-lg font-bold">3. 실행 전 미리보기</h2><dl className="mt-3 grid grid-cols-2 gap-2 text-sm md:grid-cols-4"><ResultRow label="원본 항목 수" value={parsed.originalCount}/><ResultRow label="유효 goods_key 수" value={parsed.validCount}/><ResultRow label="중복 제거 수" value={parsed.duplicateCount}/><ResultRow label="invalid 수" value={parsed.invalidCount}/><ResultRow label="최종 실행 대상 수" value={parsed.validCount}/><ResultRow label="예상 청크 수" value={chunks.length}/><ResultRow label="예상 쇼핑몰 가격 수정 행 수" value={parsed.validCount*24}/><ResultRow label="청크 크기" value="카나리 10 / 일반 50"/></dl>{parsed.invalid.length?<p className="mt-3 rounded bg-red-50 p-3 text-sm text-red-700">invalid: {parsed.invalid.slice(0,100).join(", ")}</p>:null}<p className="mt-4 text-sm text-slate-600">정책을 추가하지 않으면 기존 24개 쇼핑몰 기본 가격정책이 적용됩니다.</p>{error?<p className="mt-3 rounded bg-amber-50 p-3 text-sm">{error}</p>:null}<button onClick={create} disabled={!parsed.validCount||creating} className="mt-5 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:bg-slate-400">{creating?"생성 중...":"전체 가격설정 시작"}</button></section><section className="rounded-2xl border border-blue-200 bg-blue-50 p-5"><h2 className="font-bold">현재 작업 현황 · 최근 작업</h2><p className="mt-2 text-sm">화면과 컴퓨터를 꺼도 서버에서 작업이 계속됩니다.</p></section><details className="rounded-2xl border border-slate-200 bg-white p-5"><summary className="cursor-pointer text-lg font-bold">고급: 50개 이하 즉시 실행</summary><div className="mt-5"><ImmediateShoplingPriceModifyRunner/></div></details></div>;
+}
+
+function ImmediateShoplingPriceModifyRunner() {
   const [running, setRunning] = useState(false); const [fetchingResult, setFetchingResult] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null); const [actionsResult, setActionsResult] = useState<ActionsResult | null>(null);
   const [policies, setPolicies] = useState<PolicyOverride[]>([]); const [currentRequestId, setCurrentRequestId] = useState(() => typeof window === "undefined" ? "" : window.localStorage.getItem(CURRENT_REQUEST_ID_STORAGE_KEY) ?? "");
