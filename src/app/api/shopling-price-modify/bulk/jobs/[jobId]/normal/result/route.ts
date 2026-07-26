@@ -20,5 +20,6 @@ export async function POST(_request:Request,{params}:{params:Promise<{jobId:stri
  const analysis=analyzeShoplingPriceBulkNormalResult(actions.summary,requestId,keys,actions.runConclusion);
  const finished=await auth.admin!.rpc("finish_shopling_price_bulk_normal_chunk",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_success:analysis.success,p_failure_scope_known:analysis.failureScopeKnown,p_failed_keys:analysis.failedKeys,p_summary:actions.summary,p_run_url:actions.runUrl??null,p_error:analysis.success?null:analysis.message});
  if(finished.error)return normalError("일반 청크 결과 저장에 실패했습니다.",500,"FINISH_FAILED","normal.result.finish",finished.error);
+ if(!finished.data)return normalError("일반 청크 결과 저장 응답이 비어 있습니다.",500,"NORMAL_FINISH_EMPTY","normal.result.finish","finish_shopling_price_bulk_normal_chunk RPC가 데이터를 반환하지 않았습니다.");
  const state=rpcData(finished.data);return NextResponse.json({status:analysis.success?(state.status==="normal_succeeded"?"normal_succeeded":"chunk_succeeded"):"normal_failed",completed_chunk_index:chunk.chunk_index,completed_goods_key_count:keys.length,remaining_chunk_count:state.remaining_chunk_count,request_id:requestId,run_url:actions.runUrl,message:analysis.success?(state.status==="normal_succeeded"?"모든 상품의 가격설정 작업이 완료되었습니다.":"청크 성공을 확인했습니다."):analysis.message});
 }

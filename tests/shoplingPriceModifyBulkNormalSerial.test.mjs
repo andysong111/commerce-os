@@ -16,6 +16,8 @@ test("normal serial migration owns approval, reservation, transitions and servic
   assert.match(sql, /attempt_count=attempt_count\+1/);
   assert.match(sql, /status in \('dispatching','running','dispatch_uncertain'\)/);
   assert.match(sql, /when v_remaining=0 then 'normal_succeeded'/);
+  assert.equal((sql.match(/returning c\.id into v_chunk_id/g) ?? []).length, 2);
+  assert.equal((sql.match(/if v_chunk_id is null then raise exception/g) ?? []).length, 2);
 });
 
 test("normal APIs separate approval, one dispatch and exact-result completion", async () => {
@@ -29,7 +31,10 @@ test("normal APIs separate approval, one dispatch and exact-result completion", 
   assert.doesNotMatch(approve, /dispatchShoplingPriceBulkNormal/);
   assert.match(advance, /reserve_next_shopling_price_bulk_normal_chunk[\s\S]*dispatchShoplingPriceBulkNormal[\s\S]*mark_shopling_price_bulk_normal_running/);
   assert.match(advance, /fail_shopling_price_bulk_normal_dispatch_rejected[\s\S]*block_shopling_price_bulk_normal_uncertain/);
+  assert.match(advance, /NORMAL_STATE_TRANSITION_FAILED/);
+  assert.match(advance, /normal\.advance\.failure_transition/);
   assert.match(result, /fetchShoplingPriceModifyActionsResult\(requestId\)[\s\S]*finish_shopling_price_bulk_normal_chunk/);
+  assert.match(result, /NORMAL_FINISH_EMPTY/);
   assert.match(helper, /goodsKeys.length < 1 \|\| goodsKeys.length > 50/);
   assert.match(helper, /dispatch\.body\.inputs\.request_id = requestId/);
 });

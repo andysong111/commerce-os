@@ -12,10 +12,11 @@ export async function POST(_request:Request,{params}:{params:Promise<{jobId:stri
  const dispatched=await dispatchShoplingPriceBulkNormal(keys,context.policy_overrides,requestId);
  if(dispatched.status==="queued") {
   const marked=await auth.admin!.rpc("mark_shopling_price_bulk_normal_running",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_actions_url:dispatched.githubActionsUrl});
-  if(marked.error){await auth.admin!.rpc("block_shopling_price_bulk_normal_uncertain",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_error:"GitHub 요청 수락 후 DB 상태 저장 실패"});return normalError("요청 수락 후 상태 저장이 불확실합니다. 재전송하지 마세요.",202,"DISPATCH_UNCERTAIN","normal.advance.mark_running",marked.error);}
+  if(marked.error){const blocked=await auth.admin!.rpc("block_shopling_price_bulk_normal_uncertain",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_error:"GitHub 요청 수락 후 DB 상태 저장 실패"});if(blocked.error)return normalError("요청 수락 후 실패 상태 전이에 실패했습니다. 재전송하지 마세요.",500,"NORMAL_STATE_TRANSITION_FAILED","normal.advance.failure_transition",blocked.error);return normalError("요청 수락 후 상태 저장이 불확실합니다. 재전송하지 마세요.",202,"DISPATCH_UNCERTAIN","normal.advance.mark_running",marked.error);}
   return NextResponse.json({status:"running",chunk_index:context.chunk_index,goods_key_count:keys.length,request_id:requestId,actions_url:dispatched.githubActionsUrl,message:dispatched.message});
  }
  const rpc=dispatched.status==="rejected"?"fail_shopling_price_bulk_normal_dispatch_rejected":"block_shopling_price_bulk_normal_uncertain";
- await auth.admin!.rpc(rpc,{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_error:dispatched.message});
+ const transitioned=await auth.admin!.rpc(rpc,{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId,p_error:dispatched.message});
+ if(transitioned.error)return normalError("일반 청크 실패 상태 전이에 실패했습니다. 재전송하지 마세요.",500,"NORMAL_STATE_TRANSITION_FAILED","normal.advance.failure_transition",transitioned.error);
  return normalError(dispatched.status==="rejected"?"GitHub가 일반 청크 요청을 거절했습니다.":"전송 여부를 확정할 수 없습니다. 재전송하지 마세요.",dispatched.status==="rejected"?502:202,dispatched.status==="rejected"?"DISPATCH_REJECTED":"DISPATCH_UNCERTAIN","normal.advance.dispatch",dispatched.message);
 }

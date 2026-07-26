@@ -14,6 +14,24 @@ export async function normalSession() {
   return { ownerId: data.user.id, admin: admin as BulkAdmin };
 }
 export function normalError(error: string, status: number, code: string, stage: string, detail?: unknown) {
-  return NextResponse.json({ error, code, stage, detail: typeof detail === "string" ? detail.slice(0, 1000) : null, diagnostic_id: randomUUID() }, { status });
+  return NextResponse.json({ error, code, stage, detail: normalErrorDetail(detail), diagnostic_id: randomUUID() }, { status });
 }
 export function rpcData(value: unknown): Record<string, unknown> { return (Array.isArray(value) ? value[0] : value) as Record<string, unknown>; }
+
+export function normalErrorDetail(detail: unknown): string | null {
+  if (detail == null) return null;
+  let text: string;
+  if (detail instanceof Error) text = detail.message;
+  else if (typeof detail === "string") text = detail;
+  else if (typeof detail === "object" && "message" in detail && typeof detail.message === "string") text = detail.message;
+  else {
+    try { text = JSON.stringify(detail); }
+    catch { text = String(detail); }
+  }
+  return text
+    .replace(/sb_secret_[A-Za-z0-9._-]+/gi, "[REDACTED_SUPABASE_SECRET]")
+    .replace(/\bBearer\s+[^\s,;"'}]+/gi, "Bearer [REDACTED]")
+    .replace(/(["']?(?:apikey|authorization|service[_ -]?role(?:[_ -]?key)?|SUPABASE_SERVICE_ROLE_KEY)["']?\s*[:=]\s*["']?)[^\s,;"'}]+/gi, "$1[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED_JWT]")
+    .slice(0, 1000);
+}

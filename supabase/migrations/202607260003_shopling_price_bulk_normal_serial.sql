@@ -47,16 +47,20 @@ begin
 end $$;
 
 create or replace function public.fail_shopling_price_bulk_normal_dispatch_rejected(p_job_id uuid,p_owner_id uuid,p_request_id text,p_error text) returns void language plpgsql security definer set search_path=public as $$
+declare v_chunk_id uuid;
 begin
  if auth.role()<>'service_role' then raise exception 'service_role required'; end if;
- update public.shopling_price_bulk_chunks c set status='failed',last_error=left(coalesce(p_error,'dispatch rejected'),1000),completed_at=now(),updated_at=now() from public.shopling_price_bulk_jobs j where c.job_id=j.id and j.id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.status='dispatching' and c.request_id=p_request_id;
+ update public.shopling_price_bulk_chunks c set status='failed',last_error=left(coalesce(p_error,'dispatch rejected'),1000),completed_at=now(),updated_at=now() from public.shopling_price_bulk_jobs j where c.job_id=j.id and j.id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.status='dispatching' and c.request_id=p_request_id returning c.id into v_chunk_id;
+ if v_chunk_id is null then raise exception 'invalid normal dispatch rejected transition'; end if;
  update public.shopling_price_bulk_jobs set status='normal_failed',last_error=left(coalesce(p_error,'dispatch rejected'),1000),updated_at=now() where id=p_job_id and owner_id=p_owner_id;
 end $$;
 
 create or replace function public.block_shopling_price_bulk_normal_uncertain(p_job_id uuid,p_owner_id uuid,p_request_id text,p_error text) returns void language plpgsql security definer set search_path=public as $$
+declare v_chunk_id uuid;
 begin
  if auth.role()<>'service_role' then raise exception 'service_role required'; end if;
- update public.shopling_price_bulk_chunks c set status='dispatch_uncertain',last_error=left(coalesce(p_error,'dispatch uncertain'),1000),updated_at=now() from public.shopling_price_bulk_jobs j where c.job_id=j.id and j.id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.request_id=p_request_id and c.status in ('dispatching','running');
+ update public.shopling_price_bulk_chunks c set status='dispatch_uncertain',last_error=left(coalesce(p_error,'dispatch uncertain'),1000),updated_at=now() from public.shopling_price_bulk_jobs j where c.job_id=j.id and j.id=p_job_id and j.owner_id=p_owner_id and c.chunk_type='normal' and c.request_id=p_request_id and c.status in ('dispatching','running') returning c.id into v_chunk_id;
+ if v_chunk_id is null then raise exception 'invalid normal uncertain transition'; end if;
  update public.shopling_price_bulk_jobs set status='dispatch_uncertain',last_error=left(coalesce(p_error,'dispatch uncertain'),1000),updated_at=now() where id=p_job_id and owner_id=p_owner_id;
 end $$;
 
