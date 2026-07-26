@@ -1,12 +1,17 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ShoplingPriceModifyBulkErrorPanel } from "@/components/shopling-price-modify-runner/ShoplingPriceModifyBulkErrorPanel";
 import {
   parseShoplingPriceBulkFile,
   parseShoplingPriceBulkPaste,
   plannedShoplingPriceBulkChunkCount,
   type ShoplingPriceBulkInputResult,
 } from "@/lib/shoplingPriceModifyBulkInput";
+import {
+  requestShoplingPriceBulkJson,
+  ShoplingPriceBulkApiError,
+} from "@/lib/shoplingPriceModifyBulkClient";
 
 type Selection = { label: string; result: ShoplingPriceBulkInputResult };
 type Job = {
@@ -67,6 +72,7 @@ const labelSource = (source: string) => source === "paste" ? "직접 붙여넣�
 export function ShoplingPriceModifyBulkInputPreview() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [error, setError] = useState("");
+  const [errorDetail, setErrorDetail] = useState("");
   const [notice, setNotice] = useState("");
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -74,26 +80,56 @@ export function ShoplingPriceModifyBulkInputPreview() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
 
-  const loadJobs = useCallback(async () => {
-    const response = await fetch("/api/shopling-price-modify/bulk/jobs");
-    const body = await response.json();
-    if (response.ok) setJobs(body.jobs);
-    else setError(body.error ?? "Bulk 작업 조회에 실패했습니다.");
+  const clearError = useCallback(() => {
+    setError("");
+    setErrorDetail("");
   }, []);
 
-  const loadDetail = useCallback(async (jobId: string) => {
-    const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}`);
-    const body = await response.json();
-    if (!response.ok) {
-      setError(body.error ?? "Bulk 작업 조회에 실패했습니다.");
+  const handleError = useCallback((caught: unknown, fallback: string, operation: string) => {
+    if (caught instanceof ShoplingPriceBulkApiError) {
+      setError(caught.message);
+      setErrorDetail(caught.diagnosticText);
       return;
     }
-    setDetail(body);
-    const url = new URL(window.location.href);
-    url.searchParams.set("bulkJobId", jobId);
-    window.history.replaceState(null, "", url);
-    localStorage.setItem(STORAGE_KEY, jobId);
+    const message = caught instanceof Error ? caught.message : fallback;
+    setError(message);
+    setErrorDetail(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      operation,
+      failure_type: "client_error",
+      error: message,
+    }, null, 2));
   }, []);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const body = await requestShoplingPriceBulkJson(
+        "/api/shopling-price-modify/bulk/jobs",
+        undefined,
+        "bulk_jobs.list",
+      );
+      setJobs(Array.isArray(body.jobs) ? body.jobs as Job[] : []);
+    } catch (caught) {
+      handleError(caught, "Bulk 작업 조회에 실패했습니다.", "bulk_jobs.list");
+    }
+  }, [handleError]);
+
+  const loadDetail = useCallback(async (jobId: string) => {
+    try {
+      const body = await requestShoplingPriceBulkJson(
+        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}`,
+        undefined,
+        "bulk_jobs.detail",
+      );
+      setDetail(body as unknown as Detail);
+      const url = new URL(window.location.href);
+      url.searchParams.set("bulkJobId", jobId);
+      window.history.replaceState(null, "", url);
+      localStorage.setItem(STORAGE_KEY, jobId);
+    } catch (caught) {
+      handleError(caught, "Bulk 작업 조회에 실패했습니다.", "bulk_jobs.detail");
+    }
+  }, [handleError]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -114,22 +150,22 @@ export function ShoplingPriceModifyBulkInputPreview() {
     const file = event.target.files?.[0];
     if (!file) return;
     setReading(true);
-    setError("");
+    clearError();
     try {
       setSelection({ label: file.name, result: await parseShoplingPriceBulkFile(file) });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "파일을 읽을 수 없습니다.");
+      handleError(caught, "파일을 읽을 수 없습니다.", "bulk_input.file");
     } finally {
       setReading(false);
     }
   };
 
   const onPaste = (value: string) => {
-    setError("");
+    clearError();
     try {
       setSelection({ label: "직접 붙여넣기", result: parseShoplingPriceBulkPaste(value) });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "입력을 검사할 수 없습니다.");
+      handleError(caught, "입력을 검사할 수 없습니다.", "bulk_input.paste");
     }
   };
 
@@ -143,26 +179,30 @@ export function ShoplingPriceModifyBulkInputPreview() {
     )) return;
 
     setSaving(true);
-    setError("");
+    clearError();
     setNotice("");
     try {
-      const response = await fetch("/api/shopling-price-modify/bulk/jobs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          input_source: result.source,
-          goods_keys: result.goodsKeys,
-          original_count: result.originalCount,
-          duplicate_count: result.duplicateCount,
-          invalid_count: result.invalidCount,
-        }),
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Bulk 작업 저장에 실패했습니다.");
-      await refresh(body.id);
+      const body = await requestShoplingPriceBulkJson(
+        "/api/shopling-price-modify/bulk/jobs",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            input_source: result.source,
+            goods_keys: result.goodsKeys,
+            original_count: result.originalCount,
+            duplicate_count: result.duplicateCount,
+            invalid_count: result.invalidCount,
+          }),
+        },
+        "bulk_jobs.create",
+      );
+      const jobId = typeof body.id === "string" ? body.id : "";
+      if (!jobId) throw new Error("Bulk 작업 저장 응답에 작업번호가 없습니다.");
+      await refresh(jobId);
       setNotice("Bulk 준비 작업이 저장되었습니다. 가격은 아직 변경되지 않았습니다.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Bulk 작업 저장에 실패했습니다.");
+      handleError(caught, "Bulk 작업 저장에 실패했습니다.", "bulk_jobs.create");
     } finally {
       setSaving(false);
     }
@@ -178,16 +218,18 @@ export function ShoplingPriceModifyBulkInputPreview() {
     )) return;
 
     setActing(true);
-    setError("");
+    clearError();
     setNotice("");
     try {
-      const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/dispatch`, { method: "POST" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "카나리 실행 요청에 실패했습니다.");
-      setNotice(body.message ?? body.error ?? "카나리 실행 요청을 처리했습니다.");
+      const body = await requestShoplingPriceBulkJson(
+        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/dispatch`,
+        { method: "POST" },
+        "bulk_canary.dispatch",
+      );
+      setNotice(typeof body.message === "string" ? body.message : "카나리 실행 요청을 처리했습니다.");
       await refresh(detail.job.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "카나리 실행 요청에 실패했습니다.");
+      handleError(caught, "카나리 실행 요청에 실패했습니다.", "bulk_canary.dispatch");
     } finally {
       setActing(false);
     }
@@ -196,16 +238,18 @@ export function ShoplingPriceModifyBulkInputPreview() {
   const checkCanary = async () => {
     if (!detail || acting) return;
     setActing(true);
-    setError("");
+    clearError();
     setNotice("");
     try {
-      const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/result`, { method: "POST" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "카나리 결과 확인에 실패했습니다.");
-      setNotice(body.message ?? "카나리 결과를 확인했습니다.");
+      const body = await requestShoplingPriceBulkJson(
+        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/result`,
+        { method: "POST" },
+        "bulk_canary.result",
+      );
+      setNotice(typeof body.message === "string" ? body.message : "카나리 결과를 확인했습니다.");
       await refresh(detail.job.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "카나리 결과 확인에 실패했습니다.");
+      handleError(caught, "카나리 결과 확인에 실패했습니다.", "bulk_canary.result");
     } finally {
       setActing(false);
     }
@@ -231,7 +275,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
         </label>
       </div>
       {reading && <p className="mt-4">파일을 검사하고 있습니다.</p>}
-      {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}
+      {error && <ShoplingPriceModifyBulkErrorPanel summary={error} diagnostic={errorDetail} />}
       {notice && <p className="mt-4 rounded-lg bg-emerald-50 p-3 font-bold text-emerald-800">{notice}</p>}
       {selection
         ? <Preview selection={selection} saving={saving} save={save} />
