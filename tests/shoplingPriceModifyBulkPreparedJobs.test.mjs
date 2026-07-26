@@ -74,6 +74,9 @@ test("migration, API security, and UI prepared-only contracts", async () => {
   assert.match(detail,/if \(!jobResult\.data\) return missing\(\)/);
   assert.match(detail,/const missing = \(\) => NextResponse\.json\(\{ error: "작업을 찾을 수 없거나 접근 권한이 없습니다\." \}, \{ status: 404 \}\)/);
   assert.doesNotMatch(detail,/jobResult\.error\s*\|\|\s*!jobResult\.data/);
-  assert.match(ui,/Bulk 준비 작업 저장/); assert.match(ui,/가격은 아직 변경되지 않았습니다/); assert.match(ui,/최근 준비 작업/); assert.match(ui,/bulkJobId/); assert.match(ui,/localStorage/); assert.doesNotMatch(ui,/setInterval|카나리 실행|재시도|일시중지|재개/);
+  assert.match(ui,/Bulk 준비 작업 저장/); assert.match(ui,/가격은 아직 변경되지 않았습니다/); assert.match(ui,/최근 준비 작업/); assert.match(ui,/bulkJobId/); assert.match(ui,/localStorage/);
+  for (const label of ["예상 쇼핑몰 가격 수정 행 수", "카나리 크기", "일반 청크 크기", "goods_key 마지막 5개"]) assert.match(ui, new RegExp(label));
+  assert.match(ui,/useEffect\(\(\) => \{[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*void loadJobs\(\)[\s\S]*void loadDetail\(targetId\)/);
+  assert.doesNotMatch(ui,/eslint-disable[\s\S]*react-hooks|setInterval|가격 실행|카나리 실행|재시도/);
   assert.match(page,/<details/); assert.match(page,/고급: 50개 이하 즉시 실행/); assert.ok(runner.length>0);
 });
