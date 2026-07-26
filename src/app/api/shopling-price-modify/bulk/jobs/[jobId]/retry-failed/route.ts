@@ -1,0 +1,2 @@
+import { NextResponse } from "next/server"; import { retryFailedBulkJob } from "@/lib/shoplingPriceModifyBulkStore";
+export async function POST(_: Request, { params }: { params: Promise<{ jobId: string }> }) { try { return NextResponse.json(await retryFailedBulkJob((await params).jobId), { status: 201 }); } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "실패 상품 재실행 실패" }, { status: 400 }); } }

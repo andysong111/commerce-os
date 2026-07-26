@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { createBulkJob, listBulkJobs } from "@/lib/shoplingPriceModifyBulkStore";
+export const runtime = "nodejs";
+export async function GET() { try { return NextResponse.json({ jobs: await listBulkJobs() }); } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "작업 조회 실패" }, { status: 500 }); } }
+export async function POST(request: Request) { try { const body = await request.json() as Record<string, unknown>; const job = await createBulkJob({ goodsKeys: Array.isArray(body.goodsKeys) ? body.goodsKeys.filter((v): v is string => typeof v === "string") : [], inputSource: body.inputSource === "csv" || body.inputSource === "xlsx" ? body.inputSource : "paste", totalInputCount: Number(body.totalInputCount), duplicateCount: Number(body.duplicateCount), invalidCount: Number(body.invalidCount), policyOverrides: body.policyOverrides }); return NextResponse.json(job, { status: 201 }); } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "작업 생성 실패" }, { status: 400 }); } }
