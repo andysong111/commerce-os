@@ -125,5 +125,8 @@ test("phase 3 migration and routes enforce manual canary-only execution", async 
   assert.match(ui, /카나리[\s\S]*실제 실행/);
   assert.match(ui, /일반 청크는 자동 실행되지 않습니다/);
   assert.match(ui, /카나리 결과 확인/);
+  assert.match(ui, /chunks\.find\(\(chunk\) => chunk\.chunk_index === 0 && chunk\.chunk_type === "canary"\)/);
+  assert.match(ui, /detail\.job\.status === "dispatch_uncertain" && canary\?\.status === "dispatch_uncertain"/);
+  assert.doesNotMatch(ui, /detail\.job\.status === "dispatch_uncertain" && detail\.current_active_chunk\?\.chunk_type === "canary"/);
   assert.doesNotMatch(dispatchRoute + resultRoute + ui, /setInterval|cron|scheduler|전체 가격설정 시작|실패 상품만 다시 실행/);
 });
