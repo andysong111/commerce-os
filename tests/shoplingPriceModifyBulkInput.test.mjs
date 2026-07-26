@@ -2,7 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { zipSync, strToU8 } from "fflate";
-import { parseShoplingPriceBulkCsvText, parseShoplingPriceBulkFile, parseShoplingPriceBulkPaste, parseShoplingPriceBulkXlsxBytes, plannedShoplingPriceBulkChunkCount } from "../src/lib/shoplingPriceModifyBulkInput.ts";
+import ts from "typescript";
+
+async function importTranspiledBulkInput() {
+  const sourceName = "shoplingPriceModifyBulkInput.ts";
+  const source = (await readFile(new URL(`../src/lib/${sourceName}`, import.meta.url), "utf8")).replace(
+    '"fflate"',
+    JSON.stringify(import.meta.resolve("fflate")),
+  );
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+    fileName: sourceName,
+    reportDiagnostics: true,
+  });
+  const errors = output.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? [];
+  assert.deepEqual(errors, [], `TypeScript transpilation failed for ${sourceName}`);
+  return import(`data:text/javascript;base64,${Buffer.from(output.outputText).toString("base64")}`);
+}
+
+const { parseShoplingPriceBulkCsvText, parseShoplingPriceBulkFile, parseShoplingPriceBulkPaste, parseShoplingPriceBulkXlsxBytes, plannedShoplingPriceBulkChunkCount } = await importTranspiledBulkInput();
 
 function xlsx(sheet, { shared = "", secondSheet = "" } = {}) {
   const files = {
