@@ -4,15 +4,11 @@ export async function createSupabaseAdminClient() {
 
   if (!supabaseUrl || !supabaseSecretKey) return null;
 
-  const { createClient } = await dynamicImportSupabaseJs();
+  const { createClient } = await import("@supabase/supabase-js");
   return createClient(supabaseUrl, supabaseSecretKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
-}
-
-async function dynamicImportSupabaseJs(): Promise<{ createClient: (url: string, key: string, options: unknown) => unknown }> {
-  return Function("specifier", "return import(specifier)")("@supabase/supabase-js");
 }
