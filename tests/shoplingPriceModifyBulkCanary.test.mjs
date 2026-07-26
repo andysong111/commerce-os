@@ -77,7 +77,7 @@ test("canary dispatch classifies accepted, rejected, and uncertain responses", a
       const body = JSON.parse(init.body);
       assert.equal(body.inputs.request_id, "req-1");
       assert.equal(String(init.headers.Authorization).includes("secret-token"), true);
-      return new Response("", { status: 204 });
+      return new Response(null, { status: 204 });
     };
     assert.equal((await dispatchShoplingPriceBulkCanary(expectedKeys, [], "req-1")).status, "queued");
 

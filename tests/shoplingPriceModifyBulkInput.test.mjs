@@ -94,7 +94,7 @@ test("UI contract keeps input validation and the existing runner", async () => {
   assert.match(page, /<ShoplingPriceModifyRunner \/>/); assert.match(page, /ShoplingPriceModifyBulkInputPreview/); assert.match(page, /<details/);
   for (const phrase of ["고정 양식", "실제 가격을 수정하지 않습니다", "파일 업로드", "직접 붙여넣기", "실행 전 미리보기"]) assert.match(component, new RegExp(phrase));
   assert.doesNotMatch(component, /setSelection\(null\)/);
-  assert.match(component, /const onPaste[\s\S]*?catch \(caught\) \{ setError/);
-  assert.match(component, /const onFile[\s\S]*?catch \(caught\) \{ setError/);
+  assert.match(component, /const onPaste[\s\S]*?catch \(caught\) \{[\s\S]*?handleError/);
+  assert.match(component, /const onFile[\s\S]*?catch \(caught\) \{[\s\S]*?handleError/);
   assert.doesNotMatch(library, /fetch\s*\(/); assert.doesNotMatch(library, /supabase/i); assert.doesNotMatch(component + library, /https?:\/\//);
 });

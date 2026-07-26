@@ -47,9 +47,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
       .eq("job_id", jobId)
       .order("ordinal", { ascending: false })
       .limit(5),
-    admin.from("shopling_price_bulk_items").select("id", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "pending"),
-    admin.from("shopling_price_bulk_items").select("id", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "succeeded"),
-    admin.from("shopling_price_bulk_items").select("id", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "failed"),
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "pending"),
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "succeeded"),
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "failed"),
   ]);
   if (chunks.error || first.error || last.error || pendingItems.error || succeededItems.error || failedItems.error) {
     return NextResponse.json({ error: "Bulk 작업 조회에 실패했습니다." }, { status: 500 });
