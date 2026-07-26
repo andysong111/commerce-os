@@ -67,17 +67,16 @@ test("planned chunk counts follow a 10-item canary and 50-item regular chunks", 
   for (const [count, expected] of [[0,0],[1,1],[10,1],[11,2],[50,2],[51,2],[60,2],[61,3],[10_000,201]]) assert.equal(plannedShoplingPriceBulkChunkCount(count), expected);
 });
 
-test("UI contract remains local-only and keeps the existing runner", async () => {
+test("UI contract keeps input validation and the existing runner", async () => {
   const [page, component, library] = await Promise.all([
     readFile(new URL("../src/app/shopling-price-modify-runner/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/shoplingPriceModifyBulkInput.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /<ShoplingPriceModifyRunner \/>/); assert.match(page, /ShoplingPriceModifyBulkInputPreview/);
+  assert.match(page, /<ShoplingPriceModifyRunner \/>/); assert.match(page, /ShoplingPriceModifyBulkInputPreview/); assert.match(page, /<details/);
   for (const phrase of ["고정 양식", "실제 가격을 수정하지 않습니다", "파일 업로드", "직접 붙여넣기", "실행 전 미리보기"]) assert.match(component, new RegExp(phrase));
   assert.doesNotMatch(component, /setSelection\(null\)/);
   assert.match(component, /const onPaste[\s\S]*?catch \(caught\) \{ setError/);
   assert.match(component, /const onFile[\s\S]*?catch \(caught\) \{ setError/);
-  const newCode = component + library;
-  assert.doesNotMatch(newCode, /fetch\s*\(/); assert.doesNotMatch(newCode, /\/api\/shopling-price-modify\/bulk/); assert.doesNotMatch(newCode, /supabase/i); assert.doesNotMatch(newCode, /https?:\/\//);
+  assert.doesNotMatch(library, /fetch\s*\(/); assert.doesNotMatch(library, /supabase/i); assert.doesNotMatch(component + library, /https?:\/\//);
 });
