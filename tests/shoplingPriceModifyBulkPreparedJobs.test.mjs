@@ -57,7 +57,7 @@ test("server validation rejects unsafe requests", () => {
   assert.throws(()=>validateShoplingPriceBulkCreateInput({...valid(["1"]),invalid_count:-1}),/통계/);
   assert.throws(()=>validateShoplingPriceBulkCreateInput({...valid(["1"]),original_count:2}),/통계/);
 });
-test("migration, API security, and UI prepared-only contracts", async () => {
+test("migration, API security, and UI prepared-job contracts", async () => {
   const [migration,collection,detail,ui,page,runner] = await Promise.all([
     readFile(new URL("../supabase/migrations/202607260001_shopling_price_bulk_prepared_jobs.sql",import.meta.url),"utf8"),
     readFile(new URL("../src/app/api/shopling-price-modify/bulk/jobs/route.ts",import.meta.url),"utf8"),
@@ -74,9 +74,9 @@ test("migration, API security, and UI prepared-only contracts", async () => {
   assert.match(detail,/if \(!jobResult\.data\) return missing\(\)/);
   assert.match(detail,/const missing = \(\) => NextResponse\.json\(\{ error: "작업을 찾을 수 없거나 접근 권한이 없습니다\." \}, \{ status: 404 \}\)/);
   assert.doesNotMatch(detail,/jobResult\.error\s*\|\|\s*!jobResult\.data/);
-  assert.match(ui,/Bulk 준비 작업 저장/); assert.match(ui,/가격은 아직 변경되지 않았습니다/); assert.match(ui,/최근 준비 작업/); assert.match(ui,/bulkJobId/); assert.match(ui,/localStorage/);
+  assert.match(ui,/Bulk 준비 작업 저장/); assert.match(ui,/준비 작업 저장만으로는 가격을 수정하지 않습니다/); assert.match(ui,/최근 작업/); assert.match(ui,/bulkJobId/); assert.match(ui,/localStorage/);
   for (const label of ["예상 쇼핑몰 가격 수정 행 수", "카나리 크기", "일반 청크 크기", "goods_key 마지막 5개"]) assert.match(ui, new RegExp(label));
   assert.match(ui,/useEffect\(\(\) => \{[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*void loadJobs\(\)[\s\S]*void loadDetail\(targetId\)/);
-  assert.doesNotMatch(ui,/eslint-disable[\s\S]*react-hooks|setInterval|가격 실행|카나리 실행|재시도/);
+  assert.doesNotMatch(ui,/eslint-disable[\s\S]*react-hooks|setInterval|전체 가격설정 시작|실패 상품만 다시 실행|작업 재개/);
   assert.match(page,/<details/); assert.match(page,/고급: 50개 이하 즉시 실행/); assert.ok(runner.length>0);
 });
