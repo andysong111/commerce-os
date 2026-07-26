@@ -1,0 +1,2 @@
+import { NextResponse } from "next/server"; import { setBulkJobPaused } from "@/lib/shoplingPriceModifyBulkStore";
+export async function POST(_: Request, { params }: { params: Promise<{ jobId: string }> }) { try { return NextResponse.json(await setBulkJobPaused((await params).jobId, true)); } catch (error) { return NextResponse.json({ message: error instanceof Error ? error.message : "일시중지 실패" }, { status: 400 }); } }
