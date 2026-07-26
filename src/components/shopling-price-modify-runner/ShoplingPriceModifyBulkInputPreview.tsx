@@ -20,7 +20,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
   const onPaste = (value: string) => {
     setError("");
     try { setSelection({ label: "직접 붙여넣기", result: parseShoplingPriceBulkPaste(value) }); }
-    catch (caught) { setSelection(null); setError(caught instanceof Error ? caught.message : "입력을 검사할 수 없습니다."); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "입력을 검사할 수 없습니다."); }
   };
   return <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
     <h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2>
