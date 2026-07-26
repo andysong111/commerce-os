@@ -1,20 +1,100 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useState } from "react";
-import { parseShoplingPriceBulkFile, parseShoplingPriceBulkPaste, plannedShoplingPriceBulkChunkCount, type ShoplingPriceBulkInputResult } from "@/lib/shoplingPriceModifyBulkInput";
+import {
+  parseShoplingPriceBulkFile,
+  parseShoplingPriceBulkPaste,
+  plannedShoplingPriceBulkChunkCount,
+  type ShoplingPriceBulkInputResult,
+} from "@/lib/shoplingPriceModifyBulkInput";
 
 type Selection = { label: string; result: ShoplingPriceBulkInputResult };
-type Job = { id: string; status: string; input_source: string; original_count: number; valid_count: number; duplicate_count: number; invalid_count: number; canary_size?: number; total_chunk_count: number; created_at: string; updated_at: string };
-type Detail = { job: Job; chunks: { chunk_index: number; chunk_type: string; goods_key_count: number; status: string }[]; first_goods_keys: string[]; last_goods_keys: string[] };
+type Job = {
+  id: string;
+  status: string;
+  input_source: string;
+  original_count: number;
+  valid_count: number;
+  duplicate_count: number;
+  invalid_count: number;
+  canary_size?: number;
+  normal_chunk_size?: number;
+  total_chunk_count: number;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+type Chunk = {
+  chunk_index: number;
+  chunk_type: string;
+  goods_key_count: number;
+  status: string;
+  request_id?: string | null;
+  actions_url?: string | null;
+  result_summary?: Record<string, unknown> | null;
+  last_error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string;
+};
+type Detail = { job: Job; chunks: Chunk[]; first_goods_keys: string[]; last_goods_keys: string[] };
+
 const STORAGE_KEY = "shoplingPriceModifyBulkRecentJobId";
-const labelStatus = (status: string) => status === "prepared" ? "실행 전 준비 완료" : status;
+
+const STATUS_LABELS: Record<string, string> = {
+  prepared: "실행 전 준비 완료",
+  canary_dispatching: "카나리 전송 중",
+  canary_running: "카나리 실행 중",
+  canary_succeeded: "카나리 성공 · 일반 실행 승인 대기",
+  canary_failed: "카나리 실패 · 점검 필요",
+  dispatch_uncertain: "전송 여부 불확실 · 중복 실행 금지",
+  cancelled: "취소됨",
+};
+
+const CHUNK_STATUS_LABELS: Record<string, string> = {
+  pending: "대기",
+  dispatching: "전송 중",
+  running: "실행 중",
+  succeeded: "성공",
+  failed: "실패",
+  dispatch_uncertain: "전송 여부 불확실",
+};
+
+const labelStatus = (status: string) => STATUS_LABELS[status] ?? status;
+const labelChunkStatus = (status: string) => CHUNK_STATUS_LABELS[status] ?? status;
 const labelSource = (source: string) => source === "paste" ? "직접 붙여넣기" : source.toUpperCase();
 
 export function ShoplingPriceModifyBulkInputPreview() {
-  const [selection, setSelection] = useState<Selection | null>(null); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
-  const [reading, setReading] = useState(false); const [saving, setSaving] = useState(false); const [jobs, setJobs] = useState<Job[]>([]); const [detail, setDetail] = useState<Detail | null>(null);
-  const loadJobs = useCallback(async () => { const response = await fetch("/api/shopling-price-modify/bulk/jobs"); const body = await response.json(); if (response.ok) setJobs(body.jobs); else setError(body.error ?? "Bulk 작업 조회에 실패했습니다."); }, []);
-  const loadDetail = useCallback(async (jobId: string) => { const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}`); const body = await response.json(); if (!response.ok) { setError(body.error ?? "Bulk 작업 조회에 실패했습니다."); return; } setDetail(body); const url = new URL(window.location.href); url.searchParams.set("bulkJobId", jobId); window.history.replaceState(null, "", url); localStorage.setItem(STORAGE_KEY, jobId); }, []);
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reading, setReading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [detail, setDetail] = useState<Detail | null>(null);
+
+  const loadJobs = useCallback(async () => {
+    const response = await fetch("/api/shopling-price-modify/bulk/jobs");
+    const body = await response.json();
+    if (response.ok) setJobs(body.jobs);
+    else setError(body.error ?? "Bulk 작업 조회에 실패했습니다.");
+  }, []);
+
+  const loadDetail = useCallback(async (jobId: string) => {
+    const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}`);
+    const body = await response.json();
+    if (!response.ok) {
+      setError(body.error ?? "Bulk 작업 조회에 실패했습니다.");
+      return;
+    }
+    setDetail(body);
+    const url = new URL(window.location.href);
+    url.searchParams.set("bulkJobId", jobId);
+    window.history.replaceState(null, "", url);
+    localStorage.setItem(STORAGE_KEY, jobId);
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadJobs();
@@ -23,21 +103,227 @@ export function ShoplingPriceModifyBulkInputPreview() {
       const targetId = queryId ?? recentId;
       if (targetId) void loadDetail(targetId);
     }, 0);
-
     return () => window.clearTimeout(timer);
   }, [loadDetail, loadJobs]);
-  const onFile = async (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; setReading(true); setError(""); try { setSelection({ label: file.name, result: await parseShoplingPriceBulkFile(file) }); } catch (caught) { setError(caught instanceof Error ? caught.message : "파일을 읽을 수 없습니다."); } finally { setReading(false); } };
-  const onPaste = (value: string) => { setError(""); try { setSelection({ label: "직접 붙여넣기", result: parseShoplingPriceBulkPaste(value) }); } catch (caught) { setError(caught instanceof Error ? caught.message : "입력을 검사할 수 없습니다."); } };
-  const save = async () => { if (!selection || saving) return; const result = selection.result; if (!window.confirm(`유효 ${result.validCount}개의 goods_key를 Bulk 준비 작업으로 저장합니다.\n중복 ${result.duplicateCount}개와 invalid ${result.invalidCount}개는 제외됩니다.\n이 단계에서는 가격이 변경되지 않습니다.\n계속하시겠습니까?`)) return; setSaving(true); setError(""); setNotice(""); try { const response = await fetch("/api/shopling-price-modify/bulk/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input_source: result.source, goods_keys: result.goodsKeys, original_count: result.originalCount, duplicate_count: result.duplicateCount, invalid_count: result.invalidCount }) }); const body = await response.json(); if (!response.ok) throw new Error(body.error ?? "Bulk 작업 저장에 실패했습니다."); await Promise.all([loadDetail(body.id), loadJobs()]); setNotice("Bulk 준비 작업이 저장되었습니다. 가격은 아직 변경되지 않았습니다."); } catch (caught) { setError(caught instanceof Error ? caught.message : "Bulk 작업 저장에 실패했습니다."); } finally { setSaving(false); } };
-  return <div className="space-y-8"><section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2><p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 이번 단계에서는 실제 가격을 수정하지 않습니다.</p>
-    <div className="mt-6 grid gap-5 lg:grid-cols-2"><div className="rounded-xl border p-4"><h3 className="font-bold">엑셀·CSV 업로드</h3><input aria-label="파일 업로드" type="file" accept=".xlsx,.csv" onChange={onFile} className="mt-3 block w-full"/><div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm"><strong>고정 양식</strong><ul className="list-disc pl-5"><li>첫 시트 A열만 사용</li><li>A1: goods_key</li><li>A2부터 상품번호</li><li>B열 이후 데이터 금지</li></ul></div></div><label className="rounded-xl border p-4 font-bold">직접 붙여넣기<textarea onChange={(event) => onPaste(event.target.value)} className="mt-3 min-h-40 w-full rounded-lg border p-2 font-mono text-sm"/><span className="mt-2 block text-sm font-normal text-slate-600">쉼표, 공백, 탭, 줄바꿈을 사용할 수 있습니다.</span></label></div>
-    {reading && <p className="mt-4">파일을 검사하고 있습니다.</p>}{error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}{notice && <p className="mt-4 rounded-lg bg-emerald-50 p-3 font-bold text-emerald-800">{notice}</p>}
-    {selection ? <Preview selection={selection} saving={saving} save={save}/> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">파일을 업로드하거나 goods_key를 붙여넣으면 실행 전 미리보기가 표시됩니다.</p>}</section>
-    <SavedJobs jobs={jobs} detail={detail} select={loadDetail}/></div>;
+
+  const refresh = useCallback(async (jobId: string) => {
+    await Promise.all([loadDetail(jobId), loadJobs()]);
+  }, [loadDetail, loadJobs]);
+
+  const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setReading(true);
+    setError("");
+    try {
+      setSelection({ label: file.name, result: await parseShoplingPriceBulkFile(file) });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "파일을 읽을 수 없습니다.");
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const onPaste = (value: string) => {
+    setError("");
+    try {
+      setSelection({ label: "직접 붙여넣기", result: parseShoplingPriceBulkPaste(value) });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "입력을 검사할 수 없습니다.");
+    }
+  };
+
+  const save = async () => {
+    if (!selection || saving) return;
+    const result = selection.result;
+    if (!window.confirm(
+      `유효 ${result.validCount}개의 goods_key를 Bulk 준비 작업으로 저장합니다.\n` +
+      `중복 ${result.duplicateCount}개와 invalid ${result.invalidCount}개는 제외됩니다.\n` +
+      "이 단계에서는 가격이 변경되지 않습니다.\n계속하시겠습니까?",
+    )) return;
+
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/shopling-price-modify/bulk/jobs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          input_source: result.source,
+          goods_keys: result.goodsKeys,
+          original_count: result.originalCount,
+          duplicate_count: result.duplicateCount,
+          invalid_count: result.invalidCount,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Bulk 작업 저장에 실패했습니다.");
+      await refresh(body.id);
+      setNotice("Bulk 준비 작업이 저장되었습니다. 가격은 아직 변경되지 않았습니다.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Bulk 작업 저장에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const runCanary = async () => {
+    if (!detail || acting) return;
+    const canaryCount = detail.job.canary_size ?? Math.min(detail.job.valid_count, 10);
+    if (!window.confirm(
+      `카나리 ${canaryCount}개 상품의 기본가격과 24개 쇼핑몰별 가격을 실제로 변경합니다.\n` +
+      "일반 청크는 자동 실행되지 않습니다.\n" +
+      "이 실행은 실제 운영 데이터에 반영됩니다. 계속하시겠습니까?",
+    )) return;
+
+    setActing(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/dispatch`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "카나리 실행 요청에 실패했습니다.");
+      setNotice(body.message ?? body.error ?? "카나리 실행 요청을 처리했습니다.");
+      await refresh(detail.job.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "카나리 실행 요청에 실패했습니다.");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const checkCanary = async () => {
+    if (!detail || acting) return;
+    setActing(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/canary/result`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "카나리 결과 확인에 실패했습니다.");
+      setNotice(body.message ?? "카나리 결과를 확인했습니다.");
+      await refresh(detail.job.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "카나리 결과 확인에 실패했습니다.");
+    } finally {
+      setActing(false);
+    }
+  };
+
+  return <div className="space-y-8">
+    <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
+      <h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2>
+      <p className="mt-2 text-sm text-slate-600">Bulk 실행 전 goods_key 형식을 검사합니다. 준비 작업 저장만으로는 가격을 수정하지 않습니다.</p>
+      <div className="mt-6 grid gap-5 lg:grid-cols-2">
+        <div className="rounded-xl border p-4">
+          <h3 className="font-bold">엑셀·CSV 업로드</h3>
+          <input aria-label="파일 업로드" type="file" accept=".xlsx,.csv" onChange={onFile} className="mt-3 block w-full" />
+          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm">
+            <strong>고정 양식</strong>
+            <ul className="list-disc pl-5"><li>첫 시트 A열만 사용</li><li>A1: goods_key</li><li>A2부터 상품번호</li><li>B열 이후 데이터 금지</li></ul>
+          </div>
+        </div>
+        <label className="rounded-xl border p-4 font-bold">
+          직접 붙여넣기
+          <textarea onChange={(event) => onPaste(event.target.value)} className="mt-3 min-h-40 w-full rounded-lg border p-2 font-mono text-sm" />
+          <span className="mt-2 block text-sm font-normal text-slate-600">쉼표, 공백, 탭, 줄바꿈을 사용할 수 있습니다.</span>
+        </label>
+      </div>
+      {reading && <p className="mt-4">파일을 검사하고 있습니다.</p>}
+      {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-red-700">{error}</p>}
+      {notice && <p className="mt-4 rounded-lg bg-emerald-50 p-3 font-bold text-emerald-800">{notice}</p>}
+      {selection
+        ? <Preview selection={selection} saving={saving} save={save} />
+        : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">파일을 업로드하거나 goods_key를 붙여넣으면 실행 전 미리보기가 표시됩니다.</p>}
+    </section>
+    <SavedJobs jobs={jobs} detail={detail} acting={acting} select={loadDetail} runCanary={runCanary} checkCanary={checkCanary} />
+  </div>;
 }
 
-function Preview({ selection, saving, save }: { selection: Selection; saving: boolean; save: () => void }) { const { result } = selection; const rows = [["입력 방식",labelSource(result.source)],["원본 항목 수",result.originalCount],["유효 goods_key 수",result.validCount],["중복 제거 수",result.duplicateCount],["invalid 수",result.invalidCount],["최종 대상 수",result.validCount],["예상 쇼핑몰 가격 수정 행 수",result.validCount*24],["카나리 크기","최대 10"],["일반 청크 크기","최대 50"],["예상 청크 수",plannedShoplingPriceBulkChunkCount(result.validCount)]]; const last = result.goodsKeys.length > 20 ? result.goodsKeys.slice(-5) : []; return <div className="mt-6 rounded-xl border border-emerald-200 p-5"><h3 className="font-bold">실행 전 미리보기</h3><p className="mt-2 text-sm">{selection.label}</p><dl className="mt-4 grid gap-2 sm:grid-cols-3">{rows.map(([key,value])=><div className="rounded-lg bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="font-bold">{value}</dd></div>)}</dl><div className="grid gap-4 lg:grid-cols-2"><PreviewList title="goods_key 첫 20개" values={result.goodsKeys.slice(0,20)}/>{last.length > 0 && <PreviewList title="goods_key 마지막 5개" values={last}/>}</div>{result.goodsKeys.length > 25 && <p className="mt-2 text-xs text-slate-600">중간 {(result.goodsKeys.length-25).toLocaleString("ko-KR")}개 항목은 생략했습니다.</p>}{result.invalidCount > 0 && <p className="mt-3 text-amber-800">invalid {result.invalidCount}개: {result.invalid.slice(0,100).join(", ")}</p>}{result.validCount > 0 && <div className="mt-5"><p className="mb-3 font-semibold text-blue-900">이 단계에서는 입력 목록과 청크 계획만 서버에 저장합니다.<br/>상품 가격은 아직 변경되지 않습니다.</p><button type="button" disabled={saving} onClick={save} className="rounded-lg bg-blue-700 px-5 py-3 font-bold text-white disabled:opacity-50">{saving ? "저장 중..." : "Bulk 준비 작업 저장"}</button></div>}</div>; }
+function Preview({ selection, saving, save }: { selection: Selection; saving: boolean; save: () => void }) {
+  const { result } = selection;
+  const rows = [
+    ["입력 방식", labelSource(result.source)], ["원본 항목 수", result.originalCount], ["유효 goods_key 수", result.validCount],
+    ["중복 제거 수", result.duplicateCount], ["invalid 수", result.invalidCount], ["최종 대상 수", result.validCount],
+    ["예상 쇼핑몰 가격 수정 행 수", result.validCount * 24], ["카나리 크기", "최대 10"], ["일반 청크 크기", "최대 50"],
+    ["예상 청크 수", plannedShoplingPriceBulkChunkCount(result.validCount)],
+  ];
+  const last = result.goodsKeys.length > 20 ? result.goodsKeys.slice(-5) : [];
+  return <div className="mt-6 rounded-xl border border-emerald-200 p-5">
+    <h3 className="font-bold">실행 전 미리보기</h3>
+    <p className="mt-2 text-sm">{selection.label}</p>
+    <dl className="mt-4 grid gap-2 sm:grid-cols-3">{rows.map(([key, value]) => <div className="rounded-lg bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="font-bold">{value}</dd></div>)}</dl>
+    <div className="grid gap-4 lg:grid-cols-2"><PreviewList title="goods_key 첫 20개" values={result.goodsKeys.slice(0, 20)} />{last.length > 0 && <PreviewList title="goods_key 마지막 5개" values={last} />}</div>
+    {result.goodsKeys.length > 25 && <p className="mt-2 text-xs text-slate-600">중간 {(result.goodsKeys.length - 25).toLocaleString("ko-KR")}개 항목은 생략했습니다.</p>}
+    {result.invalidCount > 0 && <p className="mt-3 text-amber-800">invalid {result.invalidCount}개: {result.invalid.slice(0, 100).join(", ")}</p>}
+    {result.validCount > 0 && <div className="mt-5">
+      <p className="mb-3 font-semibold text-blue-900">이 단계에서는 입력 목록과 청크 계획만 서버에 저장합니다.<br />상품 가격은 아직 변경되지 않습니다.</p>
+      <button type="button" disabled={saving} onClick={save} className="rounded-lg bg-blue-700 px-5 py-3 font-bold text-white disabled:opacity-50">{saving ? "저장 중..." : "Bulk 준비 작업 저장"}</button>
+    </div>}
+  </div>;
+}
 
-function SavedJobs({ jobs, detail, select }: { jobs: Job[]; detail: Detail | null; select: (id: string) => Promise<void> }) { return <section className="rounded-2xl border bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">저장된 Bulk 준비 작업</h2>{detail && <div className="mt-5 rounded-xl border border-blue-200 p-5"><p className="rounded-lg bg-blue-50 p-3 font-bold text-blue-900">이 작업은 저장만 완료된 상태입니다.<br/>아직 상품 가격이 변경되지 않았습니다.</p><dl className="mt-4 grid gap-2 sm:grid-cols-3">{[["작업번호",detail.job.id],["상태",labelStatus(detail.job.status)],["입력 방식",labelSource(detail.job.input_source)],["원본 항목 수",detail.job.original_count],["유효 goods_key 수",detail.job.valid_count],["중복 제외 수",detail.job.duplicate_count],["invalid 제외 수",detail.job.invalid_count],["카나리 상품 수",detail.job.canary_size ?? 0],["normal chunk 수",detail.job.total_chunk_count-1],["총 chunk 수",detail.job.total_chunk_count],["생성시간",new Date(detail.job.created_at).toLocaleString("ko-KR")],["최근 갱신시간",new Date(detail.job.updated_at).toLocaleString("ko-KR")]].map(([key,value])=><div className="rounded bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="break-all font-semibold">{value}</dd></div>)}</dl><div className="grid lg:grid-cols-2"><PreviewList title="goods_key 첫 20개" values={detail.first_goods_keys}/><PreviewList title="goods_key 마지막 5개" values={detail.last_goods_keys}/></div></div>}
-    <h3 className="mt-7 font-bold">최근 준비 작업</h3><div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{["생성시간","상태","입력 방식","유효 상품 수","총 청크 수","작업번호"].map(x=><th className="p-2" key={x}>{x}</th>)}</tr></thead><tbody>{jobs.map(job=><tr tabIndex={0} role="button" onClick={()=>void select(job.id)} onKeyDown={(event)=>{if(event.key==="Enter")void select(job.id)}} className="cursor-pointer border-t hover:bg-slate-50" key={job.id}><td className="p-2">{new Date(job.created_at).toLocaleString("ko-KR")}</td><td className="p-2">{labelStatus(job.status)}</td><td className="p-2">{labelSource(job.input_source)}</td><td className="p-2">{job.valid_count}</td><td className="p-2">{job.total_chunk_count}</td><td className="p-2 font-mono">{job.id}</td></tr>)}</tbody></table></div></section>; }
-function PreviewList({ title, values }: { title: string; values: string[] }) { return <div className="mt-4 rounded-lg bg-slate-50 p-4"><h4 className="text-sm font-bold">{title}</h4><ol className="mt-2 list-decimal pl-6 font-mono text-sm">{values.map((value,index)=><li key={`${value}-${index}`}>{value}</li>)}</ol></div>; }
+function SavedJobs({
+  jobs,
+  detail,
+  acting,
+  select,
+  runCanary,
+  checkCanary,
+}: {
+  jobs: Job[];
+  detail: Detail | null;
+  acting: boolean;
+  select: (id: string) => Promise<void>;
+  runCanary: () => Promise<void>;
+  checkCanary: () => Promise<void>;
+}) {
+  const canary = detail?.chunks.find((chunk) => chunk.chunk_index === 0 && chunk.chunk_type === "canary");
+  return <section className="rounded-2xl border bg-white p-6 shadow-sm">
+    <h2 className="text-xl font-bold">저장된 Bulk 작업</h2>
+    {detail && <div className="mt-5 rounded-xl border border-blue-200 p-5">
+      <p className="rounded-lg bg-blue-50 p-3 font-bold text-blue-900">작업 상태: {labelStatus(detail.job.status)}</p>
+      <dl className="mt-4 grid gap-2 sm:grid-cols-3">{[
+        ["작업번호", detail.job.id], ["상태", labelStatus(detail.job.status)], ["입력 방식", labelSource(detail.job.input_source)],
+        ["원본 항목 수", detail.job.original_count], ["유효 goods_key 수", detail.job.valid_count], ["중복 제외 수", detail.job.duplicate_count],
+        ["invalid 제외 수", detail.job.invalid_count], ["카나리 상품 수", detail.job.canary_size ?? 0], ["normal chunk 수", detail.job.total_chunk_count - 1],
+        ["총 chunk 수", detail.job.total_chunk_count], ["생성시간", new Date(detail.job.created_at).toLocaleString("ko-KR")], ["최근 갱신시간", new Date(detail.job.updated_at).toLocaleString("ko-KR")],
+      ].map(([key, value]) => <div className="rounded bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="break-all font-semibold">{value}</dd></div>)}</dl>
+
+      {detail.job.last_error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">마지막 오류: {detail.job.last_error}</p>}
+
+      {detail.job.status === "prepared" && <div className="mt-5 rounded-xl border border-red-300 bg-red-50 p-4">
+        <p className="font-bold text-red-900">다음 버튼은 카나리 상품의 실제 가격을 변경합니다.</p>
+        <p className="mt-1 text-sm text-red-800">카나리만 실행하며 일반 청크는 자동으로 시작하지 않습니다.</p>
+        <button type="button" disabled={acting} onClick={() => void runCanary()} className="mt-3 rounded-lg bg-red-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "처리 중..." : `카나리 ${detail.job.canary_size ?? Math.min(detail.job.valid_count, 10)}개 실제 실행`}</button>
+      </div>}
+
+      {new Set(["canary_dispatching", "canary_running", "dispatch_uncertain"]).has(detail.job.status) && <div className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <p className="font-bold text-amber-900">{detail.job.status === "dispatch_uncertain" ? "중복 실행 금지: 전송 여부가 불확실합니다." : "카나리 결과를 수동으로 확인하세요."}</p>
+        <p className="mt-1 text-sm text-amber-800">결과 확인은 같은 request_id만 조회하며 새 실행을 만들지 않습니다.</p>
+        <button type="button" disabled={acting || detail.job.status === "canary_dispatching"} onClick={() => void checkCanary()} className="mt-3 rounded-lg bg-amber-700 px-5 py-3 font-bold text-white disabled:opacity-50">{acting ? "확인 중..." : "카나리 결과 확인"}</button>
+      </div>}
+
+      {detail.job.status === "canary_succeeded" && <p className="mt-5 rounded-xl border border-emerald-300 bg-emerald-50 p-4 font-bold text-emerald-900">카나리가 성공했습니다. 일반 청크는 아직 실행되지 않았으며 다음 단계의 전체 실행 승인 기능을 기다립니다.</p>}
+      {detail.job.status === "canary_failed" && <p className="mt-5 rounded-xl border border-red-300 bg-red-50 p-4 font-bold text-red-900">카나리가 실패했습니다. 자동 재시도와 일반 청크 실행은 차단되어 있습니다.</p>}
+
+      {canary && <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm">
+        <h3 className="font-bold">카나리 청크</h3>
+        <p className="mt-2">상태: {labelChunkStatus(canary.status)} · 상품 수: {canary.goods_key_count}</p>
+        <p className="mt-1 break-all">request_id: {canary.request_id ?? "-"}</p>
+        {canary.actions_url && <a className="mt-2 inline-block text-blue-700 underline" href={canary.actions_url} target="_blank" rel="noreferrer">GitHub Actions 열기</a>}
+        {canary.last_error && <p className="mt-2 text-red-700">청크 오류: {canary.last_error}</p>}
+      </div>}
+
+      <div className="grid lg:grid-cols-2"><PreviewList title="goods_key 첫 20개" values={detail.first_goods_keys} /><PreviewList title="goods_key 마지막 5개" values={detail.last_goods_keys} /></div>
+    </div>}
+
+    <h3 className="mt-7 font-bold">최근 작업</h3>
+    <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{["생성시간", "상태", "입력 방식", "유효 상품 수", "총 청크 수", "작업번호"].map((value) => <th className="p-2" key={value}>{value}</th>)}</tr></thead><tbody>{jobs.map((job) => <tr tabIndex={0} role="button" onClick={() => void select(job.id)} onKeyDown={(event) => { if (event.key === "Enter") void select(job.id); }} className="cursor-pointer border-t hover:bg-slate-50" key={job.id}><td className="p-2">{new Date(job.created_at).toLocaleString("ko-KR")}</td><td className="p-2">{labelStatus(job.status)}</td><td className="p-2">{labelSource(job.input_source)}</td><td className="p-2">{job.valid_count}</td><td className="p-2">{job.total_chunk_count}</td><td className="p-2 font-mono">{job.id}</td></tr>)}</tbody></table></div>
+  </section>;
+}
+
+function PreviewList({ title, values }: { title: string; values: string[] }) {
+  return <div className="mt-4 rounded-lg bg-slate-50 p-4"><h4 className="text-sm font-bold">{title}</h4><ol className="mt-2 list-decimal pl-6 font-mono text-sm">{values.map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ol></div>;
+}
