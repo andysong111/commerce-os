@@ -212,10 +212,10 @@ export async function fetchShoplingPriceModifyActionsResult(requestId?: string):
       const runsJson = await readJson(await fetch(pageRequest.url, { headers: headers(pageRequest.token) }));
       const workflowRuns = Array.isArray(runsJson.workflow_runs) ? runsJson.workflow_runs : [];
       const completedRuns = workflowRuns.filter((run: GithubWorkflowRun) => run?.status === "completed");
-      candidateCount += completedRuns.length;
-      if (candidateCount > EXACT_RESULT_MAX_CANDIDATES) return { status: "pending", message: "완료 실행 후보가 안전 조회 한도를 초과했습니다. 잠시 후 다시 확인하세요.", requestId };
       for (const run of completedRuns) {
         const runId = Number(run.id); if (!Number.isFinite(runId)) continue;
+        if (candidateCount >= EXACT_RESULT_MAX_CANDIDATES) return { status: "pending", message: "완료 실행 후보가 안전 조회 한도를 초과했습니다. 잠시 후 다시 확인하세요.", requestId };
+        candidateCount += 1;
         const artifactsJson = await readJson(await fetch(`https://api.github.com/repos/${process.env.SHOPLING_PRICE_MODIFY_REPO?.trim()}/actions/runs/${runId}/artifacts`, { headers: headers(pageRequest.token) }));
         const artifact = (Array.isArray(artifactsJson.artifacts) ? artifactsJson.artifacts : []).find((item: GithubArtifact) => item?.name === ARTIFACT_NAME);
         if (!artifact?.archive_download_url) continue;
