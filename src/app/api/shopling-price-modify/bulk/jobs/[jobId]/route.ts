@@ -77,7 +77,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
     chunks: chunks.data ?? [],
     first_goods_keys: keys(first.data),
     last_goods_keys: keys(last.data).reverse(),
-    item_status_counts: { pending: pendingItems.count ?? 0, succeeded: succeededItems.count ?? 0, failed: failedCount },
+    item_status_counts: { pending: pendingItems.count ?? 0, succeeded: succeededItems.count ?? 0, failed: failedItems.count ?? 0 },
     chunk_status_counts: chunkStatusCounts,
     normal_chunk_count: normalChunks.length,
     retry_chunk_count: retryChunks.length,
