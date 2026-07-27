@@ -24,6 +24,7 @@ const ACTIVE_STATUSES = new Set([
   "retry_running",
   "dispatch_uncertain",
 ]);
+const FAILED_STATUSES = new Set(["canary_failed", "normal_failed", "retry_failed"]);
 
 type Selection = { label: string; result: ShoplingPriceBulkInputResult };
 type Job = {
@@ -59,13 +60,26 @@ const STEPS: Step[] = [
   { title: "4. 완료", description: "성공·실패 결과를 저장합니다." },
 ];
 
+function friendlyMessage(value: string) {
+  return value
+    .replaceAll("goods_key", "상품번호")
+    .replaceAll("Bulk", "대량 작업")
+    .replaceAll("bulk", "대량 작업")
+    .replaceAll("canary", "첫 10개 시험")
+    .replaceAll("chunk", "실행 묶음")
+    .replaceAll("invalid", "잘못된 번호");
+}
+
 function simpleStatus(detail: Detail) {
   const { job } = detail;
   if (job.status === "normal_succeeded" || (job.status === "canary_succeeded" && detail.normal_chunk_count === 0)) {
     return "모든 상품의 가격 변경이 완료되었습니다.";
   }
-  if (["canary_failed", "normal_failed", "retry_failed"].includes(job.status)) {
-    return `실패 상품 ${detail.failed_goods_key_count.toLocaleString("ko-KR")}개가 있어 자동으로 멈췄습니다.`;
+  if (job.automation_stop_reason) return friendlyMessage(job.automation_stop_reason);
+  if (FAILED_STATUSES.has(job.status)) {
+    return detail.failed_goods_key_count > 0
+      ? `실패 상품 ${detail.failed_goods_key_count.toLocaleString("ko-KR")}개가 있어 자동으로 멈췄습니다.`
+      : "결과를 안전하게 확정할 수 없어 자동으로 멈췄습니다.";
   }
   if (job.status === "dispatch_uncertain") return "전송 상태를 확인하고 있습니다. 중복 방지를 위해 새로 실행하지 않습니다.";
   if (["normal_paused", "retry_paused"].includes(job.status)) return "자동 실행이 일시중지되어 있습니다.";
@@ -77,14 +91,13 @@ function simpleStatus(detail: Detail) {
     const completed = detail.chunks.filter((chunk) => chunk.chunk_type === "normal" && ["succeeded", "recovered"].includes(chunk.status)).length;
     return `50개씩 자동으로 변경 중입니다. ${completed}/${detail.normal_chunk_count}묶음 완료`;
   }
-  if (job.automation_stop_reason) return job.automation_stop_reason;
   return "작업 상태를 확인하고 있습니다.";
 }
 
 function currentStep(detail: Detail | null) {
   if (!detail) return 1;
   if (detail.job.status === "normal_succeeded" || (detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0)) return 4;
-  if (["prepared", "canary_dispatching", "canary_running"].includes(detail.job.status)) return 2;
+  if (["prepared", "canary_dispatching", "canary_running", "canary_failed"].includes(detail.job.status)) return 2;
   return 3;
 }
 
@@ -100,11 +113,11 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   const clearError = useCallback(() => { setError(""); setDiagnostic(""); }, []);
   const handleError = useCallback((caught: unknown, fallback: string, operation: string) => {
     if (caught instanceof ShoplingPriceBulkApiError) {
-      setError(caught.message);
+      setError(friendlyMessage(caught.message));
       setDiagnostic(caught.diagnosticText);
       return;
     }
-    const message = caught instanceof Error ? caught.message : fallback;
+    const message = friendlyMessage(caught instanceof Error ? caught.message : fallback);
     setError(message);
     setDiagnostic(JSON.stringify({ timestamp: new Date().toISOString(), operation, error: message }, null, 2));
   }, []);
@@ -138,7 +151,11 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   }, [loadDetail]);
 
   useEffect(() => {
-    if (!detail || detail.job.automation_mode !== "auto" || !ACTIVE_STATUSES.has(detail.job.status)) return;
+    if (!detail
+      || detail.job.automation_mode !== "auto"
+      || detail.job.automation_finished_at
+      || detail.job.automation_stop_reason
+      || !ACTIVE_STATUSES.has(detail.job.status)) return;
     const timer = window.setTimeout(() => void loadDetail(detail.job.id), 15_000);
     return () => window.clearTimeout(timer);
   }, [detail, loadDetail]);
@@ -201,7 +218,9 @@ export function ShoplingPriceModifySimpleAutoRunner() {
       );
       const jobId = typeof body.id === "string" ? body.id : "";
       if (!jobId) throw new Error("작업번호를 받지 못했습니다.");
-      setNotice(typeof body.message === "string" ? body.message : "자동 가격 변경을 시작했습니다.");
+      const message = friendlyMessage(typeof body.message === "string" ? body.message : "자동 가격 변경을 시작했습니다.");
+      if (body.outcome === "stopped") setError(message);
+      else setNotice(message);
       await loadDetail(jobId);
     } catch (caught) {
       handleError(caught, "자동 가격 변경을 시작하지 못했습니다.", "simple_auto.create");
@@ -226,7 +245,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
         },
         `simple_auto.${action}`,
       );
-      setNotice(String(body.message ?? label));
+      setNotice(friendlyMessage(String(body.message ?? label)));
       await loadDetail(detail.job.id);
     } catch (caught) {
       handleError(caught, "실행 상태를 변경하지 못했습니다.", `simple_auto.${action}`);
@@ -250,7 +269,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
         },
         "simple_auto.retry",
       );
-      setNotice(String(body.message ?? "실패 상품만 다시 실행합니다."));
+      setNotice(friendlyMessage(String(body.message ?? "실패 상품만 다시 실행합니다.")));
       await loadDetail(detail.job.id);
     } catch (caught) {
       handleError(caught, "실패 상품을 다시 실행하지 못했습니다.", "simple_auto.retry");
@@ -262,16 +281,26 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   const step = currentStep(detail);
   const preview = selection?.result;
   const retryAllowed = detail
-    ? ["canary_failed", "normal_failed", "retry_failed"].includes(detail.job.status)
+    ? FAILED_STATUSES.has(detail.job.status)
       && detail.failed_goods_key_count > 0
       && detail.job.retry_scope_known !== false
       && (detail.job.retry_round ?? 0) < (detail.job.max_retry_rounds ?? 2)
     : false;
+  const activeAutoExists = detail?.job.automation_mode === "auto"
+    && !detail.job.automation_finished_at
+    && !detail.job.automation_stop_reason
+    && ACTIVE_STATUSES.has(detail.job.status);
   const completed = detail?.item_status_counts.succeeded ?? 0;
   const failed = detail?.item_status_counts.failed ?? 0;
   const total = detail?.job.valid_count ?? preview?.validCount ?? 0;
   const progress = total > 0 ? Math.floor((completed + failed) * 100 / total) : 0;
   const status = useMemo(() => detail ? simpleStatus(detail) : "상품번호를 넣고 실행 전 내용을 확인하세요.", [detail]);
+  const resultAvailable = detail && (
+    detail.job.status === "normal_succeeded"
+    || (detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0)
+    || FAILED_STATUSES.has(detail.job.status)
+    || Boolean(detail.job.automation_stop_reason)
+  );
 
   return <div className="space-y-6">
     <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
@@ -287,7 +316,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
         <label className="rounded-xl border p-4">
           <span className="font-bold">엑셀·CSV 선택</span>
           <input type="file" accept=".xlsx,.csv" onChange={onFile} className="mt-3 block w-full" />
-          <span className="mt-2 block text-xs text-slate-500">첫 시트 A열에 상품번호를 넣고 A1에는 goods_key를 적습니다.</span>
+          <span className="mt-2 block text-xs text-slate-500">첫 줄에는 시스템 양식명 goods_key, 둘째 줄부터 상품번호를 넣습니다.</span>
         </label>
         <label className="rounded-xl border p-4">
           <span className="font-bold">직접 붙여넣기</span>
@@ -309,10 +338,11 @@ export function ShoplingPriceModifySimpleAutoRunner() {
           ].map(([label, value]) => <div key={label} className="rounded-lg bg-white p-3"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 text-xl font-black">{Number(value).toLocaleString("ko-KR")}</dd></div>)}
         </dl>
         <p className="mt-4 text-sm font-semibold text-blue-900">안전 방식: 첫 10개 확인 후 나머지를 50개씩 자동 실행합니다.</p>
-        <button type="button" disabled={busy || preview.validCount === 0} onClick={() => void start()} className="mt-5 w-full rounded-xl bg-blue-700 px-6 py-4 text-lg font-black text-white shadow-sm disabled:opacity-50">
-          {busy ? "시작 준비 중..." : "전체 가격 자동 변경 시작"}
+        <button type="button" disabled={busy || preview.validCount === 0 || activeAutoExists} onClick={() => void start()} className="mt-5 w-full rounded-xl bg-blue-700 px-6 py-4 text-lg font-black text-white shadow-sm disabled:opacity-50">
+          {busy ? "시작 준비 중..." : activeAutoExists ? "현재 자동 변경 작업 진행 중" : "전체 가격 자동 변경 시작"}
         </button>
-        <p className="mt-3 text-center text-sm text-slate-600">먼저 10개를 시험 실행합니다. 모두 성공하면 나머지를 자동 처리하며, 실패하거나 전송 상태가 불확실하면 즉시 멈춥니다.</p>
+        {activeAutoExists && <p className="mt-3 text-center text-sm font-semibold text-amber-800">현재 작업이 끝나거나 안전하게 중단된 뒤 새 작업을 시작할 수 있습니다.</p>}
+        {!activeAutoExists && <p className="mt-3 text-center text-sm text-slate-600">먼저 10개를 시험 실행합니다. 모두 성공하면 나머지를 자동 처리하며, 실패하거나 전송 상태가 불확실하면 즉시 멈춥니다.</p>}
         <details className="mt-4 text-sm text-slate-600"><summary className="cursor-pointer font-semibold">상세 보기</summary><p className="mt-2">입력 방식: {selection.label} · 원본 {preview.originalCount.toLocaleString("ko-KR")}개 · 예상 쇼핑몰 수정 행 {(preview.validCount * 24).toLocaleString("ko-KR")}개</p></details>
       </div>}
     </section>
@@ -342,7 +372,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
         {(["normal_running", "retry_running"].includes(detail.job.status)) && <button type="button" disabled={busy} onClick={() => void control("pause")} className="rounded-lg bg-amber-700 px-4 py-3 font-bold text-white disabled:opacity-50">현재 묶음 후 멈추기</button>}
         {(["normal_paused", "retry_paused"].includes(detail.job.status)) && <button type="button" disabled={busy} onClick={() => void control("resume")} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">계속 실행</button>}
         {retryAllowed && <button type="button" disabled={busy} onClick={() => void retry()} className="rounded-lg bg-red-700 px-4 py-3 font-bold text-white disabled:opacity-50">실패 상품만 다시 실행</button>}
-        {(detail.job.status === "normal_succeeded" || (detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0)) && <a href={`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/report?format=csv`} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white">결과 파일 받기</a>}
+        {resultAvailable && <a href={`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/report?format=csv`} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white">결과 파일 받기</a>}
         <button type="button" disabled={busy} onClick={() => void loadDetail(detail.job.id)} className="rounded-lg border px-4 py-3 font-bold disabled:opacity-50">상태 다시 확인</button>
       </div>}
 
