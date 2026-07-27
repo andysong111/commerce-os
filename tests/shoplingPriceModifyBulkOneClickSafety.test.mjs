@@ -10,6 +10,7 @@ test("only one active unattended job per owner can exist", async () => {
   assert.match(sql, /on public\.shopling_price_bulk_jobs\(owner_id\)/);
   assert.match(sql, /where automation_mode = 'auto'[\s\S]*?archived_at is null[\s\S]*?automation_finished_at is null[\s\S]*?automation_stop_reason is null/);
   assert.match(sql, /job\.automation_stop_reason is null/);
+  assert.match(sql, /automation_worker_id is distinct from p_worker_id/);
 });
 
 test("one-click creation fails before job creation when cron is missing", async () => {
