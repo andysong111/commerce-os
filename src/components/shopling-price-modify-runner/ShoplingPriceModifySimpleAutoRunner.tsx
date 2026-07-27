@@ -38,6 +38,7 @@ type Job = {
   automation_mode?: string;
   automation_stop_reason?: string | null;
   automation_finished_at?: string | null;
+  archived_at?: string | null;
   pause_requested?: boolean;
   retry_round?: number;
   max_retry_rounds?: number;
@@ -99,6 +100,15 @@ function currentStep(detail: Detail | null) {
   if (detail.job.status === "normal_succeeded" || (detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0)) return 4;
   if (["prepared", "canary_dispatching", "canary_running", "canary_failed"].includes(detail.job.status)) return 2;
   return 3;
+}
+
+function isUnfinishedAutoJob(detail: Detail | null) {
+  return Boolean(
+    detail
+      && detail.job.automation_mode === "auto"
+      && !detail.job.automation_finished_at
+      && !detail.job.archived_at,
+  );
 }
 
 export function ShoplingPriceModifySimpleAutoRunner() {
@@ -163,6 +173,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelection(null);
     setReading(true);
     clearError();
     try {
@@ -175,6 +186,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   };
 
   const onPaste = (value: string) => {
+    setSelection(null);
     clearError();
     try {
       setSelection({ label: "직접 붙여넣기", result: parseShoplingPriceBulkPaste(value) });
@@ -184,7 +196,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
   };
 
   const start = async () => {
-    if (!selection || selection.result.validCount === 0 || busy) return;
+    if (!selection || selection.result.validCount === 0 || busy || isUnfinishedAutoJob(detail)) return;
     const result = selection.result;
     const confirmed = window.confirm(
       `실제 상품 ${result.validCount.toLocaleString("ko-KR")}개의 가격을 변경합니다.\n\n` +
@@ -286,10 +298,7 @@ export function ShoplingPriceModifySimpleAutoRunner() {
       && detail.job.retry_scope_known !== false
       && (detail.job.retry_round ?? 0) < (detail.job.max_retry_rounds ?? 2)
     : false;
-  const activeAutoExists = detail?.job.automation_mode === "auto"
-    && !detail.job.automation_finished_at
-    && !detail.job.automation_stop_reason
-    && ACTIVE_STATUSES.has(detail.job.status);
+  const unfinishedAutoExists = isUnfinishedAutoJob(detail);
   const completed = detail?.item_status_counts.succeeded ?? 0;
   const failed = detail?.item_status_counts.failed ?? 0;
   const total = detail?.job.valid_count ?? preview?.validCount ?? 0;
@@ -338,11 +347,11 @@ export function ShoplingPriceModifySimpleAutoRunner() {
           ].map(([label, value]) => <div key={label} className="rounded-lg bg-white p-3"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 text-xl font-black">{Number(value).toLocaleString("ko-KR")}</dd></div>)}
         </dl>
         <p className="mt-4 text-sm font-semibold text-blue-900">안전 방식: 첫 10개 확인 후 나머지를 50개씩 자동 실행합니다.</p>
-        <button type="button" disabled={busy || preview.validCount === 0 || activeAutoExists} onClick={() => void start()} className="mt-5 w-full rounded-xl bg-blue-700 px-6 py-4 text-lg font-black text-white shadow-sm disabled:opacity-50">
-          {busy ? "시작 준비 중..." : activeAutoExists ? "현재 자동 변경 작업 진행 중" : "전체 가격 자동 변경 시작"}
+        <button type="button" disabled={busy || preview.validCount === 0 || unfinishedAutoExists} onClick={() => void start()} className="mt-5 w-full rounded-xl bg-blue-700 px-6 py-4 text-lg font-black text-white shadow-sm disabled:opacity-50">
+          {busy ? "시작 준비 중..." : unfinishedAutoExists ? "현재 자동 변경 작업 미완료" : "전체 가격 자동 변경 시작"}
         </button>
-        {activeAutoExists && <p className="mt-3 text-center text-sm font-semibold text-amber-800">현재 작업이 끝나거나 안전하게 중단된 뒤 새 작업을 시작할 수 있습니다.</p>}
-        {!activeAutoExists && <p className="mt-3 text-center text-sm text-slate-600">먼저 10개를 시험 실행합니다. 모두 성공하면 나머지를 자동 처리하며, 실패하거나 전송 상태가 불확실하면 즉시 멈춥니다.</p>}
+        {unfinishedAutoExists && <p className="mt-3 rounded-lg bg-amber-50 p-3 text-center text-sm font-semibold text-amber-900">기존 자동 작업을 먼저 계속 실행하거나 실패 상품만 다시 실행하세요. 더 이상 진행하지 않을 작업은 고급 관리에서 보관한 뒤 새 작업을 시작할 수 있습니다.</p>}
+        {!unfinishedAutoExists && <p className="mt-3 text-center text-sm text-slate-600">먼저 10개를 시험 실행합니다. 모두 성공하면 나머지를 자동 처리하며, 실패하거나 전송 상태가 불확실하면 즉시 멈춥니다.</p>}
         <details className="mt-4 text-sm text-slate-600"><summary className="cursor-pointer font-semibold">상세 보기</summary><p className="mt-2">입력 방식: {selection.label} · 원본 {preview.originalCount.toLocaleString("ko-KR")}개 · 예상 쇼핑몰 수정 행 {(preview.validCount * 24).toLocaleString("ko-KR")}개</p></details>
       </div>}
     </section>
