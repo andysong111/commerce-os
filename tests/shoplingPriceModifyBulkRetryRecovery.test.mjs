@@ -20,15 +20,18 @@ test("004 migration provides bounded failed-only retry, recovery, pause, and ser
   assert.match(sql, /max_retry_rounds integer not null default 2/);
   assert.match(sql, /retry_scope_known boolean not null default true/);
   assert.match(sql, /where job_id = p_job_id and status = 'failed'/);
-  assert.match(sql, /row_number\(\) over \(order by ordinal\) - 1\) \/ 50/);
+  assert.match(sql, /row_number\(\) over\s*\(order by ordinal\)\s*-\s*1\)\s*\/\s*50/);
   assert.match(sql, /v_job\.retry_round >= v_job\.max_retry_rounds/);
   assert.match(sql, /for update skip locked/);
-  assert.match(sql, /status in \('dispatching', 'running', 'dispatch_uncertain'\)/);
+  assert.match(sql, /status in \('dispatching'\s*,\s*'running'\s*,\s*'dispatch_uncertain'\)/);
   assert.match(sql, /status = 'superseded'/);
   assert.match(sql, /retry failure scope is unknown/);
   assert.match(sql, /if v_job\.id is null then raise exception 'job not found for owner'/);
   assert.match(sql, /where job_id = v_job\.id[\s\S]*request_id = p_request_id/);
-  assert.match(sql, /pause_requested then[\s\S]*status = 'retry_paused'[\s\S]*'paused', true/);
+  assert.match(sql, /v_job\.status = 'retry_paused'[\s\S]*'paused',true/);
+  assert.match(sql, /v_job\.status = 'normal_paused'[\s\S]*'paused',true/);
+  assert.match(sql, /from unnest\(v_failed\) as failed_key\(value\)/);
+  assert.match(sql, /chunk_key\.value = failed_key\.value/);
 
   for (const rpc of [
     "approve_shopling_price_bulk_failed_retry",
@@ -67,7 +70,7 @@ test("unknown retry failure scope blocks later retry approval and is visible to 
     read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/route.ts"),
     read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx"),
   ]);
-  assert.match(sql, /retry_scope_known = case[\s\S]*else p_failure_scope_known/);
+  assert.match(sql, /retry_scope_known = case when p_success then true else p_failure_scope_known end/);
   assert.match(sql, /if not v_job\.retry_scope_known then/);
   assert.match(route, /retry_scope_known/);
   assert.match(ui, /detail\.job\.retry_scope_known !== false/);
