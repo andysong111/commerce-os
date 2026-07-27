@@ -14,9 +14,11 @@ type ArchivedJob = {
   total_chunk_count: number;
   archived_at?: string | null;
   archive_note?: string | null;
+  archive_previous_status?: string | null;
   created_at: string;
 };
 type OpsReport = {
+  summary_only?: boolean;
   job: {
     id: string;
     status: string;
@@ -54,6 +56,15 @@ type AuditEvent = {
 };
 
 const STORAGE_KEY = "shoplingPriceModifyBulkRecentJobId";
+const ARCHIVEABLE_STATUSES = new Set([
+  "prepared",
+  "validation_only",
+  "canary_failed",
+  "normal_succeeded",
+  "normal_failed",
+  "retry_failed",
+  "cancelled",
+]);
 const readCurrentJobId = () => {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get("bulkJobId")
@@ -114,7 +125,7 @@ export function ShoplingPriceModifyBulkOperations() {
     if (!targetId) return;
     try {
       const body = await requestShoplingPriceBulkJson(
-        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(targetId)}/report?format=json`,
+        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(targetId)}/report?format=json&summary=1`,
         undefined,
         "bulk_ops.report",
       );
@@ -217,12 +228,9 @@ export function ShoplingPriceModifyBulkOperations() {
       localStorage.setItem(STORAGE_KEY, id);
       const url = new URL(window.location.href);
       url.searchParams.set("bulkJobId", id);
-      window.history.replaceState(null, "", url);
-      await loadReport(id);
-      setNotice(String(body.message ?? "20,000개 검증 전용 작업을 저장했습니다."));
+      window.location.assign(url.toString());
     } catch (caught) {
       handleError(caught, "20,000개 검증 전용 작업 저장에 실패했습니다.", "bulk_ops.validation_create");
-    } finally {
       setBusy(false);
     }
   };
@@ -233,16 +241,14 @@ export function ShoplingPriceModifyBulkOperations() {
     setBusy(true);
     clearMessages();
     try {
-      const body = await requestShoplingPriceBulkJson(
+      await requestShoplingPriceBulkJson(
         `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/archive`,
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "CONFIRM_BULK_ARCHIVE", note: "manual archive" }) },
         "bulk_ops.archive",
       );
-      setNotice(String(body.message));
-      await Promise.all([loadReport(jobId), loadArchived()]);
+      window.location.reload();
     } catch (caught) {
       handleError(caught, "작업 보관에 실패했습니다.", "bulk_ops.archive");
-    } finally {
       setBusy(false);
     }
   };
@@ -258,9 +264,12 @@ export function ShoplingPriceModifyBulkOperations() {
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "CONFIRM_BULK_RESTORE" }) },
         "bulk_ops.restore",
       );
+      if (targetId === jobId) {
+        window.location.reload();
+        return;
+      }
       setNotice(String(body.message));
       await loadArchived();
-      if (targetId === jobId) await loadReport(targetId);
     } catch (caught) {
       handleError(caught, "보관 해제에 실패했습니다.", "bulk_ops.restore");
     } finally {
@@ -290,6 +299,11 @@ export function ShoplingPriceModifyBulkOperations() {
 
   const mode = report?.job.execution_mode ?? "live";
   const archived = Boolean(report?.job.archived_at);
+  const pendingNormal = report?.chunks.some((chunk) => chunk.chunk_type === "normal" && ["pending", "dispatching", "running", "dispatch_uncertain"].includes(String(chunk.status))) ?? false;
+  const archiveAllowed = Boolean(report && !archived && (ARCHIVEABLE_STATUSES.has(report.job.status) || (report.job.status === "canary_succeeded" && !pendingNormal)));
+  const chunkCountSummary = report
+    ? Object.entries(report.chunk_status_counts).filter(([, count]) => count > 0).map(([status, count]) => `${status} ${count}`).join(" · ") || "-"
+    : "-";
 
   return <section className="rounded-2xl border border-violet-200 bg-white p-6 shadow-sm">
     <h2 className="text-xl font-bold text-slate-950">운영 검증·관측·정리</h2>
@@ -304,7 +318,7 @@ export function ShoplingPriceModifyBulkOperations() {
         <button type="button" disabled={busy} onClick={() => void downloadReport("json")} className="rounded-lg bg-violet-700 px-4 py-2 font-bold text-white disabled:opacity-50">운영 리포트 JSON 다운로드</button>
         <button type="button" disabled={busy} onClick={() => void downloadReport("csv")} className="rounded-lg bg-violet-700 px-4 py-2 font-bold text-white disabled:opacity-50">상품 결과 CSV 다운로드</button>
         <button type="button" disabled={busy} onClick={() => void loadAudit()} className="rounded-lg bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">감사 로그 보기</button>
-        {!archived && <button type="button" disabled={busy} onClick={() => void archiveCurrent()} className="rounded-lg bg-amber-700 px-4 py-2 font-bold text-white disabled:opacity-50">작업 보관</button>}
+        {archiveAllowed && <button type="button" disabled={busy} onClick={() => void archiveCurrent()} className="rounded-lg bg-amber-700 px-4 py-2 font-bold text-white disabled:opacity-50">작업 보관</button>}
         {archived && <button type="button" disabled={busy} onClick={() => void restoreJob(jobId)} className="rounded-lg bg-emerald-700 px-4 py-2 font-bold text-white disabled:opacity-50">보관 해제</button>}
       </>}
     </div>
@@ -318,6 +332,7 @@ export function ShoplingPriceModifyBulkOperations() {
         ["작업 상태", report.job.status],
         ["총 상품", report.job.valid_count],
         ["총 청크", report.job.total_chunk_count],
+        ["청크 상태", chunkCountSummary],
         ["성공 상품", report.item_status_counts.succeeded ?? 0],
         ["실패 상품", report.item_status_counts.failed ?? 0],
         ["대기 상품", report.item_status_counts.pending ?? 0],
@@ -357,7 +372,7 @@ export function ShoplingPriceModifyBulkOperations() {
 
     <details className="mt-6 rounded-xl border p-4">
       <summary className="cursor-pointer font-bold">보관된 Bulk 작업 ({archivedJobs.length})</summary>
-      <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">생성시간</th><th className="p-2">원래 상태</th><th className="p-2">상품 수</th><th className="p-2">작업번호</th><th className="p-2">작업</th></tr></thead><tbody>{archivedJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-2">{new Date(job.created_at).toLocaleString("ko-KR")}</td><td className="p-2">{job.status}</td><td className="p-2">{job.valid_count}</td><td className="p-2 font-mono text-xs">{job.id}</td><td className="p-2"><button type="button" disabled={busy} onClick={() => void restoreJob(job.id)} className="rounded bg-emerald-700 px-3 py-1 text-white disabled:opacity-50">보관 해제</button></td></tr>)}</tbody></table></div>
+      <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">생성시간</th><th className="p-2">보관 전 상태</th><th className="p-2">상품 수</th><th className="p-2">작업번호</th><th className="p-2">작업</th></tr></thead><tbody>{archivedJobs.map((job) => <tr key={job.id} className="border-t"><td className="p-2">{new Date(job.created_at).toLocaleString("ko-KR")}</td><td className="p-2">{job.archive_previous_status ?? job.status}</td><td className="p-2">{job.valid_count}</td><td className="p-2 font-mono text-xs">{job.id}</td><td className="p-2"><button type="button" disabled={busy} onClick={() => void restoreJob(job.id)} className="rounded bg-emerald-700 px-3 py-1 text-white disabled:opacity-50">보관 해제</button></td></tr>)}</tbody></table></div>
     </details>
   </section>;
 }
