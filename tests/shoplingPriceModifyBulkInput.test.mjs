@@ -85,9 +85,9 @@ test("planned chunk counts follow a 10-item canary and 50-item regular chunks", 
   for (const [count, expected] of [[0,0],[1,1],[10,1],[11,2],[50,2],[51,2],[60,2],[61,3],[10_000,201]]) assert.equal(plannedShoplingPriceBulkChunkCount(count), expected);
 });
 
-test("UI contract keeps input validation and the existing runner", async () => {
+test("UI contract keeps input validation and the existing runner on the advanced route", async () => {
   const [page, component, library] = await Promise.all([
-    readFile(new URL("../src/app/shopling-price-modify-runner/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/shopling-price-modify-runner/advanced/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/shoplingPriceModifyBulkInput.ts", import.meta.url), "utf8"),
   ]);
