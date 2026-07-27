@@ -3,6 +3,7 @@ import { normalError, normalSession, type BulkAdmin } from "@/lib/shoplingPriceM
 import {
   calculateShoplingPriceBulkTiming,
   createShoplingPriceBulkItemsCsv,
+  redactShoplingPriceBulkOperationalText,
   type ShoplingPriceBulkOpsChunk,
   type ShoplingPriceBulkOpsItem,
 } from "@/lib/shoplingPriceModifyBulkOps";
@@ -38,7 +39,7 @@ async function loadItems(admin: BulkAdmin, jobId: string) {
         ordinal,
         status: typeof row.status === "string" ? row.status : "unknown",
         attempt_count: Number(row.attempt_count ?? 0),
-        last_error: typeof row.last_error === "string" ? row.last_error.slice(0, 1000) : null,
+        last_error: redactShoplingPriceBulkOperationalText(row.last_error, 80),
       });
       lastOrdinal = ordinal;
     }
@@ -76,7 +77,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   }
 
   const jobResult = await auth.admin!.from("shopling_price_bulk_jobs")
-    .select("id,owner_id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,created_at,updated_at,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,archive_note")
+    .select("id,owner_id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,created_at,updated_at,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,archive_note,archive_previous_status")
     .eq("id", jobId)
     .eq("owner_id", auth.ownerId)
     .maybeSingle();
@@ -116,7 +117,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     started_at: typeof row.started_at === "string" ? row.started_at : null,
     completed_at: typeof row.completed_at === "string" ? row.completed_at : null,
     updated_at: typeof row.updated_at === "string" ? row.updated_at : null,
-    last_error: typeof row.last_error === "string" ? row.last_error.slice(0, 1000) : null,
+    last_error: redactShoplingPriceBulkOperationalText(row.last_error, 160),
   })) as ShoplingPriceBulkOpsChunk[];
 
   const chunkStatusCounts = chunks.reduce<Record<string, number>>((counts, chunk) => {
@@ -162,8 +163,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
       created_at: job.created_at,
       updated_at: job.updated_at,
       archived_at: job.archived_at,
-      archive_note: job.archive_note,
-      last_error: typeof job.last_error === "string" ? job.last_error.slice(0, 1000) : null,
+      archive_note: redactShoplingPriceBulkOperationalText(job.archive_note, 160),
+      archive_previous_status: job.archive_previous_status,
+      last_error: redactShoplingPriceBulkOperationalText(job.last_error, 160),
     },
     item_status_counts: itemStatusCounts,
     chunk_status_counts: chunkStatusCounts,
