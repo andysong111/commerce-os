@@ -9,6 +9,7 @@ import {
 
 export const runtime = "nodejs";
 const MAX_ITEMS = 20_000;
+const MAX_CHUNKS = 2_000;
 const PAGE_SIZE = 1_000;
 
 async function loadItems(admin: BulkAdmin, jobId: string) {
@@ -68,7 +69,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     .select("chunk_index,chunk_type,status,goods_key_count,attempt_count,retry_round,request_id,actions_url,started_at,completed_at,updated_at,last_error")
     .eq("job_id", jobId)
     .order("chunk_index", { ascending: true })
-    .limit(1000);
+    .limit(MAX_CHUNKS);
   if (chunkResult.error) return normalError("운영 리포트 청크 조회에 실패했습니다.", 500, "REPORT_CHUNK_QUERY_FAILED", "report.chunk_query", chunkResult.error);
 
   let items: ShoplingPriceBulkOpsItem[];
