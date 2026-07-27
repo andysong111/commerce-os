@@ -48,11 +48,29 @@ async function loadItems(admin: BulkAdmin, jobId: string) {
   return items;
 }
 
+async function loadItemStatusCounts(admin: BulkAdmin, jobId: string) {
+  const [pending, succeeded, failed] = await Promise.all([
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "pending"),
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "succeeded"),
+    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "failed"),
+  ]);
+  if (pending.error || succeeded.error || failed.error) {
+    throw pending.error ?? succeeded.error ?? failed.error;
+  }
+  return {
+    pending: pending.count ?? 0,
+    succeeded: succeeded.count ?? 0,
+    failed: failed.count ?? 0,
+  };
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
   const auth = await normalSession();
   if (auth.response) return auth.response;
   const { jobId } = await params;
-  const format = new URL(request.url).searchParams.get("format") ?? "json";
+  const searchParams = new URL(request.url).searchParams;
+  const format = searchParams.get("format") ?? "json";
+  const summaryOnly = format === "json" && searchParams.get("summary") === "1";
   if (!new Set(["json", "csv"]).has(format)) {
     return normalError("지원하지 않는 리포트 형식입니다.", 400, "REPORT_FORMAT_INVALID", "report.format");
   }
@@ -72,9 +90,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     .limit(MAX_CHUNKS);
   if (chunkResult.error) return normalError("운영 리포트 청크 조회에 실패했습니다.", 500, "REPORT_CHUNK_QUERY_FAILED", "report.chunk_query", chunkResult.error);
 
-  let items: ShoplingPriceBulkOpsItem[];
+  let items: ShoplingPriceBulkOpsItem[] = [];
+  let itemStatusCounts: Record<string, number>;
   try {
-    items = await loadItems(auth.admin!, jobId);
+    if (summaryOnly) {
+      itemStatusCounts = await loadItemStatusCounts(auth.admin!, jobId);
+    } else {
+      items = await loadItems(auth.admin!, jobId);
+      itemStatusCounts = Object.fromEntries(["pending", "succeeded", "failed"].map((status) => [status, items.filter((item) => item.status === status).length]));
+    }
   } catch (error) {
     return normalError("운영 리포트 상품 조회에 실패했습니다.", 500, "REPORT_ITEM_QUERY_FAILED", "report.item_query", error);
   }
@@ -95,7 +119,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     last_error: typeof row.last_error === "string" ? row.last_error.slice(0, 1000) : null,
   })) as ShoplingPriceBulkOpsChunk[];
 
-  const itemStatusCounts = Object.fromEntries(["pending", "succeeded", "failed"].map((status) => [status, items.filter((item) => item.status === status).length]));
   const chunkStatusCounts = chunks.reduce<Record<string, number>>((counts, chunk) => {
     counts[chunk.status] = (counts[chunk.status] ?? 0) + 1;
     return counts;
@@ -118,6 +141,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   return NextResponse.json({
     report_schema_version: 1,
     generated_at: new Date().toISOString(),
+    summary_only: summaryOnly,
     job: {
       id: job.id,
       status: jobStatus,
@@ -145,6 +169,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     chunk_status_counts: chunkStatusCounts,
     timing,
     chunks,
-    items,
+    items: summaryOnly ? undefined : items,
   }, { headers: { "cache-control": "no-store" } });
 }
