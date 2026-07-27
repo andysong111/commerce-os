@@ -47,6 +47,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   return NextResponse.json({
     goods_keys: goodsKeys,
     count: goodsKeys.length,
-    truncated: goodsKeys.length >= MAX_FAILED_KEYS,
+    truncated: false,
   });
 }
