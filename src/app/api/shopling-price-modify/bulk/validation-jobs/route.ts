@@ -14,7 +14,10 @@ export async function POST(request: Request) {
     return normalError("확인 문구가 필요합니다.", 400, "VALIDATION_BODY_INVALID", "validation.create.body");
   }
 
-  if ((body as { confirmation?: unknown })?.confirmation !== "CONFIRM_20000_VALIDATION_ONLY") {
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => key !== "confirmation")) {
+    return normalError("검증 전용 작업에는 확인 문구 외의 입력을 사용할 수 없습니다.", 400, "VALIDATION_BODY_FIELDS_INVALID", "validation.create.body");
+  }
+  if ((body as { confirmation?: unknown }).confirmation !== "CONFIRM_20000_VALIDATION_ONLY") {
     return normalError("20,000개 가격 무쓰기 검증 확인 문구가 일치하지 않습니다.", 400, "VALIDATION_CONFIRMATION_REQUIRED", "validation.create.confirmation");
   }
 
