@@ -355,6 +355,173 @@ begin
 end;
 $$;
 
+-- Stage 5 normally returns canary_succeeded after a retry repairs a failed
+-- canary. If the operator requested a pause during that retry, keep the pause
+-- across the recovery boundary and do not let the same Cron run dispatch normal work.
+create or replace function public.finish_shopling_price_bulk_retry_chunk(
+  p_job_id uuid,
+  p_owner_id uuid,
+  p_request_id text,
+  p_success boolean,
+  p_failure_scope_known boolean,
+  p_failed_keys text[],
+  p_summary jsonb,
+  p_run_url text,
+  p_error text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.shopling_price_bulk_jobs;
+  v_chunk public.shopling_price_bulk_chunks;
+  v_failed text[] := coalesce(p_failed_keys,array[]::text[]);
+  v_remaining integer := 0;
+  v_status text;
+begin
+  if auth.role() <> 'service_role' then raise exception 'service_role required'; end if;
+
+  select * into v_job
+  from public.shopling_price_bulk_jobs
+  where id = p_job_id and owner_id = p_owner_id
+  for update;
+  if v_job.id is null then raise exception 'job not found for owner'; end if;
+
+  select * into v_chunk
+  from public.shopling_price_bulk_chunks
+  where job_id = v_job.id
+    and chunk_type = 'retry'
+    and request_id = p_request_id
+    and status in ('dispatching','running','dispatch_uncertain')
+  for update;
+  if v_chunk.id is null then raise exception 'retry result transition not allowed'; end if;
+
+  if exists (
+    select 1
+    from unnest(v_failed) as failed_key(value)
+    where not exists (
+      select 1
+      from jsonb_array_elements_text(v_chunk.goods_keys) as chunk_key(value)
+      where chunk_key.value = failed_key.value
+    )
+  ) then raise exception 'failed key outside chunk'; end if;
+  if p_success and cardinality(v_failed) > 0 then raise exception 'success cannot include failed keys'; end if;
+  if not p_success and p_failure_scope_known and cardinality(v_failed) = 0 then
+    raise exception 'known retry failure requires failed keys';
+  end if;
+
+  if p_success then
+    update public.shopling_price_bulk_items
+    set status = 'succeeded',last_error = null,updated_at = now()
+    where job_id = v_job.id
+      and goods_key in (select jsonb_array_elements_text(v_chunk.goods_keys));
+  elsif p_failure_scope_known then
+    update public.shopling_price_bulk_items
+    set status = case when goods_key = any(v_failed) then 'failed' else 'succeeded' end,
+        last_error = case
+          when goods_key = any(v_failed) then left(coalesce(p_error,'retry failed'),1000)
+          else null
+        end,
+        updated_at = now()
+    where job_id = v_job.id
+      and goods_key in (select jsonb_array_elements_text(v_chunk.goods_keys));
+  else
+    update public.shopling_price_bulk_items
+    set status = 'failed',
+        last_error = left(coalesce(p_error,'retry failure scope unknown'),1000),
+        updated_at = now()
+    where job_id = v_job.id
+      and goods_key in (select jsonb_array_elements_text(v_chunk.goods_keys));
+  end if;
+
+  update public.shopling_price_bulk_chunks
+  set status = case when p_success then 'succeeded' else 'failed' end,
+      result_summary = p_summary,
+      actions_url = coalesce(p_run_url,actions_url),
+      completed_at = now(),
+      updated_at = now(),
+      last_error = case when p_success then null else left(coalesce(p_error,'retry failed'),1000) end
+  where id = v_chunk.id;
+
+  if not p_success then
+    update public.shopling_price_bulk_chunks
+    set status = 'superseded',
+        updated_at = now(),
+        last_error = coalesce(last_error,'superseded after retry failure')
+    where job_id = v_job.id
+      and chunk_type = 'retry'
+      and retry_round = v_chunk.retry_round
+      and status = 'pending';
+    v_status := 'retry_failed';
+  else
+    update public.shopling_price_bulk_chunks original
+    set status = 'recovered',updated_at = now()
+    where original.job_id = v_job.id
+      and original.chunk_type in ('canary','normal')
+      and original.status = 'failed'
+      and not exists (
+        select 1
+        from jsonb_array_elements_text(original.goods_keys) as original_key(value)
+        join public.shopling_price_bulk_items item
+          on item.job_id = v_job.id and item.goods_key = original_key.value
+        where item.status <> 'succeeded'
+      );
+
+    select count(*) into v_remaining
+    from public.shopling_price_bulk_chunks
+    where job_id = v_job.id
+      and chunk_type = 'retry'
+      and retry_round = v_job.retry_round
+      and status = 'pending';
+
+    if v_remaining > 0 then
+      v_status := case when v_job.pause_requested then 'retry_paused' else 'retry_running' end;
+    elsif v_job.retry_resume_status = 'canary_succeeded' then
+      if not exists (
+        select 1 from public.shopling_price_bulk_chunks
+        where job_id = v_job.id
+          and chunk_type = 'canary'
+          and status in ('succeeded','recovered')
+      ) then raise exception 'canary was not recovered'; end if;
+
+      if v_job.pause_requested and exists (
+        select 1 from public.shopling_price_bulk_chunks
+        where job_id = v_job.id
+          and chunk_type = 'normal'
+          and status = 'pending'
+      ) then
+        v_status := 'normal_paused';
+      else
+        v_status := 'canary_succeeded';
+      end if;
+    elsif exists (
+      select 1 from public.shopling_price_bulk_chunks
+      where job_id = v_job.id and chunk_type = 'normal' and status = 'pending'
+    ) then
+      v_status := case when v_job.pause_requested then 'normal_paused' else 'normal_running' end;
+    else
+      v_status := 'normal_succeeded';
+    end if;
+  end if;
+
+  update public.shopling_price_bulk_jobs
+  set status = v_status,
+      pause_requested = (v_status in ('normal_paused','retry_paused')),
+      retry_scope_known = case when p_success then true else p_failure_scope_known end,
+      last_error = case when p_success then null else left(coalesce(p_error,'retry failed'),1000) end,
+      updated_at = now()
+  where id = v_job.id and owner_id = p_owner_id;
+
+  return jsonb_build_object(
+    'status',v_status,
+    'remaining_chunk_count',v_remaining,
+    'chunk_index',v_chunk.chunk_index,
+    'retry_scope_known',case when p_success then true else p_failure_scope_known end
+  );
+end;
+$$;
+
 -- Preserve Stage 6 archive behavior and additionally allow a deliberately stopped
 -- or paused unattended job to release the owner's single-auto-job slot. Active
 -- chunks always block archival, regardless of status or stop reason.
