@@ -11,15 +11,18 @@ type BulkSingleResult = { data: Record<string, unknown> | null; error: unknown }
 type BulkAdminQuery = PromiseLike<BulkQueryResult> & {
   select(columns: string): BulkAdminQuery;
   eq(column: string, value: unknown): BulkAdminQuery;
+  gt(column: string, value: unknown): BulkAdminQuery;
   in(column: string, values: readonly unknown[]): BulkAdminQuery;
   order(column: string, options: { ascending: boolean }): BulkAdminQuery;
   limit(count: number): BulkAdminQuery;
+  range(from: number, to: number): BulkAdminQuery;
   maybeSingle(): Promise<BulkSingleResult>;
 };
 export type BulkAdmin = {
   rpc(name: string, parameters: Record<string, unknown>): Promise<{ data: unknown; error: unknown }>;
   from(table: string): BulkAdminQuery;
 };
+
 export async function normalSession() {
   try {
     const supabase = await createSupabaseServerClient();
@@ -39,7 +42,11 @@ export async function normalSession() {
     return { response: normalError("로그인 세션을 확인할 수 없습니다.", 500, "AUTH_SESSION_FAILED", "normal.session.auth", error) };
   }
 }
+
 export function normalError(error: string, status: number, code: string, stage: string, detail?: unknown) {
   return NextResponse.json({ error, code, stage, detail: normalErrorDetail(detail), diagnostic_id: randomUUID() }, { status });
 }
-export function rpcData(value: unknown): Record<string, unknown> { return (Array.isArray(value) ? value[0] : value) as Record<string, unknown>; }
+
+export function rpcData(value: unknown): Record<string, unknown> {
+  return (Array.isArray(value) ? value[0] : value) as Record<string, unknown>;
+}

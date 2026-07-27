@@ -8,6 +8,7 @@ export async function POST(_request:Request,{params}:{params:Promise<{jobId:stri
  const reserved=await auth.admin!.rpc("reserve_next_shopling_price_bulk_normal_chunk",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId});
  if(reserved.error||!reserved.data)return normalError("다음 일반 청크를 예약할 수 없습니다.",409,"NORMAL_RESERVE_REJECTED","normal.advance.reserve",reserved.error);
  const context=rpcData(reserved.data); if(context.completed)return NextResponse.json({status:"normal_succeeded",message:"모든 상품의 가격설정 작업이 완료되었습니다."});
+ if(context.paused)return NextResponse.json({status:"normal_paused",message:"직렬 실행이 안전하게 일시중지되었습니다."});
  const keys=Array.isArray(context.goods_keys)?context.goods_keys.filter((v):v is string=>typeof v==="string"):[];
  const dispatched=await dispatchShoplingPriceBulkNormal(keys,context.policy_overrides,requestId);
  if(dispatched.status==="queued") {

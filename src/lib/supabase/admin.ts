@@ -25,6 +25,11 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     return this;
   }
 
+  gt(column: string, value: unknown) {
+    this.params.append(column, `gt.${String(value)}`);
+    return this;
+  }
+
   in(column: string, values: readonly unknown[]) {
     if (values.length === 0) throw new TypeError("Supabase REST in filter requires at least one value.");
     const encodedValues = values.map((value) => {
@@ -42,6 +47,15 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
 
   limit(count: number) {
     this.params.set("limit", String(count));
+    return this;
+  }
+
+  range(from: number, to: number) {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+      throw new TypeError("Supabase REST range requires integer bounds with 0 <= from <= to.");
+    }
+    this.params.set("offset", String(from));
+    this.params.set("limit", String(to - from + 1));
     return this;
   }
 
