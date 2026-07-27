@@ -330,7 +330,7 @@ begin
     ordinal <= 10,
     'pending',
     0
-  from generate_series(1, p_count) ordinal;
+  from generate_series(1, p_count) as series(ordinal);
 
   insert into public.shopling_price_bulk_chunks(
     job_id, chunk_index, chunk_type, goods_keys, goods_key_count, status, attempt_count
@@ -348,7 +348,7 @@ begin
       (990000000000::bigint + ordinal)::text as goods_key,
       ordinal,
       case when ordinal <= 10 then 0 else 1 + ((ordinal - 11) / 50)::integer end as chunk_index
-    from generate_series(1, p_count) ordinal
+    from generate_series(1, p_count) as series(ordinal)
   ) seeds
   group by chunk_index
   order by chunk_index;
