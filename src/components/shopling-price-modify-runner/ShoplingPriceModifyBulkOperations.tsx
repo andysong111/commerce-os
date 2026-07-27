@@ -123,6 +123,7 @@ export function ShoplingPriceModifyBulkOperations() {
 
   const loadReport = useCallback(async (targetId: string) => {
     if (!targetId) return;
+    setAudit([]);
     try {
       const body = await requestShoplingPriceBulkJson(
         `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(targetId)}/report?format=json&summary=1`,
@@ -178,8 +179,8 @@ export function ShoplingPriceModifyBulkOperations() {
     try {
       const body = await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/audit`, undefined, "bulk_ops.audit");
       const events = Array.isArray(body.events) ? body.events as AuditEvent[] : [];
-      setAudit(events.slice(0, 100));
-      setNotice(`감사 로그 ${Math.min(events.length, 100)}개를 불러왔습니다.`);
+      setAudit(events);
+      setNotice(`감사 로그 ${events.length}개를 불러왔습니다. 화면에는 최신 100개만 표시하고 다운로드에는 전체 조회 결과를 포함합니다.`);
     } catch (caught) {
       handleError(caught, "감사 로그 조회에 실패했습니다.", "bulk_ops.audit");
     } finally {
@@ -288,6 +289,11 @@ export function ShoplingPriceModifyBulkOperations() {
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "CONFIRM_ARCHIVE_STALE_PREPARED", older_than_days: days }) },
         "bulk_ops.archive_stale",
       );
+      const archivedCount = Number(body.archived_count ?? 0);
+      if (archivedCount > 0) {
+        window.location.reload();
+        return;
+      }
       setNotice(String(body.message));
       await loadArchived();
     } catch (caught) {
@@ -346,8 +352,8 @@ export function ShoplingPriceModifyBulkOperations() {
     </div>}
 
     {audit.length > 0 && <div className="mt-5 rounded-xl border p-4">
-      <div className="flex items-center justify-between gap-3"><h3 className="font-bold">감사 로그 최근 {audit.length}개</h3><button type="button" onClick={downloadAudit} className="rounded bg-slate-800 px-3 py-2 text-white">감사 로그 JSON 다운로드</button></div>
-      <div className="mt-3 max-h-80 overflow-auto text-sm">{audit.map((event) => <div className="border-b py-2" key={event.id}><p><strong>{new Date(event.created_at).toLocaleString("ko-KR")}</strong> · {event.entity_type} · {event.event_type}</p><p className="text-slate-600">{event.old_status ?? "-"} → {event.new_status ?? "-"} · request_id {event.request_id ?? "-"}</p></div>)}</div>
+      <div className="flex items-center justify-between gap-3"><h3 className="font-bold">감사 로그 최근 {Math.min(audit.length, 100)}개 / 조회 {audit.length}개</h3><button type="button" onClick={downloadAudit} className="rounded bg-slate-800 px-3 py-2 text-white">감사 로그 JSON 다운로드</button></div>
+      <div className="mt-3 max-h-80 overflow-auto text-sm">{audit.slice(0, 100).map((event) => <div className="border-b py-2" key={event.id}><p><strong>{new Date(event.created_at).toLocaleString("ko-KR")}</strong> · {event.entity_type} · {event.event_type}</p><p className="text-slate-600">{event.old_status ?? "-"} → {event.new_status ?? "-"} · request_id {event.request_id ?? "-"}</p></div>)}</div>
     </div>}
 
     <div className="mt-6 rounded-xl border-2 border-amber-300 bg-amber-50 p-5">
