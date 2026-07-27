@@ -22,6 +22,10 @@ function authorized(request: Request, secret: string) {
 }
 
 export async function GET(request: Request) {
+  if (process.env.VERCEL_ENV !== "production") {
+    return NextResponse.json({ error: "자동 실행은 Production에서만 허용됩니다." }, { status: 403 });
+  }
+
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) {
     return NextResponse.json({ error: "CRON_SECRET 설정이 없어 자동 실행을 차단했습니다." }, { status: 503 });
