@@ -46,6 +46,36 @@ export async function normalSession() {
   }
 }
 
+export async function requireManualShoplingPriceBulkJob(
+  admin: BulkAdmin,
+  jobId: string,
+  ownerId: string,
+  stage: string,
+) {
+  const result = await admin.from("shopling_price_bulk_jobs")
+    .select("id,status,automation_mode")
+    .eq("id", jobId)
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+  if (result.error) {
+    return { response: normalError("Bulk 작업 조회에 실패했습니다.", 500, "JOB_QUERY_FAILED", `${stage}.job_query`, result.error) };
+  }
+  if (!result.data) {
+    return { response: normalError("작업을 찾을 수 없거나 접근 권한이 없습니다.", 404, "JOB_NOT_FOUND", `${stage}.job_query`) };
+  }
+  if (result.data.automation_mode === "auto") {
+    return {
+      response: normalError(
+        "이 작업은 서버 자동 실행이 관리합니다. 수동 진행 버튼을 사용하지 마세요.",
+        409,
+        "AUTO_MANAGED_JOB",
+        `${stage}.manual_guard`,
+      ),
+    };
+  }
+  return { job: result.data };
+}
+
 export function normalError(error: string, status: number, code: string, stage: string, detail?: unknown) {
   return NextResponse.json({ error, code, stage, detail: normalErrorDetail(detail), diagnostic_id: randomUUID() }, { status });
 }
