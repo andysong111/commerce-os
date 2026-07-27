@@ -131,12 +131,22 @@ export async function releaseShoplingPriceBulkAutoJob(admin: BulkAdmin, jobId: s
 }
 
 async function finishAuto(admin: BulkAdmin, jobId: string, ownerId: string, workerId: string, status: string): Promise<StepResult> {
-  await rpc(admin, "finish_shopling_price_bulk_auto_job", {
-    p_job_id: jobId,
-    p_owner_id: ownerId,
-    p_worker_id: workerId,
-  });
-  return { outcome: "finished", status, message: "모든 상품의 가격 변경이 완료되었습니다.", leaseReleased: true };
+  try {
+    await rpc(admin, "finish_shopling_price_bulk_auto_job", {
+      p_job_id: jobId,
+      p_owner_id: ownerId,
+      p_worker_id: workerId,
+    });
+    return { outcome: "finished", status, message: "모든 상품의 가격 변경이 완료되었습니다.", leaseReleased: true };
+  } catch (error) {
+    // The underlying item/chunk result is already committed. Keep the job
+    // claimable as normal_succeeded/canary_succeeded and retry only this marker.
+    return {
+      outcome: "waiting",
+      status,
+      message: `가격 변경은 완료됐으며 완료 상태 저장을 다시 확인합니다. ${text(error)}`,
+    };
+  }
 }
 
 async function stopAuto(admin: BulkAdmin, jobId: string, ownerId: string, workerId: string, reason: string, status?: string): Promise<StepResult> {
@@ -147,6 +157,14 @@ async function stopAuto(admin: BulkAdmin, jobId: string, ownerId: string, worker
     p_reason: reason,
   });
   return { outcome: "stopped", status, message: reason, leaseReleased: true };
+}
+
+function resultPersistencePending(label: string, status: string, error: unknown): StepResult {
+  return {
+    outcome: "waiting",
+    status,
+    message: `${label} 결과는 확인했지만 DB 저장을 다시 확인합니다. 같은 요청 결과만 재조회합니다. ${text(error)}`,
+  };
 }
 
 async function blockUncertain(admin: BulkAdmin, type: ChunkRow["chunk_type"], jobId: string, ownerId: string, requestId: string, reason: string) {
@@ -239,7 +257,7 @@ async function processCanaryResult(admin: BulkAdmin, job: JobRow, workerId: stri
     p_run_url: actions.runUrl ?? null,
     p_error: analysis.success ? null : analysis.message,
   });
-  if (finished.error) return stopAuto(admin, job.id, job.owner_id, workerId, `첫 10개 결과 저장에 실패했습니다. ${text(finished.error)}`, job.status);
+  if (finished.error || !finished.data) return resultPersistencePending("첫 10개", job.status, finished.error ?? "empty response");
   if (!analysis.success) return stopAuto(admin, job.id, job.owner_id, workerId, analysis.message, "canary_failed");
   return { outcome: "progressed", status: "canary_succeeded", message: "첫 10개 시험이 성공했습니다." };
 }
@@ -324,10 +342,11 @@ async function processNormalResult(admin: BulkAdmin, job: JobRow, workerId: stri
     p_run_url: actions.runUrl ?? null,
     p_error: analysis.success ? null : analysis.message,
   });
-  if (finished.error || !finished.data) return stopAuto(admin, job.id, job.owner_id, workerId, `현재 묶음 결과 저장에 실패했습니다. ${text(finished.error)}`, job.status);
+  if (finished.error || !finished.data) return resultPersistencePending("현재 묶음", job.status, finished.error ?? "empty response");
   if (!analysis.success) return stopAuto(admin, job.id, job.owner_id, workerId, analysis.message, "normal_failed");
   const state = record(finished.data);
   if (state.status === "normal_succeeded") return finishAuto(admin, job.id, job.owner_id, workerId, "normal_succeeded");
+  if (state.status === "normal_paused") return { outcome: "noop", status: "normal_paused", message: "현재 묶음 결과를 저장하고 안전하게 일시중지했습니다." };
   return { outcome: "progressed", status: "normal_running", message: "현재 묶음이 성공했습니다. 다음 묶음을 준비합니다." };
 }
 
@@ -398,44 +417,75 @@ async function processRetryResult(admin: BulkAdmin, job: JobRow, workerId: strin
     p_run_url: actions.runUrl ?? null,
     p_error: analysis.success ? null : analysis.message,
   });
-  if (finished.error || !finished.data) return stopAuto(admin, job.id, job.owner_id, workerId, `재실행 결과 저장에 실패했습니다. ${text(finished.error)}`, job.status);
+  if (finished.error || !finished.data) return resultPersistencePending("재실행 묶음", job.status, finished.error ?? "empty response");
   if (!analysis.success) return stopAuto(admin, job.id, job.owner_id, workerId, analysis.message, "retry_failed");
   const state = record(finished.data);
   if (state.status === "normal_succeeded") return finishAuto(admin, job.id, job.owner_id, workerId, "normal_succeeded");
+  if (["normal_paused", "retry_paused"].includes(String(state.status))) {
+    return { outcome: "noop", status: String(state.status), message: "재실행 결과를 저장하고 안전하게 일시중지했습니다." };
+  }
   return { outcome: "progressed", status: String(state.status ?? "normal_running"), message: "실패 상품 재실행이 성공했습니다." };
+}
+
+async function processSingleActiveChunk(admin: BulkAdmin, job: JobRow, workerId: string, active: ChunkRow[]): Promise<StepResult> {
+  if (active.length !== 1) {
+    return stopAuto(admin, job.id, job.owner_id, workerId, "기존 요청을 확인할 실행 묶음이 정확히 하나가 아니어서 멈췄습니다.", job.status);
+  }
+  if (active[0].chunk_type === "canary") return processCanaryResult(admin, job, workerId, active[0]);
+  if (active[0].chunk_type === "retry") return processRetryResult(admin, job, workerId, active[0]);
+  return processNormalResult(admin, job, workerId, active[0]);
 }
 
 async function advanceOnce(admin: BulkAdmin, jobId: string, ownerId: string, workerId: string): Promise<StepResult> {
   const job = await loadJob(admin, jobId, ownerId);
-  if (job.automation_mode !== "auto" || job.execution_mode !== "live" || job.archived_at) return { outcome: "noop", status: job.status, message: "자동 실행 대상이 아닙니다." };
-  if (job.automation_worker_id !== workerId) return { outcome: "noop", status: job.status, message: "다른 자동 작업자가 처리 중입니다." };
-  if (job.pause_requested || ["normal_paused", "retry_paused"].includes(job.status)) return { outcome: "noop", status: job.status, message: "현재 작업은 일시중지되어 있습니다." };
-  if (["canary_failed", "normal_failed", "retry_failed", "cancelled", "validation_only"].includes(job.status)) return stopAuto(admin, job.id, job.owner_id, workerId, job.automation_stop_reason ?? "오류 상태에서 자동 실행을 멈췄습니다.", job.status);
+  if (job.automation_mode !== "auto" || job.execution_mode !== "live" || job.archived_at) {
+    return { outcome: "noop", status: job.status, message: "자동 실행 대상이 아닙니다." };
+  }
+  if (job.automation_worker_id !== workerId) {
+    return { outcome: "noop", status: job.status, message: "다른 자동 작업자가 처리 중입니다." };
+  }
+  if (["normal_paused", "retry_paused"].includes(job.status)) {
+    return { outcome: "noop", status: job.status, message: "현재 작업은 일시중지되어 있습니다." };
+  }
+  if (["canary_failed", "normal_failed", "retry_failed", "cancelled", "validation_only"].includes(job.status)) {
+    return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "오류 상태에서 자동 실행이 중단되어 있습니다." };
+  }
   if (job.status === "normal_succeeded") return finishAuto(admin, job.id, job.owner_id, workerId, job.status);
 
-  if (job.status === "prepared") return dispatchCanary(admin, job, workerId);
+  const stopped = Boolean(job.automation_stop_reason);
+  if (job.status === "prepared") {
+    if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    return dispatchCanary(admin, job, workerId);
+  }
   if (["canary_dispatching", "canary_running"].includes(job.status)) {
     const active = await loadActiveChunks(admin, job.id, "canary");
-    if (active.length !== 1) return stopAuto(admin, job.id, job.owner_id, workerId, "첫 10개 실행 상태를 하나로 확인할 수 없어 멈췄습니다.", job.status);
-    return processCanaryResult(admin, job, workerId, active[0]);
+    if (active.length === 0 && stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    return processSingleActiveChunk(admin, job, workerId, active);
   }
-  if (job.status === "canary_succeeded") return approveNormal(admin, job, workerId);
+  if (job.status === "canary_succeeded") {
+    if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    return approveNormal(admin, job, workerId);
+  }
   if (job.status === "normal_running") {
     const active = await loadActiveChunks(admin, job.id, "normal");
     if (active.length > 1) return stopAuto(admin, job.id, job.owner_id, workerId, "동시에 두 개 이상의 실행 묶음이 감지되어 멈췄습니다.", job.status);
-    return active.length === 1 ? processNormalResult(admin, job, workerId, active[0]) : dispatchNormal(admin, job, workerId);
+    if (active.length === 1) return processNormalResult(admin, job, workerId, active[0]);
+    if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    // When pause_requested is true, this RPC changes the idle job to
+    // normal_paused and returns without creating a dispatch.
+    return dispatchNormal(admin, job, workerId);
   }
   if (job.status === "retry_running") {
     const active = await loadActiveChunks(admin, job.id, "retry");
     if (active.length > 1) return stopAuto(admin, job.id, job.owner_id, workerId, "동시에 두 개 이상의 재실행 묶음이 감지되어 멈췄습니다.", job.status);
-    return active.length === 1 ? processRetryResult(admin, job, workerId, active[0]) : dispatchRetry(admin, job, workerId);
+    if (active.length === 1) return processRetryResult(admin, job, workerId, active[0]);
+    if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    // When pause_requested is true, this RPC changes the idle job to
+    // retry_paused and returns without creating a dispatch.
+    return dispatchRetry(admin, job, workerId);
   }
   if (job.status === "dispatch_uncertain") {
-    const active = await loadActiveChunks(admin, job.id);
-    if (active.length !== 1) return stopAuto(admin, job.id, job.owner_id, workerId, "전송 상태를 확인할 실행 묶음이 정확히 하나가 아니어서 멈췄습니다.", job.status);
-    if (active[0].chunk_type === "canary") return processCanaryResult(admin, job, workerId, active[0]);
-    if (active[0].chunk_type === "retry") return processRetryResult(admin, job, workerId, active[0]);
-    return processNormalResult(admin, job, workerId, active[0]);
+    return processSingleActiveChunk(admin, job, workerId, await loadActiveChunks(admin, job.id));
   }
   return { outcome: "noop", status: job.status, message: "현재 상태에서는 자동으로 진행할 작업이 없습니다." };
 }
