@@ -6,7 +6,7 @@ export default function ProductLaunchFlowPage() {
     <>
       <PageHeader
         title="상품 출시 플로우"
-        description="실재고 시트 행번호 기준으로 상품업로드, 가격설정, 상품명/키워드 준비 상태를 연결합니다."
+        description="실재고 시트 행번호 기준으로 상품업로드, 가격설정, 상품명/키워드 준비 상태를 연결하며 상품업로드 시 위치코드를 옵션자체관리코드와 바코드에 동일하게 등록합니다."
       />
       <ProductLaunchFlow />
     </>
