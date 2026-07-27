@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
+import { normalError, normalSession, requireManualShoplingPriceBulkJob, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { analyzeShoplingPriceBulkRetryResult } from "@/lib/shoplingPriceModifyBulkRetry";
 import { fetchShoplingPriceModifyActionsResult } from "@/lib/shoplingPriceModifyRunner";
 import { decideNormalDispatchingReconciliation } from "@/lib/shoplingPriceModifyBulkReconciliation";
 export const runtime="nodejs";
 export async function POST(_request:Request,{params}:{params:Promise<{jobId:string}>}) {
  const auth=await normalSession();if(auth.response)return auth.response;const {jobId}=await params;
- const jobResult=await auth.admin!.from("shopling_price_bulk_jobs").select("id,status").eq("id",jobId).eq("owner_id",auth.ownerId).maybeSingle();
- if(jobResult.error)return normalError("Bulk 작업 조회에 실패했습니다.",500,"JOB_QUERY_FAILED","retry.result.job_query",jobResult.error);
- if(!jobResult.data)return normalError("작업을 찾을 수 없거나 접근 권한이 없습니다.",404,"JOB_NOT_FOUND","retry.result.job_query");
- if(!["retry_running","dispatch_uncertain"].includes(String(jobResult.data.status)))return normalError("현재 상태에서는 재시도 청크 결과를 확인할 수 없습니다.",409,"INVALID_JOB_STATUS","retry.result.job_query");
+ const manual=await requireManualShoplingPriceBulkJob(auth.admin!,jobId,auth.ownerId,"retry.result");if(manual.response)return manual.response;
+ if(!["retry_running","dispatch_uncertain"].includes(String(manual.job.status)))return normalError("현재 상태에서는 재시도 청크 결과를 확인할 수 없습니다.",409,"INVALID_JOB_STATUS","retry.result.job_query");
  const chunkResult=await auth.admin!.from("shopling_price_bulk_chunks").select("chunk_index,goods_keys,goods_key_count,request_id,status,started_at,updated_at").eq("job_id",jobId).eq("chunk_type","retry").in("status",["dispatching","running","dispatch_uncertain"]).order("chunk_index",{ascending:true}).limit(2);
  if(chunkResult.error)return normalError("활성 재시도 청크 조회에 실패했습니다.",500,"CHUNK_QUERY_FAILED","retry.result.chunk_query",chunkResult.error);
  const chunks=Array.isArray(chunkResult.data)?chunkResult.data:[];if(chunks.length!==1)return normalError("활성 재시도 청크가 정확히 하나여야 합니다.",409,"ACTIVE_CHUNK_INVALID","retry.result.chunk_query");
