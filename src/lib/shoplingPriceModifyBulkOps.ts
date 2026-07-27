@@ -72,6 +72,16 @@ export function calculateShoplingPriceBulkTiming(
   };
 }
 
+export function redactShoplingPriceBulkOperationalText(value: unknown, maxLength = 160) {
+  if (value === null || value === undefined) return null;
+  const text = String(value)
+    .replace(/sb_secret_[A-Za-z0-9._-]+/gi, "[REDACTED_SUPABASE_SECRET]")
+    .replace(/\bBearer\s+[^\s,;"'}]+/gi, "Bearer [REDACTED]")
+    .replace(/(["']?(?:apikey|authorization|service[_ -]?role(?:[_ -]?key)?|SUPABASE_SERVICE_ROLE_KEY)["']?\s*[:=]\s*["']?)[^\s,;"'}]+/gi, "$1[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED_JWT]");
+  return text.slice(0, Math.max(1, maxLength));
+}
+
 function neutralizeSpreadsheetFormula(value: string) {
   return /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
 }
@@ -105,7 +115,7 @@ export function createShoplingPriceBulkItemsCsv(
     item.ordinal,
     item.status,
     item.attempt_count,
-    item.last_error ?? "",
+    redactShoplingPriceBulkOperationalText(item.last_error, 80) ?? "",
   ]);
   return `\uFEFF${[header, ...rows].map((row) => row.map(escapeShoplingPriceBulkCsvCell).join(",")).join("\r\n")}\r\n`;
 }
