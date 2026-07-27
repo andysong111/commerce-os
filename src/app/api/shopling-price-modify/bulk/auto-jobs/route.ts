@@ -15,6 +15,14 @@ const LEASE_SECONDS = 75;
 export async function POST(request: Request) {
   const auth = await normalSession();
   if (auth.response) return auth.response;
+  if (!process.env.CRON_SECRET?.trim()) {
+    return normalError(
+      "자동 실행 서버 설정이 아직 완료되지 않았습니다. 관리자에게 CRON_SECRET 설정을 요청하세요.",
+      503,
+      "AUTO_CRON_CONFIG_MISSING",
+      "auto.create.configuration",
+    );
+  }
 
   let raw: unknown;
   try {
