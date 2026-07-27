@@ -180,17 +180,43 @@ test("exact result fetch searches a bounded second page while latest fetch stays
 }));
 
 test("exact result fallback and artifact candidates remain bounded", async () => withEnv(baseEnv, async () => {
+  const mismatchZip = zipSync({
+    "result_summary.json": strToU8(JSON.stringify({ request_id: "price-modify-20260726T161200Z-000000" })),
+  });
   const calls = [];
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    const text = String(url); calls.push(text);
-    if (text.includes("/runs?")) return Response.json({ workflow_runs: Array.from({ length: 21 }, (_, index) => ({ id: index + 1, status: "completed" })) });
-    throw new Error(`artifact lookup must not occur after candidate limit: ${text}`);
+    const text = String(url);
+    calls.push(text);
+    if (text.includes("/runs?")) {
+      return Response.json({
+        workflow_runs: Array.from({ length: 21 }, (_, index) => ({
+          id: index + 1,
+          status: "completed",
+          conclusion: "success",
+        })),
+      });
+    }
+    const artifactMatch = text.match(/\/actions\/runs\/(\d+)\/artifacts$/);
+    if (artifactMatch) {
+      const runId = Number(artifactMatch[1]);
+      if (runId === 21) throw new Error("candidate 21 must not be inspected");
+      return Response.json({
+        artifacts: [{
+          name: "shopling-price-modify-result-summary",
+          archive_download_url: `https://download.test/${runId}.zip`,
+        }],
+      });
+    }
+    if (/https:\/\/download\.test\/\d+\.zip/.test(text)) return new Response(mismatchZip);
+    throw new Error(`unexpected URL ${text}`);
   };
   try {
     const bounded = await fetchShoplingPriceModifyActionsResult("price-modify-20260726T161200Z-abcdef");
     assert.equal(bounded.status, "pending");
-    assert.equal(calls.length, 1);
+    assert.equal(calls.filter((url) => url.includes("/artifacts")).length, 20);
+    assert.equal(calls.filter((url) => url.endsWith(".zip")).length, 20);
+    assert.equal(calls.some((url) => url.endsWith("/21/artifacts")), false);
 
     calls.length = 0;
     globalThis.fetch = async (url) => { calls.push(String(url)); return Response.json({ workflow_runs: [] }); };
