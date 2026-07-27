@@ -179,21 +179,52 @@ test("exact result fetch searches a bounded second page while latest fetch stays
   } finally { globalThis.fetch = oldFetch; }
 }));
 
-test("exact result fallback and artifact candidates remain bounded", async () => withEnv(baseEnv, async () => {
+test("exact result inspects the first candidate when a page has more than the candidate cap", async () => withEnv(baseEnv, async () => {
+  const requestId = "price-modify-20260726T161200Z-abcdef";
+  const matchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: requestId })) });
   const calls = [];
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url) => {
     const text = String(url); calls.push(text);
     if (text.includes("/runs?")) return Response.json({ workflow_runs: Array.from({ length: 21 }, (_, index) => ({ id: index + 1, status: "completed" })) });
-    throw new Error(`artifact lookup must not occur after candidate limit: ${text}`);
+    if (text.endsWith("/1/artifacts")) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: "https://download.test/match.zip" }] });
+    if (text.endsWith("match.zip")) return new Response(matchZip);
+    throw new Error(`only the first candidate should be inspected: ${text}`);
   };
   try {
-    const bounded = await fetchShoplingPriceModifyActionsResult("price-modify-20260726T161200Z-abcdef");
-    assert.equal(bounded.status, "pending");
-    assert.equal(calls.length, 1);
+    const result = await fetchShoplingPriceModifyActionsResult(requestId);
+    assert.equal(result.status, "success");
+    assert.equal(result.runId, 1);
+    assert.equal(calls.filter((url) => url.endsWith("/artifacts")).length, 1);
+    assert.equal(calls.filter((url) => url.endsWith(".zip")).length, 1);
+  } finally { globalThis.fetch = oldFetch; }
+}));
 
-    calls.length = 0;
-    globalThis.fetch = async (url) => { calls.push(String(url)); return Response.json({ workflow_runs: [] }); };
+test("exact result stops after inspecting 20 mismatched candidates", async () => withEnv(baseEnv, async () => {
+  const mismatchZip = zipSync({ "result_summary.json": strToU8(JSON.stringify({ request_id: "price-modify-mismatch" })) });
+  const calls = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const text = String(url); calls.push(text);
+    if (text.includes("/runs?")) return Response.json({ workflow_runs: Array.from({ length: 21 }, (_, index) => ({ id: index + 1, status: "completed" })) });
+    if (/\/actions\/runs\/\d+\/artifacts$/.test(text)) return Response.json({ artifacts: [{ name: "shopling-price-modify-result-summary", archive_download_url: `https://download.test/${text.match(/runs\/(\d+)/)[1]}.zip` }] });
+    if (text.endsWith(".zip")) return new Response(mismatchZip);
+    throw new Error(`unexpected URL ${text}`);
+  };
+  try {
+    const result = await fetchShoplingPriceModifyActionsResult("price-modify-20260726T161200Z-abcdef");
+    assert.equal(result.status, "pending");
+    assert.equal(calls.filter((url) => url.endsWith("/artifacts")).length, 20);
+    assert.equal(calls.filter((url) => url.endsWith(".zip")).length, 20);
+    assert.equal(calls.some((url) => url.endsWith("/21/artifacts")), false);
+  } finally { globalThis.fetch = oldFetch; }
+}));
+
+test("exact result uses legacy request ID fallback", async () => withEnv(baseEnv, async () => {
+  const calls = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { calls.push(String(url)); return Response.json({ workflow_runs: [] }); };
+  try {
     assert.equal((await fetchShoplingPriceModifyActionsResult("price-modify-legacy-id")).status, "pending");
     const fallbackUrl = new URL(calls[0]);
     assert.equal(fallbackUrl.searchParams.get("status"), "completed");
