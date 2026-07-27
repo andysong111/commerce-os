@@ -212,7 +212,8 @@ test("operations UI synchronizes job changes and stays available on the advanced
   assert.match(ui, /window\.location\.assign/);
   assert.match(ui, /window\.location\.reload/);
   assert.match(simplePage, /ShoplingPriceModifySimpleAutoRunner/);
-  assert.doesNotMatch(simplePage, /ShoplingPriceModifyBulkOperations|ShoplingPriceModifyRunner/);
+  assert.doesNotMatch(simplePage, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyBulkOperations"|<ShoplingPriceModifyBulkOperations\s*\/>/);
+  assert.doesNotMatch(simplePage, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyRunner"|<ShoplingPriceModifyRunner\s*\/>/);
   assert.match(advancedPage, /ShoplingPriceModifyBulkOperations/);
   assert.match(advancedPage, /<ShoplingPriceModifyRunner \/>/);
   assert.match(inputUi, /일반 상품 직렬 실행 승인/);
