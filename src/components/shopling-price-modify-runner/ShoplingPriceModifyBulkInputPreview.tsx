@@ -28,6 +28,7 @@ type Job = {
   last_error?: string | null;
   created_at: string;
   updated_at: string;
+  pause_requested?: boolean; retry_round?: number; max_retry_rounds?: number; retry_resume_status?: string | null;
 };
 type Chunk = {
   chunk_index: number;
@@ -41,9 +42,11 @@ type Chunk = {
   started_at?: string | null;
   completed_at?: string | null;
   updated_at?: string;
+  retry_round?: number;
 };
 type StatusCounts = { pending: number; succeeded: number; failed: number };
-type Detail = { job: Job; chunks: Chunk[]; first_goods_keys: string[]; last_goods_keys: string[]; item_status_counts: StatusCounts; chunk_status_counts: StatusCounts & { dispatching: number; running: number; dispatch_uncertain: number }; normal_chunk_count: number; current_active_chunk: Chunk | null };
+type FailedItem = { goods_key: string; ordinal: number; last_error?: string | null; attempt_count: number };
+type Detail = { job: Job; chunks: Chunk[]; first_goods_keys: string[]; last_goods_keys: string[]; item_status_counts: StatusCounts; chunk_status_counts: StatusCounts & { dispatching: number; running: number; dispatch_uncertain: number }; normal_chunk_count: number; retry_chunk_count: number; current_retry_round_chunk_count: number; recovered_chunk_count: number; failed_goods_key_count: number; failed_goods_keys_preview: string[]; failed_items_preview: FailedItem[]; current_active_chunk: Chunk | null };
 
 const STORAGE_KEY = "shoplingPriceModifyBulkRecentJobId";
 
@@ -57,6 +60,10 @@ const STATUS_LABELS: Record<string, string> = {
   normal_running: "일반 청크 직렬 실행 중",
   normal_succeeded: "전체 가격설정 완료",
   normal_failed: "일반 청크 실패 · 자동 실행 중단",
+  normal_paused: "일반 청크 직렬 실행 일시중지",
+  retry_running: "실패 상품 제한 재실행 중",
+  retry_paused: "실패 상품 재실행 일시중지",
+  retry_failed: "재실행 후에도 실패 상품 존재 · 자동 중단",
   cancelled: "취소됨",
 };
 
@@ -66,6 +73,7 @@ const CHUNK_STATUS_LABELS: Record<string, string> = {
   running: "실행 중",
   succeeded: "성공",
   failed: "실패",
+  recovered: "재실행 복구",
   dispatch_uncertain: "전송 여부 불확실",
 };
 
@@ -272,27 +280,42 @@ export function ShoplingPriceModifyBulkInputPreview() {
     finally { normalBusyRef.current = false; setActing(false); }
   };
 
+  const retryFailed = async () => {
+    if (!detail || acting) return; const count=detail.failed_goods_key_count;
+    if (!window.confirm(`실패로 확정된 상품 ${count}개만 재실행합니다.\n이미 성공한 상품은 다시 실행하지 않습니다.\n최대 50개씩 한 청크만 순차 실행합니다.\n재시도 횟수는 최대 2회입니다.\n이 작업은 실제 상품 가격을 변경합니다.\n계속하시겠습니까?`)) return;
+    setActing(true); clearError(); try { const body=await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/retry/approve`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({confirmation:"CONFIRM_FAILED_GOODS_RETRY"})},"bulk_retry.approve"); setNotice(String(body.message)); await refresh(detail.job.id); } catch(caught){handleError(caught,"실패 상품 재실행 승인에 실패했습니다.","bulk_retry.approve");} finally{setActing(false);}
+  };
+  const controlExecution = async (action: "pause" | "resume") => {
+    if(!detail||acting)return; setActing(true); clearError(); try{const confirmation=action==="pause"?"CONFIRM_BULK_PAUSE":"CONFIRM_BULK_RESUME";const body=await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/control/${action}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({confirmation})},`bulk_control.${action}`);setNotice(String(body.message));await refresh(detail.job.id);}catch(caught){handleError(caught,"실행 제어에 실패했습니다.",`bulk_control.${action}`);}finally{setActing(false);}
+  };
+  const copyFailedGoodsKeys = async () => { if(detail) await navigator.clipboard.writeText(detail.failed_goods_keys_preview.join("\n")); };
+
   const activeNormal = detail?.current_active_chunk?.chunk_type === "normal" ? detail.current_active_chunk : null;
+  const activeRetry = detail?.current_active_chunk?.chunk_type === "retry" ? detail.current_active_chunk : null;
   useEffect(() => {
     if (!detail) return;
-    const recoveringUncertain = detail.job.status === "dispatch_uncertain" && activeNormal?.status === "dispatch_uncertain";
-    if (detail.job.status !== "normal_running" && !recoveringUncertain) return;
+    const active = activeNormal ?? activeRetry;
+    const recoveringUncertain = detail.job.status === "dispatch_uncertain" && active?.status === "dispatch_uncertain";
+    const mode = detail.job.status === "retry_running" || activeRetry ? "retry" : "normal";
+    if (!["normal_running","retry_running"].includes(detail.job.status) && !recoveringUncertain) return;
     const jobId = detail.job.id;
-    const active = activeNormal;
     const delay = active ? 12000 : 1200;
     const timer = window.setTimeout(async () => {
       if (normalBusyRef.current) return;
       normalBusyRef.current = true;
       try {
         const endpoint = recoveringUncertain ? "result" : active ? "result" : "advance";
-        const body = await requestShoplingPriceBulkJson(`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/normal/${endpoint}`, { method: "POST" }, `bulk_normal.${endpoint}`);
+        const executionUrl = mode === "retry"
+          ? `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/retry/${endpoint}`
+          : `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(jobId)}/normal/${endpoint}`;
+        const body = await requestShoplingPriceBulkJson(executionUrl, { method: "POST" }, `bulk_normal.${endpoint}`);
         if (body.status !== "pending") setNotice(String(body.message ?? "일반 청크 상태가 갱신되었습니다."));
         await refresh(jobId);
       } catch (caught) { handleError(caught, "일반 청크 직렬 실행이 중단되었습니다.", "bulk_normal.serial"); await refresh(jobId); }
       finally { normalBusyRef.current = false; }
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [activeNormal, detail, handleError, refresh]);
+  }, [activeNormal, activeRetry, detail, handleError, refresh]);
 
   return <div className="space-y-8">
     <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
@@ -320,7 +343,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
         ? <Preview selection={selection} saving={saving} save={save} />
         : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">파일을 업로드하거나 goods_key를 붙여넣으면 실행 전 미리보기가 표시됩니다.</p>}
     </section>
-    <SavedJobs jobs={jobs} detail={detail} acting={acting} select={loadDetail} runCanary={runCanary} checkCanary={checkCanary} approveNormal={approveNormal} />
+    <SavedJobs jobs={jobs} detail={detail} acting={acting} select={loadDetail} runCanary={runCanary} checkCanary={checkCanary} approveNormal={approveNormal} retryFailed={retryFailed} controlExecution={controlExecution} copyFailedGoodsKeys={copyFailedGoodsKeys} />
   </div>;
 }
 
@@ -354,7 +377,7 @@ function SavedJobs({
   select,
   runCanary,
   checkCanary,
-  approveNormal,
+  approveNormal, retryFailed, controlExecution, copyFailedGoodsKeys,
 }: {
   jobs: Job[];
   detail: Detail | null;
@@ -363,6 +386,7 @@ function SavedJobs({
   runCanary: () => Promise<void>;
   checkCanary: () => Promise<void>;
   approveNormal: () => Promise<void>;
+  retryFailed: () => Promise<void>; controlExecution: (action: "pause" | "resume") => Promise<void>; copyFailedGoodsKeys: () => Promise<void>;
 }) {
   const canary = detail?.chunks.find((chunk) => chunk.chunk_index === 0 && chunk.chunk_type === "canary");
   const normal = detail?.chunks.filter((chunk) => chunk.chunk_type === "normal") ?? [];
@@ -381,6 +405,13 @@ function SavedJobs({
       ].map(([key, value]) => <div className="rounded bg-slate-50 p-3" key={key}><dt className="text-xs text-slate-500">{key}</dt><dd className="break-all font-semibold">{value}</dd></div>)}</dl>
 
       {detail.job.last_error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">마지막 오류: {detail.job.last_error}</p>}
+      {detail.failed_goods_key_count > 0 && <div className="mt-4 rounded-xl border border-red-300 bg-red-50 p-4"><p className="font-bold text-red-900">실패 상품 {detail.failed_goods_key_count}개</p><ul className="mt-2 text-sm">{detail.failed_items_preview.map(item=><li key={item.goods_key}><code>{item.goods_key}</code> · 시도 {item.attempt_count}회 · {item.last_error ?? "오류 원인 없음"}</li>)}</ul><button type="button" onClick={() => void copyFailedGoodsKeys()} className="mt-3 rounded bg-slate-800 px-3 py-2 text-white">실패 goods_key 복사</button></div>}
+      {["canary_failed","normal_failed","retry_failed"].includes(detail.job.status) && detail.failed_goods_key_count === 0 && <p className="mt-4 rounded bg-amber-50 p-3">실패 범위를 특정할 수 없어 자동 재시도할 수 없습니다.</p>}
+      {["canary_failed","normal_failed","retry_failed"].includes(detail.job.status) && detail.failed_goods_key_count > 0 && (detail.job.retry_round ?? 0) < (detail.job.max_retry_rounds ?? 2) && <button type="button" disabled={acting} onClick={() => void retryFailed()} className="mt-4 rounded-lg bg-red-700 px-5 py-3 font-bold text-white">실패 상품 {detail.failed_goods_key_count}개만 재실행 승인</button>}
+      {["canary_failed","normal_failed","retry_failed"].includes(detail.job.status) && (detail.job.retry_round ?? 0) >= (detail.job.max_retry_rounds ?? 2) && <p className="mt-4 rounded bg-amber-50 p-3">최대 재시도 횟수에 도달했습니다. 자동으로 다시 실행하지 않습니다.</p>}
+      {["normal_running","retry_running"].includes(detail.job.status) && <button type="button" disabled={acting} onClick={() => void controlExecution("pause")} className="mt-4 rounded-lg bg-amber-700 px-5 py-3 font-bold text-white">현재 청크 완료 후 일시중지</button>}
+      {["normal_paused","retry_paused"].includes(detail.job.status) && <button type="button" disabled={acting} onClick={() => void controlExecution("resume")} className="mt-4 rounded-lg bg-blue-700 px-5 py-3 font-bold text-white">직렬 실행 재개</button>}
+      {detail.job.pause_requested && detail.current_active_chunk && <p className="mt-3 text-amber-800">현재 청크가 끝난 뒤 일시중지됩니다.</p>}
 
       {detail.job.status === "prepared" && <div className="mt-5 rounded-xl border border-red-300 bg-red-50 p-4">
         <p className="font-bold text-red-900">다음 버튼은 카나리 상품의 실제 가격을 변경합니다.</p>
