@@ -7,6 +7,8 @@ type Result = { data: unknown; error: unknown };
 type Query = PromiseLike<Result> & {
   select(columns: string): Query;
   eq(column: string, value: string): Query;
+  is(column: string, value: null | boolean): Query;
+  not(column: string, operator: "is", value: null | boolean): Query;
   order(column: string, options: { ascending: boolean }): Query;
   limit(count: number): Query;
 };
@@ -175,16 +177,19 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const auth = await session();
     if (auth.response) return auth.response;
+    const archived = new URL(request.url).searchParams.get("archived") === "1";
 
-    const { data, error } = await auth.admin.from("shopling_price_bulk_jobs")
-      .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,total_chunk_count,created_at,updated_at")
-      .eq("owner_id", auth.ownerId)
+    let query = auth.admin.from("shopling_price_bulk_jobs")
+      .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,total_chunk_count,execution_mode,archived_at,archive_note,archive_previous_status,created_at,updated_at")
+      .eq("owner_id", auth.ownerId);
+    query = archived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
+    const { data, error } = await query
       .order("created_at", { ascending: false })
-      .limit(10);
+      .limit(archived ? 20 : 10);
     if (error) {
       return diagnosticResponse({
         status: 500,
@@ -194,7 +199,7 @@ export async function GET() {
         detail: error,
       });
     }
-    return NextResponse.json({ jobs: data ?? [] });
+    return NextResponse.json({ jobs: data ?? [], archived });
   } catch (error) {
     return diagnosticResponse({
       status: 500,

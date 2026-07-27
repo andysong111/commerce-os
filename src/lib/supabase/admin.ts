@@ -30,6 +30,21 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     return this;
   }
 
+  lt(column: string, value: unknown) {
+    this.params.append(column, `lt.${String(value)}`);
+    return this;
+  }
+
+  is(column: string, value: null | boolean) {
+    this.params.append(column, `is.${value === null ? "null" : String(value)}`);
+    return this;
+  }
+
+  not(column: string, operator: "is", value: null | boolean) {
+    this.params.append(column, `not.${operator}.${value === null ? "null" : String(value)}`);
+    return this;
+  }
+
   in(column: string, values: readonly unknown[]) {
     if (values.length === 0) throw new TypeError("Supabase REST in filter requires at least one value.");
     const encodedValues = values.map((value) => {
