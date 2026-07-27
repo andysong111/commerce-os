@@ -184,7 +184,7 @@ export async function GET(request: Request) {
     const archived = new URL(request.url).searchParams.get("archived") === "1";
 
     let query = auth.admin.from("shopling_price_bulk_jobs")
-      .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,total_chunk_count,execution_mode,archived_at,archive_note,created_at,updated_at")
+      .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,total_chunk_count,execution_mode,archived_at,archive_note,archive_previous_status,created_at,updated_at")
       .eq("owner_id", auth.ownerId);
     query = archived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
     const { data, error } = await query
