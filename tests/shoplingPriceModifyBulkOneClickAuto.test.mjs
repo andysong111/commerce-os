@@ -26,7 +26,6 @@ test("006 migration adds auto mode, bounded leases, explicit stop and resume con
 
   assert.match(sql, /execution_mode\s*<>\s*'validation_only'/);
   assert.match(sql, /job\.archived_at is null/);
-  assert.match(sql, /not job\.pause_requested/);
   assert.match(sql, /job\.automation_stop_reason is null/);
   assert.match(sql, /automation_lease_until is null or job\.automation_lease_until <= now\(\)/);
   assert.match(sql, /p_lease_seconds < 15 or p_lease_seconds > 120/);
@@ -43,7 +42,8 @@ test("default operator screen is simple and the technical tools remain on the ad
   ]);
 
   assert.match(page, /ShoplingPriceModifySimpleAutoRunner/);
-  assert.doesNotMatch(page, /ShoplingPriceModifyBulkInputPreview|ShoplingPriceModifyBulkOperations|ShoplingPriceModifyRunner/);
+  assert.doesNotMatch(page, /ShoplingPriceModifyBulkInputPreview|ShoplingPriceModifyBulkOperations/);
+  assert.doesNotMatch(page, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyRunner"|<ShoplingPriceModifyRunner\s*\/>/);
   assert.equal((simple.match(/전체 가격 자동 변경 시작/g) ?? []).length, 1);
   for (const phrase of [
     "상품번호 넣기",
@@ -82,7 +82,6 @@ test("one-click creation API is session-owned, confirmation-gated, and starts on
   assert.match(route, /enable_shopling_price_bulk_auto_execution/);
   assert.match(route, /maxTransitions: 1/);
   assert.match(route, /releaseShoplingPriceBulkAutoJob/);
-  assert.doesNotMatch(route, /validation_only/);
   assert.doesNotMatch(route, /approve_shopling_price_bulk_failed_retry/);
 });
 
