@@ -8,6 +8,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   if (auth.response) return auth.response;
   let body: unknown;
   try { body = await request.json(); } catch { return normalError("확인 문구가 필요합니다.", 400, "ARCHIVE_BODY_INVALID", "archive.body"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return normalError("작업 보관 요청 형식이 올바르지 않습니다.", 400, "ARCHIVE_BODY_INVALID", "archive.body");
   const input = body as { confirmation?: unknown; note?: unknown };
   if (input.confirmation !== "CONFIRM_BULK_ARCHIVE") return normalError("작업 보관 확인 문구가 일치하지 않습니다.", 400, "ARCHIVE_CONFIRMATION_REQUIRED", "archive.confirmation");
   const { jobId } = await params;
