@@ -45,6 +45,15 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     return this;
   }
 
+  range(from: number, to: number) {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+      throw new TypeError("Supabase REST range requires integer bounds with 0 <= from <= to.");
+    }
+    this.params.set("offset", String(from));
+    this.params.set("limit", String(to - from + 1));
+    return this;
+  }
+
   async maybeSingle(): Promise<AdminResult> {
     this.params.set("limit", "1");
     const result = await this.execute();
