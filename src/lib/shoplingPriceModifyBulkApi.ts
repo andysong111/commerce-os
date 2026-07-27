@@ -12,6 +12,9 @@ type BulkAdminQuery = PromiseLike<BulkQueryResult> & {
   select(columns: string): BulkAdminQuery;
   eq(column: string, value: unknown): BulkAdminQuery;
   gt(column: string, value: unknown): BulkAdminQuery;
+  lt(column: string, value: unknown): BulkAdminQuery;
+  is(column: string, value: null | boolean): BulkAdminQuery;
+  not(column: string, operator: "is", value: null | boolean): BulkAdminQuery;
   in(column: string, values: readonly unknown[]): BulkAdminQuery;
   order(column: string, options: { ascending: boolean }): BulkAdminQuery;
   limit(count: number): BulkAdminQuery;
