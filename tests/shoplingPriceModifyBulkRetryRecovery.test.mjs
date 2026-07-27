@@ -95,17 +95,21 @@ test("retry APIs never accept client goods keys and reconcile exact existing req
   assert.match(resume, /RESUME_RPC_EMPTY/);
 });
 
-test("failed goods-key endpoint is owner-scoped and returns the complete ordered list", async () => {
-  const [endpoint, detailRoute, ui] = await Promise.all([
+test("failed goods-key endpoint is owner-scoped and paginates the complete ordered list", async () => {
+  const [endpoint, detailRoute, ui, admin] = await Promise.all([
     read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/failed-keys/route.ts"),
     read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/route.ts"),
     read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx"),
+    read("src/lib/supabase/admin.ts"),
   ]);
   assert.match(endpoint, /owner_id/);
   assert.match(endpoint, /status", "failed"/);
   assert.match(endpoint, /order\("ordinal", \{ ascending: true \}\)/);
-  assert.match(endpoint, /limit\(MAX_FAILED_KEYS\)/);
+  assert.match(endpoint, /PAGE_SIZE = 1_000/);
+  assert.match(endpoint, /for \(let offset = 0; offset < MAX_FAILED_KEYS; offset \+= PAGE_SIZE\)/);
+  assert.match(endpoint, /\.range\(offset, pageEnd\)/);
   assert.match(endpoint, /MAX_FAILED_KEYS = 20_000/);
+  assert.match(admin, /range\(from: number, to: number\)/);
   assert.match(detailRoute, /FAILED_PREVIEW_LIMIT = 100/);
   assert.match(detailRoute, /failed_preview_truncated/);
   assert.match(ui, /\/failed-keys/);
