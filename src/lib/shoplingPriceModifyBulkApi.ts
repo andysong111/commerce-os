@@ -11,6 +11,7 @@ type BulkSingleResult = { data: Record<string, unknown> | null; error: unknown }
 type BulkAdminQuery = PromiseLike<BulkQueryResult> & {
   select(columns: string): BulkAdminQuery;
   eq(column: string, value: unknown): BulkAdminQuery;
+  gt(column: string, value: unknown): BulkAdminQuery;
   in(column: string, values: readonly unknown[]): BulkAdminQuery;
   order(column: string, options: { ascending: boolean }): BulkAdminQuery;
   limit(count: number): BulkAdminQuery;
