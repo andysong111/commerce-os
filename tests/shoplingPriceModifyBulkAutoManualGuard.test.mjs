@@ -24,14 +24,14 @@ test("manual progression routes reject auto-managed jobs before reserve or resul
   for (const path of guardedRoutes) {
     const route = await read(path);
     assert.match(route, /requireManualShoplingPriceBulkJob/);
-    const guardCall = route.indexOf("requireManualShoplingPriceBulkJob(");
-    const reserveOrFinish = Math.min(
-      ...["reserve_", "finish_", "dispatchShoplingPriceBulk", "fetchShoplingPriceModifyActionsResult"]
-        .map((needle) => route.indexOf(needle))
-        .filter((position) => position >= 0),
-    );
+    const guardCall = route.lastIndexOf("requireManualShoplingPriceBulkJob(");
+    const progressionPositions = ["reserve_", "finish_", "dispatchShoplingPriceBulk", "fetchShoplingPriceModifyActionsResult"]
+      .map((needle) => route.lastIndexOf(needle))
+      .filter((position) => position > guardCall);
     assert.ok(guardCall >= 0, `${path} is missing the manual guard call`);
-    assert.ok(reserveOrFinish > guardCall, `${path} performs progression before the manual guard`);
+    assert.ok(progressionPositions.length > 0, `${path} has no progression call to protect`);
+    assert.ok(Math.min(...progressionPositions) > guardCall, `${path} performs progression before the manual guard`);
+    assert.match(route.slice(guardCall), /manual\.response\)\s*return manual\.response/);
   }
 });
 
