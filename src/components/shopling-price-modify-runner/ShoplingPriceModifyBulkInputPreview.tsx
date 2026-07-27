@@ -444,6 +444,14 @@ export function ShoplingPriceModifyBulkInputPreview() {
   const successPercent = detail && detail.job.valid_count > 0
     ? Math.floor(detail.item_status_counts.succeeded * 100 / detail.job.valid_count)
     : 0;
+  const manualCanaryResultAvailable = Boolean(
+    !autoManaged
+      && detail
+      && (
+        detail.job.status === "canary_running"
+        || (detail.job.status === "dispatch_uncertain" && canary?.status === "dispatch_uncertain")
+      ),
+  );
 
   return <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
     <h2 className="text-xl font-bold text-slate-950">대량 가격설정 입력 준비</h2>
@@ -521,7 +529,7 @@ export function ShoplingPriceModifyBulkInputPreview() {
 
       {!autoManaged && detail.job.status === "prepared" && <div className="mt-5 rounded-lg border-2 border-red-300 bg-red-50 p-4"><h4 className="font-bold text-red-950">카나리 실제 실행</h4><p className="mt-2 text-sm text-red-900">카나리만 실제 실행합니다. 일반 청크는 자동 실행되지 않습니다.</p><button type="button" disabled={busy} onClick={() => void runCanary()} className="mt-3 rounded bg-red-700 px-4 py-2 font-bold text-white disabled:opacity-50">카나리 가격설정 실행</button></div>}
 
-      {!autoManaged && (["canary_running", "dispatch_uncertain"].includes(detail.job.status)) && <div className="mt-5 rounded-lg border border-blue-300 bg-blue-50 p-4"><h4 className="font-bold text-blue-950">카나리 결과 확인</h4><p className="mt-2 text-sm text-blue-900">GitHub Actions가 끝난 뒤 결과를 확인합니다. 새 실행은 만들지 않습니다.</p><button type="button" disabled={busy} onClick={() => void checkCanary()} className="mt-3 rounded bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">카나리 결과 확인</button></div>}
+      {manualCanaryResultAvailable && <div className="mt-5 rounded-lg border border-blue-300 bg-blue-50 p-4"><h4 className="font-bold text-blue-950">카나리 결과 확인</h4><p className="mt-2 text-sm text-blue-900">GitHub Actions가 끝난 뒤 결과를 확인합니다. 새 실행은 만들지 않습니다.</p><button type="button" disabled={busy} onClick={() => void checkCanary()} className="mt-3 rounded bg-blue-700 px-4 py-2 font-bold text-white disabled:opacity-50">카나리 결과 확인</button></div>}
 
       {!autoManaged && detail.job.status === "canary_succeeded" && detail.normal_chunk_count === 0 && <p className="mt-5 rounded-lg bg-emerald-50 p-4 font-bold text-emerald-900">카나리만 포함된 작업이 완료되었습니다.</p>}
 
