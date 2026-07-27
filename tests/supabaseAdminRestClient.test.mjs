@@ -53,6 +53,28 @@ test("admin query executes PostgREST in, order and limit filters with GET auth p
   });
 });
 
+test("range emits offset and inclusive page size and rejects invalid bounds", async () => {
+  await withMockedAdmin(async () => {
+    const admin = await createSupabaseAdminClient();
+    let requestUrl = "";
+    globalThis.fetch = async (url) => {
+      requestUrl = String(url);
+      return new Response("[]", { status: 200 });
+    };
+
+    await admin.from("shopling_price_bulk_items")
+      .select("goods_key,ordinal")
+      .order("ordinal", { ascending: true })
+      .range(1000, 1999);
+
+    const url = new URL(requestUrl);
+    assert.equal(url.searchParams.get("offset"), "1000");
+    assert.equal(url.searchParams.get("limit"), "1000");
+    assert.throws(() => admin.from("items").select().range(-1, 10), /range requires integer bounds/);
+    assert.throws(() => admin.from("items").select().range(10, 9), /range requires integer bounds/);
+  });
+});
+
 test("in filter quotes special values and rejects an empty value list", async () => {
   await withMockedAdmin(async () => {
     const admin = await createSupabaseAdminClient();
