@@ -88,7 +88,7 @@ test("actual 20,000 parser and planner benchmark returns exact safe counts", () 
     passed: benchmark.passed,
     elapsed_ms: benchmark.elapsed_ms,
     valid_count: benchmark.valid_count,
-    duplicate_count: benchmark.duplicateCount,
+    duplicate_count: benchmark.duplicate_count,
     invalid_count: benchmark.invalid_count,
     planned_chunk_count: benchmark.planned_chunk_count,
     estimated_mall_rows: benchmark.estimated_mall_rows,
