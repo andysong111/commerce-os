@@ -356,8 +356,8 @@ end;
 $$;
 
 -- Stage 5 normally returns canary_succeeded after a retry repairs a failed
--- canary. If the operator requested a pause during that retry, keep the pause
--- across the recovery boundary and do not let the same Cron run dispatch normal work.
+-- canary. If an auto-managed operator requested a pause during that retry, keep
+-- the pause across the recovery boundary and do not dispatch normal work.
 create or replace function public.finish_shopling_price_bulk_retry_chunk(
   p_job_id uuid,
   p_owner_id uuid,
@@ -485,14 +485,18 @@ begin
           and status in ('succeeded','recovered')
       ) then raise exception 'canary was not recovered'; end if;
 
-      if v_job.pause_requested and exists (
-        select 1 from public.shopling_price_bulk_chunks
-        where job_id = v_job.id
-          and chunk_type = 'normal'
-          and status = 'pending'
-      ) then
+      if v_job.automation_mode = 'auto'
+        and v_job.pause_requested
+        and exists (
+          select 1 from public.shopling_price_bulk_chunks
+          where job_id = v_job.id
+            and chunk_type = 'normal'
+            and status = 'pending'
+        ) then
         v_status := 'normal_paused';
       else
+        -- Manual jobs return to canary_succeeded so the explicit
+        -- CONFIRM_NORMAL_BULK_EXECUTION approval remains mandatory.
         v_status := 'canary_succeeded';
       end if;
     elsif exists (
