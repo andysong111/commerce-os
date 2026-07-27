@@ -23,6 +23,15 @@ function isActiveAutoConflict(value: unknown) {
 }
 
 export async function POST(request: Request) {
+  if (process.env.VERCEL_ENV !== "production") {
+    return normalError(
+      "쉬운 자동 가격 변경은 Production에서만 실행할 수 있습니다.",
+      403,
+      "AUTO_PRODUCTION_ONLY",
+      "auto.create.environment",
+    );
+  }
+
   const auth = await normalSession();
   if (auth.response) return auth.response;
   if (!process.env.CRON_SECRET?.trim()) {
