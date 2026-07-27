@@ -14,6 +14,14 @@ const guardedRoutes = [
   "src/app/api/shopling-price-modify/bulk/jobs/[jobId]/retry/result/route.ts",
 ];
 
+const progressionNeedles = [
+  "reserve_",
+  "finish_",
+  "approve_shopling_price_bulk_normal_execution",
+  "dispatchShoplingPriceBulk",
+  "fetchShoplingPriceModifyActionsResult",
+];
+
 test("manual progression routes reject auto-managed jobs before reserve or result writes", async () => {
   const helper = await read("src/lib/shoplingPriceModifyBulkApi.ts");
   assert.match(helper, /function requireManualShoplingPriceBulkJob/);
@@ -25,7 +33,7 @@ test("manual progression routes reject auto-managed jobs before reserve or resul
     const route = await read(path);
     assert.match(route, /requireManualShoplingPriceBulkJob/);
     const guardCall = route.lastIndexOf("requireManualShoplingPriceBulkJob(");
-    const progressionPositions = ["reserve_", "finish_", "dispatchShoplingPriceBulk", "fetchShoplingPriceModifyActionsResult"]
+    const progressionPositions = progressionNeedles
       .map((needle) => route.lastIndexOf(needle))
       .filter((position) => position > guardCall);
     assert.ok(guardCall >= 0, `${path} is missing the manual guard call`);
