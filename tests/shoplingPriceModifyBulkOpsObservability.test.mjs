@@ -71,7 +71,7 @@ test("validation-only status cannot satisfy live canary, normal, or retry reserv
   ]);
   assert.match(canarySql, /status\s*<>\s*'prepared'|status\s*=\s*'prepared'/);
   assert.match(normalSql, /status\s*<>\s*'canary_succeeded'|status\s*=\s*'canary_succeeded'/);
-  assert.match(retrySql, /status not in \('canary_failed', 'normal_failed', 'retry_failed'\)/);
+  assert.match(retrySql, /status\s+not\s+in\s*\(\s*'canary_failed'\s*,\s*'normal_failed'\s*,\s*'retry_failed'\s*\)/i);
   for (const sql of [canarySql, normalSql, retrySql]) assert.doesNotMatch(sql, /validation_only/);
 });
 
@@ -88,7 +88,7 @@ test("actual 20,000 parser and planner benchmark returns exact safe counts", () 
     passed: benchmark.passed,
     elapsed_ms: benchmark.elapsed_ms,
     valid_count: benchmark.valid_count,
-    duplicate_count: benchmark.duplicate_count,
+    duplicate_count: benchmark.duplicateCount,
     invalid_count: benchmark.invalid_count,
     planned_chunk_count: benchmark.planned_chunk_count,
     estimated_mall_rows: benchmark.estimated_mall_rows,
