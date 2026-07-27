@@ -17,7 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   }
 
   const { jobId } = await params;
-  const result = await auth.admin!.rpc("approve_shopling_price_bulk_failed_retry", {
+  const result = await auth.admin!.rpc("approve_shopling_price_bulk_failed_retry_auto", {
     p_job_id: jobId,
     p_owner_id: auth.ownerId,
   });
@@ -31,29 +31,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
       500,
       "RETRY_APPROVAL_EMPTY",
       "retry.approve.rpc",
-      "approve_shopling_price_bulk_failed_retry RPC가 데이터를 반환하지 않았습니다.",
+      "approve_shopling_price_bulk_failed_retry_auto RPC가 데이터를 반환하지 않았습니다.",
     );
   }
 
-  const autoResume = await auth.admin!.rpc("resume_shopling_price_bulk_auto_execution", {
-    p_job_id: jobId,
-    p_owner_id: auth.ownerId,
-  });
-  if (autoResume.error || !autoResume.data) {
-    return normalError(
-      "실패 상품 재실행은 승인됐지만 자동 진행을 다시 연결하지 못했습니다. 고급 관리에서 상태를 확인하세요.",
-      500,
-      "AUTO_RETRY_RESUME_FAILED",
-      "retry.approve.auto_resume",
-      autoResume.error ?? "resume_shopling_price_bulk_auto_execution RPC가 빈 응답을 반환했습니다.",
-    );
-  }
-
-  const autoState = rpcData(autoResume.data);
+  const state = rpcData(result.data);
   return NextResponse.json({
-    ...rpcData(result.data),
-    auto_resumed: autoState.resumed === true,
-    message: autoState.resumed === true
+    ...state,
+    message: state.auto_resumed === true
       ? "실패 상품만 다시 실행합니다. 브라우저를 닫아도 자동으로 계속 진행합니다."
       : "실패 상품만 재실행하도록 승인했습니다. 성공 상품은 재실행하지 않습니다.",
   });
