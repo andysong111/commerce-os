@@ -106,6 +106,7 @@ begin
     and job.execution_mode = 'live'
     and job.archived_at is null
     and job.automation_finished_at is null
+    and job.automation_stop_reason is null
     and not job.pause_requested
     and job.status in (
       'prepared','canary_dispatching','canary_running','canary_succeeded',
@@ -124,10 +125,6 @@ begin
   set automation_worker_id = p_worker_id,
       automation_lease_until = now() + make_interval(secs => p_lease_seconds),
       automation_last_tick_at = now(),
-      automation_stop_reason = case
-        when status in ('canary_succeeded','normal_running','retry_running') then null
-        else automation_stop_reason
-      end,
       updated_at = now()
   where id = v_job.id;
 
@@ -245,6 +242,48 @@ begin
 end;
 $$;
 
+create or replace function public.resume_shopling_price_bulk_auto_execution(
+  p_job_id uuid,
+  p_owner_id uuid
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.shopling_price_bulk_jobs;
+begin
+  if auth.role() <> 'service_role' then raise exception 'service_role required'; end if;
+
+  select * into v_job
+  from public.shopling_price_bulk_jobs
+  where id = p_job_id and owner_id = p_owner_id
+  for update;
+
+  if v_job.id is null then raise exception 'job not found'; end if;
+  if v_job.automation_mode = 'manual' then
+    return jsonb_build_object('job_id', p_job_id, 'auto', false, 'resumed', false, 'status', v_job.status);
+  end if;
+  if v_job.execution_mode <> 'live' then raise exception 'validation-only job cannot resume auto execution'; end if;
+  if v_job.archived_at is not null then raise exception 'archived job cannot resume auto execution'; end if;
+  if v_job.pause_requested then raise exception 'paused job cannot resume auto execution'; end if;
+  if v_job.status not in ('retry_running','normal_running','canary_succeeded') then
+    raise exception 'auto execution resume not allowed for current status';
+  end if;
+
+  update public.shopling_price_bulk_jobs
+  set automation_stop_reason = null,
+      automation_finished_at = null,
+      automation_last_tick_at = now(),
+      automation_lease_until = null,
+      automation_worker_id = null,
+      updated_at = now()
+  where id = p_job_id and owner_id = p_owner_id;
+
+  return jsonb_build_object('job_id', p_job_id, 'auto', true, 'resumed', true, 'status', v_job.status);
+end;
+$$;
+
 create or replace function public.log_shopling_price_bulk_auto_audit()
 returns trigger
 language plpgsql
@@ -279,6 +318,15 @@ begin
     );
   end if;
 
+  if new.automation_stop_reason is distinct from old.automation_stop_reason and new.automation_stop_reason is null and old.automation_stop_reason is not null then
+    insert into public.shopling_price_bulk_audit_events(
+      job_id, owner_id, entity_type, entity_id, event_type, old_status, new_status, metadata
+    ) values (
+      new.id, new.owner_id, 'job', new.id::text, 'automation_resumed', old.status, new.status,
+      jsonb_build_object('resumed', true)
+    );
+  end if;
+
   return new;
 end;
 $$;
@@ -294,6 +342,7 @@ revoke all on function public.claim_next_shopling_price_bulk_auto_job(text,integ
 revoke all on function public.release_shopling_price_bulk_auto_job(uuid,text) from public, anon, authenticated;
 revoke all on function public.finish_shopling_price_bulk_auto_job(uuid,uuid,text) from public, anon, authenticated;
 revoke all on function public.stop_shopling_price_bulk_auto_job(uuid,uuid,text,text) from public, anon, authenticated;
+revoke all on function public.resume_shopling_price_bulk_auto_execution(uuid,uuid) from public, anon, authenticated;
 revoke all on function public.log_shopling_price_bulk_auto_audit() from public, anon, authenticated;
 
 grant execute on function public.enable_shopling_price_bulk_auto_execution(uuid,uuid,text,integer) to service_role;
@@ -301,3 +350,4 @@ grant execute on function public.claim_next_shopling_price_bulk_auto_job(text,in
 grant execute on function public.release_shopling_price_bulk_auto_job(uuid,text) to service_role;
 grant execute on function public.finish_shopling_price_bulk_auto_job(uuid,uuid,text) to service_role;
 grant execute on function public.stop_shopling_price_bulk_auto_job(uuid,uuid,text,text) to service_role;
+grant execute on function public.resume_shopling_price_bulk_auto_execution(uuid,uuid) to service_role;
