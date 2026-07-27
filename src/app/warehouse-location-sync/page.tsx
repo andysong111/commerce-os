@@ -11,7 +11,7 @@ const modeItems = [
 ];
 
 const moduleChecks = [
-  "위치코드 입력",
+  "위치코드 입력(옵션자체관리코드·바코드 동일값)",
   "적용계획",
   "이력",
   "롤백계획",
@@ -25,7 +25,7 @@ export default function WarehouseLocationSyncPage() {
     <div className="space-y-6">
       <PageHeader
         title="창고 위치코드 관리"
-        description="모델번호와 위치코드 입력 후 샵플링 반영 전 검증하는 독립 모듈 연결 화면입니다."
+        description="모델번호와 위치코드 입력 후 동일 위치코드를 샵플링 옵션자체관리코드와 바코드에 함께 반영하기 전 검증하는 독립 모듈 연결 화면입니다."
       />
 
       <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950 shadow-sm">
@@ -41,7 +41,7 @@ export default function WarehouseLocationSyncPage() {
           현재는 점검 모드입니다. 샵플링 실제 쓰기/수정 API는 호출하지 않습니다.
         </p>
         <p className="mt-2">
-          위치코드 입력, 적용계획, 이력, 롤백계획, API 사전검증을 독립 모듈에서 확인합니다.
+          위치코드 입력, 옵션자체관리코드·바코드 동일값 적용계획, 이력, 롤백계획, API 사전검증을 독립 모듈에서 확인합니다.
         </p>
       </section>
 
