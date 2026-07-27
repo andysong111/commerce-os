@@ -26,6 +26,14 @@ export type ShoplingPriceBulkOpsChunk = {
   last_error?: string | null;
 };
 
+const ACTIVE_JOB_STATUSES = new Set([
+  "canary_dispatching",
+  "canary_running",
+  "normal_running",
+  "retry_running",
+  "dispatch_uncertain",
+]);
+
 const toMillis = (value: unknown) => {
   if (typeof value !== "string" || !value) return null;
   const millis = Date.parse(value);
@@ -36,13 +44,17 @@ export function calculateShoplingPriceBulkTiming(
   job: Record<string, unknown>,
   chunks: ShoplingPriceBulkOpsChunk[],
   succeededItems: number,
+  now: () => number = () => Date.now(),
 ) {
   const startedValues = chunks.map((chunk) => toMillis(chunk.started_at)).filter((value): value is number => value !== null);
   const completedValues = chunks.map((chunk) => toMillis(chunk.completed_at)).filter((value): value is number => value !== null);
   const firstStarted = startedValues.length > 0 ? Math.min(...startedValues) : null;
   const lastUpdated = toMillis(job.updated_at);
   const completed = completedValues.length > 0 ? Math.max(...completedValues) : null;
-  const end = completed ?? lastUpdated;
+  const status = typeof job.status === "string" ? job.status : "";
+  const end = ACTIVE_JOB_STATUSES.has(status)
+    ? Math.max(lastUpdated ?? 0, now())
+    : completed ?? lastUpdated;
   const elapsedSeconds = firstStarted !== null && end !== null && end >= firstStarted
     ? Math.round((end - firstStarted) / 1000)
     : null;
@@ -61,7 +73,7 @@ export function calculateShoplingPriceBulkTiming(
 }
 
 function neutralizeSpreadsheetFormula(value: string) {
-  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return /^[\u0000-\u0020]*[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
 export function escapeShoplingPriceBulkCsvCell(value: unknown) {
