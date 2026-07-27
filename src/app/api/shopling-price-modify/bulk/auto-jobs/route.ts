@@ -8,6 +8,7 @@ import {
 import { validateShoplingPriceBulkCreateInput } from "@/lib/shoplingPriceModifyBulkServer";
 
 export const runtime = "nodejs";
+export const maxDuration = 50;
 
 const CONFIRMATION = "CONFIRM_ONE_CLICK_AUTO_PRICE_CHANGE";
 const LEASE_SECONDS = 75;
