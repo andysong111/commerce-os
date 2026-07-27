@@ -12,6 +12,16 @@ export const runtime = "nodejs";
 const CONFIRMATION = "CONFIRM_ONE_CLICK_AUTO_PRICE_CHANGE";
 const LEASE_SECONDS = 75;
 
+function isActiveAutoConflict(value: unknown) {
+  let message = "";
+  try {
+    message = typeof value === "string" ? value : JSON.stringify(value ?? "");
+  } catch {
+    message = String(value ?? "");
+  }
+  return /shopling_price_bulk_jobs_owner_active_auto_unique|duplicate key/i.test(message);
+}
+
 export async function POST(request: Request) {
   const auth = await normalSession();
   if (auth.response) return auth.response;
@@ -70,12 +80,20 @@ export async function POST(request: Request) {
     p_lease_seconds: LEASE_SECONDS,
   });
   if (enabled.error || !enabled.data) {
+    const archive = await auth.admin!.rpc("archive_shopling_price_bulk_job", {
+      p_job_id: jobId,
+      p_owner_id: auth.ownerId,
+      p_note: "one-click auto enable failed before any dispatch",
+    });
+    const conflict = isActiveAutoConflict(enabled.error);
     return normalError(
-      "작업은 저장됐지만 자동 실행을 시작하지 못했습니다. 고급 관리에서 작업을 확인하세요.",
-      500,
-      "AUTO_ENABLE_FAILED",
+      conflict
+        ? "이미 자동 가격 변경 작업이 진행 중입니다. 기존 작업이 끝난 뒤 다시 시작하세요."
+        : "자동 실행을 시작하지 못했습니다. 고급 관리에서 보관된 작업과 서버 설정을 확인하세요.",
+      conflict ? 409 : 500,
+      conflict ? "AUTO_JOB_ALREADY_ACTIVE" : "AUTO_ENABLE_FAILED",
       "auto.create.enable",
-      { job_id: jobId, error: enabled.error },
+      { job_id: jobId, error: enabled.error, cleanup_archived: !archive.error },
     );
   }
 
