@@ -77,7 +77,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   }
 
   const jobResult = await auth.admin!.from("shopling_price_bulk_jobs")
-    .select("id,owner_id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,created_at,updated_at,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,archive_note,archive_previous_status")
+    .select("id,owner_id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,created_at,updated_at,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,archive_note,archive_previous_status,automation_mode,automation_started_at,automation_last_tick_at,automation_finished_at,automation_lease_until,automation_stop_reason")
     .eq("id", jobId)
     .eq("owner_id", auth.ownerId)
     .maybeSingle();
@@ -160,6 +160,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
       max_retry_rounds: job.max_retry_rounds,
       retry_resume_status: job.retry_resume_status,
       retry_scope_known: job.retry_scope_known,
+      automation_mode: job.automation_mode,
+      automation_started_at: job.automation_started_at,
+      automation_last_tick_at: job.automation_last_tick_at,
+      automation_finished_at: job.automation_finished_at,
+      automation_lease_until: job.automation_lease_until,
+      automation_stop_reason: redactShoplingPriceBulkOperationalText(job.automation_stop_reason, 200),
       created_at: job.created_at,
       updated_at: job.updated_at,
       archived_at: job.archived_at,
