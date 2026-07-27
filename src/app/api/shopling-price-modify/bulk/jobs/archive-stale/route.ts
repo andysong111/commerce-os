@@ -9,6 +9,9 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
   let body: unknown;
   try { body = await request.json(); } catch { return normalError("확인 문구가 필요합니다.", 400, "STALE_ARCHIVE_BODY_INVALID", "archive_stale.body"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return normalError("오래된 작업 보관 요청 형식이 올바르지 않습니다.", 400, "STALE_ARCHIVE_BODY_INVALID", "archive_stale.body");
+  }
   const input = body as { confirmation?: unknown; older_than_days?: unknown };
   const days = Number(input.older_than_days);
   if (input.confirmation !== "CONFIRM_ARCHIVE_STALE_PREPARED") return normalError("오래된 작업 보관 확인 문구가 일치하지 않습니다.", 400, "STALE_ARCHIVE_CONFIRMATION_REQUIRED", "archive_stale.confirmation");
