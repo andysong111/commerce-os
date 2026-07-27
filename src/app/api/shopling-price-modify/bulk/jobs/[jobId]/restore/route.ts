@@ -8,6 +8,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
   if (auth.response) return auth.response;
   let body: unknown;
   try { body = await request.json(); } catch { return normalError("확인 문구가 필요합니다.", 400, "RESTORE_BODY_INVALID", "restore.body"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return normalError("보관 해제 요청 형식이 올바르지 않습니다.", 400, "RESTORE_BODY_INVALID", "restore.body");
   if ((body as { confirmation?: unknown }).confirmation !== "CONFIRM_BULK_RESTORE") return normalError("보관 해제 확인 문구가 일치하지 않습니다.", 400, "RESTORE_CONFIRMATION_REQUIRED", "restore.confirmation");
   const { jobId } = await params;
   const result = await auth.admin!.rpc("restore_shopling_price_bulk_job", { p_job_id: jobId, p_owner_id: auth.ownerId });
