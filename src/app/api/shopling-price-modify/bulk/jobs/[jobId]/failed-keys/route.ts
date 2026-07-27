@@ -23,25 +23,45 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   }
 
   const goodsKeys: string[] = [];
-  for (let offset = 0; offset < MAX_FAILED_KEYS; offset += PAGE_SIZE) {
-    const pageEnd = Math.min(offset + PAGE_SIZE - 1, MAX_FAILED_KEYS - 1);
-    const failedResult = await auth.admin!.from("shopling_price_bulk_items")
+  let lastOrdinal = 0;
+
+  while (goodsKeys.length < MAX_FAILED_KEYS) {
+    const pageLimit = Math.min(PAGE_SIZE, MAX_FAILED_KEYS - goodsKeys.length);
+    let query = auth.admin!.from("shopling_price_bulk_items")
       .select("goods_key,ordinal")
       .eq("job_id", jobId)
-      .eq("status", "failed")
+      .eq("status", "failed");
+
+    if (lastOrdinal > 0) query = query.gt("ordinal", lastOrdinal);
+
+    const failedResult = await query
       .order("ordinal", { ascending: true })
-      .range(offset, pageEnd);
+      .limit(pageLimit);
 
     if (failedResult.error) {
       return normalError("실패 상품 목록 조회에 실패했습니다.", 500, "FAILED_KEYS_QUERY_FAILED", "failed_keys.items_query", failedResult.error);
     }
 
     const rows = Array.isArray(failedResult.data) ? failedResult.data : [];
+    if (rows.length === 0) break;
+
     for (const row of rows) {
-      if (typeof row.goods_key === "string") goodsKeys.push(row.goods_key);
+      const goodsKey = typeof row.goods_key === "string" ? row.goods_key : "";
+      const ordinal = typeof row.ordinal === "number" ? row.ordinal : Number(row.ordinal);
+      if (!goodsKey || !Number.isInteger(ordinal) || ordinal <= lastOrdinal) {
+        return normalError(
+          "실패 상품 목록의 정렬 정보가 올바르지 않습니다.",
+          500,
+          "FAILED_KEYS_CURSOR_INVALID",
+          "failed_keys.items_query",
+          { goods_key: goodsKey || null, ordinal: row.ordinal ?? null, last_ordinal: lastOrdinal },
+        );
+      }
+      goodsKeys.push(goodsKey);
+      lastOrdinal = ordinal;
     }
 
-    if (rows.length < PAGE_SIZE) break;
+    if (rows.length < pageLimit) break;
   }
 
   return NextResponse.json({
