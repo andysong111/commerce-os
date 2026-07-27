@@ -57,13 +57,13 @@ test("server validation rejects unsafe requests", () => {
   assert.throws(()=>validateShoplingPriceBulkCreateInput({...valid(["1"]),invalid_count:-1}),/통계/);
   assert.throws(()=>validateShoplingPriceBulkCreateInput({...valid(["1"]),original_count:2}),/통계/);
 });
-test("migration, API security, and UI prepared-job contracts", async () => {
+test("migration, API security, and advanced UI prepared-job contracts", async () => {
   const [migration,collection,detail,ui,page,runner] = await Promise.all([
     readFile(new URL("../supabase/migrations/202607260001_shopling_price_bulk_prepared_jobs.sql",import.meta.url),"utf8"),
     readFile(new URL("../src/app/api/shopling-price-modify/bulk/jobs/route.ts",import.meta.url),"utf8"),
     readFile(new URL("../src/app/api/shopling-price-modify/bulk/jobs/[jobId]/route.ts",import.meta.url),"utf8"),
     readFile(new URL("../src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx",import.meta.url),"utf8"),
-    readFile(new URL("../src/app/shopling-price-modify-runner/page.tsx",import.meta.url),"utf8"),
+    readFile(new URL("../src/app/shopling-price-modify-runner/advanced/page.tsx",import.meta.url),"utf8"),
     readFile(new URL("../src/components/shopling-price-modify-runner/ShoplingPriceModifyRunner.tsx",import.meta.url),"utf8"),
   ]);
   for(const table of ["shopling_price_bulk_jobs","shopling_price_bulk_items","shopling_price_bulk_chunks"]) { assert.match(migration,new RegExp(`create table public.${table}`)); assert.match(migration,new RegExp(`alter table public.${table} enable row level security`)); }
@@ -78,5 +78,5 @@ test("migration, API security, and UI prepared-job contracts", async () => {
   for (const label of ["예상 쇼핑몰 가격 수정 행 수", "카나리 크기", "일반 청크 크기", "goods_key 마지막 5개"]) assert.match(ui, new RegExp(label));
   assert.match(ui,/useEffect\(\(\) => \{[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*void loadJobs\(\)[\s\S]*void loadDetail\(targetId\)/);
   assert.doesNotMatch(ui,/eslint-disable[\s\S]*react-hooks|setInterval|전체 가격설정 시작|실패 상품만 다시 실행|작업 재개/);
-  assert.match(page,/<details/); assert.match(page,/고급: 50개 이하 즉시 실행/); assert.ok(runner.length>0);
+  assert.match(page,/<details/); assert.match(page,/50개 이하 직접 실행/); assert.ok(runner.length>0);
 });
