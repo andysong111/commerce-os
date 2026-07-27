@@ -6,10 +6,10 @@ import { normalErrorDetail } from "@/lib/shoplingPriceModifyBulkError";
 
 export { normalErrorDetail } from "@/lib/shoplingPriceModifyBulkError";
 
-type BulkQueryResult = { data: Array<Record<string, unknown>> | null; error: unknown };
-type BulkSingleResult = { data: Record<string, unknown> | null; error: unknown };
+type BulkQueryResult = { data: Array<Record<string, unknown>> | null; error: unknown; count?: number | null };
+type BulkSingleResult = { data: Record<string, unknown> | null; error: unknown; count?: number | null };
 type BulkAdminQuery = PromiseLike<BulkQueryResult> & {
-  select(columns: string): BulkAdminQuery;
+  select(columns: string, options?: { count?: "exact"; head?: boolean }): BulkAdminQuery;
   eq(column: string, value: unknown): BulkAdminQuery;
   gt(column: string, value: unknown): BulkAdminQuery;
   lt(column: string, value: unknown): BulkAdminQuery;
