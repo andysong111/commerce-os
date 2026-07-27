@@ -35,8 +35,7 @@ create unique index if not exists shopling_price_bulk_jobs_owner_active_auto_uni
   on public.shopling_price_bulk_jobs(owner_id)
   where automation_mode = 'auto'
     and archived_at is null
-    and automation_finished_at is null
-    and automation_stop_reason is null;
+    and automation_finished_at is null;
 
 create or replace function public.enable_shopling_price_bulk_auto_execution(
   p_job_id uuid,
