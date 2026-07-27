@@ -33,6 +33,7 @@ async function importOpsModule() {
 
 const { parseShoplingPriceBulkPaste, plannedShoplingPriceBulkChunkCount } = await importBulkInput();
 const {
+  calculateShoplingPriceBulkTiming,
   createShoplingPriceBulkItemsCsv,
   createShoplingPriceBulkSyntheticInput,
   runShoplingPriceBulkLocalBenchmark,
@@ -55,11 +56,23 @@ test("005 migration adds validation-only jobs, 401 chunks, audit, and archive wi
   ]) assert.match(sql, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(sql, /p_count <> 20000/);
   assert.match(sql, /v_chunk_count := 1 \+ ceil\(greatest\(p_count - 10, 0\) \/ 50\.0\)/);
-  assert.match(sql, /status = 'validation_only'/);
-  assert.match(sql, /execution_mode = 'validation_only'/);
+  assert.match(sql, /owner_id,\s*status,\s*input_source,[\s\S]*?values \(\s*p_owner_id,\s*'validation_only',\s*'validation_only'/);
+  assert.match(sql, /execution_mode\s*\) values \([\s\S]*?'validation_only'\s*\) returning/);
   assert.doesNotMatch(sql, /delete\s+from\s+public\.shopling_price_bulk_/i);
   assert.doesNotMatch(sql, /policy_overrides[^\n]+metadata/i);
   assert.doesNotMatch(sql, /result_summary[^\n]+metadata/i);
+});
+
+test("validation-only status cannot satisfy live canary, normal, or retry reservation contracts", async () => {
+  const [canarySql, normalSql, retrySql] = await Promise.all([
+    read("supabase/migrations/202607260002_shopling_price_bulk_canary.sql"),
+    read("supabase/migrations/202607260003_shopling_price_bulk_normal_serial.sql"),
+    read("supabase/migrations/202607270001_shopling_price_bulk_retry_recovery.sql"),
+  ]);
+  assert.match(canarySql, /status\s*<>\s*'prepared'|status\s*=\s*'prepared'/);
+  assert.match(normalSql, /status\s*<>\s*'canary_succeeded'|status\s*=\s*'canary_succeeded'/);
+  assert.match(retrySql, /status not in \('canary_failed', 'normal_failed', 'retry_failed'\)/);
+  for (const sql of [canarySql, normalSql, retrySql]) assert.doesNotMatch(sql, /validation_only/);
 });
 
 test("actual 20,000 parser and planner benchmark returns exact safe counts", () => {
@@ -90,17 +103,44 @@ test("actual 20,000 parser and planner benchmark returns exact safe counts", () 
   });
 });
 
-test("CSV export has UTF-8 BOM, quoting, and spreadsheet formula neutralization", () => {
+test("active timing advances beyond a completed earlier chunk while terminal timing stops", () => {
+  const chunks = [{
+    chunk_index: 0,
+    chunk_type: "canary",
+    status: "succeeded",
+    goods_key_count: 10,
+    attempt_count: 1,
+    started_at: "2026-07-28T00:00:00.000Z",
+    completed_at: "2026-07-28T00:00:10.000Z",
+  }];
+  const active = calculateShoplingPriceBulkTiming(
+    { status: "normal_running", created_at: "2026-07-27T23:59:00.000Z", updated_at: "2026-07-28T00:00:20.000Z" },
+    chunks,
+    10,
+    () => Date.parse("2026-07-28T00:01:00.000Z"),
+  );
+  const terminal = calculateShoplingPriceBulkTiming(
+    { status: "normal_succeeded", created_at: "2026-07-27T23:59:00.000Z", updated_at: "2026-07-28T00:01:00.000Z" },
+    chunks,
+    10,
+    () => Date.parse("2026-07-28T00:02:00.000Z"),
+  );
+  assert.equal(active.elapsed_seconds, 60);
+  assert.equal(terminal.elapsed_seconds, 10);
+});
+
+test("CSV export has UTF-8 BOM, quoting, and control-whitespace formula neutralization", () => {
   const csv = createShoplingPriceBulkItemsCsv("job-1", "live", "normal_failed", [{
     goods_key: "121031",
     ordinal: 1,
     status: "failed",
     attempt_count: 2,
-    last_error: '=HYPERLINK("https://example.invalid","x"),\r\nretry',
+    last_error: '\t=HYPERLINK("https://example.invalid","x"),\r\nretry',
   }]);
   assert.equal(csv.charCodeAt(0), 0xfeff);
   assert.match(csv, /job_id,execution_mode,job_status,goods_key,ordinal,item_status,attempt_count,last_error/);
-  assert.match(csv, /"'=HYPERLINK\(""https:\/\/example\.invalid"",""x""\),\r\nretry"/);
+  assert.ok(csv.includes("'\t=HYPERLINK"));
+  assert.match(csv, /""https:\/\/example\.invalid""/);
 });
 
 test("validation-only API is session-owned and has no external execution path", async () => {
@@ -115,11 +155,14 @@ test("validation-only API is session-owned and has no external execution path", 
   assert.doesNotMatch(route, /fetch\s*\(/);
 });
 
-test("report uses stable cursor pagination and safe bounded output", async () => {
+test("report uses stable cursor pagination, summary counts, and safe bounded output", async () => {
   const route = await read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/report/route.ts");
   assert.match(route, /MAX_ITEMS = 20_000/);
+  assert.match(route, /MAX_CHUNKS = 2_000/);
   assert.match(route, /if \(lastOrdinal > 0\) query = query\.gt\("ordinal", lastOrdinal\)/);
   assert.match(route, /order\("ordinal", \{ ascending: true \}\)\.limit\(pageLimit\)/);
+  assert.match(route, /summaryOnly/);
+  assert.match(route, /count: "exact", head: true/);
   assert.match(route, /format === "csv"/);
   assert.match(route, /content-disposition/);
   assert.doesNotMatch(route, /policy_overrides[^\n]+response/i);
@@ -144,7 +187,7 @@ test("audit and archive APIs are owner scoped, bounded, and confirmation gated",
   assert.match(stale, /new Set\(\[7, 14, 30, 60, 90\]\)/);
 });
 
-test("operations UI exposes validation lock, reports, audit, archive, and keeps immediate runner", async () => {
+test("operations UI synchronizes job changes, preserves audit downloads, and keeps immediate runner", async () => {
   const [ui, page, inputUi] = await Promise.all([
     read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkOperations.tsx"),
     read("src/app/shopling-price-modify-runner/page.tsx"),
@@ -161,6 +204,12 @@ test("operations UI exposes validation lock, reports, audit, archive, and keeps 
     "보관 해제",
     "오래된 준비·검증 작업 보관",
   ]) assert.match(ui, new RegExp(phrase));
+  assert.match(ui, /format=json&summary=1/);
+  assert.match(ui, /setAudit\(\[\]\)/);
+  assert.match(ui, /setAudit\(events\)/);
+  assert.match(ui, /audit\.slice\(0, 100\)/);
+  assert.match(ui, /window\.location\.assign/);
+  assert.match(ui, /window\.location\.reload/);
   assert.match(page, /ShoplingPriceModifyBulkOperations/);
   assert.match(page, /<ShoplingPriceModifyRunner \/>/);
   assert.match(inputUi, /일반 상품 직렬 실행 승인/);
