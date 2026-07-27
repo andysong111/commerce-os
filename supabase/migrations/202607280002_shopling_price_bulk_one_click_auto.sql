@@ -195,7 +195,7 @@ begin
 
   if v_job.id is null then raise exception 'job not found'; end if;
   if v_job.automation_mode <> 'auto' then raise exception 'job is not auto mode'; end if;
-  if v_job.automation_worker_id <> p_worker_id then raise exception 'auto worker mismatch'; end if;
+  if v_job.automation_worker_id is distinct from p_worker_id then raise exception 'auto worker mismatch'; end if;
   if v_job.status = 'normal_succeeded' then null;
   elsif v_job.status = 'canary_succeeded' and not exists (
     select 1 from public.shopling_price_bulk_chunks
