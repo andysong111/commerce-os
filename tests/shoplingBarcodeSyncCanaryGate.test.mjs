@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 
 const {
+  SHOPLING_BARCODE_SYNC_CANARY_COOKIE,
   SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS,
   evaluateShoplingBarcodeSyncCanary,
 } = await importTranspiledTypeScript(
@@ -53,6 +55,7 @@ function validResult(overrides = {}) {
 test("engine dispatch and server gate use the same exact ten canary keys", () => {
   assert.deepEqual([...SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS], verifiedKeys);
   assert.deepEqual([...SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS], verifiedKeys);
+  assert.equal(SHOPLING_BARCODE_SYNC_CANARY_COOKIE, "shopling_barcode_sync_canary");
 });
 
 test("ten successful verified canary products open the bulk gate", () => {
@@ -105,15 +108,26 @@ test("partial, failed, unknown, stopped, or stale canary results are rejected", 
   );
 });
 
-test("run route contains a server-side canary proof check before apply dispatch", async () => {
-  const source = await import("node:fs/promises").then(({ readFile }) =>
-    readFile(
-      new URL("../src/app/api/shopling-barcode-sync/run/route.ts", import.meta.url),
-      "utf8",
-    ),
+test("result verification issues an HttpOnly strict canary proof cookie", async () => {
+  const source = await readFile(
+    new URL("../src/app/api/shopling-barcode-sync/result/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /evaluateShoplingBarcodeSyncCanary/);
+  assert.match(source, /response\.cookies\.set\(SHOPLING_BARCODE_SYNC_CANARY_COOKIE/);
+  assert.match(source, /httpOnly:\s*true/);
+  assert.match(source, /sameSite:\s*"strict"/);
+  assert.match(source, /maxAge:\s*7 \* 24 \* 60 \* 60/);
+});
+
+test("run route revalidates the cookie proof before apply dispatch", async () => {
+  const source = await readFile(
+    new URL("../src/app/api/shopling-barcode-sync/run/route.ts", import.meta.url),
+    "utf8",
   );
   assert.match(source, /mode === "apply"/);
-  assert.match(source, /canary_request_id/);
+  assert.match(source, /SHOPLING_BARCODE_SYNC_CANARY_COOKIE/);
+  assert.match(source, /cookieStore\.get/);
   assert.match(source, /fetchShoplingBarcodeSyncActionsResult/);
   assert.match(source, /evaluateShoplingBarcodeSyncCanary/);
   assert.match(source, /status:\s*409/);
