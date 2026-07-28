@@ -139,8 +139,8 @@ async function finishAuto(admin: BulkAdmin, jobId: string, ownerId: string, work
     });
     return { outcome: "finished", status, message: "모든 상품의 가격 변경이 완료되었습니다.", leaseReleased: true };
   } catch (error) {
-    // The underlying item/chunk result is already committed. Keep the job
-    // claimable as normal_succeeded/canary_succeeded and retry only this marker.
+    // The item/chunk result is already committed. Leave the terminal job claimable
+    // so a later worker retries only this completion marker, never a price dispatch.
     return {
       outcome: "waiting",
       status,
@@ -167,7 +167,14 @@ function resultPersistencePending(label: string, status: string, error: unknown)
   };
 }
 
-async function blockUncertain(admin: BulkAdmin, type: ChunkRow["chunk_type"], jobId: string, ownerId: string, requestId: string, reason: string) {
+async function blockUncertain(
+  admin: BulkAdmin,
+  type: ChunkRow["chunk_type"],
+  jobId: string,
+  ownerId: string,
+  requestId: string,
+  reason: string,
+) {
   const name = type === "canary"
     ? "block_shopling_price_bulk_canary_uncertain"
     : type === "retry"
@@ -179,6 +186,28 @@ async function blockUncertain(admin: BulkAdmin, type: ChunkRow["chunk_type"], jo
     p_request_id: requestId,
     p_error: reason,
   });
+}
+
+async function stopAfterUncertain(
+  admin: BulkAdmin,
+  type: ChunkRow["chunk_type"],
+  job: JobRow,
+  workerId: string,
+  requestId: string,
+  reason: string,
+): Promise<StepResult> {
+  // Persist the same request_id as uncertain first. If the process dies between
+  // these two guarded RPCs, advanceOnce repairs the missing stop marker before
+  // it is allowed to inspect or finish the result.
+  await blockUncertain(admin, type, job.id, job.owner_id, requestId, reason);
+  return stopAuto(
+    admin,
+    job.id,
+    job.owner_id,
+    workerId,
+    `전송 상태가 불확실하여 자동 실행을 중단했습니다. 같은 요청의 결과만 확인합니다. ${reason}`,
+    "dispatch_uncertain",
+  );
 }
 
 async function dispatchCanary(admin: BulkAdmin, job: JobRow, workerId: string): Promise<StepResult> {
@@ -204,8 +233,7 @@ async function dispatchCanary(admin: BulkAdmin, job: JobRow, workerId: string): 
       p_actions_url: dispatched.githubActionsUrl,
     });
     if (marked.error) {
-      await blockUncertain(admin, "canary", job.id, job.owner_id, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "첫 10개 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "canary", job, workerId, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
     }
     return { outcome: "dispatched", status: "canary_running", message: "첫 10개 상품을 시험 실행하고 있습니다." };
   }
@@ -220,8 +248,7 @@ async function dispatchCanary(admin: BulkAdmin, job: JobRow, workerId: string): 
     return stopAuto(admin, job.id, job.owner_id, workerId, `첫 10개 실행 요청이 거절되어 자동 실행을 멈췄습니다. ${dispatched.message}`, "prepared");
   }
 
-  await blockUncertain(admin, "canary", job.id, job.owner_id, requestId, dispatched.message);
-  return { outcome: "waiting", status: "dispatch_uncertain", message: "첫 10개 전송 여부를 확인하고 있습니다. 같은 요청 결과만 조회합니다." };
+  return stopAfterUncertain(admin, "canary", job, workerId, requestId, dispatched.message);
 }
 
 async function processCanaryResult(admin: BulkAdmin, job: JobRow, workerId: string, chunk: ChunkRow): Promise<StepResult> {
@@ -233,8 +260,7 @@ async function processCanaryResult(admin: BulkAdmin, job: JobRow, workerId: stri
   if (actions.status === "pending") {
     const reconciliation = decideNormalDispatchingReconciliation({ chunkStatus: chunk.status, startedAt: chunk.started_at, now: Date.now() });
     if (reconciliation === "block_uncertain") {
-      await blockUncertain(admin, "canary", job.id, job.owner_id, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "첫 10개 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "canary", job, workerId, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
     }
     return { outcome: "waiting", status: job.status, message: "첫 10개 상품의 결과를 기다리고 있습니다." };
   }
@@ -243,8 +269,9 @@ async function processCanaryResult(admin: BulkAdmin, job: JobRow, workerId: stri
   }
 
   if (chunk.status === "dispatching") {
-    await blockUncertain(admin, "canary", job.id, job.owner_id, requestId, "완료 결과를 찾았으므로 기존 요청을 불확실 상태에서 확정합니다.");
+    return stopAfterUncertain(admin, "canary", job, workerId, requestId, "완료 결과는 찾았지만 실행 상태 저장이 확인되지 않았습니다.");
   }
+
   const analysis = analyzeShoplingPriceBulkCanaryResult(actions.summary, requestId, keys, actions.runConclusion);
   const finished = await admin.rpc("finish_shopling_price_bulk_canary", {
     p_job_id: job.id,
@@ -295,40 +322,44 @@ async function dispatchNormal(admin: BulkAdmin, job: JobRow, workerId: string): 
       p_actions_url: dispatched.githubActionsUrl,
     });
     if (marked.error) {
-      await blockUncertain(admin, "normal", job.id, job.owner_id, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "현재 50개 묶음의 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "normal", job, workerId, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
     }
     return { outcome: "dispatched", status: "normal_running", message: `상품 ${keys.length}개를 자동 변경 중입니다.` };
   }
 
-  const transition = dispatched.status === "rejected"
-    ? "fail_shopling_price_bulk_normal_dispatch_rejected"
-    : "block_shopling_price_bulk_normal_uncertain";
-  await rpc(admin, transition, {
-    p_job_id: job.id,
-    p_owner_id: job.owner_id,
-    p_request_id: requestId,
-    p_error: dispatched.message,
-  });
-  if (dispatched.status === "rejected") return stopAuto(admin, job.id, job.owner_id, workerId, `50개 묶음 실행 요청이 거절되어 멈췄습니다. ${dispatched.message}`, "normal_failed");
-  return { outcome: "waiting", status: "dispatch_uncertain", message: "현재 50개 묶음의 전송 여부를 확인하고 있습니다." };
+  if (dispatched.status === "rejected") {
+    await rpc(admin, "fail_shopling_price_bulk_normal_dispatch_rejected", {
+      p_job_id: job.id,
+      p_owner_id: job.owner_id,
+      p_request_id: requestId,
+      p_error: dispatched.message,
+    });
+    return stopAuto(admin, job.id, job.owner_id, workerId, `50개 묶음 실행 요청이 거절되어 멈췄습니다. ${dispatched.message}`, "normal_failed");
+  }
+
+  return stopAfterUncertain(admin, "normal", job, workerId, requestId, dispatched.message);
 }
 
 async function processNormalResult(admin: BulkAdmin, job: JobRow, workerId: string, chunk: ChunkRow): Promise<StepResult> {
   const requestId = typeof chunk.request_id === "string" ? chunk.request_id : "";
   const keys = goodsKeys(chunk.goods_keys);
   if (!requestId || keys.length === 0) return stopAuto(admin, job.id, job.owner_id, workerId, "현재 실행 묶음의 요청 정보가 불완전해 멈췄습니다.", job.status);
+
   const actions = await fetchShoplingPriceModifyActionsResult(requestId);
   if (actions.status === "pending") {
     const reconciliation = decideNormalDispatchingReconciliation({ chunkStatus: chunk.status, startedAt: chunk.started_at, now: Date.now() });
     if (reconciliation === "block_uncertain") {
-      await blockUncertain(admin, "normal", job.id, job.owner_id, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "현재 묶음의 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "normal", job, workerId, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
     }
     return { outcome: "waiting", status: job.status, message: "현재 50개 묶음의 결과를 기다리고 있습니다." };
   }
-  if (actions.status === "error" || !actions.summary) return { outcome: "waiting", status: job.status, message: actions.message ?? "현재 묶음 결과를 아직 확인하지 못했습니다." };
-  if (chunk.status === "dispatching") await blockUncertain(admin, "normal", job.id, job.owner_id, requestId, "완료 결과를 찾았으므로 기존 요청을 불확실 상태에서 확정합니다.");
+  if (actions.status === "error" || !actions.summary) {
+    return { outcome: "waiting", status: job.status, message: actions.message ?? "현재 묶음 결과를 아직 확인하지 못했습니다." };
+  }
+
+  if (chunk.status === "dispatching") {
+    return stopAfterUncertain(admin, "normal", job, workerId, requestId, "완료 결과는 찾았지만 실행 상태 저장이 확인되지 않았습니다.");
+  }
 
   const analysis = analyzeShoplingPriceBulkNormalResult(actions.summary, requestId, keys, actions.runConclusion);
   const finished = await admin.rpc("finish_shopling_price_bulk_normal_chunk", {
@@ -361,6 +392,7 @@ async function dispatchRetry(admin: BulkAdmin, job: JobRow, workerId: string): P
   const context = record(reserved.data);
   if (context.completed) return { outcome: "progressed", status: String(context.status ?? "normal_running"), message: "실패 상품 재실행이 완료되었습니다." };
   if (context.paused) return { outcome: "noop", status: "retry_paused", message: "실패 상품 재실행이 일시중지되어 있습니다." };
+
   const keys = goodsKeys(context.goods_keys);
   const dispatched = await dispatchShoplingPriceBulkRetry(keys, context.policy_overrides, requestId);
   if (dispatched.status === "queued") {
@@ -371,39 +403,44 @@ async function dispatchRetry(admin: BulkAdmin, job: JobRow, workerId: string): P
       p_actions_url: dispatched.githubActionsUrl,
     });
     if (marked.error) {
-      await blockUncertain(admin, "retry", job.id, job.owner_id, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "실패 상품 재실행 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "retry", job, workerId, requestId, "GitHub 요청 수락 후 상태 저장이 불확실합니다.");
     }
     return { outcome: "dispatched", status: "retry_running", message: `실패 상품 ${keys.length}개를 다시 실행 중입니다.` };
   }
-  const transition = dispatched.status === "rejected"
-    ? "fail_shopling_price_bulk_retry_dispatch_rejected"
-    : "block_shopling_price_bulk_retry_uncertain";
-  await rpc(admin, transition, {
-    p_job_id: job.id,
-    p_owner_id: job.owner_id,
-    p_request_id: requestId,
-    p_error: dispatched.message,
-  });
-  if (dispatched.status === "rejected") return stopAuto(admin, job.id, job.owner_id, workerId, `실패 상품 재실행 요청이 거절됐습니다. ${dispatched.message}`, "retry_failed");
-  return { outcome: "waiting", status: "dispatch_uncertain", message: "실패 상품 재실행 전송 여부를 확인하고 있습니다." };
+
+  if (dispatched.status === "rejected") {
+    await rpc(admin, "fail_shopling_price_bulk_retry_dispatch_rejected", {
+      p_job_id: job.id,
+      p_owner_id: job.owner_id,
+      p_request_id: requestId,
+      p_error: dispatched.message,
+    });
+    return stopAuto(admin, job.id, job.owner_id, workerId, `실패 상품 재실행 요청이 거절됐습니다. ${dispatched.message}`, "retry_failed");
+  }
+
+  return stopAfterUncertain(admin, "retry", job, workerId, requestId, dispatched.message);
 }
 
 async function processRetryResult(admin: BulkAdmin, job: JobRow, workerId: string, chunk: ChunkRow): Promise<StepResult> {
   const requestId = typeof chunk.request_id === "string" ? chunk.request_id : "";
   const keys = goodsKeys(chunk.goods_keys);
   if (!requestId || keys.length === 0) return stopAuto(admin, job.id, job.owner_id, workerId, "실패 상품 재실행 요청 정보가 불완전해 멈췄습니다.", job.status);
+
   const actions = await fetchShoplingPriceModifyActionsResult(requestId);
   if (actions.status === "pending") {
     const reconciliation = decideNormalDispatchingReconciliation({ chunkStatus: chunk.status, startedAt: chunk.started_at, now: Date.now() });
     if (reconciliation === "block_uncertain") {
-      await blockUncertain(admin, "retry", job.id, job.owner_id, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
-      return { outcome: "waiting", status: "dispatch_uncertain", message: "실패 상품 재실행 전송 상태를 확인하고 있습니다." };
+      return stopAfterUncertain(admin, "retry", job, workerId, requestId, "전송 대기 상태가 120초 이상 지속되어 재전송을 차단합니다.");
     }
     return { outcome: "waiting", status: job.status, message: "실패 상품 재실행 결과를 기다리고 있습니다." };
   }
-  if (actions.status === "error" || !actions.summary) return { outcome: "waiting", status: job.status, message: actions.message ?? "재실행 결과를 아직 확인하지 못했습니다." };
-  if (chunk.status === "dispatching") await blockUncertain(admin, "retry", job.id, job.owner_id, requestId, "완료 결과를 찾았으므로 기존 요청을 불확실 상태에서 확정합니다.");
+  if (actions.status === "error" || !actions.summary) {
+    return { outcome: "waiting", status: job.status, message: actions.message ?? "재실행 결과를 아직 확인하지 못했습니다." };
+  }
+
+  if (chunk.status === "dispatching") {
+    return stopAfterUncertain(admin, "retry", job, workerId, requestId, "완료 결과는 찾았지만 실행 상태 저장이 확인되지 않았습니다.");
+  }
 
   const analysis = analyzeShoplingPriceBulkRetryResult(actions.summary, requestId, keys, actions.runConclusion);
   const finished = await admin.rpc("finish_shopling_price_bulk_retry_chunk", {
@@ -453,6 +490,26 @@ async function advanceOnce(admin: BulkAdmin, jobId: string, ownerId: string, wor
   if (job.status === "normal_succeeded") return finishAuto(admin, job.id, job.owner_id, workerId, job.status);
 
   const stopped = Boolean(job.automation_stop_reason);
+  if (job.status === "dispatch_uncertain") {
+    const active = await loadActiveChunks(admin, job.id);
+    if (active.length !== 1) {
+      return stopAuto(admin, job.id, job.owner_id, workerId, "전송 상태를 확인할 실행 묶음이 정확히 하나가 아니어서 멈췄습니다.", job.status);
+    }
+    if (!stopped) {
+      // Crash recovery for the small gap between the existing uncertain RPC and
+      // the stop RPC. Never inspect a result until the stop marker is durable.
+      return stopAuto(
+        admin,
+        job.id,
+        job.owner_id,
+        workerId,
+        "전송 상태가 불확실하여 자동 실행을 중단했습니다. 같은 요청의 결과만 확인합니다.",
+        "dispatch_uncertain",
+      );
+    }
+    return processSingleActiveChunk(admin, job, workerId, active);
+  }
+
   if (job.status === "prepared") {
     if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
     return dispatchCanary(admin, job, workerId);
@@ -463,7 +520,11 @@ async function advanceOnce(admin: BulkAdmin, jobId: string, ownerId: string, wor
     return processSingleActiveChunk(admin, job, workerId, active);
   }
   if (job.status === "canary_succeeded") {
-    if (stopped) return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    if (stopped) {
+      const normalCount = await countChunks(admin, job.id, "normal");
+      if (normalCount === 0) return finishAuto(admin, job.id, job.owner_id, workerId, "canary_succeeded");
+      return { outcome: "noop", status: job.status, message: job.automation_stop_reason ?? "자동 실행이 중단되어 있습니다." };
+    }
     return approveNormal(admin, job, workerId);
   }
   if (job.status === "normal_running") {
@@ -483,9 +544,6 @@ async function advanceOnce(admin: BulkAdmin, jobId: string, ownerId: string, wor
     // When pause_requested is true, this RPC changes the idle job to
     // retry_paused and returns without creating a dispatch.
     return dispatchRetry(admin, job, workerId);
-  }
-  if (job.status === "dispatch_uncertain") {
-    return processSingleActiveChunk(admin, job, workerId, await loadActiveChunks(admin, job.id));
   }
   return { outcome: "noop", status: job.status, message: "현재 상태에서는 자동으로 진행할 작업이 없습니다." };
 }
