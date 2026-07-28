@@ -26,7 +26,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
   const admin = rawAdmin as Admin;
   const { jobId } = await params;
   const jobResult = await admin.from("shopling_price_bulk_jobs")
-    .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,policy_overrides,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,created_at,updated_at")
+    .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,policy_overrides,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,automation_mode,automation_started_at,automation_last_tick_at,automation_finished_at,automation_lease_until,automation_worker_id,automation_stop_reason,created_at,updated_at")
     .eq("id", jobId)
     .eq("owner_id", auth.user.id)
     .maybeSingle();

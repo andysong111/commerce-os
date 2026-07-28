@@ -55,7 +55,7 @@ test("job detail counts existing item columns and exposes every item status coun
   assert.match(route, /failed: failedItems\.count \?\? 0/);
 });
 
-test("UI requires explicit approval and uses a timeout-only resumable serial loop", async () => {
+test("manual UI requires explicit approval and uses a timeout-only resumable serial loop", async () => {
   const ui = await read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx");
   assert.match(ui, /일반 상품 직렬 실행 승인/);
   assert.match(ui, /detail\.job\.status === "canary_succeeded" && detail\.normal_chunk_count > 0/);
@@ -66,8 +66,9 @@ test("UI requires explicit approval and uses a timeout-only resumable serial loo
   assert.match(ui, /실패 또는 불확실 상태에서 자동 중단/);
   assert.match(ui, /item_status_counts\.succeeded \* 100/);
   assert.match(ui, /카나리만 포함된 작업이 완료되었습니다/);
-  assert.match(ui, /activeNormal[\s\S]*dispatch_uncertain[\s\S]*normal\/\$\{endpoint\}/);
-  assert.match(ui, /recoveringUncertain \? "result"/);
+  assert.match(ui, /const endpoint = retryMode \|\| activeRetry \? "retry" : "normal"/);
+  assert.match(ui, /const action = recoveringUncertain \? "result" : \(activeNormal \|\| activeRetry \? "result" : "advance"\)/);
+  assert.match(ui, /\$\{endpoint\}\/\$\{action\}/);
   assert.match(ui, /일반 청크 전송 여부 확인 중/);
   assert.match(ui, /새 실행을 만들지 않고 기존 request_id의 결과만 확인합니다/);
   assert.match(ui, /canary\?\.status === "dispatch_uncertain"/);

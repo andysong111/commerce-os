@@ -187,10 +187,11 @@ test("audit and archive APIs are owner scoped, bounded, and confirmation gated",
   assert.match(stale, /new Set\(\[7, 14, 30, 60, 90\]\)/);
 });
 
-test("operations UI synchronizes job changes, preserves audit downloads, and keeps immediate runner", async () => {
-  const [ui, page, inputUi] = await Promise.all([
+test("operations UI synchronizes job changes and stays available on the advanced route", async () => {
+  const [ui, simplePage, advancedPage, inputUi] = await Promise.all([
     read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkOperations.tsx"),
     read("src/app/shopling-price-modify-runner/page.tsx"),
+    read("src/app/shopling-price-modify-runner/advanced/page.tsx"),
     read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkInputPreview.tsx"),
   ]);
   for (const phrase of [
@@ -210,8 +211,11 @@ test("operations UI synchronizes job changes, preserves audit downloads, and kee
   assert.match(ui, /audit\.slice\(0, 100\)/);
   assert.match(ui, /window\.location\.assign/);
   assert.match(ui, /window\.location\.reload/);
-  assert.match(page, /ShoplingPriceModifyBulkOperations/);
-  assert.match(page, /<ShoplingPriceModifyRunner \/>/);
+  assert.match(simplePage, /ShoplingPriceModifySimpleAutoRunner/);
+  assert.doesNotMatch(simplePage, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyBulkOperations"|<ShoplingPriceModifyBulkOperations\s*\/>/);
+  assert.doesNotMatch(simplePage, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyRunner"|<ShoplingPriceModifyRunner\s*\/>/);
+  assert.match(advancedPage, /ShoplingPriceModifyBulkOperations/);
+  assert.match(advancedPage, /<ShoplingPriceModifyRunner \/>/);
   assert.match(inputUi, /일반 상품 직렬 실행 승인/);
   assert.match(inputUi, /실패 상품 .*개만 재실행 승인/);
   assert.doesNotMatch(ui, /setInterval/);

@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
+import { normalError, normalSession, requireManualShoplingPriceBulkJob, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { dispatchShoplingPriceBulkNormal } from "@/lib/shoplingPriceModifyBulkNormal";
 import { generateShoplingPriceModifyRequestId } from "@/lib/shoplingPriceModifyRunner";
 export const runtime="nodejs";
 export async function POST(_request:Request,{params}:{params:Promise<{jobId:string}>}) {
- const auth=await normalSession(); if(auth.response)return auth.response; const {jobId}=await params; const requestId=generateShoplingPriceModifyRequestId();
+ const auth=await normalSession(); if(auth.response)return auth.response; const {jobId}=await params;
+ const manual=await requireManualShoplingPriceBulkJob(auth.admin!,jobId,auth.ownerId,"normal.advance");if(manual.response)return manual.response;
+ const requestId=generateShoplingPriceModifyRequestId();
  const reserved=await auth.admin!.rpc("reserve_next_shopling_price_bulk_normal_chunk",{p_job_id:jobId,p_owner_id:auth.ownerId,p_request_id:requestId});
  if(reserved.error||!reserved.data)return normalError("다음 일반 청크를 예약할 수 없습니다.",409,"NORMAL_RESERVE_REJECTED","normal.advance.reserve",reserved.error);
  const context=rpcData(reserved.data); if(context.completed)return NextResponse.json({status:"normal_succeeded",message:"모든 상품의 가격설정 작업이 완료되었습니다."});

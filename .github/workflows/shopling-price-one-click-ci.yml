@@ -1,0 +1,88 @@
+name: Shopling Price One-Click CI
+
+on:
+  push:
+    branches:
+      - codex/shopling-price-simple-one-click-auto
+  pull_request:
+    paths:
+      - "src/app/api/cron/shopling-price-bulk-auto/**"
+      - "src/app/api/shopling-price-modify/bulk/**"
+      - "src/app/shopling-price-modify-runner/**"
+      - "src/components/shopling-price-modify-runner/**"
+      - "src/lib/shoplingPriceModifyBulk*"
+      - "supabase/migrations/20260728000*_shopling_price_bulk_one_click_auto*.sql"
+      - "tests/shoplingPriceModifyBulk*.test.mjs"
+      - "vercel.json"
+      - ".github/workflows/shopling-price-one-click-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund
+      - name: Focused tests
+        run: |
+          node --test tests/shoplingPriceModifyBulkOneClickAuto.test.mjs
+          node --test tests/shoplingPriceModifyBulkOneClickSafety.test.mjs
+          node --test tests/shoplingPriceModifyBulkOneClickSafetyPatch.test.mjs
+          node --test tests/shoplingPriceModifyBulkAutoManualGuard.test.mjs
+          node --test tests/shoplingPriceModifyBulkRetryPauseRecovery.test.mjs
+          node --test tests/shoplingPriceModifyBulkAuditPagination.test.mjs
+          node --test tests/shoplingPriceModifyBulkOpsObservability.test.mjs
+          node --test tests/shoplingPriceModifyBulkRetryRecovery.test.mjs
+          node --test tests/shoplingPriceModifyBulkNormalSerial.test.mjs
+          node --test tests/shoplingPriceModifyBulkCanary.test.mjs
+          node --test tests/shoplingPriceModifyRunner.test.mjs
+          node --test tests/shoplingPriceModifyRunnerCandidateLimit.test.mjs
+          node --test tests/supabaseAdminRestClient.test.mjs
+          node --test tests/shoplingPriceModifyBulkDiagnostics.test.mjs
+          node --test tests/shoplingPriceModifyBulkInput.test.mjs
+          node --test tests/shoplingPriceModifyBulkPreparedJobs.test.mjs
+      - name: Run all static checks and capture logs
+        shell: bash
+        run: |
+          set +e
+          npx eslint \
+            src/app/api/cron/shopling-price-bulk-auto \
+            src/app/api/shopling-price-modify/bulk \
+            src/app/shopling-price-modify-runner \
+            src/components/shopling-price-modify-runner \
+            src/lib/shoplingPriceModifyBulk*.ts \
+            tests/shoplingPriceModifyBulk*.test.mjs > lint.log 2>&1
+          echo $? > lint.exit
+          npm run build > build.log 2>&1
+          echo $? > build.exit
+          npx tsc --noEmit > typecheck.log 2>&1
+          echo $? > typecheck.exit
+          git diff --check > diff-check.log 2>&1
+          echo $? > diff-check.exit
+          printf 'lint=%s\nbuild=%s\ntypecheck=%s\ndiff_check=%s\n' \
+            "$(cat lint.exit)" "$(cat build.exit)" "$(cat typecheck.exit)" "$(cat diff-check.exit)" | tee check-summary.txt
+      - name: Upload check logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopling-one-click-check-logs
+          path: |
+            lint.log
+            build.log
+            typecheck.log
+            diff-check.log
+            check-summary.txt
+          retention-days: 3
+      - name: Enforce static checks
+        shell: bash
+        run: |
+          test "$(cat lint.exit)" = "0"
+          test "$(cat build.exit)" = "0"
+          test "$(cat typecheck.exit)" = "0"
+          test "$(cat diff-check.exit)" = "0"

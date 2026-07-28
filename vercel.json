@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/shopling-price-bulk-auto",
+      "schedule": "* * * * *"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
+import { normalError, normalSession, requireManualShoplingPriceBulkJob, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { dispatchShoplingPriceBulkRetry } from "@/lib/shoplingPriceModifyBulkRetry";
 import { generateShoplingPriceModifyRequestId } from "@/lib/shoplingPriceModifyRunner";
 
@@ -10,6 +10,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   if (auth.response) return auth.response;
 
   const { jobId } = await params;
+  const manual = await requireManualShoplingPriceBulkJob(auth.admin!, jobId, auth.ownerId, "retry.advance");
+  if (manual.response) return manual.response;
   const requestId = generateShoplingPriceModifyRequestId();
   const reserved = await auth.admin!.rpc("reserve_next_shopling_price_bulk_retry_chunk", {
     p_job_id: jobId,

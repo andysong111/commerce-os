@@ -12,12 +12,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
     return normalError("확인 문구가 필요합니다.", 400, "INVALID_BODY", "retry.approve.body");
   }
 
-  if ((body as { confirmation?: unknown })?.confirmation !== "CONFIRM_FAILED_GOODS_RETRY") {
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body as { confirmation?: unknown }).confirmation !== "CONFIRM_FAILED_GOODS_RETRY") {
     return normalError("재시도 확인 문구가 일치하지 않습니다.", 400, "CONFIRMATION_REQUIRED", "retry.approve.confirmation");
   }
 
   const { jobId } = await params;
-  const result = await auth.admin!.rpc("approve_shopling_price_bulk_failed_retry", {
+  const result = await auth.admin!.rpc("approve_shopling_price_bulk_failed_retry_auto", {
     p_job_id: jobId,
     p_owner_id: auth.ownerId,
   });
@@ -31,12 +31,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ job
       500,
       "RETRY_APPROVAL_EMPTY",
       "retry.approve.rpc",
-      "approve_shopling_price_bulk_failed_retry RPC가 데이터를 반환하지 않았습니다.",
+      "approve_shopling_price_bulk_failed_retry_auto RPC가 데이터를 반환하지 않았습니다.",
     );
   }
 
+  const state = rpcData(result.data);
   return NextResponse.json({
-    ...rpcData(result.data),
-    message: "실패 상품만 재실행하도록 승인했습니다. 성공 상품은 재실행하지 않습니다.",
+    ...state,
+    message: state.auto_resumed === true
+      ? "실패 상품만 다시 실행합니다. 브라우저를 닫아도 자동으로 계속 진행합니다."
+      : "실패 상품만 재실행하도록 승인했습니다. 성공 상품은 재실행하지 않습니다.",
   });
 }

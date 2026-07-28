@@ -31,6 +31,9 @@ type OpsReport = {
     updated_at: string;
     archived_at?: string | null;
     archive_note?: string | null;
+    automation_mode?: string;
+    automation_finished_at?: string | null;
+    automation_stop_reason?: string | null;
   };
   item_status_counts: Record<string, number>;
   chunk_status_counts: Record<string, number>;
@@ -65,6 +68,7 @@ const ARCHIVEABLE_STATUSES = new Set([
   "retry_failed",
   "cancelled",
 ]);
+const ACTIVE_CHUNK_STATUSES = new Set(["dispatching", "running", "dispatch_uncertain"]);
 const readCurrentJobId = () => {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get("bulkJobId")
@@ -306,7 +310,24 @@ export function ShoplingPriceModifyBulkOperations() {
   const mode = report?.job.execution_mode ?? "live";
   const archived = Boolean(report?.job.archived_at);
   const pendingNormal = report?.chunks.some((chunk) => chunk.chunk_type === "normal" && ["pending", "dispatching", "running", "dispatch_uncertain"].includes(String(chunk.status))) ?? false;
-  const archiveAllowed = Boolean(report && !archived && (ARCHIVEABLE_STATUSES.has(report.job.status) || (report.job.status === "canary_succeeded" && !pendingNormal)));
+  const activeChunk = report?.chunks.some((chunk) => ACTIVE_CHUNK_STATUSES.has(String(chunk.status))) ?? false;
+  const stoppedAuto = report?.job.automation_mode === "auto"
+    && !report.job.automation_finished_at
+    && Boolean(report.job.automation_stop_reason);
+  const pausedAuto = report?.job.automation_mode === "auto"
+    && !report.job.automation_finished_at
+    && ["normal_paused", "retry_paused"].includes(report.job.status);
+  const archiveAllowed = Boolean(
+    report
+      && !archived
+      && !activeChunk
+      && (
+        ARCHIVEABLE_STATUSES.has(report.job.status)
+        || (report.job.status === "canary_succeeded" && !pendingNormal)
+        || stoppedAuto
+        || pausedAuto
+      ),
+  );
   const chunkCountSummary = report
     ? Object.entries(report.chunk_status_counts).filter(([, count]) => count > 0).map(([status, count]) => `${status} ${count}`).join(" · ") || "-"
     : "-";
@@ -331,7 +352,7 @@ export function ShoplingPriceModifyBulkOperations() {
 
     {report && <div className="mt-5 rounded-xl border p-4">
       <p className={`rounded-lg p-3 font-bold ${mode === "validation_only" ? "bg-amber-100 text-amber-950" : "bg-blue-50 text-blue-950"}`}>
-        실행 모드: {mode === "validation_only" ? "가격 무쓰기 검증 · 가격 실행 잠금" : "LIVE"}{archived ? " · 보관됨" : ""}
+        실행 모드: {mode === "validation_only" ? "가격 무쓰기 검증 · 가격 실행 잠금" : "LIVE"}{report.job.automation_mode === "auto" ? " · 서버 자동 실행" : ""}{archived ? " · 보관됨" : ""}
       </p>
       <dl className="mt-4 grid gap-2 sm:grid-cols-3">{[
         ["작업번호", report.job.id],
@@ -348,6 +369,8 @@ export function ShoplingPriceModifyBulkOperations() {
         ["최근 갱신", new Date(report.job.updated_at).toLocaleString("ko-KR")],
         ["보관 시각", report.job.archived_at ? new Date(report.job.archived_at).toLocaleString("ko-KR") : "-"],
       ].map(([key, value]) => <div className="rounded-lg bg-slate-50 p-3" key={String(key)}><dt className="text-xs text-slate-500">{key}</dt><dd className="break-all font-bold">{value}</dd></div>)}</dl>
+      {report.job.automation_stop_reason && <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 font-semibold text-amber-900">자동 실행 중단 사유: {report.job.automation_stop_reason}</p>}
+      {activeChunk && <p className="mt-4 rounded-lg border border-blue-300 bg-blue-50 p-3 font-semibold text-blue-900">현재 전송·실행·확인 중인 묶음이 있어 작업 보관을 차단합니다.</p>}
       {mode === "validation_only" && <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 font-semibold text-amber-900">이 작업은 20,000개 DB·청크·재접속 검증용입니다. 카나리·일반·재시도 가격 실행 경로를 사용할 수 없습니다.</p>}
     </div>}
 

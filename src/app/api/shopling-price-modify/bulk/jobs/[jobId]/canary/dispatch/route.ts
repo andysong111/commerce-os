@@ -1,54 +1,42 @@
 import { NextResponse } from "next/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { normalError, normalSession, requireManualShoplingPriceBulkJob, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { dispatchShoplingPriceBulkCanary } from "@/lib/shoplingPriceModifyBulkCanary";
 import { generateShoplingPriceModifyRequestId } from "@/lib/shoplingPriceModifyRunner";
 
 export const runtime = "nodejs";
 
-type Result = { data: unknown; error: unknown };
-type Admin = { rpc(name: string, parameters: Record<string, unknown>): Promise<Result> };
-
-async function session() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { response: NextResponse.json({ error: "Supabase 서버 설정이 필요합니다." }, { status: 503 }) };
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) return { response: NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 }) };
-  const admin = await createSupabaseAdminClient();
-  if (!admin) return { response: NextResponse.json({ error: "Supabase 서버 설정이 필요합니다." }, { status: 503 }) };
-  return { ownerId: data.user.id, admin: admin as Admin };
-}
-
 export async function POST(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
-  const auth = await session();
+  const auth = await normalSession();
   if (auth.response) return auth.response;
   const { jobId } = await params;
+  const manual = await requireManualShoplingPriceBulkJob(auth.admin!, jobId, auth.ownerId, "canary.dispatch");
+  if (manual.response) return manual.response;
   const requestId = generateShoplingPriceModifyRequestId();
 
-  const reserved = await auth.admin.rpc("reserve_shopling_price_bulk_canary", {
+  const reserved = await auth.admin!.rpc("reserve_shopling_price_bulk_canary", {
     p_job_id: jobId,
     p_owner_id: auth.ownerId,
     p_request_id: requestId,
   });
   if (reserved.error || !reserved.data) {
-    return NextResponse.json({ error: "카나리 실행을 시작할 수 없습니다. 작업 상태와 migration 적용 여부를 확인하세요." }, { status: 409 });
+    return normalError("카나리 실행을 시작할 수 없습니다. 작업 상태와 migration 적용 여부를 확인하세요.", 409, "CANARY_RESERVE_REJECTED", "canary.dispatch.reserve", reserved.error);
   }
 
-  const context = (Array.isArray(reserved.data) ? reserved.data[0] : reserved.data) as Record<string, unknown>;
+  const context = rpcData(reserved.data);
   const goodsKeys = Array.isArray(context.goods_keys)
     ? context.goods_keys.filter((value): value is string => typeof value === "string")
     : [];
   const dispatch = await dispatchShoplingPriceBulkCanary(goodsKeys, context.policy_overrides, requestId);
 
   if (dispatch.status === "queued") {
-    const marked = await auth.admin.rpc("mark_shopling_price_bulk_canary_running", {
+    const marked = await auth.admin!.rpc("mark_shopling_price_bulk_canary_running", {
       p_job_id: jobId,
       p_owner_id: auth.ownerId,
       p_request_id: requestId,
       p_actions_url: dispatch.githubActionsUrl,
     });
     if (marked.error) {
-      await auth.admin.rpc("block_shopling_price_bulk_canary_uncertain", {
+      await auth.admin!.rpc("block_shopling_price_bulk_canary_uncertain", {
         p_job_id: jobId,
         p_owner_id: auth.ownerId,
         p_request_id: requestId,
@@ -70,7 +58,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   }
 
   if (dispatch.status === "rejected") {
-    await auth.admin.rpc("reset_shopling_price_bulk_canary_rejected", {
+    await auth.admin!.rpc("reset_shopling_price_bulk_canary_rejected", {
       p_job_id: jobId,
       p_owner_id: auth.ownerId,
       p_request_id: requestId,
@@ -79,7 +67,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
     return NextResponse.json({ status: "rejected", error: dispatch.message }, { status: 502 });
   }
 
-  await auth.admin.rpc("block_shopling_price_bulk_canary_uncertain", {
+  await auth.admin!.rpc("block_shopling_price_bulk_canary_uncertain", {
     p_job_id: jobId,
     p_owner_id: auth.ownerId,
     p_request_id: requestId,
