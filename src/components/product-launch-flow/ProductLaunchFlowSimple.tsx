@@ -198,6 +198,10 @@ export function ProductLaunchFlowSimple() {
     Boolean(uploadRequestId) && !isUploadTerminal && uploadPolls < MAX_POLLS;
   const priceActive =
     Boolean(priceRequestId) && !isPriceTerminal && pricePolls < MAX_POLLS;
+  const recommendationTimedOut =
+    Boolean(recommendationRequestId) &&
+    !isRecommendationTerminal &&
+    recommendationPolls >= MAX_POLLS;
   const recommendationActive =
     Boolean(recommendationRequestId) &&
     !isRecommendationTerminal &&
@@ -591,7 +595,9 @@ export function ProductLaunchFlowSimple() {
       !isPriceDone ||
       !goodsKeys.length ||
       recommendationBusy ||
-      recommendationRequestId
+      recommendationRequestId ||
+      directRequestId ||
+      directResult
     ) {
       return;
     }
@@ -621,14 +627,22 @@ export function ProductLaunchFlowSimple() {
       setRecommendationPolls(0);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(
-          error instanceof Error ? error.message : "키워드 추천 실행 요청 오류",
-        );
+        const errorMessage =
+          error instanceof Error ? error.message : "키워드 추천 실행 요청 오류";
+        setRecommendationResult({
+          status: "error",
+          phase: "failed",
+          message: errorMessage,
+        });
+        recommendationStartedForPrice.current = "";
+        setMessage(errorMessage);
       }
     } finally {
       if (operationEpoch.current === epoch) setRecommendationBusy(false);
     }
   }, [
+    directRequestId,
+    directResult,
     goodsKeys,
     hydrated,
     isPriceDone,
@@ -637,7 +651,16 @@ export function ProductLaunchFlowSimple() {
   ]);
 
   useEffect(() => {
-    if (!hydrated || !isPriceDone || !priceRequestId || !goodsKeys.length) return;
+    if (
+      !hydrated ||
+      !isPriceDone ||
+      !priceRequestId ||
+      !goodsKeys.length ||
+      directRequestId ||
+      directResult
+    ) {
+      return;
+    }
     if (recommendationRequestId || recommendationResult || recommendationBusy) {
       return;
     }
@@ -646,6 +669,8 @@ export function ProductLaunchFlowSimple() {
     const timer = window.setTimeout(() => void startRecommendations(), 0);
     return () => window.clearTimeout(timer);
   }, [
+    directRequestId,
+    directResult,
     goodsKeys.length,
     hydrated,
     isPriceDone,
@@ -675,6 +700,7 @@ export function ProductLaunchFlowSimple() {
         setMessage(
           error instanceof Error ? error.message : "키워드 추천 결과 확인 오류",
         );
+        setRecommendationPolls((count) => count + 1);
       }
     } finally {
       if (operationEpoch.current === epoch) setRecommendationBusy(false);
@@ -704,13 +730,41 @@ export function ProductLaunchFlowSimple() {
   ]);
 
   const retryRecommendations = useCallback(() => {
-    if (recommendationBusy || recommendationActive) return;
+    if (
+      recommendationBusy ||
+      recommendationActive ||
+      directRequestId ||
+      directResult
+    ) {
+      return;
+    }
     setRecommendationRequestId("");
     setRecommendationResult(null);
     setRecommendationPolls(0);
     recommendationStartedForPrice.current = "";
     setMessage("키워드 추천을 다시 생성합니다.");
-  }, [recommendationActive, recommendationBusy]);
+  }, [
+    directRequestId,
+    directResult,
+    recommendationActive,
+    recommendationBusy,
+  ]);
+
+  const resumeRecommendationPolling = useCallback(() => {
+    if (
+      !recommendationRequestId ||
+      recommendationBusy ||
+      isRecommendationTerminal
+    ) {
+      return;
+    }
+    setRecommendationPolls(0);
+    setMessage("기존 키워드 추천 request_id의 결과 확인을 계속합니다.");
+  }, [
+    isRecommendationTerminal,
+    recommendationBusy,
+    recommendationRequestId,
+  ]);
 
   const applyOptimizedForGoodsKey = useCallback(
     (goodsKey: string, group: KeywordRecommendationGroup | undefined) => {
@@ -955,9 +1009,11 @@ export function ProductLaunchFlowSimple() {
                 ? "완료"
                 : recommendationFailed
                   ? "확인 필요"
-                  : recommendationRequestId
-                    ? "생성 중"
-                    : "대기"
+                  : recommendationTimedOut
+                    ? "결과 확인 대기"
+                    : recommendationRequestId
+                      ? "생성 중"
+                      : "대기"
             }
           />
           <StatusBox label="상품 수" value={goodsKeys.length} />
@@ -1058,7 +1114,17 @@ export function ProductLaunchFlowSimple() {
               >
                 전체 상품 최적화 자동 적용
               </button>
-              {recommendationFailed ? (
+              {recommendationTimedOut && !directRequestId ? (
+                <button
+                  type="button"
+                  onClick={resumeRecommendationPolling}
+                  disabled={recommendationBusy}
+                  className="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700"
+                >
+                  기존 추천 결과 계속 확인
+                </button>
+              ) : null}
+              {recommendationFailed && !directRequestId ? (
                 <button
                   type="button"
                   onClick={retryRecommendations}
@@ -1090,10 +1156,12 @@ export function ProductLaunchFlowSimple() {
               {recommendationFailed
                 ? recommendationResult?.message ||
                   "키워드 추천 결과를 불러오지 못했습니다. 직접 입력하거나 다시 생성하세요."
-                : recommendationRequestId
-                  ? recommendationResult?.message ||
-                    "키워드 엔진이 추천키워드를 생성하고 있습니다."
-                  : "가격설정 완료 후 키워드 엔진을 자동 시작합니다."}
+                : recommendationTimedOut
+                  ? "자동 확인이 일시중지됐습니다. 새 실행을 만들지 않고 기존 추천 결과 확인을 계속할 수 있습니다."
+                  : recommendationRequestId
+                    ? recommendationResult?.message ||
+                      "키워드 엔진이 추천키워드를 생성하고 있습니다."
+                    : "가격설정 완료 후 키워드 엔진을 자동 시작합니다."}
             </div>
           ) : (
             <div className="mt-4 grid gap-4 xl:grid-cols-2">
