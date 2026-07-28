@@ -52,6 +52,24 @@ const FORBIDDEN_PATTERNS = [
   /100\s*%|무조건|영구|절대/i,
 ];
 
+const SAFE_DERIVED_ROOTS: Array<{
+  source: RegExp;
+  generated: string[];
+}> = [
+  { source: /여행/, generated: ["휴대"] },
+  { source: /휴대/, generated: ["여행"] },
+  { source: /브러시|브러쉬/, generated: ["솔"] },
+  { source: /솔/, generated: ["브러시", "브러쉬"] },
+  { source: /거치대|거치/, generated: ["홀더"] },
+  { source: /홀더/, generated: ["거치", "거치대"] },
+  { source: /수납/, generated: ["정리", "보관"] },
+  { source: /정리|보관/, generated: ["수납"] },
+  { source: /운동화/, generated: ["스니커즈", "슈즈"] },
+  { source: /스니커즈|슈즈/, generated: ["운동화"] },
+];
+
+const SAFE_TITLE_AFFIXES = ["형", "용", "식", "형태", "타입", "전용", "겸용"];
+
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -130,6 +148,89 @@ function sourceEvidenceText(input: ProductLaunchAiTitleTermInput) {
     .join(" | ");
 }
 
+function lexicalTokens(value: unknown) {
+  return text(value).match(/[0-9A-Za-z가-힣]+/g) ?? [];
+}
+
+function markSpan(coverage: boolean[], start: number, length: number) {
+  for (let index = start; index < start + length; index += 1) {
+    if (index >= 0 && index < coverage.length) coverage[index] = true;
+  }
+}
+
+function markSourceOverlap(
+  token: string,
+  sourceTokens: string[],
+  coverage: boolean[],
+) {
+  for (const sourceToken of sourceTokens) {
+    if (sourceToken.length < 2) continue;
+    for (let start = 0; start < token.length; start += 1) {
+      let bestLength = 0;
+      for (let end = start + 2; end <= token.length; end += 1) {
+        const fragment = token.slice(start, end);
+        if (sourceToken.includes(fragment)) bestLength = fragment.length;
+      }
+      if (bestLength >= 2) markSpan(coverage, start, bestLength);
+    }
+  }
+}
+
+function markSafeDerivedRoots(
+  token: string,
+  sourceCompact: string,
+  coverage: boolean[],
+) {
+  for (const rule of SAFE_DERIVED_ROOTS) {
+    if (!rule.source.test(sourceCompact)) continue;
+    for (const generatedRoot of rule.generated) {
+      let start = token.indexOf(generatedRoot);
+      while (start >= 0) {
+        markSpan(coverage, start, generatedRoot.length);
+        start = token.indexOf(generatedRoot, start + generatedRoot.length);
+      }
+    }
+  }
+}
+
+function markSafeAffixes(token: string, coverage: boolean[]) {
+  for (const affix of SAFE_TITLE_AFFIXES) {
+    if (!token.endsWith(affix) || token.length <= affix.length) continue;
+    const start = token.length - affix.length;
+    if (coverage.slice(0, start).some(Boolean)) {
+      markSpan(coverage, start, affix.length);
+    }
+  }
+}
+
+export function isProductLaunchAiTitleTermGrounded(
+  generatedText: string,
+  input: ProductLaunchAiTitleTermInput,
+) {
+  const sourceText = sourceEvidenceText(input);
+  const sourceCompact = compact(sourceText);
+  const sourceTokens = lexicalTokens(sourceText)
+    .map(compact)
+    .filter((token) => token.length >= 2);
+  const generatedTokens = lexicalTokens(generatedText)
+    .map(compact)
+    .filter(Boolean);
+  if (!generatedTokens.length) return false;
+
+  return generatedTokens.every((token) => {
+    if (token.length < 2) return true;
+    const coverage = Array.from({ length: token.length }, () => false);
+    if (sourceCompact.includes(token)) {
+      coverage.fill(true);
+    } else {
+      markSourceOverlap(token, sourceTokens, coverage);
+      markSafeDerivedRoots(token, sourceCompact, coverage);
+      markSafeAffixes(token, coverage);
+    }
+    return coverage.every(Boolean);
+  });
+}
+
 function cleanGeneratedTerm(value: unknown) {
   return text(value)
     .replace(/[,，、;|/]+/g, " ")
@@ -173,6 +274,7 @@ export function sanitizeProductLaunchAiTitleTerms(
       generatedText.length > 20 ||
       utf8Bytes(generatedText) > 45 ||
       isForbiddenTerm(generatedText) ||
+      !isProductLaunchAiTitleTermGrounded(generatedText, input) ||
       existing.has(identity) ||
       seen.has(identity)
     ) {
@@ -258,6 +360,7 @@ function systemPrompt() {
     "검색어를 만드는 작업이 아니므로 자연스러운 띄어쓰기를 사용할 수 있다.",
     "제공된 상품명, 상품그룹, 검색어, 추천키워드가 증명하는 상품 정체성 안에서만 생성한다.",
     "새로운 브랜드, 재질, 색상, 크기, 수량, 원산지, 인증, 기능, 효능, 의료 표현을 추측하지 않는다.",
+    "생성어에 포함되는 모든 핵심 단어와 수식어는 입력 데이터에서 직접 확인되거나, 여행용-휴대형처럼 의미가 보수적으로 동일한 표현이어야 한다.",
     "최고, 완벽, 필수템, 최저가, 무료배송 같은 과장·가격·배송 표현을 만들지 않는다.",
     "각 생성어는 상품명 조합 부품으로 바로 쓸 수 있게 2~20자 이내로 간결하게 만든다.",
     "이미 제공된 상품명 후보와 동일하거나 단순 어순 변경인 표현은 피한다.",
