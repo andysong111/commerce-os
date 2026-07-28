@@ -21,6 +21,7 @@ export async function dispatchShoplingPriceBulkCanary(
   goodsKeys: readonly string[],
   policyOverrides: unknown,
   requestId: string,
+  signal?: AbortSignal,
 ): Promise<ShoplingPriceBulkCanaryDispatchResult> {
   if (process.env.SHOPLING_PRICE_MODIFY_ENABLED !== "1") {
     return { status: "rejected", requestId, message: "SHOPLING_PRICE_MODIFY_ENABLED=1 설정이 필요합니다." };
@@ -55,6 +56,7 @@ export async function dispatchShoplingPriceBulkCanary(
         "X-GitHub-Api-Version": "2022-11-28",
       },
       body: JSON.stringify(request.body),
+      signal,
     });
     if (response.status === 200 || response.status === 204) {
       return { status: "queued", requestId, githubActionsUrl: request.githubActionsUrl };
@@ -67,10 +69,15 @@ export async function dispatchShoplingPriceBulkCanary(
       githubActionsUrl: request.githubActionsUrl,
     };
   } catch (error) {
+    const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
     return {
       status: "uncertain",
       requestId,
-      message: error instanceof Error ? error.message : "GitHub Actions 응답을 확인하지 못했습니다.",
+      message: aborted
+        ? "GitHub Actions 요청 확인 시간이 초과되었습니다. 같은 요청의 결과만 확인합니다."
+        : error instanceof Error
+          ? error.message
+          : "GitHub Actions 응답을 확인하지 못했습니다.",
       githubActionsUrl: request.githubActionsUrl,
     };
   }
