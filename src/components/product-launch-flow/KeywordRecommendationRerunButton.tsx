@@ -10,8 +10,6 @@ type StoredSession = {
   recommendationRequestId?: unknown;
   recommendationResult?: unknown;
   recommendationPolls?: unknown;
-  directRequestId?: unknown;
-  directResult?: unknown;
   updatedAt?: unknown;
 };
 
@@ -38,7 +36,6 @@ function isCompletedRecommendation(value: unknown) {
 function canRerunCurrentRecommendation(session: StoredSession | null) {
   if (!session || session.version !== 1) return false;
   if (!text(session.priceRequestId) && !session.priceResult) return false;
-  if (text(session.directRequestId) || session.directResult) return false;
   return isCompletedRecommendation(session.recommendationResult);
 }
 
@@ -66,7 +63,7 @@ export function KeywordRecommendationRerunButton() {
       const session = raw ? (JSON.parse(raw) as StoredSession) : null;
       if (!canRerunCurrentRecommendation(session)) {
         setMessage(
-          "현재 작업은 추천을 다시 만들 수 있는 상태가 아닙니다.",
+          "가격설정과 추천 생성까지 완료된 현재 작업에서 사용할 수 있습니다.",
         );
         setVisible(false);
         return;
@@ -99,7 +96,7 @@ export function KeywordRecommendationRerunButton() {
               현재 상품의 추천키워드를 새 엔진으로 다시 만들 수 있습니다.
             </p>
             <p className="mt-1 text-sm text-violet-800">
-              상품업로드·가격설정·입력값은 유지하고 키워드 추천만 새로 실행합니다.
+              상품업로드·가격설정·입력값·기존 반영 결과는 건드리지 않고 추천 파일만 새로 생성합니다.
             </p>
           </div>
           <button
