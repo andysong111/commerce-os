@@ -28,6 +28,9 @@ export async function GET(request: Request) {
   const response = NextResponse.json(
     {
       ...result,
+      message: canaryGate.ok
+        ? `${result.message || "10개 테스트가 완료되었습니다."} 전체 반영 잠금이 해제되었습니다.`
+        : result.message,
       canaryGatePassed: canaryGate.ok,
       canaryGateMessage: canaryGate.message,
     },
