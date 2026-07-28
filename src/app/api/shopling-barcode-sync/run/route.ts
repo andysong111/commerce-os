@@ -89,5 +89,21 @@ export async function POST(request: Request) {
     );
   }
 
+  if (
+    result.status === "error" &&
+    /status=5\d\d/.test(result.message) &&
+    result.requestId
+  ) {
+    return NextResponse.json(
+      {
+        ...result,
+        status: "uncertain",
+        message:
+          "GitHub가 서버 오류를 반환했지만 실행이 생성됐을 수 있습니다. 같은 작업을 다시 누르지 말고 현재 실행 결과 확인으로 조회하세요.",
+      },
+      { status: 202 },
+    );
+  }
+
   return NextResponse.json(result, { status: result.status === "queued" ? 200 : 400 });
 }
