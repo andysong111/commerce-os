@@ -28,7 +28,8 @@ function config() {
   const runner = getEngineRunnerConfig("keyword_engine");
   if (!runner) throw new Error("키워드 엔진 설정을 찾을 수 없습니다.");
   const token = process.env.GITHUB_ENGINE_DISPATCH_TOKEN?.trim();
-  if (!token) throw new Error("GITHUB_ENGINE_DISPATCH_TOKEN 환경변수가 필요합니다.");
+  if (!token)
+    throw new Error("GITHUB_ENGINE_DISPATCH_TOKEN 환경변수가 필요합니다.");
   return { runner, token };
 }
 
@@ -37,14 +38,16 @@ export function normalizeKeywordRecommendationGoodsKeys(value: unknown) {
     ? value.map(text)
     : text(value).split(/[\s,]+/).map(text);
   const keys = [...new Set(raw.filter(Boolean))];
-  if (keys.length < 1) throw new Error("추천키워드를 만들 상품번호가 필요합니다.");
+  if (keys.length < 1)
+    throw new Error("추천키워드를 만들 상품번호가 필요합니다.");
   if (keys.length > KEYWORD_RECOMMENDATION_MAX_GOODS_KEYS) {
     throw new Error(
       `추천키워드 실행은 한 번에 최대 ${KEYWORD_RECOMMENDATION_MAX_GOODS_KEYS}개 상품까지 가능합니다.`,
     );
   }
   for (const key of keys) {
-    if (!/^\d+$/.test(key)) throw new Error(`상품번호 형식이 올바르지 않습니다: ${key}`);
+    if (!/^\d+$/.test(key))
+      throw new Error(`상품번호 형식이 올바르지 않습니다: ${key}`);
   }
   return keys;
 }
@@ -66,7 +69,8 @@ export function buildKeywordRecommendationDispatchInput(input: {
   request_id?: unknown;
 }) {
   const goodsKeys = normalizeKeywordRecommendationGoodsKeys(input.goods_keys);
-  const requestId = text(input.request_id) || generateKeywordRecommendationRequestId();
+  const requestId =
+    text(input.request_id) || generateKeywordRecommendationRequestId();
   if (!isValidKeywordRecommendationRequestId(requestId)) {
     throw new Error("키워드 추천 request_id 형식이 올바르지 않습니다.");
   }
@@ -144,6 +148,19 @@ function pendingResult(
   };
 }
 
+function failedRunResult(requestId: string, run: GitHubActionsRun) {
+  return {
+    status: "error",
+    phase: "failed",
+    message: `키워드 엔진 실행이 성공하지 않았습니다. conclusion=${run.conclusion || "unknown"}`,
+    requestId,
+    runId: run.id,
+    runUrl: run.htmlUrl,
+    runStatus: run.status,
+    runConclusion: run.conclusion,
+  };
+}
+
 function exactArtifact(
   artifacts: GitHubActionsArtifact[],
   expectedName: string,
@@ -170,7 +187,9 @@ function safeRecommendationResult(
   expectedGoodsKeys: string[],
 ) {
   if (parsed.requestId !== requestId) {
-    throw new Error("키워드 추천 artifact의 request_id가 현재 요청과 일치하지 않습니다.");
+    throw new Error(
+      "키워드 추천 artifact의 request_id가 현재 요청과 일치하지 않습니다.",
+    );
   }
   if (parsed.missingGoodsKeys.length || parsed.extraGoodsKeys.length) {
     throw new Error(
@@ -206,7 +225,9 @@ export async function fetchKeywordRecommendationResult(
       status: "error",
       phase: "failed",
       message:
-        error instanceof Error ? error.message : "추천 대상 상품번호가 올바르지 않습니다.",
+        error instanceof Error
+          ? error.message
+          : "추천 대상 상품번호가 올바르지 않습니다.",
       requestId,
     };
   }
@@ -228,21 +249,12 @@ export async function fetchKeywordRecommendationResult(
         "키워드 엔진이 추천키워드를 생성하고 있습니다.",
       );
     }
+    if (run.conclusion !== "success") {
+      return failedRunResult(requestId, run);
+    }
     const artifacts = await deps.listArtifacts({ ...runner, token }, run.id);
     const artifact = exactArtifact(artifacts, runner.expectedArtifactName);
     if (!artifact) {
-      if (run.conclusion && run.conclusion !== "success") {
-        return {
-          status: "error",
-          phase: "failed",
-          message: "키워드 엔진 실행이 실패했고 결과 artifact가 없습니다.",
-          requestId,
-          runId: run.id,
-          runUrl: run.htmlUrl,
-          runStatus: run.status,
-          runConclusion: run.conclusion,
-        };
-      }
       return pendingResult(
         requestId,
         run,
