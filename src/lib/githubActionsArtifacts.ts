@@ -28,13 +28,17 @@ const OPTIONAL_FILES = {
     "keyword_mvp_result.csv",
     "keyword_mvp_result.json",
     "keyword_mvp_auto_promotion_audit.csv",
+    "keyword_engine_run_meta.json",
   ],
   detail_page_engine: [] as string[],
 } as const;
 
 export type ArtifactExtractionResult = {
   files: Record<string, string>;
-  binaryFiles?: Record<string, { path: string; byteLength: number; contentType: string }>;
+  binaryFiles?: Record<
+    string,
+    { path: string; byteLength: number; contentType: string }
+  >;
   missingFiles: string[];
   skippedFiles: string[];
   generatedSourceFiles?: string[];
@@ -56,9 +60,14 @@ const DETAIL_LEGACY_TEXT_FILES = [
   "multi_source_summary.json",
 ] as const;
 
-const DETAIL_BINARY_REFERENCES = new Set(["shopling_full_page_image/detailpage_full_1000.jpg"]);
+const DETAIL_BINARY_REFERENCES = new Set([
+  "shopling_full_page_image/detailpage_full_1000.jpg",
+]);
 
-type ArtifactDownloadConfig = Pick<EngineRunnerConfig, "repoOwner" | "repoName"> & { token: string };
+type ArtifactDownloadConfig = Pick<
+  EngineRunnerConfig,
+  "repoOwner" | "repoName"
+> & { token: string };
 
 function githubHeaders(token: string) {
   return {
@@ -79,18 +88,28 @@ export async function downloadWorkflowArtifact(
   const apiUrl = `https://api.github.com/repos/${config.repoOwner}/${config.repoName}/actions/artifacts/${artifactId}/zip`;
   const response = await fetch(apiUrl, { headers: githubHeaders(config.token) });
   if (!response.ok) {
-    throw new Error(`GitHub Actions artifact download failed with HTTP ${response.status}.`);
+    throw new Error(
+      `GitHub Actions artifact download failed with HTTP ${response.status}.`,
+    );
   }
 
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength > MAX_ZIP_BYTES) {
-    throw new Error("GitHub Actions artifact zip is larger than the safe preview limit.");
+    throw new Error(
+      "GitHub Actions artifact zip is larger than the safe preview limit.",
+    );
   }
   return bytes;
 }
 
 function normalizeSafeEntryName(name: string) {
-  if (!name || name.startsWith("/") || /^[A-Za-z]:/.test(name) || name.includes("\\")) return null;
+  if (
+    !name ||
+    name.startsWith("/") ||
+    /^[A-Za-z]:/.test(name) ||
+    name.includes("\\")
+  )
+    return null;
   const parts = name.split("/");
   if (parts.some((part) => part === ".." || part === "")) return null;
   const normalized = parts.join("/");
@@ -104,8 +123,8 @@ function allowedBasename(entryName: string, allowlist: Set<string>) {
   return allowlist.has(basename) ? basename : null;
 }
 
-const unreadableZipMessage = "GitHub Actions 산출물 ZIP을 읽지 못했습니다. artifact가 손상되었거나 지원하지 않는 ZIP 형식일 수 있습니다.";
-
+const unreadableZipMessage =
+  "GitHub Actions 산출물 ZIP을 읽지 못했습니다. artifact가 손상되었거나 지원하지 않는 ZIP 형식일 수 있습니다.";
 
 type ZipEntries = Record<string, Uint8Array>;
 
@@ -117,13 +136,19 @@ function unzipArtifact(zipBytes: Uint8Array): ZipEntries {
   }
 }
 
-export function extractExpectedArtifactFiles(kind: EngineRunnerKind, zipBytes: Uint8Array): ArtifactExtractionResult {
+export function extractExpectedArtifactFiles(
+  kind: EngineRunnerKind,
+  zipBytes: Uint8Array,
+): ArtifactExtractionResult {
   const expected = EXPECTED_FILES[kind];
   if (!expected) throw new Error("Unsupported engine runner kind.");
 
   const allowlist = new Set<string>([...expected, ...OPTIONAL_FILES[kind]]);
   const files: Record<string, string> = {};
-  const binaryFiles: Record<string, { path: string; byteLength: number; contentType: string }> = {};
+  const binaryFiles: Record<
+    string,
+    { path: string; byteLength: number; contentType: string }
+  > = {};
   const skippedFiles: string[] = [];
   const generatedSourceFiles: string[] = [];
   const foundSafeFiles: string[] = [];
@@ -136,16 +161,24 @@ export function extractExpectedArtifactFiles(kind: EngineRunnerKind, zipBytes: U
       skippedFiles.push(entryName || "unsafe-entry");
     } else if (
       kind === "detail_page_engine" &&
-      [...DETAIL_BINARY_REFERENCES].some((path) => safeEntryName === path || safeEntryName.endsWith(`/${path}`))
+      [...DETAIL_BINARY_REFERENCES].some(
+        (path) =>
+          safeEntryName === path || safeEntryName.endsWith(`/${path}`),
+      )
     ) {
       foundSafeFiles.push(safeEntryName);
-      const binaryPath = "shopling_full_page_image/detailpage_full_1000.jpg";
+      const binaryPath =
+        "shopling_full_page_image/detailpage_full_1000.jpg";
       binaryFiles[binaryPath] = {
         path: binaryPath,
         byteLength: entryBytes.byteLength,
         contentType: "image/jpeg",
       };
-    } else if (kind === "detail_page_engine" && safeEntryName.startsWith("generated_source/") && !safeEntryName.endsWith("/")) {
+    } else if (
+      kind === "detail_page_engine" &&
+      safeEntryName.startsWith("generated_source/") &&
+      !safeEntryName.endsWith("/")
+    ) {
       foundSafeFiles.push(safeEntryName);
       generatedSourceFiles.push(safeEntryName);
     } else {
@@ -153,14 +186,17 @@ export function extractExpectedArtifactFiles(kind: EngineRunnerKind, zipBytes: U
       const basename = allowedBasename(safeEntryName, allowlist);
       if (basename) {
         if (Object.hasOwn(files, basename)) {
-          throw new Error("동일한 산출물 파일이 여러 위치에서 발견되었습니다. 안전을 위해 가져오기를 중단했습니다.");
+          throw new Error(
+            "동일한 산출물 파일이 여러 위치에서 발견되었습니다. 안전을 위해 가져오기를 중단했습니다.",
+          );
         }
         if (entryBytes.byteLength > MAX_TEXT_FILE_BYTES) {
-          throw new Error(`Artifact file ${basename} is larger than the safe preview limit.`);
+          throw new Error(
+            `Artifact file ${basename} is larger than the safe preview limit.`,
+          );
         }
         files[basename] = decoder.decode(entryBytes);
-      }
-      else if (!safeEntryName.endsWith("/")) {
+      } else if (!safeEntryName.endsWith("/")) {
         skippedFiles.push(safeEntryName);
       }
     }
@@ -171,16 +207,26 @@ export function extractExpectedArtifactFiles(kind: EngineRunnerKind, zipBytes: U
     binaryFiles: kind === "detail_page_engine" ? binaryFiles : undefined,
     missingFiles: missingExpectedFiles(kind, files),
     skippedFiles,
-    generatedSourceFiles: kind === "detail_page_engine" ? generatedSourceFiles : undefined,
+    generatedSourceFiles:
+      kind === "detail_page_engine" ? generatedSourceFiles : undefined,
     foundSafeFiles,
   };
 }
 
-function missingExpectedFiles(kind: EngineRunnerKind, files: Record<string, string>) {
+function missingExpectedFiles(
+  kind: EngineRunnerKind,
+  files: Record<string, string>,
+) {
   if (kind !== "detail_page_engine") {
-    return EXPECTED_FILES[kind].filter((file) => !Object.hasOwn(files, file));
+    return EXPECTED_FILES[kind].filter(
+      (file) => !Object.hasOwn(files, file),
+    );
   }
-  const hasProduction = DETAIL_PRODUCTION_TEXT_FILES.some((file) => Object.hasOwn(files, file));
-  const required = hasProduction ? DETAIL_PRODUCTION_TEXT_FILES : DETAIL_LEGACY_TEXT_FILES;
+  const hasProduction = DETAIL_PRODUCTION_TEXT_FILES.some((file) =>
+    Object.hasOwn(files, file),
+  );
+  const required = hasProduction
+    ? DETAIL_PRODUCTION_TEXT_FILES
+    : DETAIL_LEGACY_TEXT_FILES;
   return required.filter((file) => !Object.hasOwn(files, file));
 }
