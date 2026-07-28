@@ -1,6 +1,10 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { requireShoplingBarcodeSyncOperator } from "@/lib/shoplingBarcodeSyncAuth";
-import { evaluateShoplingBarcodeSyncCanary } from "@/lib/shoplingBarcodeSyncCanaryGate";
+import {
+  SHOPLING_BARCODE_SYNC_CANARY_COOKIE,
+  evaluateShoplingBarcodeSyncCanary,
+} from "@/lib/shoplingBarcodeSyncCanaryGate";
 import {
   dispatchShoplingBarcodeSyncActions,
   fetchShoplingBarcodeSyncActionsResult,
@@ -34,13 +38,17 @@ export async function POST(request: Request) {
   const mode = typeof body.mode === "string" ? body.mode : "";
 
   if (mode === "apply") {
-    const canaryRequestId =
+    const bodyCanaryRequestId =
       typeof body.canary_request_id === "string" ? body.canary_request_id.trim() : "";
+    const cookieStore = await cookies();
+    const canaryRequestId =
+      bodyCanaryRequestId || cookieStore.get(SHOPLING_BARCODE_SYNC_CANARY_COOKIE)?.value || "";
     if (!isValidShoplingBarcodeSyncRequestId(canaryRequestId)) {
       return NextResponse.json(
         {
           status: "error",
-          message: "전체 반영 전에 성공한 10개 테스트의 요청 추적 ID가 필요합니다.",
+          message:
+            "전체 반영 전에 10개 테스트를 실행한 뒤 해당 실행의 결과 확인 버튼을 눌러야 합니다.",
         },
         { status: 409 },
       );
