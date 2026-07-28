@@ -61,6 +61,19 @@ test("keyword recommendations appear above inputs with click and optimized apply
   );
 });
 
+test("recommendation failures and long-running results remain recoverable", async () => {
+  const component = await readFile(componentPath, "utf8");
+  assert.match(component, /setRecommendationResult\(\{/);
+  assert.match(component, /status: "error"/);
+  assert.match(component, /phase: "failed"/);
+  assert.match(component, /recommendationStartedForPrice\.current = ""/);
+  assert.match(component, /recommendationTimedOut/);
+  assert.match(component, /resumeRecommendationPolling/);
+  assert.match(component, /기존 추천 결과 계속 확인/);
+  assert.match(component, /추천 다시 만들기/);
+  assert.match(component, /setRecommendationPolls\(0\)/);
+});
+
 test("normal flow requires exact preflight coverage before direct apply", async () => {
   const component = await readFile(componentPath, "utf8");
   assert.match(component, /coverageMismatchGoodsKeyCount/);
