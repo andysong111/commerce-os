@@ -2,14 +2,23 @@
 
 ## OPS Center 환경변수
 
-Production 환경에 다음을 설정합니다.
+Production 환경에서 필수 설정은 실행 허용 이메일입니다.
 
 ```text
-SHOPLING_BARCODE_SYNC_ENABLED=1
 SHOPLING_BARCODE_SYNC_ALLOWED_EMAILS=<OPS Center 로그인 이메일>
 ```
 
 `OPS_OWNER_EMAILS`가 이미 설정되어 있다면 `SHOPLING_BARCODE_SYNC_ALLOWED_EMAILS` 대신 사용할 수 있습니다.
+
+기능 플래그는 선택형 비상 정지 장치입니다.
+
+```text
+SHOPLING_BARCODE_SYNC_ENABLED=1
+```
+
+- 값이 없으면 허용 이메일과 로그인 검증을 통과한 사용자에게 기능을 엽니다.
+- `1`이면 기능을 엽니다.
+- `0` 등 명시적인 다른 값이면 기능을 즉시 비활성화합니다.
 
 GitHub Actions 토큰은 다음 순서로 사용합니다.
 
