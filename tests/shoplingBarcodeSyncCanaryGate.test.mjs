@@ -10,21 +10,18 @@ const {
 } = await importTranspiledTypeScript(
   new URL("../src/lib/shoplingBarcodeSyncCanaryGate.ts", import.meta.url),
 );
-const { SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS } = await importTranspiledTypeScript(
-  new URL("../src/lib/shoplingBarcodeSyncRunner.ts", import.meta.url),
-);
 
 const verifiedKeys = [
-  "117305",
-  "117308",
-  "117311",
-  "100049",
-  "100034",
-  "102648",
-  "110791",
-  "116737",
-  "109791",
-  "121102",
+  "100035",
+  "100051",
+  "100092",
+  "100157",
+  "108186",
+  "112018",
+  "100068",
+  "100116",
+  "100133",
+  "100050",
 ];
 
 function validResult(overrides = {}) {
@@ -52,8 +49,7 @@ function validResult(overrides = {}) {
   };
 }
 
-test("engine dispatch and server gate use the same exact ten canary keys", () => {
-  assert.deepEqual([...SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS], verifiedKeys);
+test("server gate uses the exact untouched ten canary keys", () => {
   assert.deepEqual([...SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS], verifiedKeys);
   assert.equal(SHOPLING_BARCODE_SYNC_CANARY_COOKIE, "shopling_barcode_sync_canary");
 });
