@@ -22,7 +22,8 @@ test("legacy workaround screen remains isolated under developer route", async ()
 test("normal flow dispatches direct apply and never performs final price repair", async () => {
   const component = await readFile(componentPath, "utf8");
   assert.match(component, /keyword-shopling-direct-apply\/run/);
-  assert.match(component, /KEYWORD_SHOPLING_DIRECT_APPLY_CONFIRMATION/);
+  assert.match(component, /APPLY_REVIEWED_TITLES_AND_SEARCH_TO_SHOPLING/);
+  assert.doesNotMatch(component, /keywordShoplingDirectApplyRunner/);
   assert.doesNotMatch(component, /runFinalPriceModify/);
   assert.doesNotMatch(component, /manual_canary/);
   assert.doesNotMatch(component, /manual_remaining/);
@@ -48,6 +49,6 @@ test("normal flow requires exact preflight coverage before direct apply", async 
   assert.match(component, /generatedTitleTargetCount/);
   assert.match(component, /expectedTitleTargetCount/);
   assert.match(component, /blockedCount/);
-  assert.match(component, /keywordTokens\(searchCandidates/);
+  assert.match(component, /rawKeywordTokens\(searchCandidates/);
   assert.match(component, /length === 10/);
 });
