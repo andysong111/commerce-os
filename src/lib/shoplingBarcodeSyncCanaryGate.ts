@@ -2,16 +2,16 @@ import type { ShoplingBarcodeSyncActionsResult } from "./shoplingBarcodeSyncRunn
 
 export const SHOPLING_BARCODE_SYNC_CANARY_COOKIE = "shopling_barcode_sync_canary";
 export const SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS = [
-  "117305",
-  "117308",
-  "117311",
-  "100049",
-  "100034",
-  "102648",
-  "110791",
-  "116737",
-  "109791",
-  "121102",
+  "100035",
+  "100051",
+  "100092",
+  "100157",
+  "108186",
+  "112018",
+  "100068",
+  "100116",
+  "100133",
+  "100050",
 ] as const;
 
 const MAX_CANARY_AGE_MS = 7 * 24 * 60 * 60_000;
