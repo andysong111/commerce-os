@@ -51,4 +51,26 @@ test("normal flow requires exact preflight coverage before direct apply", async 
   assert.match(component, /blockedCount/);
   assert.match(component, /rawKeywords\(searches/);
   assert.match(component, /length === 10/);
+  assert.match(component, /100bytes/);
+});
+
+test("normal flow restores request IDs and results after refresh", async () => {
+  const component = await readFile(componentPath, "utf8");
+  assert.match(component, /readProductLaunchSimpleSession/);
+  assert.match(component, /writeProductLaunchSimpleSession/);
+  assert.match(component, /setUploadRequestId\(restored\.uploadRequestId\)/);
+  assert.match(component, /setPriceRequestId\(restored\.priceRequestId\)/);
+  assert.match(component, /setDirectRequestId\(restored\.directRequestId\)/);
+  assert.match(component, /if \(!hydrated \|\| !uploadRequestId/);
+  assert.match(component, /if \(!hydrated \|\| !priceRequestId/);
+  assert.match(component, /if \(!hydrated \|\| !directRequestId/);
+});
+
+test("normal flow rejects partial uploads and invalidates stale async completions", async () => {
+  const component = await readFile(componentPath, "utf8");
+  assert.match(component, /isSuccessfulSimpleUploadResult\(uploadResult\)/);
+  assert.match(component, /operationEpoch/);
+  assert.match(component, /operationEpoch\.current !== epoch/);
+  assert.match(component, /disabled=\{resetDisabled\}/);
+  assert.match(component, /상품업로드 전체가 성공하지 않아/);
 });
