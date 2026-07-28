@@ -4,14 +4,19 @@ import test from "node:test";
 
 import {
   generateProductLaunchAiTitleTerms,
+  isProductLaunchAiTitleTermGrounded,
   parseProductLaunchAiTitleTermInput,
   sanitizeProductLaunchAiTitleTerms,
 } from "../src/lib/productLaunchAiTitleTerms.ts";
-import { POST as postAiTitleTerms } from "../src/app/api/product-launch-ai-title-terms/route.ts";
+import {
+  consumeProductLaunchAiTitleTermsRateLimit,
+  resetProductLaunchAiTitleTermsRateLimitsForTests,
+} from "../src/lib/productLaunchAiTitleTermsAuth.ts";
 
 const componentPath =
   "src/components/product-launch-flow/ProductLaunchAiTitleTermsPanel.tsx";
 const pagePath = "src/app/product-launch-flow/page.tsx";
+const routePath = "src/app/api/product-launch-ai-title-terms/route.ts";
 
 function input() {
   return {
@@ -35,7 +40,7 @@ function generatedTerms() {
     ["필터형 샤워헤드", "형태구성", "필터형 구성을 강조", ["필터", "샤워기"]],
     ["휴대 샤워필터", "사용상황", "휴대 사용에 맞는 짧은 표현", ["휴대용샤워기", "필터"]],
     ["교체 필터헤드", "형태구성", "교체형 필터 구성을 간결하게 표현", ["교체형필터", "헤드"]],
-    ["여행 필터샤워기", "사용상황", "여행과 필터 기능의 상품 정체성", ["여행용", "필터", "샤워기"]],
+    ["여행 필터샤워기", "사용상황", "여행과 필터 상품 정체성", ["여행용", "필터", "샤워기"]],
     ["휴대형 필터샤워", "중립수식어", "휴대형 상품명 조합용 표현", ["휴대용샤워기", "필터"]],
     ["샤워헤드 필터형", "스타일", "마켓별 어순 다양화에 적합", ["샤워기", "필터"]],
   ];
@@ -62,7 +67,27 @@ test("AI title term input is strict and bounded", () => {
   );
 });
 
-test("sanitizer removes claims, duplicates, existing terms and unsupported evidence", () => {
+test("generated modifiers must be grounded across the whole phrase", () => {
+  const parsed = parseProductLaunchAiTitleTermInput(input());
+  assert.equal(
+    isProductLaunchAiTitleTermGrounded("휴대형 샤워헤드", parsed),
+    true,
+  );
+  assert.equal(
+    isProductLaunchAiTitleTermGrounded("필터형 여행 샤워기", parsed),
+    true,
+  );
+  assert.equal(
+    isProductLaunchAiTitleTermGrounded("실크 소재 샤워기", parsed),
+    false,
+  );
+  assert.equal(
+    isProductLaunchAiTitleTermGrounded("자동차용 샤워기", parsed),
+    false,
+  );
+});
+
+test("sanitizer removes claims, unsupported modifiers, duplicates and existing terms", () => {
   const parsed = parseProductLaunchAiTitleTermInput(input());
   const result = sanitizeProductLaunchAiTitleTerms(
     [
@@ -71,6 +96,12 @@ test("sanitizer removes claims, duplicates, existing terms and unsupported evide
         text: "완벽한 샤워기",
         category: "중립수식어",
         reason: "과장",
+        evidence: ["샤워기"],
+      },
+      {
+        text: "실크 소재 샤워기",
+        category: "스타일",
+        reason: "근거 없는 재질",
         evidence: ["샤워기"],
       },
       {
@@ -90,13 +121,14 @@ test("sanitizer removes claims, duplicates, existing terms and unsupported evide
     parsed,
   );
   assert.equal(result.terms.some((term) => /완벽/.test(term.text)), false);
+  assert.equal(result.terms.some((term) => /실크|소재/.test(term.text)), false);
   assert.equal(result.terms.some((term) => term.text === "샤워기헤드"), false);
   assert.equal(result.terms.some((term) => /자동차/.test(term.text)), false);
   assert.equal(
     result.terms.filter((term) => term.text === "휴대형 샤워헤드").length,
     1,
   );
-  assert.ok(result.rejectedCount >= 4);
+  assert.ok(result.rejectedCount >= 5);
 });
 
 test("generator uses Responses API structured output and returns sanitized terms", async () => {
@@ -129,25 +161,55 @@ test("generator uses Responses API structured output and returns sanitized terms
   assert.equal(result.terms.some((term) => term.text === "샤워기헤드"), false);
 });
 
-test("API route fails safely when OpenAI key is missing", async () => {
-  const previous = process.env.OPENAI_API_KEY;
-  delete process.env.OPENAI_API_KEY;
-  try {
-    const response = await postAiTitleTerms(
-      new Request("http://localhost/api/product-launch-ai-title-terms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input()),
-      }),
-    );
-    const body = await response.json();
-    assert.equal(response.status, 503);
-    assert.equal(body.status, "error");
-    assert.match(body.message, /OPENAI_API_KEY/);
-  } finally {
-    if (previous === undefined) delete process.env.OPENAI_API_KEY;
-    else process.env.OPENAI_API_KEY = previous;
-  }
+test("generator fails safely when OpenAI key is missing", async () => {
+  await assert.rejects(
+    generateProductLaunchAiTitleTerms(input(), { apiKey: "" }),
+    /OPENAI_API_KEY/,
+  );
+});
+
+test("per-user rate limit blocks repeated billable requests", () => {
+  resetProductLaunchAiTitleTermsRateLimitsForTests();
+  assert.deepEqual(
+    consumeProductLaunchAiTitleTermsRateLimit("user-1", 1_000, {
+      windowMs: 60_000,
+      maxRequests: 2,
+    }),
+    { ok: true, remaining: 1 },
+  );
+  assert.deepEqual(
+    consumeProductLaunchAiTitleTermsRateLimit("user-1", 2_000, {
+      windowMs: 60_000,
+      maxRequests: 2,
+    }),
+    { ok: true, remaining: 0 },
+  );
+  const blocked = consumeProductLaunchAiTitleTermsRateLimit("user-1", 3_000, {
+    windowMs: 60_000,
+    maxRequests: 2,
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.retryAfterSeconds, 58);
+  assert.equal(
+    consumeProductLaunchAiTitleTermsRateLimit("user-2", 3_000, {
+      windowMs: 60_000,
+      maxRequests: 2,
+    }).ok,
+    true,
+  );
+});
+
+test("OpenAI route authenticates and rate-limits before generation", async () => {
+  const source = await readFile(routePath, "utf8");
+  const auth = source.indexOf("requireProductLaunchAiTitleTermsOperator");
+  const limit = source.indexOf("consumeProductLaunchAiTitleTermsRateLimit");
+  const generate = source.indexOf("generateProductLaunchAiTitleTerms(body)");
+  assert.ok(auth >= 0);
+  assert.ok(limit > auth);
+  assert.ok(generate > limit);
+  assert.match(source, /status: 429/);
+  assert.match(source, /Retry-After/);
+  assert.match(source, /Cache-Control.*no-store/s);
 });
 
 test("product launch page exposes AI title terms before the main flow", async () => {
