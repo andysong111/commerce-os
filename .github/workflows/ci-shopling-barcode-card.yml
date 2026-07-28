@@ -18,9 +18,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
 
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
 
       - name: Targeted tests
         run: node --experimental-strip-types --test tests/shoplingBarcodeSyncRunner.test.mjs
