@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   extractRowsWithGoodsKey,
   inferProductGroupFromPtnGoodsCd,
@@ -15,6 +15,7 @@ import type { ProductLaunchAiTitleTerm } from "@/lib/productLaunchAiTitleTerms";
 
 const AI_TITLE_TERMS_STORAGE_KEY = "productLaunchFlow.aiTitleTerms.v1";
 const TITLE_INPUT_PLACEHOLDER = "쉼표로 상품명 후보 입력";
+const SESSION_SYNC_MS = 1_000;
 
 type ProductContext = {
   goodsKey: string;
@@ -128,6 +129,19 @@ function buildProductContexts(session: ProductLaunchSimpleSession) {
   return contexts;
 }
 
+function contextFingerprint(contexts: ProductContext[]) {
+  return JSON.stringify(
+    contexts.map((context) => ({
+      goodsKey: context.goodsKey,
+      productGroup: context.productGroup,
+      originalTitle: context.originalTitle,
+      currentTitle: context.currentTitle,
+      searchKeywords: context.searchKeywords,
+      recommendationKeywords: context.recommendationKeywords,
+    })),
+  );
+}
+
 function readStoredSuggestions(): StoredSuggestions {
   try {
     const raw = window.localStorage.getItem(AI_TITLE_TERMS_STORAGE_KEY);
@@ -195,11 +209,16 @@ function updateSessionTitle(goodsKey: string, value: string) {
 }
 
 function categoryClass(category: ProductLaunchAiTitleTerm["category"]) {
-  if (category === "상품대체어") return "border-indigo-300 bg-indigo-50 text-indigo-800";
-  if (category === "사용상황") return "border-emerald-300 bg-emerald-50 text-emerald-800";
-  if (category === "형태구성") return "border-blue-300 bg-blue-50 text-blue-800";
-  if (category === "스타일") return "border-pink-300 bg-pink-50 text-pink-800";
-  if (category === "사용대상") return "border-amber-300 bg-amber-50 text-amber-800";
+  if (category === "상품대체어")
+    return "border-indigo-300 bg-indigo-50 text-indigo-800";
+  if (category === "사용상황")
+    return "border-emerald-300 bg-emerald-50 text-emerald-800";
+  if (category === "형태구성")
+    return "border-blue-300 bg-blue-50 text-blue-800";
+  if (category === "스타일")
+    return "border-pink-300 bg-pink-50 text-pink-800";
+  if (category === "사용대상")
+    return "border-amber-300 bg-amber-50 text-amber-800";
   return "border-slate-300 bg-slate-50 text-slate-700";
 }
 
@@ -213,20 +232,43 @@ export function ProductLaunchAiTitleTermsPanel() {
   const [currentTitles, setCurrentTitles] = useState<Record<string, string>>({});
   const [busyGoodsKey, setBusyGoodsKey] = useState("");
   const [messages, setMessages] = useState<Record<string, string>>({});
+  const fingerprintRef = useRef("");
 
   useEffect(() => {
-    const session = readProductLaunchSimpleSession(window.localStorage);
-    if (session) {
-      const nextContexts = buildProductContexts(session);
+    let cancelled = false;
+
+    const syncSession = () => {
+      const session = readProductLaunchSimpleSession(window.localStorage);
+      const nextContexts = session ? buildProductContexts(session) : [];
+      const nextFingerprint = contextFingerprint(nextContexts);
+      if (cancelled || fingerprintRef.current === nextFingerprint) return;
+      fingerprintRef.current = nextFingerprint;
       setContexts(nextContexts);
       setCurrentTitles(
         Object.fromEntries(
           nextContexts.map((context) => [context.goodsKey, context.currentTitle]),
         ),
       );
-    }
+    };
+
+    syncSession();
     setSuggestions(readStoredSuggestions());
     setHydrated(true);
+    const timer = window.setInterval(syncSession, SESSION_SYNC_MS);
+    window.addEventListener("focus", syncSession);
+    window.addEventListener("storage", syncSession);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") syncSession();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", syncSession);
+      window.removeEventListener("storage", syncSession);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const contextByGoodsKey = useMemo(
