@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 
-const { evaluateShoplingBarcodeSyncCanary } = await importTranspiledTypeScript(
+const {
+  SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS,
+  evaluateShoplingBarcodeSyncCanary,
+} = await importTranspiledTypeScript(
   new URL("../src/lib/shoplingBarcodeSyncCanaryGate.ts", import.meta.url),
+);
+const { SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS } = await importTranspiledTypeScript(
+  new URL("../src/lib/shoplingBarcodeSyncRunner.ts", import.meta.url),
 );
 
 const verifiedKeys = [
@@ -43,6 +49,11 @@ function validResult(overrides = {}) {
     ...overrides,
   };
 }
+
+test("engine dispatch and server gate use the same exact ten canary keys", () => {
+  assert.deepEqual([...SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS], verifiedKeys);
+  assert.deepEqual([...SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS], verifiedKeys);
+});
 
 test("ten successful verified canary products open the bulk gate", () => {
   const gate = evaluateShoplingBarcodeSyncCanary(
