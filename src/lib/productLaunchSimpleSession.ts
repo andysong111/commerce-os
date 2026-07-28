@@ -165,6 +165,20 @@ export function parseProductLaunchSimpleSession(
 ): ProductLaunchSimpleSession | null {
   const source = object(value);
   if (source.version !== 1) return null;
+  const directRequestId = text(source.directRequestId);
+  const hasRecommendationFields =
+    Object.hasOwn(source, "recommendationRequestId") ||
+    Object.hasOwn(source, "recommendationResult") ||
+    Object.hasOwn(source, "recommendationPolls");
+  const legacyRecommendationResult =
+    directRequestId && !hasRecommendationFields
+      ? {
+          status: "skipped",
+          phase: "artifact_ready",
+          message:
+            "기존 버전에서 이미 상품명·검색어 반영을 시작한 작업이므로 추천 단계는 건너뛰었습니다.",
+        }
+      : null;
   return {
     version: 1,
     rowExpression: text(source.rowExpression),
@@ -175,11 +189,12 @@ export function parseProductLaunchSimpleSession(
     priceResult: safeResult(source.priceResult),
     pricePolls: safePollCount(source.pricePolls),
     recommendationRequestId: text(source.recommendationRequestId),
-    recommendationResult: safeResult(source.recommendationResult),
+    recommendationResult:
+      safeResult(source.recommendationResult) ?? legacyRecommendationResult,
     recommendationPolls: safePollCount(source.recommendationPolls),
     titles: stringMap(source.titles),
     searches: stringMap(source.searches),
-    directRequestId: text(source.directRequestId),
+    directRequestId,
     directResult: safeResult(source.directResult),
     directPolls: safePollCount(source.directPolls),
     updatedAt: text(source.updatedAt) || new Date(0).toISOString(),
