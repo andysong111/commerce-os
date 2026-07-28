@@ -63,7 +63,9 @@ function numberOrNull(value: unknown) {
 }
 
 function normalizeKeyword(value: unknown) {
-  return text(value).replace(/^[\[\]{}()'"`]+|[\[\]{}()'"`]+$/g, "").trim();
+  return text(value)
+    .replace(/^[\[\]{}()'"`]+|[\[\]{}()'"`]+$/g, "")
+    .trim();
 }
 
 export function splitRecommendationTerms(value: unknown): string[] {
@@ -80,7 +82,10 @@ export function splitRecommendationTerms(value: unknown): string[] {
   }
   const raw = text(value);
   if (!raw) return [];
-  if ((raw.startsWith("[") && raw.endsWith("]")) || (raw.startsWith("{") && raw.endsWith("}"))) {
+  if (
+    (raw.startsWith("[") && raw.endsWith("]")) ||
+    (raw.startsWith("{") && raw.endsWith("}"))
+  ) {
     try {
       return splitRecommendationTerms(JSON.parse(raw.replace(/'/g, '"')));
     } catch {
@@ -123,6 +128,12 @@ function booleanValue(value: unknown) {
   );
 }
 
+function passValue(value: unknown) {
+  return ["pass", "passed", "success", "safe", "verified", "ready"].includes(
+    text(value).toLocaleLowerCase(),
+  );
+}
+
 function severeRejected(row: CsvRecord) {
   const tier = text(row.recommendation_tier).toUpperCase();
   const safety = text(row.safety_status).toUpperCase();
@@ -130,8 +141,28 @@ function severeRejected(row: CsvRecord) {
   return (
     tier.startsWith("REJECTED") ||
     safety === "REJECTED" ||
-    /drift|cross_category|attribute_only|unsupported_model|claim_risk/.test(rejection)
+    /drift|cross_category|attribute_only|unsupported_model|claim_risk/.test(
+      rejection,
+    )
   );
+}
+
+function approvalSafeForAuto(row: CsvRecord) {
+  const noBlock =
+    !text(row.block_reason) &&
+    !text(row.non_approvable_reason) &&
+    !booleanValue(row.auto_blocked);
+  const explicitlyReady =
+    booleanValue(row.apply_ready) ||
+    booleanValue(row.review_passed) ||
+    booleanValue(row.approvable) ||
+    ["approved", "ready", "pass"].includes(
+      text(row.approval_status).toLocaleLowerCase(),
+    );
+  const qualityPassed =
+    passValue(row.site_srch_quality_status) &&
+    passValue(row.final_site_srch_confidence_status);
+  return noBlock && explicitlyReady && qualityPassed;
 }
 
 function upsertCandidate(
@@ -142,9 +173,10 @@ function upsertCandidate(
   const keyword = normalizeKeyword(seed.keyword);
   if (!keyword) return;
   const identity = keyword.toLocaleLowerCase().replace(/\s+/g, "");
-  const demandBonus = seed.totalSearch && seed.totalSearch > 0
-    ? Math.min(300, Math.round(Math.log10(seed.totalSearch + 1) * 75))
-    : 0;
+  const demandBonus =
+    seed.totalSearch && seed.totalSearch > 0
+      ? Math.min(300, Math.round(Math.log10(seed.totalSearch + 1) * 75))
+      : 0;
   const score = seed.baseScore - index + demandBonus;
   const next: KeywordRecommendationItem = {
     keyword,
@@ -163,8 +195,10 @@ function upsertCandidate(
     return;
   }
   if (next.safeAutoApply && !current.safeAutoApply) current.safeAutoApply = true;
-  if (next.selectedByEngine && !current.selectedByEngine) current.selectedByEngine = true;
-  if (!current.totalSearch && next.totalSearch) current.totalSearch = next.totalSearch;
+  if (next.selectedByEngine && !current.selectedByEngine)
+    current.selectedByEngine = true;
+  if (!current.totalSearch && next.totalSearch)
+    current.totalSearch = next.totalSearch;
 }
 
 function groupApprovalRecords(records: CsvRecord[]) {
@@ -185,63 +219,93 @@ function buildGroup(
   engineStatus: string,
 ): KeywordRecommendationGroup {
   const candidateMap = new Map<string, KeywordRecommendationItem>();
-  const primary = approvals.find((row) => text(row.new_site_srch)) ?? approvals[0] ?? {};
+  const primary =
+    approvals.find((row) => text(row.new_site_srch)) ?? approvals[0] ?? {};
+  const approvalSafe = approvalSafeForAuto(primary);
   const finalTerms = splitRecommendationTerms(primary.new_site_srch);
   finalTerms.forEach((keyword, index) =>
-    upsertCandidate(candidateMap, {
-      keyword,
-      baseScore: 10_000,
-      quality: "최적",
-      source: "엔진 최종 검색어",
-      selectedByEngine: true,
-      safeAutoApply: true,
-      reason: "keyword_engine_final_site_srch",
-    }, index),
+    upsertCandidate(
+      candidateMap,
+      {
+        keyword,
+        baseScore: 10_000,
+        quality: approvalSafe ? "최적" : "검토",
+        source: "엔진 최종 검색어",
+        selectedByEngine: true,
+        safeAutoApply: approvalSafe,
+        reason: approvalSafe
+          ? "keyword_engine_final_site_srch_quality_pass"
+          : "keyword_engine_final_site_srch_requires_review",
+      },
+      index,
+    ),
   );
 
   const safeTerms = dedupe(
-    approvals.flatMap((row) => splitRecommendationTerms(row.final_site_srch_safe_for_auto_apply_terms)),
+    approvals.flatMap((row) =>
+      splitRecommendationTerms(row.final_site_srch_safe_for_auto_apply_terms),
+    ),
   );
   safeTerms.forEach((keyword, index) =>
-    upsertCandidate(candidateMap, {
-      keyword,
-      baseScore: 9_000,
-      quality: "최적",
-      source: "자동 적용 안전 후보",
-      safeAutoApply: true,
-      reason: "safe_for_auto_apply",
-    }, index),
+    upsertCandidate(
+      candidateMap,
+      {
+        keyword,
+        baseScore: 9_500,
+        quality: "최적",
+        source: "자동 적용 안전 후보",
+        safeAutoApply: true,
+        reason: "safe_for_auto_apply",
+      },
+      index,
+    ),
   );
 
   const promotedTerms = dedupe([
-    ...approvals.flatMap((row) => splitRecommendationTerms(row.auto_promoted_site_srch_terms)),
+    ...approvals.flatMap((row) =>
+      splitRecommendationTerms(row.auto_promoted_site_srch_terms),
+    ),
     ...audits
-      .filter((row) => ["promoted", "accepted", "selected", "auto_promoted"].includes(text(row.decision).toLocaleLowerCase()))
+      .filter((row) =>
+        ["promoted", "accepted", "selected", "auto_promoted"].includes(
+          text(row.decision).toLocaleLowerCase(),
+        ),
+      )
       .map((row) => text(row.candidate_keyword)),
   ]);
   promotedTerms.forEach((keyword, index) =>
-    upsertCandidate(candidateMap, {
-      keyword,
-      baseScore: 8_500,
-      quality: "추천",
-      source: "자동 승격 후보",
-      safeAutoApply: true,
-      reason: "auto_promoted",
-    }, index),
+    upsertCandidate(
+      candidateMap,
+      {
+        keyword,
+        baseScore: 8_500,
+        quality: "추천",
+        source: "자동 승격 후보",
+        safeAutoApply: true,
+        reason: "auto_promoted",
+      },
+      index,
+    ),
   );
 
   const opportunityTerms = dedupe(
-    approvals.flatMap((row) => splitRecommendationTerms(row.top_opportunity_keywords)),
+    approvals.flatMap((row) =>
+      splitRecommendationTerms(row.top_opportunity_keywords),
+    ),
   );
   opportunityTerms.forEach((keyword, index) =>
-    upsertCandidate(candidateMap, {
-      keyword,
-      baseScore: 7_500,
-      quality: "추천",
-      source: "기회 키워드",
-      safeAutoApply: true,
-      reason: "top_opportunity",
-    }, index),
+    upsertCandidate(
+      candidateMap,
+      {
+        keyword,
+        baseScore: 7_500,
+        quality: "추천",
+        source: "기회 키워드",
+        safeAutoApply: false,
+        reason: "top_opportunity_click_to_select",
+      },
+      index,
+    ),
   );
 
   manuals
@@ -250,36 +314,62 @@ function buildGroup(
       const tier = text(row.recommendation_tier).toUpperCase();
       const sellerQuality = text(row.seller_quality_status).toUpperCase();
       const safety = text(row.safety_status).toUpperCase();
-      const verified = ["VERIFIED", "SAFE", "PASS", "SELLER_QUALITY_VERIFIED"].includes(sellerQuality);
+      const verified = [
+        "VERIFIED",
+        "SAFE",
+        "PASS",
+        "SELLER_QUALITY_VERIFIED",
+      ].includes(sellerQuality);
       const safeReview = tier === "SAFE_REVIEW" || verified;
-      const needsReview = tier === "NEEDS_SOURCE_CHECK" || safety === "SOURCE_CHECK_REQUIRED";
-      upsertCandidate(candidateMap, {
-        keyword: row.candidate_keyword,
-        baseScore: safeReview ? 6_500 : needsReview ? 4_000 : 2_500,
-        quality: safeReview ? "추천" : "검토",
-        source: safeReview ? "검증 추천 후보" : "추가 검토 후보",
-        safeAutoApply: safeReview && safety !== "SOURCE_CHECK_REQUIRED",
-        totalSearch: numberOrNull(row.total_search),
-        competitionIndex: row.comp_idx,
-        reason: row.rejection_reason || row.searchad_related_evaluation_reason,
-      }, index);
+      const needsReview =
+        tier === "NEEDS_SOURCE_CHECK" || safety === "SOURCE_CHECK_REQUIRED";
+      const safeAuto =
+        safeReview &&
+        safety !== "SOURCE_CHECK_REQUIRED" &&
+        safety !== "REJECTED";
+      upsertCandidate(
+        candidateMap,
+        {
+          keyword: row.candidate_keyword,
+          baseScore: safeReview ? 6_500 : needsReview ? 4_000 : 2_500,
+          quality: safeReview ? "추천" : "검토",
+          source: safeReview ? "검증 추천 후보" : "추가 검토 후보",
+          safeAutoApply: safeAuto,
+          totalSearch: numberOrNull(row.total_search),
+          competitionIndex: row.comp_idx,
+          reason:
+            row.rejection_reason || row.searchad_related_evaluation_reason,
+        },
+        index,
+      );
     });
 
   const items = [...candidateMap.values()]
-    .sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, "ko"))
+    .sort(
+      (a, b) =>
+        b.score - a.score || a.keyword.localeCompare(b.keyword, "ko"),
+    )
     .slice(0, 30);
-  const optimizedKeywords = dedupe([
-    ...finalTerms,
-    ...items.filter((item) => item.safeAutoApply).map((item) => item.keyword),
-  ]).slice(0, 10);
+  const optimizedKeywords = dedupe(
+    items.filter((item) => item.safeAutoApply).map((item) => item.keyword),
+  ).slice(0, 10);
   const warningSet = new Set<string>();
   for (const row of approvals) {
-    for (const warning of splitRecommendationTerms(row.warning_flags || row.review_warnings)) {
+    for (const warning of splitRecommendationTerms(
+      row.warning_flags || row.review_warnings,
+    )) {
       warningSet.add(warning);
     }
   }
+  if (!approvalSafe && finalTerms.length > 0) {
+    warningSet.add(
+      "엔진 최종 검색어의 품질·신뢰도·적용 준비 상태가 모두 PASS가 아니어서 자동 적용에서 제외했습니다.",
+    );
+  }
   if (optimizedKeywords.length < 10) {
-    warningSet.add(`자동 적용 가능한 추천키워드가 ${optimizedKeywords.length}개입니다. 나머지는 직접 선택해야 합니다.`);
+    warningSet.add(
+      `자동 적용 가능한 추천키워드가 ${optimizedKeywords.length}개입니다. 나머지는 직접 선택해야 합니다.`,
+    );
   }
   return {
     goodsKey,
@@ -312,9 +402,15 @@ export function parseKeywordRecommendationArtifact(
   expectedGoodsKeys: string[] = [],
 ): KeywordRecommendationArtifactResult {
   const meta = parseMeta(files["keyword_engine_run_meta.json"] ?? "");
-  const approvals = parseCsvRecords(files["keyword_mvp_approval_sheet.csv"] ?? "");
-  const manuals = parseCsvRecords(files["keyword_mvp_manual_candidates.csv"] ?? "");
-  const audits = parseCsvRecords(files["keyword_mvp_auto_promotion_audit.csv"] ?? "");
+  const approvals = parseCsvRecords(
+    files["keyword_mvp_approval_sheet.csv"] ?? "",
+  );
+  const manuals = parseCsvRecords(
+    files["keyword_mvp_manual_candidates.csv"] ?? "",
+  );
+  const audits = parseCsvRecords(
+    files["keyword_mvp_auto_promotion_audit.csv"] ?? "",
+  );
   const approvalsByGoodsKey = groupApprovalRecords(approvals);
   const actualGoodsKeys = dedupe([
     ...meta.goodsKeys,
@@ -337,8 +433,12 @@ export function parseKeywordRecommendationArtifact(
     goodsKeys: actualGoodsKeys,
     status: meta.status,
     groups,
-    missingGoodsKeys: expected.filter((goodsKey) => !actualGoodsKeys.includes(goodsKey)),
-    extraGoodsKeys: actualGoodsKeys.filter((goodsKey) => expected.length > 0 && !expected.includes(goodsKey)),
+    missingGoodsKeys: expected.filter(
+      (goodsKey) => !actualGoodsKeys.includes(goodsKey),
+    ),
+    extraGoodsKeys: actualGoodsKeys.filter(
+      (goodsKey) => expected.length > 0 && !expected.includes(goodsKey),
+    ),
   };
 }
 
@@ -354,7 +454,8 @@ export function toggleRecommendedKeyword(
   );
   const next = exists
     ? current.filter(
-        (item) => item.toLocaleLowerCase().replace(/\s+/g, "") !== normalized,
+        (item) =>
+          item.toLocaleLowerCase().replace(/\s+/g, "") !== normalized,
       )
     : [...current, keyword].slice(0, limit);
   return next.join(",");
