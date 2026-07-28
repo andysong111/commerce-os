@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireShoplingBarcodeSyncOperator } from "@/lib/shoplingBarcodeSyncAuth";
+import { evaluateShoplingBarcodeSyncCanary } from "@/lib/shoplingBarcodeSyncCanaryGate";
 import {
   dispatchShoplingBarcodeSyncActions,
+  fetchShoplingBarcodeSyncActionsResult,
+  isValidShoplingBarcodeSyncRequestId,
   type ShoplingBarcodeSyncApplyScope,
   type ShoplingBarcodeSyncMode,
 } from "@/lib/shoplingBarcodeSyncRunner";
@@ -28,12 +31,33 @@ export async function POST(request: Request) {
     );
   }
   const body = value as Record<string, unknown>;
+  const mode = typeof body.mode === "string" ? body.mode : "";
+
+  if (mode === "apply") {
+    const canaryRequestId =
+      typeof body.canary_request_id === "string" ? body.canary_request_id.trim() : "";
+    if (!isValidShoplingBarcodeSyncRequestId(canaryRequestId)) {
+      return NextResponse.json(
+        {
+          status: "error",
+          message: "전체 반영 전에 성공한 10개 테스트의 요청 추적 ID가 필요합니다.",
+        },
+        { status: 409 },
+      );
+    }
+
+    const canaryResult = await fetchShoplingBarcodeSyncActionsResult(canaryRequestId);
+    const gate = evaluateShoplingBarcodeSyncCanary(canaryResult);
+    if (!gate.ok) {
+      return NextResponse.json(
+        { status: "error", message: gate.message, canaryRequestId },
+        { status: 409 },
+      );
+    }
+  }
 
   const result = await dispatchShoplingBarcodeSyncActions({
-    mode:
-      typeof body.mode === "string"
-        ? (body.mode as ShoplingBarcodeSyncMode)
-        : ("" as ShoplingBarcodeSyncMode),
+    mode: mode as ShoplingBarcodeSyncMode,
     apply_scope:
       typeof body.apply_scope === "string"
         ? (body.apply_scope as ShoplingBarcodeSyncApplyScope)
