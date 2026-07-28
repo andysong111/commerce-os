@@ -26,8 +26,7 @@ export const engineRunnerConfigs = [
     workflowName: "Keyword Engine Runner",
     supportedModes: ["dry_run"],
     outputReviewRoute: "/keyword-review-queue",
-    actionsUrl:
-      "https://github.com/andysong111/andysong111-keyword-engine-soon/actions/workflows/keyword-engine-runner.yml",
+    actionsUrl: "https://github.com/andysong111/andysong111-keyword-engine-soon/actions/workflows/keyword-engine-runner.yml",
     expectedArtifactName: "keyword-engine-mvp-output",
     expectedArtifacts: [
       "keyword_mvp_approval_sheet.csv",
@@ -47,8 +46,7 @@ export const engineRunnerConfigs = [
     workflowName: "Detail Page Engine Runner",
     supportedModes: ["generate_artifacts"],
     outputReviewRoute: "/detail-page-draft-review",
-    actionsUrl:
-      "https://github.com/andysong111/product-detail-page-auto/actions/workflows/detail-page-engine-runner.yml",
+    actionsUrl: "https://github.com/andysong111/product-detail-page-auto/actions/workflows/detail-page-engine-runner.yml",
     expectedArtifactName: "detail-page-engine-output",
     expectedArtifacts: [
       "detailpage_shopling_FINAL.html",
@@ -74,24 +72,17 @@ export function isEngineDispatchTokenConfigured() {
 }
 
 function trimInputs(inputs: Record<string, string> = {}) {
-  return Object.fromEntries(
-    Object.entries(inputs).map(([key, value]) => [key, value.trim()]),
-  );
+  return Object.fromEntries(Object.entries(inputs).map(([key, value]) => [key, value.trim()]));
 }
 
 export function generateDetailPageProductCode(date = new Date()) {
-  const timestamp = date
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
+  const timestamp = date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const randomSuffix = Math.random().toString(36).slice(2, 8).toUpperCase();
 
   return `DP-${timestamp}-${randomSuffix}`;
 }
 
-export function mapEngineWorkflowInputs(
-  request: EngineRunnerDispatchInput,
-): Record<string, string> {
+export function mapEngineWorkflowInputs(request: EngineRunnerDispatchInput): Record<string, string> {
   const inputs = trimInputs(request.inputs);
 
   if (request.kind === "keyword_engine") {
@@ -104,16 +95,17 @@ export function mapEngineWorkflowInputs(
     return {
       goods_key: goodsKey,
       seed_keyword: inputs.seed_keyword || "",
-      request_id: inputs.request_id || "",
       mode: request.mode,
     };
   }
 
   if (request.kind === "detail_page_engine") {
     const productCode = inputs.product_code || generateDetailPageProductCode();
+
     if (!inputs.source_link) {
       throw new Error("Detail Page Engine dispatch requires source_link.");
     }
+
     return {
       product_code: productCode,
       source_link: inputs.source_link,
@@ -132,12 +124,15 @@ export function buildEngineDispatchPreview(
   request: EngineRunnerDispatchInput,
 ): EngineRunnerDispatchPreview {
   const config = getEngineRunnerConfig(request.kind);
+
   if (!config) {
     throw new Error("Unsupported engine runner kind.");
   }
+
   if (!(config.supportedModes as readonly string[]).includes(request.mode)) {
     throw new Error("Unsupported engine runner mode.");
   }
+
   return {
     previewOnly: true,
     status: "dispatch_preview",
