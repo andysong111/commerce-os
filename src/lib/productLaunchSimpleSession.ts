@@ -1,5 +1,9 @@
 import { extractUploadRows, extractRowsWithGoodsKey } from "./productLaunchFlow";
 import type { KeywordRecommendationGroup } from "./productLaunchKeywordRecommendations";
+import {
+  isNoSpaceSearchKeyword,
+  sanitizeNoSpaceRecommendationResult,
+} from "./productLaunchNoSpaceKeywordPolicy";
 
 export const PRODUCT_LAUNCH_SIMPLE_SESSION_KEY =
   "productLaunchFlow.simpleSession.v1";
@@ -85,6 +89,19 @@ function stringMap(value: unknown) {
   );
 }
 
+function noSpaceSearchMap(value: unknown) {
+  const source = stringMap(value);
+  return Object.fromEntries(
+    Object.entries(source).map(([goodsKey, raw]) => {
+      const keywords = raw
+        .split(",")
+        .map((keyword) => keyword.trim())
+        .filter(isNoSpaceSearchKeyword);
+      return [goodsKey, [...new Set(keywords)].slice(0, 10).join(",")];
+    }),
+  );
+}
+
 function safePollCount(value: unknown) {
   return Math.max(0, Math.min(1000, Math.trunc(number(value))));
 }
@@ -93,6 +110,18 @@ function safeResult(value: unknown): ProductLaunchSimpleRunResult | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as ProductLaunchSimpleRunResult;
   return JSON.parse(JSON.stringify(source)) as ProductLaunchSimpleRunResult;
+}
+
+function hasSpacedRecommendation(
+  result: ProductLaunchSimpleRunResult | null,
+) {
+  return Boolean(
+    result?.recommendations?.some(
+      (group) =>
+        group.optimizedKeywords.some((keyword) => !isNoSpaceSearchKeyword(keyword)) ||
+        group.items.some((item) => !isNoSpaceSearchKeyword(item.keyword)),
+    ),
+  );
 }
 
 export function isSuccessfulSimpleUploadResult(value: unknown) {
@@ -179,6 +208,15 @@ export function parseProductLaunchSimpleSession(
             "기존 버전에서 이미 상품명·검색어 반영을 시작한 작업이므로 추천 단계는 건너뛰었습니다.",
         }
       : null;
+  const storedRecommendationResult = safeResult(source.recommendationResult);
+  const recommendationRequiresRefresh =
+    !directRequestId && hasSpacedRecommendation(storedRecommendationResult);
+  const recommendationResult = recommendationRequiresRefresh
+    ? null
+    : storedRecommendationResult
+      ? sanitizeNoSpaceRecommendationResult(storedRecommendationResult)
+      : legacyRecommendationResult;
+
   return {
     version: 1,
     rowExpression: text(source.rowExpression),
@@ -189,11 +227,12 @@ export function parseProductLaunchSimpleSession(
     priceResult: safeResult(source.priceResult),
     pricePolls: safePollCount(source.pricePolls),
     recommendationRequestId: text(source.recommendationRequestId),
-    recommendationResult:
-      safeResult(source.recommendationResult) ?? legacyRecommendationResult,
-    recommendationPolls: safePollCount(source.recommendationPolls),
+    recommendationResult,
+    recommendationPolls: recommendationRequiresRefresh
+      ? 0
+      : safePollCount(source.recommendationPolls),
     titles: stringMap(source.titles),
-    searches: stringMap(source.searches),
+    searches: noSpaceSearchMap(source.searches),
     directRequestId,
     directResult: safeResult(source.directResult),
     directPolls: safePollCount(source.directPolls),
