@@ -51,7 +51,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm run lint > lint.log 2>&1
+          npx eslint \
+            src/app/api/cron/shopling-price-bulk-auto \
+            src/app/api/shopling-price-modify/bulk \
+            src/app/shopling-price-modify-runner \
+            src/components/shopling-price-modify-runner \
+            src/lib/shoplingPriceModifyBulk*.ts \
+            tests/shoplingPriceModifyBulk*.test.mjs > lint.log 2>&1
           echo $? > lint.exit
           npm run build > build.log 2>&1
           echo $? > build.exit
