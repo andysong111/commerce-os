@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireShoplingBarcodeSyncOperator } from "@/lib/shoplingBarcodeSyncAuth";
 import {
+  SHOPLING_BARCODE_SYNC_CANARY_COOKIE,
+  evaluateShoplingBarcodeSyncCanary,
+} from "@/lib/shoplingBarcodeSyncCanaryGate";
+import {
   fetchShoplingBarcodeSyncActionsResult,
   isValidShoplingBarcodeSyncRequestId,
 } from "@/lib/shoplingBarcodeSyncRunner";
@@ -20,5 +24,23 @@ export async function GET(request: Request) {
   }
 
   const result = await fetchShoplingBarcodeSyncActionsResult(requestId);
-  return NextResponse.json(result, { status: result.status === "error" ? 400 : 200 });
+  const canaryGate = evaluateShoplingBarcodeSyncCanary(result);
+  const response = NextResponse.json(
+    {
+      ...result,
+      canaryGatePassed: canaryGate.ok,
+      canaryGateMessage: canaryGate.message,
+    },
+    { status: result.status === "error" ? 400 : 200 },
+  );
+  if (canaryGate.ok) {
+    response.cookies.set(SHOPLING_BARCODE_SYNC_CANARY_COOKIE, requestId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60,
+      path: "/api/shopling-barcode-sync",
+    });
+  }
+  return response;
 }
