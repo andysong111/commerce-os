@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { dispatchKeywordShoplingDirectApply } from "@/lib/keywordShoplingDirectApplyRunner";
+import { validateNoSpaceExecutionPlan } from "@/lib/productLaunchNoSpaceKeywordPolicy";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,22 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+
+  const noSpaceValidation = validateNoSpaceExecutionPlan(
+    body.execution_plan_json,
+  );
+  if (!noSpaceValidation.ok) {
+    return NextResponse.json(
+      {
+        status: "error",
+        message: noSpaceValidation.message,
+        goods_key: noSpaceValidation.goodsKey,
+        keyword: noSpaceValidation.keyword,
+      },
+      { status: 400 },
+    );
+  }
+
   const result = await dispatchKeywordShoplingDirectApply(body);
   return NextResponse.json(result, {
     status: result.status === "queued" ? 200 : 400,
