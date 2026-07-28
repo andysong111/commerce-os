@@ -25,6 +25,13 @@ const ACTIVE_STATUSES = new Set([
   "dispatch_uncertain",
 ]);
 const FAILED_STATUSES = new Set(["canary_failed", "normal_failed", "retry_failed"]);
+const CONTINUABLE_STOPPED_STATUSES = new Set([
+  "canary_succeeded",
+  "normal_running",
+  "retry_running",
+  "normal_paused",
+  "retry_paused",
+]);
 
 type Selection = { label: string; result: ShoplingPriceBulkInputResult };
 type Job = {
@@ -51,6 +58,7 @@ type Detail = {
   item_status_counts: { pending: number; succeeded: number; failed: number };
   normal_chunk_count: number;
   failed_goods_key_count: number;
+  current_active_chunk?: Chunk | null;
 };
 
 type Step = { title: string; description: string };
@@ -71,10 +79,17 @@ function friendlyMessage(value: string) {
     .replaceAll("invalid", "잘못된 번호");
 }
 
+function hasActiveChunk(detail: Detail | null) {
+  return Boolean(detail?.current_active_chunk);
+}
+
 function simpleStatus(detail: Detail) {
   const { job } = detail;
   if (job.status === "normal_succeeded" || (job.status === "canary_succeeded" && detail.normal_chunk_count === 0)) {
     return "모든 상품의 가격 변경이 완료되었습니다.";
+  }
+  if (job.automation_stop_reason && hasActiveChunk(detail)) {
+    return "전송 상태가 불확실해 자동 실행은 멈췄습니다. 현재 요청의 결과만 확인하고 있습니다.";
   }
   if (job.automation_stop_reason) return friendlyMessage(job.automation_stop_reason);
   if (FAILED_STATUSES.has(job.status)) {
@@ -164,8 +179,8 @@ export function ShoplingPriceModifySimpleAutoRunner() {
     if (!detail
       || detail.job.automation_mode !== "auto"
       || detail.job.automation_finished_at
-      || detail.job.automation_stop_reason
       || !ACTIVE_STATUSES.has(detail.job.status)) return;
+    if (detail.job.automation_stop_reason && !hasActiveChunk(detail)) return;
     const timer = window.setTimeout(() => void loadDetail(detail.job.id), 15_000);
     return () => window.clearTimeout(timer);
   }, [detail, loadDetail]);
@@ -266,6 +281,33 @@ export function ShoplingPriceModifySimpleAutoRunner() {
     }
   };
 
+  const continueAfterReview = async () => {
+    if (!detail || busy) return;
+    if (!window.confirm(
+      "현재 요청의 결과 저장이 끝났습니다.\n중단 사유를 확인했고, 남은 상품부터 자동 가격 변경을 계속합니다.\n이미 성공한 상품은 다시 실행하지 않습니다.\n\n계속하시겠습니까?",
+    )) return;
+    setBusy(true);
+    clearError();
+    setNotice("");
+    try {
+      const body = await requestShoplingPriceBulkJson(
+        `/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/control/continue-auto`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ confirmation: "CONFIRM_AUTO_CONTINUE_AFTER_REVIEW" }),
+        },
+        "simple_auto.continue_after_review",
+      );
+      setNotice(friendlyMessage(String(body.message ?? "남은 상품 자동 변경을 계속합니다.")));
+      await loadDetail(detail.job.id);
+    } catch (caught) {
+      handleError(caught, "자동 가격 변경을 계속하지 못했습니다.", "simple_auto.continue_after_review");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const retry = async () => {
     if (!detail || busy || detail.failed_goods_key_count === 0) return;
     if (!window.confirm(`실패 상품 ${detail.failed_goods_key_count}개만 다시 실행합니다.\n이미 성공한 상품은 다시 실행하지 않습니다.\n계속하시겠습니까?`)) return;
@@ -292,12 +334,32 @@ export function ShoplingPriceModifySimpleAutoRunner() {
 
   const step = currentStep(detail);
   const preview = selection?.result;
+  const activeChunkExists = hasActiveChunk(detail);
   const retryAllowed = detail
     ? FAILED_STATUSES.has(detail.job.status)
       && detail.failed_goods_key_count > 0
       && detail.job.retry_scope_known !== false
       && (detail.job.retry_round ?? 0) < (detail.job.max_retry_rounds ?? 2)
     : false;
+  const continueAllowed = Boolean(
+    detail
+      && detail.job.automation_mode === "auto"
+      && detail.job.automation_stop_reason
+      && !detail.job.automation_finished_at
+      && !detail.job.archived_at
+      && !activeChunkExists
+      && CONTINUABLE_STOPPED_STATUSES.has(detail.job.status),
+  );
+  const ordinaryPauseAllowed = Boolean(
+    detail
+      && !detail.job.automation_stop_reason
+      && ["normal_running", "retry_running"].includes(detail.job.status),
+  );
+  const ordinaryResumeAllowed = Boolean(
+    detail
+      && !detail.job.automation_stop_reason
+      && ["normal_paused", "retry_paused"].includes(detail.job.status),
+  );
   const unfinishedAutoExists = isUnfinishedAutoJob(detail);
   const completed = detail?.item_status_counts.succeeded ?? 0;
   const failed = detail?.item_status_counts.failed ?? 0;
@@ -378,8 +440,9 @@ export function ShoplingPriceModifySimpleAutoRunner() {
       </div>
 
       {detail && <div className="mt-4 flex flex-wrap gap-3">
-        {(["normal_running", "retry_running"].includes(detail.job.status)) && <button type="button" disabled={busy} onClick={() => void control("pause")} className="rounded-lg bg-amber-700 px-4 py-3 font-bold text-white disabled:opacity-50">현재 묶음 후 멈추기</button>}
-        {(["normal_paused", "retry_paused"].includes(detail.job.status)) && <button type="button" disabled={busy} onClick={() => void control("resume")} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">계속 실행</button>}
+        {ordinaryPauseAllowed && <button type="button" disabled={busy} onClick={() => void control("pause")} className="rounded-lg bg-amber-700 px-4 py-3 font-bold text-white disabled:opacity-50">현재 묶음 후 멈추기</button>}
+        {ordinaryResumeAllowed && <button type="button" disabled={busy} onClick={() => void control("resume")} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">계속 실행</button>}
+        {continueAllowed && <button type="button" disabled={busy} onClick={() => void continueAfterReview()} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">확인 후 계속 실행</button>}
         {retryAllowed && <button type="button" disabled={busy} onClick={() => void retry()} className="rounded-lg bg-red-700 px-4 py-3 font-bold text-white disabled:opacity-50">실패 상품만 다시 실행</button>}
         {resultAvailable && <a href={`/api/shopling-price-modify/bulk/jobs/${encodeURIComponent(detail.job.id)}/report?format=csv`} className="rounded-lg bg-emerald-700 px-4 py-3 font-bold text-white">결과 파일 받기</a>}
         <button type="button" disabled={busy} onClick={() => void loadDetail(detail.job.id)} className="rounded-lg border px-4 py-3 font-bold disabled:opacity-50">상태 다시 확인</button>
