@@ -23,10 +23,11 @@ SHOPLING_BARCODE_SYNC_ENABLED=1
 GitHub Actions 토큰은 다음 순서로 사용합니다.
 
 1. `SHOPLING_BARCODE_SYNC_ACTIONS_TOKEN`
-2. `GITHUB_ACTIONS_TOKEN`
-3. 기존 `SHOPLING_PRICE_MODIFY_ACTIONS_TOKEN`
+2. 기존 `GITHUB_ENGINE_DISPATCH_TOKEN`
+3. `GITHUB_ACTIONS_TOKEN`
+4. 기존 `SHOPLING_PRICE_MODIFY_ACTIONS_TOKEN`
 
-기존 가격설정 실행기의 토큰이 새 비공개 저장소에도 Actions 권한을 갖고 있다면 별도 토큰을 추가하지 않아도 됩니다.
+기존 외부 엔진 실행 토큰이 새 비공개 저장소에도 Actions 권한을 갖고 있다면 별도 토큰을 추가하지 않아도 됩니다. GitHub가 `404`를 반환하면 저장소명이나 workflow 파일보다 먼저 토큰이 비공개 저장소를 볼 수 있는지 확인합니다.
 
 선택 설정은 기본값을 그대로 사용할 수 있습니다.
 
