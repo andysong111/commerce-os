@@ -15,14 +15,19 @@ const resultRouteSource = await readFile(
   "utf8",
 );
 
-test("barcode sync requires feature flag, login, and allowlisted email", () => {
-  assert.match(authSource, /SHOPLING_BARCODE_SYNC_ENABLED\s*!==\s*"1"/);
+test("barcode sync requires login and allowlisted email", () => {
   assert.match(authSource, /SHOPLING_BARCODE_SYNC_ALLOWED_EMAILS/);
   assert.match(authSource, /OPS_OWNER_EMAILS/);
   assert.match(authSource, /supabase\.auth\.getUser\(\)/);
   assert.match(authSource, /allowedEmails\.has\(email\)/);
   assert.match(authSource, /status:\s*401/);
   assert.match(authSource, /status:\s*403/);
+});
+
+test("feature flag is optional but an explicit non-1 value disables the route", () => {
+  assert.match(authSource, /const featureFlag = process\.env\.SHOPLING_BARCODE_SYNC_ENABLED\?\.trim\(\)/);
+  assert.match(authSource, /if \(featureFlag && featureFlag !== "1"\)/);
+  assert.doesNotMatch(authSource, /process\.env\.SHOPLING_BARCODE_SYNC_ENABLED\s*!==\s*"1"/);
 });
 
 test("both dispatch and result routes enforce operator authorization", () => {
