@@ -11,6 +11,7 @@ set search_path = public
 as $$
 declare
   v_job public.shopling_price_bulk_jobs;
+  v_canary_only_complete boolean;
 begin
   if auth.role() <> 'service_role' then raise exception 'service_role required'; end if;
   if p_worker_id is null or p_worker_id !~ '^[A-Za-z0-9._:-]{1,120}$' then raise exception 'invalid worker id'; end if;
@@ -54,6 +55,31 @@ begin
 
   if v_job.id is null then
     return jsonb_build_object('claimed', false);
+  end if;
+
+  select v_job.status = 'canary_succeeded' and not exists (
+    select 1 from public.shopling_price_bulk_chunks
+    where job_id = v_job.id and chunk_type = 'normal'
+  ) into v_canary_only_complete;
+
+  -- Result rows are already committed. Recover only the missing automation marker
+  -- without claiming or dispatching another external request.
+  if v_job.status = 'normal_succeeded' or v_canary_only_complete then
+    update public.shopling_price_bulk_jobs
+    set automation_finished_at = coalesce(automation_finished_at, now()),
+        automation_last_tick_at = now(),
+        automation_lease_until = null,
+        automation_worker_id = null,
+        automation_stop_reason = null,
+        updated_at = now()
+    where id = v_job.id;
+
+    return jsonb_build_object(
+      'claimed', false,
+      'recovered_terminal_job_id', v_job.id,
+      'status', v_job.status,
+      'finished', true
+    );
   end if;
 
   update public.shopling_price_bulk_jobs
@@ -135,6 +161,66 @@ begin
 end;
 $$;
 
+-- Preserve the existing manual reset behavior. For an auto job, record the stop
+-- reason in the same transaction so a process exit can never cause auto-retry.
+create or replace function public.reset_shopling_price_bulk_canary_rejected(
+  p_job_id uuid,
+  p_owner_id uuid,
+  p_request_id text,
+  p_error text
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.shopling_price_bulk_jobs;
+  v_chunk_id uuid;
+  v_reason text := left(coalesce(nullif(trim(p_error), ''), 'dispatch rejected'), 1000);
+begin
+  if auth.role() <> 'service_role' then raise exception 'service_role required'; end if;
+
+  select * into v_job
+  from public.shopling_price_bulk_jobs
+  where id = p_job_id and owner_id = p_owner_id
+  for update;
+  if v_job.id is null then raise exception 'job not found'; end if;
+
+  update public.shopling_price_bulk_chunks
+  set status = 'pending',
+      request_id = null,
+      actions_url = null,
+      started_at = null,
+      updated_at = now(),
+      last_error = v_reason
+  where job_id = p_job_id
+    and chunk_index = 0
+    and chunk_type = 'canary'
+    and status = 'dispatching'
+    and request_id = p_request_id
+  returning id into v_chunk_id;
+
+  if v_chunk_id is null then raise exception 'invalid canary rejected transition'; end if;
+
+  update public.shopling_price_bulk_jobs
+  set status = 'prepared',
+      last_error = v_reason,
+      automation_stop_reason = case
+        when v_job.automation_mode = 'auto'
+          then left('첫 10개 실행 요청이 거절되어 자동 실행을 멈췄습니다. ' || v_reason, 500)
+        else automation_stop_reason
+      end,
+      automation_last_tick_at = case
+        when v_job.automation_mode = 'auto' then now()
+        else automation_last_tick_at
+      end,
+      updated_at = now()
+  where id = p_job_id and owner_id = p_owner_id;
+end;
+$$;
+
+-- Optional direct transition retained for future callers that want reset, stop,
+-- and lease release in one RPC.
 create or replace function public.reject_shopling_price_bulk_canary_auto(
   p_job_id uuid,
   p_owner_id uuid,
@@ -200,8 +286,10 @@ $$;
 
 revoke all on function public.claim_next_shopling_price_bulk_auto_job(text,integer) from public, anon, authenticated;
 revoke all on function public.continue_shopling_price_bulk_auto_after_review(uuid,uuid) from public, anon, authenticated;
+revoke all on function public.reset_shopling_price_bulk_canary_rejected(uuid,uuid,text,text) from public, anon, authenticated;
 revoke all on function public.reject_shopling_price_bulk_canary_auto(uuid,uuid,text,text,text) from public, anon, authenticated;
 
 grant execute on function public.claim_next_shopling_price_bulk_auto_job(text,integer) to service_role;
 grant execute on function public.continue_shopling_price_bulk_auto_after_review(uuid,uuid) to service_role;
+grant execute on function public.reset_shopling_price_bulk_canary_rejected(uuid,uuid,text,text) to service_role;
 grant execute on function public.reject_shopling_price_bulk_canary_auto(uuid,uuid,text,text,text) to service_role;
