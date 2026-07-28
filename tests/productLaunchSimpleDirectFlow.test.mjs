@@ -49,6 +49,6 @@ test("normal flow requires exact preflight coverage before direct apply", async 
   assert.match(component, /generatedTitleTargetCount/);
   assert.match(component, /expectedTitleTargetCount/);
   assert.match(component, /blockedCount/);
-  assert.match(component, /rawKeywordTokens\(searchCandidates/);
+  assert.match(component, /rawKeywords\(searches/);
   assert.match(component, /length === 10/);
 });
