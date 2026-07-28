@@ -30,10 +30,11 @@ import {
   resolveManualTitleOverride,
   type ProductLaunchUploadRow,
 } from "@/lib/productLaunchFlow";
-import { KEYWORD_SHOPLING_DIRECT_APPLY_CONFIRMATION } from "@/lib/keywordShoplingDirectApplyRunner";
 
 const POLL_MS = 5_000;
 const MAX_POLLS = 60;
+const DIRECT_APPLY_CONFIRMATION =
+  "APPLY_REVIEWED_TITLES_AND_SEARCH_TO_SHOPLING";
 
 type RunResult = {
   status?: string;
@@ -47,13 +48,8 @@ type RunResult = {
   blockedItems?: Array<Record<string, unknown>>;
 };
 
-type UploadResult = RunResult & {
-  summary?: unknown;
-};
-
-type PriceResult = RunResult & {
-  summary?: Record<string, unknown>;
-};
+type UploadResult = RunResult & { summary?: unknown };
+type PriceResult = RunResult & { summary?: Record<string, unknown> };
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -64,11 +60,18 @@ function numeric(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function keywordTokens(value: string) {
-  return normalizeManualKeywordOverride(value)
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function rawKeywordTokens(value: string) {
+  const seen = new Set<string>();
+  return String(value ?? "")
+    .split(/[,\n;|/]+|\s{2,}/)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function isPending(result: RunResult | null) {
@@ -114,12 +117,10 @@ export function ProductLaunchFlowSimple() {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadPollCount, setUploadPollCount] = useState(0);
-
   const [priceRequestId, setPriceRequestId] = useState("");
   const [priceResult, setPriceResult] = useState<PriceResult | null>(null);
   const [priceBusy, setPriceBusy] = useState(false);
   const [pricePollCount, setPricePollCount] = useState(0);
-
   const [titleCandidates, setTitleCandidates] = useState<Record<string, string>>(
     {},
   );
@@ -130,14 +131,13 @@ export function ProductLaunchFlowSimple() {
     useState<KeywordPayloadPreviewResult | null>(null);
   const [preflightResult, setPreflightResult] =
     useState<KeywordExecutionPreflightResult | null>(null);
-
   const [directRequestId, setDirectRequestId] = useState("");
   const [directResult, setDirectResult] = useState<RunResult | null>(null);
   const [directBusy, setDirectBusy] = useState(false);
   const [directPollCount, setDirectPollCount] = useState(0);
   const [message, setMessage] = useState("");
-
   const priceStartedForUploadRef = useRef("");
+
   const uploadRows = useMemo(
     () => extractRowsWithGoodsKey(uploadResult),
     [uploadResult],
@@ -158,14 +158,13 @@ export function ProductLaunchFlowSimple() {
     () => expectedLaunchApplyCount(goodsKeys, buildGoodsKeyGroupMap(uploadRows)),
     [goodsKeys, uploadRows],
   );
-
   const candidateComplete = useMemo(
     () =>
       goodsKeys.length > 0 &&
       goodsKeys.every(
         (goodsKey) =>
           text(titleCandidates[goodsKey]) !== "" &&
-          keywordTokens(searchCandidates[goodsKey] ?? "").length === 10,
+          rawKeywordTokens(searchCandidates[goodsKey] ?? "").length === 10,
       ),
     [goodsKeys, searchCandidates, titleCandidates],
   );
@@ -227,7 +226,7 @@ export function ProductLaunchFlowSimple() {
       {
         ...DEFAULT_KEYWORD_EXECUTION_PREFLIGHT_CONFIG,
         maxRows: 100,
-        confirmationText: KEYWORD_SHOPLING_DIRECT_APPLY_CONFIRMATION,
+        confirmationText: DIRECT_APPLY_CONFIRMATION,
       },
     );
     setPreviewResult(nextPreview);
@@ -264,8 +263,7 @@ export function ProductLaunchFlowSimple() {
       const response = await fetch(
         `/api/shopling-product-upload/actions-result?request_id=${encodeURIComponent(uploadRequestId)}`,
       );
-      const data = (await response.json()) as UploadResult;
-      setUploadResult(data);
+      setUploadResult((await response.json()) as UploadResult);
       setUploadPollCount((count) => count + 1);
     } catch (error) {
       setMessage(
@@ -279,17 +277,17 @@ export function ProductLaunchFlowSimple() {
   }, [uploadBusy, uploadRequestId]);
 
   const startUpload = useCallback(async () => {
-    if (!rowExpression.trim() || uploadBusy) return;
+    const nextRows = rowExpression.trim();
+    if (!nextRows || uploadBusy) return;
     reset();
-    setRowExpression(rowExpression.trim());
+    setRowExpression(nextRows);
     setUploadBusy(true);
-    setMessage("");
     try {
       const response = await fetch("/api/shopling-product-upload/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rowExpression: rowExpression.trim(),
+          rowExpression: nextRows,
           channel: "",
           skip_if_goods_key: true,
           dump: false,
@@ -331,8 +329,7 @@ export function ProductLaunchFlowSimple() {
       const response = await fetch(
         `/api/shopling-price-modify/actions-result?request_id=${encodeURIComponent(priceRequestId)}`,
       );
-      const data = (await response.json()) as PriceResult;
-      setPriceResult(data);
+      setPriceResult((await response.json()) as PriceResult);
       setPricePollCount((count) => count + 1);
     } catch (error) {
       setMessage(
@@ -348,7 +345,6 @@ export function ProductLaunchFlowSimple() {
   const startPrice = useCallback(async () => {
     if (goodsKeys.length < 1 || priceBusy) return;
     setPriceBusy(true);
-    setMessage("");
     try {
       const response = await fetch("/api/shopling-price-modify/run", {
         method: "POST",
@@ -364,7 +360,11 @@ export function ProductLaunchFlowSimple() {
       if (!response.ok || !requestId)
         throw new Error(data.message || "가격설정을 시작하지 못했습니다.");
       setPriceRequestId(requestId);
-      setPriceResult({ ...data, status: "pending", phase: data.phase || "queued" });
+      setPriceResult({
+        ...data,
+        status: "pending",
+        phase: data.phase || "queued",
+      });
       setPricePollCount(0);
     } catch (error) {
       setMessage(
@@ -384,7 +384,15 @@ export function ProductLaunchFlowSimple() {
     priceStartedForUploadRef.current = uploadRequestId;
     const timer = window.setTimeout(() => void startPrice(), 0);
     return () => window.clearTimeout(timer);
-  }, [goodsKeys.length, priceBusy, priceRequestId, priceResult, startPrice, uploadRequestId, uploadResult]);
+  }, [
+    goodsKeys.length,
+    priceBusy,
+    priceRequestId,
+    priceResult,
+    startPrice,
+    uploadRequestId,
+    uploadResult,
+  ]);
 
   useEffect(() => {
     if (!priceRequestId || priceSucceeded(priceResult, goodsKeys.length)) return;
@@ -439,7 +447,7 @@ export function ProductLaunchFlowSimple() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           execution_plan_json: buildCompactKeywordApplyExecutionPlan(current),
-          confirmation_text: KEYWORD_SHOPLING_DIRECT_APPLY_CONFIRMATION,
+          confirmation_text: DIRECT_APPLY_CONFIRMATION,
           max_items: 100,
         }),
       });
@@ -448,7 +456,11 @@ export function ProductLaunchFlowSimple() {
       if (!response.ok || !requestId)
         throw new Error(data.message || "상품명·검색어 반영을 시작하지 못했습니다.");
       setDirectRequestId(requestId);
-      setDirectResult({ ...data, status: "pending", phase: data.phase || "queued" });
+      setDirectResult({
+        ...data,
+        status: "pending",
+        phase: data.phase || "queued",
+      });
       setDirectPollCount(0);
     } catch (error) {
       setMessage(
@@ -468,8 +480,7 @@ export function ProductLaunchFlowSimple() {
       const response = await fetch(
         `/api/keyword-shopling-direct-apply/actions-result?request_id=${encodeURIComponent(directRequestId)}`,
       );
-      const data = (await response.json()) as RunResult;
-      setDirectResult(data);
+      setDirectResult((await response.json()) as RunResult);
       setDirectPollCount((count) => count + 1);
     } catch (error) {
       setMessage(
@@ -499,7 +510,6 @@ export function ProductLaunchFlowSimple() {
       }),
     [directResult?.applyResults, preflightResult, previewResult],
   );
-
   const completed = directApplySucceeded(directResult);
   const priceDone = priceSucceeded(priceResult, goodsKeys.length);
   const directSummary = directResult?.summary ?? {};
@@ -535,8 +545,14 @@ export function ProductLaunchFlowSimple() {
           </div>
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-5">
-          <StatusBox label="상품업로드" value={uploadSucceeded(uploadResult) ? "완료" : uploadRequestId ? "진행 중" : "대기"} />
-          <StatusBox label="가격설정" value={priceDone ? "완료" : priceRequestId ? "진행 중" : "대기"} />
+          <StatusBox
+            label="상품업로드"
+            value={uploadSucceeded(uploadResult) ? "완료" : uploadRequestId ? "진행 중" : "대기"}
+          />
+          <StatusBox
+            label="가격설정"
+            value={priceDone ? "완료" : priceRequestId ? "진행 중" : "대기"}
+          />
           <StatusBox label="상품 수" value={goodsKeys.length} />
           <StatusBox label="가격 대상" value={expectedPriceRows} />
           <StatusBox label="상품명 대상" value={expectedTitleRows} />
@@ -594,7 +610,7 @@ export function ProductLaunchFlowSimple() {
               </thead>
               <tbody>
                 {goodsKeys.map((goodsKey) => {
-                  const count = keywordTokens(searchCandidates[goodsKey] ?? "").length;
+                  const count = rawKeywordTokens(searchCandidates[goodsKey] ?? "").length;
                   const ready = text(titleCandidates[goodsKey]) !== "" && count === 10;
                   return (
                     <tr key={goodsKey} className="border-t border-slate-200 align-top">
@@ -604,7 +620,10 @@ export function ProductLaunchFlowSimple() {
                         <input
                           value={titleCandidates[goodsKey] ?? ""}
                           onChange={(event) => {
-                            setTitleCandidates((current) => ({ ...current, [goodsKey]: event.target.value }));
+                            setTitleCandidates((current) => ({
+                              ...current,
+                              [goodsKey]: event.target.value,
+                            }));
                             setPreviewResult(null);
                             setPreflightResult(null);
                           }}
@@ -616,7 +635,10 @@ export function ProductLaunchFlowSimple() {
                         <textarea
                           value={searchCandidates[goodsKey] ?? ""}
                           onChange={(event) => {
-                            setSearchCandidates((current) => ({ ...current, [goodsKey]: event.target.value }));
+                            setSearchCandidates((current) => ({
+                              ...current,
+                              [goodsKey]: event.target.value,
+                            }));
                             setPreviewResult(null);
                             setPreflightResult(null);
                           }}
@@ -628,7 +650,9 @@ export function ProductLaunchFlowSimple() {
                           {count}/10개
                         </p>
                       </td>
-                      <td className="px-3 py-3 font-bold">{ready ? "준비 완료" : "입력 필요"}</td>
+                      <td className="px-3 py-3 font-bold">
+                        {ready ? "준비 완료" : "입력 필요"}
+                      </td>
                     </tr>
                   );
                 })}
@@ -647,7 +671,12 @@ export function ProductLaunchFlowSimple() {
             <button
               type="button"
               onClick={() => void startDirectApply()}
-              disabled={!preflightResult || preflightResult.summary.blockedCount > 0 || directBusy || !!directRequestId}
+              disabled={
+                !preflightResult ||
+                preflightResult.summary.blockedCount > 0 ||
+                directBusy ||
+                !!directRequestId
+              }
               className="rounded-xl bg-blue-700 px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {directBusy ? "확인 중" : "상품명·검색어 실제 반영 시작"}
@@ -689,8 +718,12 @@ export function ProductLaunchFlowSimple() {
                     <td className="px-3 py-2 font-mono">{row.mallKey}</td>
                     <td className="px-3 py-2 font-semibold">{row.finalTitle}</td>
                     <td className="px-3 py-2">{row.finalSiteSrch}</td>
-                    <td className="px-3 py-2">{row.preflightStatus === "eligible" ? "반영 가능" : "차단"}</td>
-                    <td className="px-3 py-2">{formatKeywordExecutionPreflightLabels(row.blockingReasons) || "-"}</td>
+                    <td className="px-3 py-2">
+                      {row.preflightStatus === "eligible" ? "반영 가능" : "차단"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {formatKeywordExecutionPreflightLabels(row.blockingReasons) || "-"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -704,7 +737,10 @@ export function ProductLaunchFlowSimple() {
           <h2 className="text-lg font-black text-slate-950">4. 상품명·검색어 반영 결과</h2>
           <RequestLine label="request_id" value={directRequestId} />
           <div className="mt-4 grid gap-3 md:grid-cols-4">
-            <StatusBox label="현재 상태" value={completed ? "출시 완료" : directResult?.message || "진행 중"} />
+            <StatusBox
+              label="현재 상태"
+              value={completed ? "출시 완료" : directResult?.message || "진행 중"}
+            />
             <StatusBox label="검색어 성공" value={numeric(directSummary.search_apply_success_count)} />
             <StatusBox label="상품명 성공" value={numeric(directSummary.title_apply_success_count)} />
             <StatusBox label="실패" value={numeric(directSummary.failed_item_count)} />
