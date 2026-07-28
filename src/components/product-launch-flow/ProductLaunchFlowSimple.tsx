@@ -30,6 +30,12 @@ import {
   resolveManualTitleOverride,
 } from "@/lib/productLaunchFlow";
 import {
+  applyOptimizedRecommendedKeywords,
+  toggleRecommendedKeyword,
+  type KeywordRecommendationGroup,
+  type KeywordRecommendationItem,
+} from "@/lib/productLaunchKeywordRecommendations";
+import {
   clearProductLaunchSimpleSession,
   isSuccessfulSimpleUploadResult,
   readProductLaunchSimpleSession,
@@ -104,6 +110,31 @@ function applyDone(result: RunResult | null) {
   );
 }
 
+function recommendationReady(result: RunResult | null, goodsKeys: string[]) {
+  if (result?.phase !== "artifact_ready" || status(result.status) !== "success") {
+    return false;
+  }
+  const groups = Array.isArray(result.recommendations)
+    ? result.recommendations
+    : [];
+  return (
+    groups.length === goodsKeys.length &&
+    goodsKeys.every((goodsKey) =>
+      groups.some((group) => group.goodsKey === goodsKey),
+    )
+  );
+}
+
+function recommendationQualityClass(item: KeywordRecommendationItem) {
+  if (item.quality === "최적") {
+    return "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100";
+  }
+  if (item.quality === "추천") {
+    return "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100";
+  }
+  return "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100";
+}
+
 export function ProductLaunchFlowSimple() {
   const [hydrated, setHydrated] = useState(false);
   const [rowExpression, setRowExpression] = useState("");
@@ -115,6 +146,11 @@ export function ProductLaunchFlowSimple() {
   const [priceResult, setPriceResult] = useState<PriceResult | null>(null);
   const [priceBusy, setPriceBusy] = useState(false);
   const [pricePolls, setPricePolls] = useState(0);
+  const [recommendationRequestId, setRecommendationRequestId] = useState("");
+  const [recommendationResult, setRecommendationResult] =
+    useState<RunResult | null>(null);
+  const [recommendationBusy, setRecommendationBusy] = useState(false);
+  const [recommendationPolls, setRecommendationPolls] = useState(0);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [searches, setSearches] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<KeywordPayloadPreviewResult | null>(null);
@@ -126,6 +162,7 @@ export function ProductLaunchFlowSimple() {
   const [directPolls, setDirectPolls] = useState(0);
   const [message, setMessage] = useState("");
   const priceStartedForUpload = useRef("");
+  const recommendationStartedForPrice = useRef("");
   const operationEpoch = useRef(0);
 
   const uploadRows = useMemo(
@@ -150,22 +187,47 @@ export function ProductLaunchFlowSimple() {
   const isUploadTerminal = runTerminal(uploadResult);
   const isPriceDone = priceDone(priceResult, goodsKeys.length);
   const isPriceTerminal = runTerminal(priceResult);
+  const isRecommendationTerminal = runTerminal(recommendationResult);
+  const isRecommendationReady = recommendationReady(
+    recommendationResult,
+    goodsKeys,
+  );
   const isDirectTerminal = runTerminal(directResult);
   const isComplete = applyDone(directResult);
   const uploadActive =
     Boolean(uploadRequestId) && !isUploadTerminal && uploadPolls < MAX_POLLS;
   const priceActive =
     Boolean(priceRequestId) && !isPriceTerminal && pricePolls < MAX_POLLS;
+  const recommendationActive =
+    Boolean(recommendationRequestId) &&
+    !isRecommendationTerminal &&
+    recommendationPolls < MAX_POLLS;
   const directActive =
     Boolean(directRequestId) && !isDirectTerminal && directPolls < MAX_POLLS;
   const resetDisabled =
     !hydrated ||
     uploadBusy ||
     priceBusy ||
+    recommendationBusy ||
     directBusy ||
     uploadActive ||
     priceActive ||
+    recommendationActive ||
     directActive;
+  const recommendationGroups = useMemo(
+    () =>
+      Array.isArray(recommendationResult?.recommendations)
+        ? recommendationResult.recommendations
+        : [],
+    [recommendationResult?.recommendations],
+  );
+  const recommendationByGoodsKey = useMemo(
+    () =>
+      new Map(
+        recommendationGroups.map((group) => [group.goodsKey, group] as const),
+      ),
+    [recommendationGroups],
+  );
   const candidatesReady =
     goodsKeys.length > 0 &&
     goodsKeys.every((goodsKey) => {
@@ -187,6 +249,10 @@ export function ProductLaunchFlowSimple() {
     setPriceResult(null);
     setPriceBusy(false);
     setPricePolls(0);
+    setRecommendationRequestId("");
+    setRecommendationResult(null);
+    setRecommendationBusy(false);
+    setRecommendationPolls(0);
     setTitles({});
     setSearches({});
     setPreview(null);
@@ -197,6 +263,7 @@ export function ProductLaunchFlowSimple() {
     setDirectPolls(0);
     setMessage("");
     priceStartedForUpload.current = "";
+    recommendationStartedForPrice.current = "";
   }, []);
 
   const reset = useCallback(() => {
@@ -219,6 +286,9 @@ export function ProductLaunchFlowSimple() {
         setPriceRequestId(restored.priceRequestId);
         setPriceResult(restored.priceResult);
         setPricePolls(restored.pricePolls);
+        setRecommendationRequestId(restored.recommendationRequestId);
+        setRecommendationResult(restored.recommendationResult);
+        setRecommendationPolls(restored.recommendationPolls);
         setTitles(restored.titles);
         setSearches(restored.searches);
         setDirectRequestId(restored.directRequestId);
@@ -226,6 +296,9 @@ export function ProductLaunchFlowSimple() {
         setDirectPolls(restored.directPolls);
         if (restored.priceRequestId || restored.priceResult) {
           priceStartedForUpload.current = restored.uploadRequestId;
+        }
+        if (restored.recommendationRequestId || restored.recommendationResult) {
+          recommendationStartedForPrice.current = restored.priceRequestId;
         }
       }
       setHydrated(true);
@@ -248,6 +321,9 @@ export function ProductLaunchFlowSimple() {
         priceRequestId,
         priceResult,
         pricePolls,
+        recommendationRequestId,
+        recommendationResult,
+        recommendationPolls,
         titles,
         searches,
         directRequestId,
@@ -265,6 +341,9 @@ export function ProductLaunchFlowSimple() {
     pricePolls,
     priceRequestId,
     priceResult,
+    recommendationPolls,
+    recommendationRequestId,
+    recommendationResult,
     rowExpression,
     searches,
     titles,
@@ -370,8 +449,9 @@ export function ProductLaunchFlowSimple() {
       const data = (await response.json()) as RunResult;
       if (operationEpoch.current !== epoch) return;
       const requestId = text(data.requestId);
-      if (!response.ok || !requestId)
+      if (!response.ok || !requestId) {
         throw new Error(data.message || "상품업로드를 시작하지 못했습니다.");
+      }
       setUploadRequestId(requestId);
       setUploadResult({
         ...data,
@@ -380,7 +460,9 @@ export function ProductLaunchFlowSimple() {
       });
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "상품업로드 요청 오류");
+        setMessage(
+          error instanceof Error ? error.message : "상품업로드 요청 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setUploadBusy(false);
@@ -401,7 +483,9 @@ export function ProductLaunchFlowSimple() {
       setUploadPolls((count) => count + 1);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "상품업로드 결과 확인 오류");
+        setMessage(
+          error instanceof Error ? error.message : "상품업로드 결과 확인 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setUploadBusy(false);
@@ -432,8 +516,9 @@ export function ProductLaunchFlowSimple() {
       const data = (await response.json()) as RunResult;
       if (operationEpoch.current !== epoch) return;
       const requestId = text(data.requestId);
-      if (!response.ok || !requestId)
+      if (!response.ok || !requestId) {
         throw new Error(data.message || "가격설정을 시작하지 못했습니다.");
+      }
       setPriceRequestId(requestId);
       setPriceResult({
         ...data,
@@ -443,7 +528,9 @@ export function ProductLaunchFlowSimple() {
       setPricePolls(0);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "가격설정 요청 오류");
+        setMessage(
+          error instanceof Error ? error.message : "가격설정 요청 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setPriceBusy(false);
@@ -482,7 +569,9 @@ export function ProductLaunchFlowSimple() {
       setPricePolls((count) => count + 1);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "가격설정 결과 확인 오류");
+        setMessage(
+          error instanceof Error ? error.message : "가격설정 결과 확인 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setPriceBusy(false);
@@ -495,6 +584,196 @@ export function ProductLaunchFlowSimple() {
     const timer = window.setTimeout(() => void pollPrice(), POLL_MS);
     return () => window.clearTimeout(timer);
   }, [hydrated, isPriceTerminal, pollPrice, pricePolls, priceRequestId]);
+
+  const startRecommendations = useCallback(async () => {
+    if (
+      !hydrated ||
+      !isPriceDone ||
+      !goodsKeys.length ||
+      recommendationBusy ||
+      recommendationRequestId
+    ) {
+      return;
+    }
+    const epoch = operationEpoch.current;
+    setRecommendationBusy(true);
+    try {
+      const response = await fetch(
+        "/api/product-launch-keyword-recommendations/run",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ goods_keys: goodsKeys }),
+        },
+      );
+      const data = (await response.json()) as RunResult;
+      if (operationEpoch.current !== epoch) return;
+      const requestId = text(data.requestId);
+      if (!response.ok || !requestId) {
+        throw new Error(data.message || "키워드 추천 생성을 시작하지 못했습니다.");
+      }
+      setRecommendationRequestId(requestId);
+      setRecommendationResult({
+        ...data,
+        status: "pending",
+        phase: data.phase || "queued",
+      });
+      setRecommendationPolls(0);
+    } catch (error) {
+      if (operationEpoch.current === epoch) {
+        setMessage(
+          error instanceof Error ? error.message : "키워드 추천 실행 요청 오류",
+        );
+      }
+    } finally {
+      if (operationEpoch.current === epoch) setRecommendationBusy(false);
+    }
+  }, [
+    goodsKeys,
+    hydrated,
+    isPriceDone,
+    recommendationBusy,
+    recommendationRequestId,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated || !isPriceDone || !priceRequestId || !goodsKeys.length) return;
+    if (recommendationRequestId || recommendationResult || recommendationBusy) {
+      return;
+    }
+    if (recommendationStartedForPrice.current === priceRequestId) return;
+    recommendationStartedForPrice.current = priceRequestId;
+    const timer = window.setTimeout(() => void startRecommendations(), 0);
+    return () => window.clearTimeout(timer);
+  }, [
+    goodsKeys.length,
+    hydrated,
+    isPriceDone,
+    priceRequestId,
+    recommendationBusy,
+    recommendationRequestId,
+    recommendationResult,
+    startRecommendations,
+  ]);
+
+  const pollRecommendations = useCallback(async () => {
+    if (!recommendationRequestId || recommendationBusy || !goodsKeys.length) {
+      return;
+    }
+    const epoch = operationEpoch.current;
+    setRecommendationBusy(true);
+    try {
+      const response = await fetch(
+        `/api/product-launch-keyword-recommendations/result?request_id=${encodeURIComponent(recommendationRequestId)}&goods_keys=${encodeURIComponent(goodsKeys.join(","))}`,
+      );
+      const data = (await response.json()) as RunResult;
+      if (operationEpoch.current !== epoch) return;
+      setRecommendationResult(data);
+      setRecommendationPolls((count) => count + 1);
+    } catch (error) {
+      if (operationEpoch.current === epoch) {
+        setMessage(
+          error instanceof Error ? error.message : "키워드 추천 결과 확인 오류",
+        );
+      }
+    } finally {
+      if (operationEpoch.current === epoch) setRecommendationBusy(false);
+    }
+  }, [goodsKeys, recommendationBusy, recommendationRequestId]);
+
+  useEffect(() => {
+    if (
+      !hydrated ||
+      !recommendationRequestId ||
+      isRecommendationTerminal ||
+      recommendationPolls >= MAX_POLLS
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void pollRecommendations(),
+      POLL_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    hydrated,
+    isRecommendationTerminal,
+    pollRecommendations,
+    recommendationPolls,
+    recommendationRequestId,
+  ]);
+
+  const retryRecommendations = useCallback(() => {
+    if (recommendationBusy || recommendationActive) return;
+    setRecommendationRequestId("");
+    setRecommendationResult(null);
+    setRecommendationPolls(0);
+    recommendationStartedForPrice.current = "";
+    setMessage("키워드 추천을 다시 생성합니다.");
+  }, [recommendationActive, recommendationBusy]);
+
+  const applyOptimizedForGoodsKey = useCallback(
+    (goodsKey: string, group: KeywordRecommendationGroup | undefined) => {
+      if (!group) return;
+      const value = applyOptimizedRecommendedKeywords(group.optimizedKeywords);
+      if (!value) {
+        setMessage(`${goodsKey}: 자동 적용 가능한 추천키워드가 없습니다.`);
+        return;
+      }
+      setSearches((current) => ({ ...current, [goodsKey]: value }));
+      setPreview(null);
+      setPreflight(null);
+      setMessage(
+        group.optimizedKeywords.length >= 10
+          ? `${goodsKey}: 품질 우선 추천키워드 10개를 적용했습니다.`
+          : `${goodsKey}: 안전한 추천키워드 ${group.optimizedKeywords.length}개를 적용했습니다. 부족한 키워드는 직접 선택하세요.`,
+      );
+    },
+    [],
+  );
+
+  const applyOptimizedForAll = useCallback(() => {
+    if (!isRecommendationReady) return;
+    setSearches((current) => {
+      const next = { ...current };
+      for (const goodsKey of goodsKeys) {
+        const group = recommendationByGoodsKey.get(goodsKey);
+        const value = applyOptimizedRecommendedKeywords(
+          group?.optimizedKeywords ?? [],
+        );
+        if (value) next[goodsKey] = value;
+      }
+      return next;
+    });
+    setPreview(null);
+    setPreflight(null);
+    const fullCount = goodsKeys.filter(
+      (goodsKey) =>
+        (recommendationByGoodsKey.get(goodsKey)?.optimizedKeywords.length ?? 0) >=
+        10,
+    ).length;
+    setMessage(
+      fullCount === goodsKeys.length
+        ? "모든 상품에 품질 우선 추천키워드 10개를 자동 적용했습니다."
+        : `${fullCount}/${goodsKeys.length}개 상품은 10개 자동 적용을 완료했습니다. 부족한 상품은 추천칩을 눌러 보완하세요.`,
+    );
+  }, [goodsKeys, isRecommendationReady, recommendationByGoodsKey]);
+
+  const toggleRecommendation = useCallback(
+    (goodsKey: string, keyword: string) => {
+      setSearches((current) => ({
+        ...current,
+        [goodsKey]: toggleRecommendedKeyword(
+          current[goodsKey] ?? "",
+          keyword,
+          10,
+        ),
+      }));
+      setPreview(null);
+      setPreflight(null);
+    },
+    [],
+  );
 
   const makePreview = useCallback(() => {
     setMessage("");
@@ -534,8 +813,11 @@ export function ProductLaunchFlowSimple() {
       const data = (await response.json()) as RunResult;
       if (operationEpoch.current !== epoch) return;
       const requestId = text(data.requestId);
-      if (!response.ok || !requestId)
-        throw new Error(data.message || "상품명·검색어 반영을 시작하지 못했습니다.");
+      if (!response.ok || !requestId) {
+        throw new Error(
+          data.message || "상품명·검색어 반영을 시작하지 못했습니다.",
+        );
+      }
       setDirectRequestId(requestId);
       setDirectResult({
         ...data,
@@ -545,7 +827,11 @@ export function ProductLaunchFlowSimple() {
       setDirectPolls(0);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "상품명·검색어 반영 요청 오류");
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "상품명·검색어 반영 요청 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setDirectBusy(false);
@@ -573,7 +859,9 @@ export function ProductLaunchFlowSimple() {
       setDirectPolls((count) => count + 1);
     } catch (error) {
       if (operationEpoch.current === epoch) {
-        setMessage(error instanceof Error ? error.message : "상품명·검색어 결과 확인 오류");
+        setMessage(
+          error instanceof Error ? error.message : "상품명·검색어 결과 확인 오류",
+        );
       }
     } finally {
       if (operationEpoch.current === epoch) setDirectBusy(false);
@@ -600,18 +888,22 @@ export function ProductLaunchFlowSimple() {
   const directSummary = directResult?.summary ?? {};
   const uploadFailed = isUploadTerminal && !isUploadDone;
   const priceFailed = isPriceTerminal && !isPriceDone;
+  const recommendationFailed =
+    isRecommendationTerminal && !isRecommendationReady;
 
   return (
     <div className="space-y-6">
       <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold text-emerald-800">정상 상품출시 경로</p>
+            <p className="text-sm font-bold text-emerald-800">
+              정상 상품출시 경로
+            </p>
             <h2 className="mt-1 text-2xl font-black text-slate-950">
               {isComplete ? "출시 준비 완료" : "상품 출시 진행 중"}
             </h2>
             <p className="mt-2 text-sm text-slate-700">
-              상품업로드 → 가격설정 → 검색어 검증 → 쇼핑몰별 상품명 반영 순서입니다. 마켓 전송은 자동으로 실행하지 않습니다.
+              상품업로드 → 가격설정 → 키워드 엔진 추천 → 검색어 검증 → 쇼핑몰별 상품명 반영 순서입니다. 마켓 전송은 자동으로 실행하지 않습니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -631,7 +923,7 @@ export function ProductLaunchFlowSimple() {
             </Link>
           </div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-5">
+        <div className="mt-5 grid gap-3 md:grid-cols-6">
           <StatusBox
             label="상품업로드"
             value={
@@ -653,6 +945,18 @@ export function ProductLaunchFlowSimple() {
                   ? "실패"
                   : priceRequestId
                     ? "진행 중"
+                    : "대기"
+            }
+          />
+          <StatusBox
+            label="키워드 추천"
+            value={
+              isRecommendationReady
+                ? "완료"
+                : recommendationFailed
+                  ? "확인 필요"
+                  : recommendationRequestId
+                    ? "생성 중"
                     : "대기"
             }
           />
@@ -705,6 +1009,7 @@ export function ProductLaunchFlowSimple() {
               uploadBusy ||
               uploadActive ||
               priceActive ||
+              recommendationActive ||
               directActive ||
               Boolean(uploadRequestId)
             }
@@ -715,6 +1020,10 @@ export function ProductLaunchFlowSimple() {
         </div>
         <RequestLine label="상품업로드 request_id" value={uploadRequestId} />
         <RequestLine label="가격설정 request_id" value={priceRequestId} />
+        <RequestLine
+          label="키워드 추천 request_id"
+          value={recommendationRequestId}
+        />
         {isUploadDone && !priceRequestId && !priceBusy ? (
           <button
             type="button"
@@ -727,10 +1036,147 @@ export function ProductLaunchFlowSimple() {
       </section>
 
       {isPriceDone ? (
+        <section className="rounded-3xl border border-violet-200 bg-violet-50 p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-violet-700">
+                키워드 엔진 추천
+              </p>
+              <h2 className="mt-1 text-lg font-black text-slate-950">
+                2. 추천키워드 선택
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                초록색은 엔진 최적 키워드, 파란색은 품질 추천 키워드, 노란색은 추가 확인 후 선택할 후보입니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={applyOptimizedForAll}
+                disabled={!isRecommendationReady || directBusy || Boolean(directRequestId)}
+                className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                전체 상품 최적화 자동 적용
+              </button>
+              {recommendationFailed ? (
+                <button
+                  type="button"
+                  onClick={retryRecommendations}
+                  disabled={recommendationBusy || recommendationActive}
+                  className="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700"
+                >
+                  추천 다시 만들기
+                </button>
+              ) : null}
+              {recommendationResult?.runUrl ||
+              recommendationResult?.githubActionsUrl ? (
+                <a
+                  href={
+                    recommendationResult.runUrl ||
+                    recommendationResult.githubActionsUrl
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700"
+                >
+                  키워드 엔진 실행 보기
+                </a>
+              ) : null}
+            </div>
+          </div>
+
+          {!isRecommendationReady ? (
+            <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4 text-sm font-bold text-violet-800">
+              {recommendationFailed
+                ? recommendationResult?.message ||
+                  "키워드 추천 결과를 불러오지 못했습니다. 직접 입력하거나 다시 생성하세요."
+                : recommendationRequestId
+                  ? recommendationResult?.message ||
+                    "키워드 엔진이 추천키워드를 생성하고 있습니다."
+                  : "가격설정 완료 후 키워드 엔진을 자동 시작합니다."}
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              {goodsKeys.map((goodsKey) => {
+                const group = recommendationByGoodsKey.get(goodsKey);
+                const selected = new Set(
+                  rawKeywords(searches[goodsKey] ?? "").map((keyword) =>
+                    keyword.toLocaleLowerCase().replace(/\s+/g, ""),
+                  ),
+                );
+                return (
+                  <div
+                    key={goodsKey}
+                    className="rounded-2xl border border-violet-200 bg-white p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-mono text-xs text-slate-500">
+                          {goodsKey}
+                        </p>
+                        <p className="font-black text-slate-900">
+                          품질 {group?.qualityStatus || "확인 필요"} · 신뢰도 {group?.confidenceStatus || "확인 필요"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          applyOptimizedForGoodsKey(goodsKey, group)
+                        }
+                        disabled={!group?.optimizedKeywords.length}
+                        className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-2 text-xs font-black text-violet-800 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                      >
+                        이 상품 최적화 적용 ({
+                          group?.optimizedKeywords.length ?? 0
+                        }/10)
+                      </button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(group?.items ?? []).map((item) => {
+                        const active = selected.has(
+                          item.keyword
+                            .toLocaleLowerCase()
+                            .replace(/\s+/g, ""),
+                        );
+                        return (
+                          <button
+                            key={`${goodsKey}:${item.keyword}`}
+                            type="button"
+                            onClick={() =>
+                              toggleRecommendation(goodsKey, item.keyword)
+                            }
+                            title={`${item.source}${item.reason ? ` · ${item.reason}` : ""}`}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${recommendationQualityClass(item)} ${active ? "ring-2 ring-slate-900 ring-offset-1" : ""}`}
+                          >
+                            {item.keyword}
+                            <span className="ml-1 opacity-70">
+                              {item.quality}
+                              {item.totalSearch
+                                ? ` · ${item.totalSearch.toLocaleString()}`
+                                : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {group?.warnings.length ? (
+                      <p className="mt-3 text-xs font-semibold text-amber-700">
+                        {group.warnings.join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {isPriceDone ? (
         <section className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-black">2. 상품명·검색어 후보 입력</h2>
+          <h2 className="text-lg font-black">3. 상품명·검색어 후보 입력</h2>
           <p className="mt-1 text-sm text-slate-600">
-            상품명 후보와 검색어 10개를 입력하세요. 상품그룹에 연결된 쇼핑몰은 자동 선택됩니다.
+            추천키워드를 클릭하거나 최적화 자동 적용 후 필요한 내용을 직접 수정하세요. 상품그룹에 연결된 쇼핑몰은 자동 선택됩니다.
           </p>
           <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
             <table className="min-w-[1000px] w-full text-sm">
@@ -746,13 +1192,24 @@ export function ProductLaunchFlowSimple() {
               <tbody>
                 {goodsKeys.map((goodsKey) => {
                   const count = rawKeywords(searches[goodsKey] ?? "").length;
-                  const finalTitle = resolveManualTitleOverride(titles[goodsKey], goodsKey);
+                  const finalTitle = resolveManualTitleOverride(
+                    titles[goodsKey],
+                    goodsKey,
+                  );
                   const titleBytes = new TextEncoder().encode(finalTitle).length;
-                  const ready = finalTitle !== "" && titleBytes <= 100 && count === 10;
+                  const ready =
+                    finalTitle !== "" && titleBytes <= 100 && count === 10;
                   return (
-                    <tr key={goodsKey} className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3 font-mono font-bold">{goodsKey}</td>
-                      <td className="px-3 py-3">{productGroups[goodsKey] || "-"}</td>
+                    <tr
+                      key={goodsKey}
+                      className="border-t border-slate-200 align-top"
+                    >
+                      <td className="px-3 py-3 font-mono font-bold">
+                        {goodsKey}
+                      </td>
+                      <td className="px-3 py-3">
+                        {productGroups[goodsKey] || "-"}
+                      </td>
                       <td className="px-3 py-3">
                         <input
                           value={titles[goodsKey] ?? ""}
@@ -767,7 +1224,13 @@ export function ProductLaunchFlowSimple() {
                           placeholder="쉼표로 상품명 후보 입력"
                           className="w-full rounded-lg border border-slate-300 px-3 py-2"
                         />
-                        <p className={titleBytes > 100 ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>
+                        <p
+                          className={
+                            titleBytes > 100
+                              ? "mt-1 text-red-700"
+                              : "mt-1 text-slate-500"
+                          }
+                        >
                           {titleBytes}/100bytes
                         </p>
                       </td>
@@ -786,7 +1249,13 @@ export function ProductLaunchFlowSimple() {
                           rows={2}
                           className="w-full rounded-lg border border-slate-300 px-3 py-2"
                         />
-                        <p className={count === 10 ? "mt-1 text-emerald-700" : "mt-1 text-red-700"}>
+                        <p
+                          className={
+                            count === 10
+                              ? "mt-1 text-emerald-700"
+                              : "mt-1 text-red-700"
+                          }
+                        >
                           {count}/10개
                         </p>
                       </td>
@@ -803,7 +1272,9 @@ export function ProductLaunchFlowSimple() {
             <button
               type="button"
               onClick={makePreview}
-              disabled={!candidatesReady || directBusy || Boolean(directRequestId)}
+              disabled={
+                !candidatesReady || directBusy || Boolean(directRequestId)
+              }
               className="rounded-xl border border-blue-600 px-5 py-3 font-black text-blue-700 disabled:border-slate-300 disabled:text-slate-300"
             >
               반영 내용 확인
@@ -827,13 +1298,27 @@ export function ProductLaunchFlowSimple() {
 
       {preflight ? (
         <section className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
-          <h2 className="text-lg font-black">3. 전체 쇼핑몰 적용 미리보기</h2>
+          <h2 className="text-lg font-black">
+            4. 전체 쇼핑몰 적용 미리보기
+          </h2>
           <div className="mt-4 grid gap-3 md:grid-cols-5">
-            <StatusBox label="전체" value={preflight.summary.totalPreviewItems} />
-            <StatusBox label="반영 가능" value={preflight.summary.eligibleCount} />
+            <StatusBox
+              label="전체"
+              value={preflight.summary.totalPreviewItems}
+            />
+            <StatusBox
+              label="반영 가능"
+              value={preflight.summary.eligibleCount}
+            />
             <StatusBox label="차단" value={preflight.summary.blockedCount} />
-            <StatusBox label="예상 상품명" value={preflight.summary.expectedTitleTargetCount} />
-            <StatusBox label="검색어 goods_key" value={preflight.summary.siteSrchGoodsKeyCount} />
+            <StatusBox
+              label="예상 상품명"
+              value={preflight.summary.expectedTitleTargetCount}
+            />
+            <StatusBox
+              label="검색어 goods_key"
+              value={preflight.summary.siteSrchGoodsKeyCount}
+            />
           </div>
           <div className="mt-4 max-h-[520px] overflow-auto rounded-2xl border border-emerald-200 bg-white">
             <table className="min-w-[1200px] w-full text-xs">
@@ -859,13 +1344,19 @@ export function ProductLaunchFlowSimple() {
                     <td className="px-3 py-2">{row.productGroup}</td>
                     <td className="px-3 py-2">{row.marketName}</td>
                     <td className="px-3 py-2 font-mono">{row.mallKey}</td>
-                    <td className="px-3 py-2 font-semibold">{row.finalTitle}</td>
+                    <td className="px-3 py-2 font-semibold">
+                      {row.finalTitle}
+                    </td>
                     <td className="px-3 py-2">{row.finalSiteSrch}</td>
                     <td className="px-3 py-2">
-                      {row.preflightStatus === "eligible" ? "반영 가능" : "차단"}
+                      {row.preflightStatus === "eligible"
+                        ? "반영 가능"
+                        : "차단"}
                     </td>
                     <td className="px-3 py-2">
-                      {formatKeywordExecutionPreflightLabels(row.blockingReasons) || "-"}
+                      {formatKeywordExecutionPreflightLabels(
+                        row.blockingReasons,
+                      ) || "-"}
                     </td>
                   </tr>
                 ))}
@@ -877,12 +1368,16 @@ export function ProductLaunchFlowSimple() {
 
       {directRequestId || directResult ? (
         <section className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
-          <h2 className="text-lg font-black">4. 상품명·검색어 반영 결과</h2>
+          <h2 className="text-lg font-black">5. 상품명·검색어 반영 결과</h2>
           <RequestLine label="request_id" value={directRequestId} />
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             <StatusBox
               label="현재 상태"
-              value={isComplete ? "출시 완료" : directResult?.message || "진행 중"}
+              value={
+                isComplete
+                  ? "출시 완료"
+                  : directResult?.message || "진행 중"
+              }
             />
             <StatusBox
               label="검색어 성공"
@@ -892,7 +1387,10 @@ export function ProductLaunchFlowSimple() {
               label="상품명 성공"
               value={number(directSummary.title_apply_success_count)}
             />
-            <StatusBox label="실패" value={number(directSummary.failed_item_count)} />
+            <StatusBox
+              label="실패"
+              value={number(directSummary.failed_item_count)}
+            />
           </div>
           {directResult?.runUrl || directResult?.githubActionsUrl ? (
             <a
@@ -919,7 +1417,9 @@ function StatusBox({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="rounded-2xl border border-white/70 bg-white p-4 shadow-sm">
       <p className="text-xs font-bold text-slate-500">{label}</p>
-      <p className="mt-1 font-black text-slate-950">{String(value ?? "-")}</p>
+      <p className="mt-1 font-black text-slate-950">
+        {String(value ?? "-")}
+      </p>
     </div>
   );
 }
