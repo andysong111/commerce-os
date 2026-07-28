@@ -1,5 +1,6 @@
 import type { ShoplingBarcodeSyncActionsResult } from "./shoplingBarcodeSyncRunner";
 
+export const SHOPLING_BARCODE_SYNC_CANARY_COOKIE = "shopling_barcode_sync_canary";
 export const SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS = [
   "117305",
   "117308",
