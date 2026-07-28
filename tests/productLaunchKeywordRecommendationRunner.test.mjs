@@ -168,6 +168,29 @@ test("queued exact run remains pending without downloading artifact", async () =
   });
 });
 
+test("failed or cancelled runs reject artifacts without downloading them", async () => {
+  await withToken(async () => {
+    for (const conclusion of ["failure", "cancelled"]) {
+      let downloaded = false;
+      const custom = deps({ runStatus: "completed", runConclusion: conclusion });
+      custom.downloadArtifact = async () => {
+        downloaded = true;
+        return new Uint8Array();
+      };
+      const result = await fetchKeywordRecommendationResult(
+        "keyword-rec-test-001",
+        "121500",
+        custom,
+      );
+      assert.equal(result.status, "error");
+      assert.equal(result.phase, "failed");
+      assert.equal(result.runConclusion, conclusion);
+      assert.equal(downloaded, false);
+      assert.match(result.message, /성공하지 않았습니다/);
+    }
+  });
+});
+
 test("wrong artifact request id and goods keys are rejected", async () => {
   await withToken(async () => {
     const wrongRequest = await fetchKeywordRecommendationResult(
