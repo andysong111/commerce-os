@@ -12,10 +12,13 @@ import {
   type ShoplingBarcodeSyncApplyScope,
   type ShoplingBarcodeSyncMode,
 } from "@/lib/shoplingBarcodeSyncRunner";
+import { applyShoplingBarcodeSyncTokenFallback } from "@/lib/shoplingBarcodeSyncTokenFallback";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  applyShoplingBarcodeSyncTokenFallback();
+
   const auth = await requireShoplingBarcodeSyncOperator();
   if (auth.response) return auth.response;
 
@@ -74,6 +77,17 @@ export async function POST(request: Request) {
     confirm_text: typeof body.confirm_text === "string" ? body.confirm_text : "",
     canary_count: typeof body.canary_count === "number" ? body.canary_count : 10,
   });
+
+  if (result.status === "error" && result.message.includes("status=404")) {
+    return NextResponse.json(
+      {
+        ...result,
+        message:
+          "GitHub 토큰이 비공개 바코드 저장소 또는 workflow에 접근하지 못했습니다. SHOPLING_BARCODE_SYNC_ACTIONS_TOKEN이나 기존 GITHUB_ENGINE_DISPATCH_TOKEN의 저장소 권한을 확인하세요.",
+      },
+      { status: 400 },
+    );
+  }
 
   return NextResponse.json(result, { status: result.status === "queued" ? 200 : 400 });
 }
