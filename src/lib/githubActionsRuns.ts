@@ -3,6 +3,7 @@ import type { EngineRunnerConfig } from "./engineRunnerTypes";
 export type GitHubActionsRun = {
   id: number;
   name: string;
+  displayTitle: string;
   status: string | null;
   conclusion: string | null;
   event: string;
@@ -31,7 +32,10 @@ type RunListingConfig = Pick<
   "repoOwner" | "repoName" | "intendedWorkflowFile" | "expectedArtifactName"
 > & { token: string; perPage?: number };
 
-type ArtifactListingConfig = Pick<EngineRunnerConfig, "repoOwner" | "repoName" | "expectedArtifactName"> & {
+type ArtifactListingConfig = Pick<
+  EngineRunnerConfig,
+  "repoOwner" | "repoName" | "expectedArtifactName"
+> & {
   token: string;
 };
 
@@ -45,11 +49,15 @@ function githubHeaders(token: string) {
 
 function assertGitHubResponse(response: Response, resource: string) {
   if (!response.ok) {
-    throw new Error(`GitHub Actions ${resource} request failed with HTTP ${response.status}.`);
+    throw new Error(
+      `GitHub Actions ${resource} request failed with HTTP ${response.status}.`,
+    );
   }
 }
 
-export async function listWorkflowRuns(config: RunListingConfig): Promise<GitHubActionsRun[]> {
+export async function listWorkflowRuns(
+  config: RunListingConfig,
+): Promise<GitHubActionsRun[]> {
   const encodedWorkflowFile = encodeURIComponent(config.intendedWorkflowFile);
   const perPage = config.perPage ?? 10;
   const apiUrl = `https://api.github.com/repos/${config.repoOwner}/${config.repoName}/actions/workflows/${encodedWorkflowFile}/runs?per_page=${perPage}`;
@@ -65,8 +73,10 @@ export async function listWorkflowRuns(config: RunListingConfig): Promise<GitHub
     return {
       id: Number(value.id),
       name: String(value.name ?? ""),
+      displayTitle: String(value.display_title ?? value.name ?? ""),
       status: typeof value.status === "string" ? value.status : null,
-      conclusion: typeof value.conclusion === "string" ? value.conclusion : null,
+      conclusion:
+        typeof value.conclusion === "string" ? value.conclusion : null,
       event: String(value.event ?? ""),
       branch: String(value.head_branch ?? ""),
       headSha: String(value.head_sha ?? ""),
