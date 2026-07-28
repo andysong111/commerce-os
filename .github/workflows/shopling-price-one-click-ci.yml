@@ -22,7 +22,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,7 +47,36 @@ jobs:
           node --test tests/shoplingPriceModifyBulkDiagnostics.test.mjs
           node --test tests/shoplingPriceModifyBulkInput.test.mjs
           node --test tests/shoplingPriceModifyBulkPreparedJobs.test.mjs
-      - run: npm run lint
-      - run: npm run build
-      - run: npx tsc --noEmit
-      - run: git diff --check
+      - name: Run all static checks and capture logs
+        shell: bash
+        run: |
+          set +e
+          npm run lint > lint.log 2>&1
+          echo $? > lint.exit
+          npm run build > build.log 2>&1
+          echo $? > build.exit
+          npx tsc --noEmit > typecheck.log 2>&1
+          echo $? > typecheck.exit
+          git diff --check > diff-check.log 2>&1
+          echo $? > diff-check.exit
+          printf 'lint=%s\nbuild=%s\ntypecheck=%s\ndiff_check=%s\n' \
+            "$(cat lint.exit)" "$(cat build.exit)" "$(cat typecheck.exit)" "$(cat diff-check.exit)" | tee check-summary.txt
+      - name: Upload check logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopling-one-click-check-logs
+          path: |
+            lint.log
+            build.log
+            typecheck.log
+            diff-check.log
+            check-summary.txt
+          retention-days: 3
+      - name: Enforce static checks
+        shell: bash
+        run: |
+          test "$(cat lint.exit)" = "0"
+          test "$(cat build.exit)" = "0"
+          test "$(cat typecheck.exit)" = "0"
+          test "$(cat diff-check.exit)" = "0"
