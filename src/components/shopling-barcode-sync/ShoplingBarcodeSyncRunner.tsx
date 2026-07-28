@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "shoplingBarcodeSync.currentRequestId";
 const VERIFIED_CANARY_KEYS =
-  "117305,117308,117311,100049,100034,102648,110791,116737,109791,121102";
+  "100035,100051,100092,100157,108186,112018,100068,100116,100133,100050";
 
 type RunMode = "plan" | "canary" | "apply" | "retry";
 type ApplyScope = "oldest_1000" | "oldest_2000" | "all";
@@ -81,9 +81,9 @@ const RUN_ACTIONS: RunAction[] = [
 ];
 
 const VERIFIED_METRICS = [
-  ["조회 상품", "10,267개"],
-  ["전체 옵션", "20,126개"],
-  ["변경 필요 상품", "8,272개"],
+  ["조회 상품", "10,273개"],
+  ["전체 옵션", "20,132개"],
+  ["변경 필요 상품", "8,278개"],
   ["이미 동일", "1,995개"],
   ["구조 차단", "0개"],
   ["조회 오류", "0개"],
