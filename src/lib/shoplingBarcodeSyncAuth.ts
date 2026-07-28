@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+type OperatorAuthResult =
+  | { response: NextResponse; userId?: never; email?: never }
+  | { response?: undefined; userId: string; email: string };
+
 function allowedOperatorEmails() {
   const raw =
     process.env.SHOPLING_BARCODE_SYNC_ALLOWED_EMAILS?.trim() ||
@@ -14,7 +18,7 @@ function allowedOperatorEmails() {
   );
 }
 
-export async function requireShoplingBarcodeSyncOperator() {
+export async function requireShoplingBarcodeSyncOperator(): Promise<OperatorAuthResult> {
   if (process.env.SHOPLING_BARCODE_SYNC_ENABLED !== "1") {
     return {
       response: NextResponse.json(
