@@ -45,6 +45,7 @@ export async function dispatchShoplingPriceBulkCanary(
 
   request.requestId = requestId;
   request.body.inputs.request_id = requestId;
+  const dispatchSignal = signal ?? AbortSignal.timeout(20_000);
 
   try {
     const response = await fetch(request.url, {
@@ -56,7 +57,7 @@ export async function dispatchShoplingPriceBulkCanary(
         "X-GitHub-Api-Version": "2022-11-28",
       },
       body: JSON.stringify(request.body),
-      signal,
+      signal: dispatchSignal,
     });
     if (response.status === 200 || response.status === 204) {
       return { status: "queued", requestId, githubActionsUrl: request.githubActionsUrl };
@@ -69,7 +70,7 @@ export async function dispatchShoplingPriceBulkCanary(
       githubActionsUrl: request.githubActionsUrl,
     };
   } catch (error) {
-    const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
+    const aborted = dispatchSignal.aborted || (error instanceof Error && error.name === "AbortError");
     return {
       status: "uncertain",
       requestId,
