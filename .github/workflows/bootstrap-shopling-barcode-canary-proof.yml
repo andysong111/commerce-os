@@ -1,0 +1,47 @@
+name: Bootstrap Shopling Barcode Canary Proof UI
+
+on:
+  push:
+    branches:
+      - feat/shopling-barcode-sync-card
+    paths:
+      - ".github/workflows/bootstrap-shopling-barcode-canary-proof.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-ui:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/shopling-barcode-sync-card
+          fetch-depth: 0
+
+      - name: Pass current canary request ID to bulk apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/components/shopling-barcode-sync/ShoplingBarcodeSyncRunner.tsx")
+          text = path.read_text(encoding="utf-8")
+          old = '''          canary_count: 10,
+          },'''
+          new = '''          canary_count: 10,
+          canary_request_id: currentRequestId,
+          },'''
+          if old not in text:
+              raise SystemExit("canary request body marker not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          Path(".github/workflows/bootstrap-shopling-barcode-canary-proof.yml").unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/shopling-barcode-sync/ShoplingBarcodeSyncRunner.tsx .github/workflows/bootstrap-shopling-barcode-canary-proof.yml
+          git commit -m "safety: pass canary proof into bulk apply"
+          git push origin HEAD:feat/shopling-barcode-sync-card
