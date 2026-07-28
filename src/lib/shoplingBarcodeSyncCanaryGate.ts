@@ -1,7 +1,17 @@
-import {
-  SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS,
-  type ShoplingBarcodeSyncActionsResult,
-} from "@/lib/shoplingBarcodeSyncRunner";
+import type { ShoplingBarcodeSyncActionsResult } from "./shoplingBarcodeSyncRunner";
+
+export const SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS = [
+  "117305",
+  "117308",
+  "117311",
+  "100049",
+  "100034",
+  "102648",
+  "110791",
+  "116737",
+  "109791",
+  "121102",
+] as const;
 
 const MAX_CANARY_AGE_MS = 7 * 24 * 60 * 60_000;
 
@@ -20,8 +30,8 @@ function integer(value: unknown) {
 function exactVerifiedKeys(value: unknown) {
   if (!Array.isArray(value)) return false;
   const keys = value.filter((item): item is string => typeof item === "string");
-  if (keys.length !== SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS.length) return false;
-  return SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS.every(
+  if (keys.length !== SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS.length) return false;
+  return SHOPLING_BARCODE_SYNC_CANARY_GATE_KEYS.every(
     (key, index) => keys[index] === key,
   );
 }
