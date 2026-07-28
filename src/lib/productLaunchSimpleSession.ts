@@ -1,4 +1,5 @@
 import { extractUploadRows, extractRowsWithGoodsKey } from "./productLaunchFlow";
+import type { KeywordRecommendationGroup } from "./productLaunchKeywordRecommendations";
 
 export const PRODUCT_LAUNCH_SIMPLE_SESSION_KEY =
   "productLaunchFlow.simpleSession.v1";
@@ -15,6 +16,10 @@ export type ProductLaunchSimpleRunResult = {
   summary?: Record<string, unknown>;
   applyResults?: Array<Record<string, unknown>>;
   blockedItems?: Array<Record<string, unknown>>;
+  recommendations?: KeywordRecommendationGroup[];
+  goodsKeys?: string[];
+  engineStatus?: string;
+  artifactId?: number;
 };
 
 export type ProductLaunchSimpleSession = {
@@ -26,6 +31,9 @@ export type ProductLaunchSimpleSession = {
   priceRequestId: string;
   priceResult: ProductLaunchSimpleRunResult | null;
   pricePolls: number;
+  recommendationRequestId: string;
+  recommendationResult: ProductLaunchSimpleRunResult | null;
+  recommendationPolls: number;
   titles: Record<string, string>;
   searches: Record<string, string>;
   directRequestId: string;
@@ -140,6 +148,9 @@ export function createEmptyProductLaunchSimpleSession(
     priceRequestId: "",
     priceResult: null,
     pricePolls: 0,
+    recommendationRequestId: "",
+    recommendationResult: null,
+    recommendationPolls: 0,
     titles: {},
     searches: {},
     directRequestId: "",
@@ -154,6 +165,20 @@ export function parseProductLaunchSimpleSession(
 ): ProductLaunchSimpleSession | null {
   const source = object(value);
   if (source.version !== 1) return null;
+  const directRequestId = text(source.directRequestId);
+  const hasRecommendationFields =
+    Object.hasOwn(source, "recommendationRequestId") ||
+    Object.hasOwn(source, "recommendationResult") ||
+    Object.hasOwn(source, "recommendationPolls");
+  const legacyRecommendationResult =
+    directRequestId && !hasRecommendationFields
+      ? {
+          status: "skipped",
+          phase: "artifact_ready",
+          message:
+            "기존 버전에서 이미 상품명·검색어 반영을 시작한 작업이므로 추천 단계는 건너뛰었습니다.",
+        }
+      : null;
   return {
     version: 1,
     rowExpression: text(source.rowExpression),
@@ -163,9 +188,13 @@ export function parseProductLaunchSimpleSession(
     priceRequestId: text(source.priceRequestId),
     priceResult: safeResult(source.priceResult),
     pricePolls: safePollCount(source.pricePolls),
+    recommendationRequestId: text(source.recommendationRequestId),
+    recommendationResult:
+      safeResult(source.recommendationResult) ?? legacyRecommendationResult,
+    recommendationPolls: safePollCount(source.recommendationPolls),
     titles: stringMap(source.titles),
     searches: stringMap(source.searches),
-    directRequestId: text(source.directRequestId),
+    directRequestId,
     directResult: safeResult(source.directResult),
     directPolls: safePollCount(source.directPolls),
     updatedAt: text(source.updatedAt) || new Date(0).toISOString(),
