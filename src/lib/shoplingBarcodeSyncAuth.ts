@@ -19,7 +19,12 @@ function allowedOperatorEmails() {
 }
 
 export async function requireShoplingBarcodeSyncOperator(): Promise<OperatorAuthResult> {
-  if (process.env.SHOPLING_BARCODE_SYNC_ENABLED !== "1") {
+  // The email allowlist is the mandatory authorization boundary. The optional
+  // feature flag remains a kill switch: an explicit value other than "1"
+  // disables the route, while an omitted flag does not break a configured
+  // Production deployment.
+  const featureFlag = process.env.SHOPLING_BARCODE_SYNC_ENABLED?.trim();
+  if (featureFlag && featureFlag !== "1") {
     return {
       response: NextResponse.json(
         { status: "error", message: "샵플링 옵션 바코드 동기화 기능이 비활성화되어 있습니다." },
