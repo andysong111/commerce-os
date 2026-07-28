@@ -33,6 +33,21 @@ function successUpload(overrides = {}) {
   };
 }
 
+function recommendationItem(keyword, overrides = {}) {
+  return {
+    keyword,
+    score: 100,
+    quality: "최적",
+    source: "exact",
+    selectedByEngine: true,
+    safeAutoApply: true,
+    totalSearch: 100,
+    competitionIndex: "LOW",
+    reason: "exact",
+    ...overrides,
+  };
+}
+
 test("complete upload is required before pricing", () => {
   assert.equal(isSuccessfulSimpleUploadResult(successUpload()), true);
   assert.equal(
@@ -125,7 +140,7 @@ test("simple launch session round trips only the versioned state", () => {
         {
           goodsKey: "121500",
           optimizedKeywords: ["검색어1"],
-          items: [],
+          items: [recommendationItem("검색어1")],
           qualityStatus: "PASS",
           confidenceStatus: "PASS",
           engineStatus: "success",
@@ -189,19 +204,7 @@ test("restored spaced recommendations repoll the same request and drop spaced se
         {
           goodsKey: "121500",
           optimizedKeywords: ["샤워기 필터", "샤워기필터"],
-          items: [
-            {
-              keyword: "샤워기 필터",
-              score: 100,
-              quality: "최적",
-              source: "old",
-              selectedByEngine: true,
-              safeAutoApply: true,
-              totalSearch: 100,
-              competitionIndex: "LOW",
-              reason: "old",
-            },
-          ],
+          items: [recommendationItem("샤워기 필터")],
           qualityStatus: "PASS",
           confidenceStatus: "PASS",
           engineStatus: "success",
@@ -233,28 +236,12 @@ test("restored completed direct sessions sanitize recommendations without repoll
           goodsKey: "121500",
           optimizedKeywords: ["샤워기 필터", "샤워기필터"],
           items: [
-            {
-              keyword: "샤워기 필터",
-              score: 100,
-              quality: "최적",
-              source: "old",
-              selectedByEngine: true,
-              safeAutoApply: true,
-              totalSearch: 100,
-              competitionIndex: "LOW",
-              reason: "old",
-            },
-            {
-              keyword: "샤워기필터",
+            recommendationItem("샤워기 필터"),
+            recommendationItem("샤워기필터", {
               score: 90,
-              quality: "최적",
-              source: "exact",
-              selectedByEngine: true,
-              safeAutoApply: true,
               totalSearch: 80,
               competitionIndex: "MID",
-              reason: "exact",
-            },
+            }),
           ],
           qualityStatus: "PASS",
           confidenceStatus: "PASS",
