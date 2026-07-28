@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireShoplingBarcodeSyncOperator } from "@/lib/shoplingBarcodeSyncAuth";
 import {
   fetchShoplingBarcodeSyncActionsResult,
   isValidShoplingBarcodeSyncRequestId,
@@ -7,6 +8,9 @@ import {
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  const auth = await requireShoplingBarcodeSyncOperator();
+  if (auth.response) return auth.response;
+
   const requestId = new URL(request.url).searchParams.get("request_id")?.trim() || "";
   if (!requestId || !isValidShoplingBarcodeSyncRequestId(requestId)) {
     return NextResponse.json(
