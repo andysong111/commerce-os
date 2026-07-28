@@ -31,16 +31,34 @@ test("normal flow dispatches direct apply and never performs final price repair"
   assert.doesNotMatch(component, /finalize_after_keyword_apply/);
 });
 
-test("normal flow preserves the intended operational order and no market transmission", async () => {
+test("normal flow runs recommendations between price and direct apply without market transmission", async () => {
   const component = await readFile(componentPath, "utf8");
   const upload = component.indexOf("/api/shopling-product-upload/run");
   const price = component.indexOf("/api/shopling-price-modify/run");
+  const recommendation = component.indexOf(
+    "/api/product-launch-keyword-recommendations/run",
+  );
   const direct = component.indexOf("/api/keyword-shopling-direct-apply/run");
   assert.ok(upload >= 0);
   assert.ok(price > upload);
-  assert.ok(direct > price);
+  assert.ok(recommendation > price);
+  assert.ok(direct > recommendation);
   assert.match(component, /마켓 전송은 자동으로 실행하지 않습니다/);
   assert.doesNotMatch(component, /market.*dispatch|send.*market/i);
+});
+
+test("keyword recommendations appear above inputs with click and optimized apply actions", async () => {
+  const component = await readFile(componentPath, "utf8");
+  assert.match(component, /키워드 엔진 추천/);
+  assert.match(component, /전체 상품 최적화 자동 적용/);
+  assert.match(component, /이 상품 최적화 적용/);
+  assert.match(component, /toggleRecommendedKeyword/);
+  assert.match(component, /applyOptimizedRecommendedKeywords/);
+  assert.match(component, /초록색은 엔진 최적 키워드/);
+  assert.ok(
+    component.indexOf("2. 추천키워드 선택") <
+      component.indexOf("3. 상품명·검색어 후보 입력"),
+  );
 });
 
 test("normal flow requires exact preflight coverage before direct apply", async () => {
@@ -54,15 +72,20 @@ test("normal flow requires exact preflight coverage before direct apply", async 
   assert.match(component, /100bytes/);
 });
 
-test("normal flow restores request IDs and results after refresh", async () => {
+test("normal flow restores all request IDs and results after refresh", async () => {
   const component = await readFile(componentPath, "utf8");
   assert.match(component, /readProductLaunchSimpleSession/);
   assert.match(component, /writeProductLaunchSimpleSession/);
   assert.match(component, /setUploadRequestId\(restored\.uploadRequestId\)/);
   assert.match(component, /setPriceRequestId\(restored\.priceRequestId\)/);
+  assert.match(
+    component,
+    /setRecommendationRequestId\(restored\.recommendationRequestId\)/,
+  );
   assert.match(component, /setDirectRequestId\(restored\.directRequestId\)/);
   assert.match(component, /if \(!hydrated \|\| !uploadRequestId/);
   assert.match(component, /if \(!hydrated \|\| !priceRequestId/);
+  assert.match(component, /!recommendationRequestId/);
   assert.match(component, /if \(!hydrated \|\| !directRequestId/);
 });
 
