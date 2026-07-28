@@ -8,10 +8,13 @@ import {
   fetchShoplingBarcodeSyncActionsResult,
   isValidShoplingBarcodeSyncRequestId,
 } from "@/lib/shoplingBarcodeSyncRunner";
+import { applyShoplingBarcodeSyncTokenFallback } from "@/lib/shoplingBarcodeSyncTokenFallback";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  applyShoplingBarcodeSyncTokenFallback();
+
   const auth = await requireShoplingBarcodeSyncOperator();
   if (auth.response) return auth.response;
 
