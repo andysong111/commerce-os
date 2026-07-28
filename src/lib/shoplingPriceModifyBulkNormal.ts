@@ -18,6 +18,7 @@ export async function dispatchShoplingPriceBulkNormal(
   catch (error) { return { status: "rejected", requestId, message: error instanceof Error ? error.message : "실행 요청을 만들 수 없습니다." }; }
   dispatch.requestId = requestId;
   dispatch.body.inputs.request_id = requestId;
+  const dispatchSignal = signal ?? AbortSignal.timeout(20_000);
   try {
     const response = await fetch(dispatch.url, {
       method: "POST",
@@ -28,12 +29,12 @@ export async function dispatchShoplingPriceBulkNormal(
         "X-GitHub-Api-Version": "2022-11-28",
       },
       body: JSON.stringify(dispatch.body),
-      signal,
+      signal: dispatchSignal,
     });
     if (response.status === 200 || response.status === 204) return { status: "queued", requestId, message: "일반 청크 실행 요청이 전송되었습니다.", githubActionsUrl: dispatch.githubActionsUrl };
     return { status: response.status >= 400 && response.status < 500 ? "rejected" : "uncertain", requestId, message: `GitHub Actions 요청 실패 status=${response.status}`, githubActionsUrl: dispatch.githubActionsUrl };
   } catch (error) {
-    const aborted = signal?.aborted || (error instanceof Error && error.name === "AbortError");
+    const aborted = dispatchSignal.aborted || (error instanceof Error && error.name === "AbortError");
     return {
       status: "uncertain",
       requestId,
