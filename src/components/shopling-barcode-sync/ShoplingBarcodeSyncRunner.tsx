@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "shoplingBarcodeSync.currentRequestId";
 const VERIFIED_CANARY_KEYS =
@@ -8,12 +8,14 @@ const VERIFIED_CANARY_KEYS =
 
 type RunMode = "plan" | "canary" | "apply" | "retry";
 type ApplyScope = "oldest_1000" | "oldest_2000" | "all";
+
 type DispatchResult = {
   status?: string;
   message?: string;
   requestId?: string;
   githubActionsUrl?: string;
 };
+
 type ActionsResult = {
   status?: string;
   message?: string;
@@ -126,14 +128,52 @@ export function ShoplingBarcodeSyncRunner() {
   const [fetchingResult, setFetchingResult] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<DispatchResult | null>(null);
   const [actionsResult, setActionsResult] = useState<ActionsResult | null>(null);
-  const [currentRequestId, setCurrentRequestId] = useState(() =>
-    typeof window === "undefined" ? "" : window.localStorage.getItem(STORAGE_KEY) ?? "",
-  );
+  const [currentRequestId, setCurrentRequestId] = useState("");
   const [retryGoodsKeys, setRetryGoodsKeys] = useState("");
+  const requestIdInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem(STORAGE_KEY)?.trim() || "";
+    if (saved) setCurrentRequestId(saved);
+  }, []);
 
   const rememberRequestId = (value: string) => {
-    setCurrentRequestId(value);
-    if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, value);
+    const normalized = value.trim();
+    setCurrentRequestId(normalized);
+    if (typeof window !== "undefined") {
+      if (normalized) window.localStorage.setItem(STORAGE_KEY, normalized);
+      else window.localStorage.removeItem(STORAGE_KEY);
+    }
+  };
+
+  const fetchResult = async () => {
+    if (fetchingResult) return;
+    const requestId =
+      requestIdInputRef.current?.value.trim() || currentRequestId.trim();
+    if (!requestId) {
+      setActionsResult({
+        status: "error",
+        message: "요청 추적 ID를 입력하세요.",
+      });
+      return;
+    }
+
+    rememberRequestId(requestId);
+    setFetchingResult(true);
+    try {
+      const response = await fetch(
+        `/api/shopling-barcode-sync/result?request_id=${encodeURIComponent(requestId)}`,
+      );
+      const data = (await response.json()) as ActionsResult;
+      setActionsResult(data);
+    } catch (error) {
+      setActionsResult({
+        status: "error",
+        message: error instanceof Error ? error.message : "결과 확인 중 오류가 발생했습니다.",
+      });
+    } finally {
+      setFetchingResult(false);
+    }
   };
 
   const run = async (action: RunAction, targetGoodsKeys = "") => {
@@ -164,24 +204,6 @@ export function ShoplingBarcodeSyncRunner() {
       });
     } finally {
       setRunningKey("");
-    }
-  };
-
-  const fetchResult = async () => {
-    if (fetchingResult || !currentRequestId.trim()) return;
-    setFetchingResult(true);
-    try {
-      const response = await fetch(
-        `/api/shopling-barcode-sync/result?request_id=${encodeURIComponent(currentRequestId.trim())}`,
-      );
-      setActionsResult((await response.json()) as ActionsResult);
-    } catch (error) {
-      setActionsResult({
-        status: "error",
-        message: error instanceof Error ? error.message : "결과 확인 중 오류가 발생했습니다.",
-      });
-    } finally {
-      setFetchingResult(false);
     }
   };
 
@@ -274,8 +296,9 @@ export function ShoplingBarcodeSyncRunner() {
         <label className="mt-4 block text-sm font-semibold text-slate-700">
           요청 추적 ID
           <input
+            ref={requestIdInputRef}
             value={currentRequestId}
-            onChange={(event) => rememberRequestId(event.target.value.trim())}
+            onChange={(event) => rememberRequestId(event.target.value)}
             className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm"
             placeholder="barcode-sync-..."
           />
@@ -284,7 +307,7 @@ export function ShoplingBarcodeSyncRunner() {
           <button
             type="button"
             onClick={fetchResult}
-            disabled={fetchingResult || !currentRequestId.trim()}
+            disabled={fetchingResult}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
           >
             {fetchingResult ? "결과 확인 중..." : "현재 실행 결과 확인"}
@@ -315,6 +338,11 @@ export function ShoplingBarcodeSyncRunner() {
           <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
             <p className="font-semibold text-slate-900">실행 요청: {dispatchResult.status ?? "-"}</p>
             <p className="mt-1 text-slate-600">{dispatchResult.message}</p>
+            {dispatchResult.requestId && dispatchResult.status !== "queued" ? (
+              <p className="mt-2 font-semibold text-amber-700">
+                요청 ID가 생성됐다면 같은 작업을 다시 누르지 말고 결과 확인으로 실제 실행 여부를 확인하세요.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
