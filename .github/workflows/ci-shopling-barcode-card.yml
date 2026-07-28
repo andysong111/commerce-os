@@ -22,7 +22,7 @@ jobs:
       - run: npm install --no-audit --no-fund
 
       - name: Targeted tests
-        run: node --experimental-strip-types --test tests/shoplingBarcodeSyncRunner.test.mjs tests/shoplingBarcodeSyncAuth.test.mjs
+        run: node --experimental-strip-types --test tests/shoplingBarcodeSyncRunner.test.mjs tests/shoplingBarcodeSyncAuth.test.mjs tests/shoplingBarcodeSyncCanaryGate.test.mjs
 
       - name: Lint
         run: npm run lint
