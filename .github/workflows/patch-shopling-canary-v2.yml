@@ -1,0 +1,81 @@
+name: Patch Shopling canary v2 keys
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/shopling-canary-v2-keys'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Replace canary keys
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          server = Path('src/lib/shoplingBarcodeSyncRunner.ts')
+          server_text = server.read_text(encoding='utf-8')
+          old_array = '''export const SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS = [
+  "117305",
+  "117308",
+  "117311",
+  "100049",
+  "100034",
+  "102648",
+  "110791",
+  "116737",
+  "109791",
+  "121102",
+] as const;'''
+          new_array = '''export const SHOPLING_BARCODE_SYNC_VERIFIED_CANARY_KEYS = [
+  "100035",
+  "100051",
+  "100092",
+  "100157",
+  "108186",
+  "112018",
+  "100068",
+  "100116",
+  "100133",
+  "100050",
+] as const;'''
+          if old_array in server_text:
+              server.write_text(server_text.replace(old_array, new_array, 1), encoding='utf-8')
+          elif new_array not in server_text:
+              raise SystemExit('server canary array anchor not found')
+
+          component = Path('src/components/shopling-barcode-sync/ShoplingBarcodeSyncRunner.tsx')
+          component_text = component.read_text(encoding='utf-8')
+          old_string = '  "117305,117308,117311,100049,100034,102648,110791,116737,109791,121102";'
+          new_string = '  "100035,100051,100092,100157,108186,112018,100068,100116,100133,100050";'
+          if old_string in component_text:
+              component.write_text(component_text.replace(old_string, new_string, 1), encoding='utf-8')
+          elif new_string not in component_text:
+              raise SystemExit('component canary string anchor not found')
+
+          test_path = Path('tests/shoplingBarcodeSyncRunner.test.mjs')
+          test_text = test_path.read_text(encoding='utf-8')
+          old_assert = '["117305", "117308", "117311"]'
+          new_assert = '["100035", "100051", "100092"]'
+          if old_assert in test_text:
+              test_path.write_text(test_text.replace(old_assert, new_assert, 1), encoding='utf-8')
+          elif new_assert not in test_text:
+              raise SystemExit('test canary assertion anchor not found')
+          PY
+
+      - name: Commit key rotation
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/shoplingBarcodeSyncRunner.ts src/components/shopling-barcode-sync/ShoplingBarcodeSyncRunner.tsx tests/shoplingBarcodeSyncRunner.test.mjs
+          git commit -m 'test: rotate Shopling canary to untouched balanced products'
+          git push origin HEAD:${{ github.head_ref }}
