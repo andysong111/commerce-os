@@ -63,7 +63,10 @@ export function sanitizeNoSpaceRecommendationGroup(
   const optimizedKeywords = dedupeNoSpaceKeywords(
     group.optimizedKeywords ?? [],
     10,
-  ).filter((keyword) => byKeyword.get(exactIdentity(keyword))?.safeAutoApply === true);
+  ).filter(
+    (keyword) =>
+      byKeyword.get(exactIdentity(keyword))?.safeAutoApply === true,
+  );
   const warnings = [...(group.warnings ?? [])];
   if (sanitized.excludedSpacingCount > 0) {
     warnings.push(
@@ -83,16 +86,21 @@ export function sanitizeNoSpaceRecommendationGroup(
   };
 }
 
-export function sanitizeNoSpaceRecommendationResult<
-  T extends { recommendations?: KeywordRecommendationGroup[] },
->(result: T): T {
-  if (!Array.isArray(result.recommendations)) return result;
+export function sanitizeNoSpaceRecommendationResult<T extends object>(
+  result: T,
+): T {
+  const source = result as T & {
+    recommendations?: unknown;
+  };
+  if (!Array.isArray(source.recommendations)) return result;
+  const recommendations = source.recommendations.filter(
+    (value): value is KeywordRecommendationGroup =>
+      Boolean(value) && typeof value === "object" && !Array.isArray(value),
+  );
   return {
     ...result,
-    recommendations: result.recommendations.map(
-      sanitizeNoSpaceRecommendationGroup,
-    ),
-  };
+    recommendations: recommendations.map(sanitizeNoSpaceRecommendationGroup),
+  } as T;
 }
 
 function parsePlan(value: unknown): unknown[] | null {
@@ -125,7 +133,10 @@ export function validateNoSpaceExecutionPlan(
   }
   for (const value of rows) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return { ok: false, message: "실행계획 행 형식이 올바르지 않습니다." };
+      return {
+        ok: false,
+        message: "실행계획 행 형식이 올바르지 않습니다.",
+      };
     }
     const row = value as Record<string, unknown>;
     const goodsKey = text(row.goods_key);
