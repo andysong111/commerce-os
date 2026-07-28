@@ -16,11 +16,12 @@ function files(requestId = "keyword-rec-test-001", goodsKeys = ["121500"]) {
     }),
     "keyword_mvp_approval_sheet.csv": [
       "goods_key,new_site_srch,site_srch_quality_status,final_site_srch_confidence_status,approval_status,approvable,apply_ready,auto_blocked,block_reason",
-      `${goodsKeys[0]},키1,키2,키3,키4,키5,키6,키7,키8,키9,키10,PASS,PASS,approved,true,true,false,`,
+      `${goodsKeys[0]},"키1,키2,키3,키4,키5,키6,키7,키8,키9,키10",PASS,PASS,approved,true,true,false,`,
     ].join("\n"),
     "keyword_mvp_manual_candidates.csv": "goods_key,candidate_keyword",
     "keyword_mvp_summary.md": "# summary",
-    "keyword_mvp_auto_promotion_audit.csv": "goods_key,candidate_keyword,decision",
+    "keyword_mvp_auto_promotion_audit.csv":
+      "goods_key,candidate_keyword,decision",
   };
 }
 
@@ -82,13 +83,25 @@ async function withToken(fn) {
 }
 
 test("goods key and request validation is fail closed", () => {
-  assert.deepEqual(normalizeKeywordRecommendationGoodsKeys("121500,121501,121500"), ["121500", "121501"]);
-  assert.throws(() => normalizeKeywordRecommendationGoodsKeys("AAA1"), /형식/);
+  assert.deepEqual(
+    normalizeKeywordRecommendationGoodsKeys("121500,121501,121500"),
+    ["121500", "121501"],
+  );
   assert.throws(
-    () => normalizeKeywordRecommendationGoodsKeys(Array.from({ length: 51 }, (_, index) => String(100000 + index))),
+    () => normalizeKeywordRecommendationGoodsKeys("AAA1"),
+    /형식/,
+  );
+  assert.throws(
+    () =>
+      normalizeKeywordRecommendationGoodsKeys(
+        Array.from({ length: 51 }, (_, index) => String(100000 + index)),
+      ),
     /최대 50개/,
   );
-  assert.equal(isValidKeywordRecommendationRequestId("keyword-rec-test-001"), true);
+  assert.equal(
+    isValidKeywordRecommendationRequestId("keyword-rec-test-001"),
+    true,
+  );
   assert.equal(isValidKeywordRecommendationRequestId("bad-id"), false);
 });
 
@@ -120,6 +133,18 @@ test("exact completed run returns safe parsed recommendations", async () => {
     assert.equal(result.artifactId, 88);
     assert.equal(result.recommendations.length, 1);
     assert.equal(result.recommendations[0].goodsKey, "121500");
+    assert.deepEqual(result.recommendations[0].optimizedKeywords, [
+      "키1",
+      "키2",
+      "키3",
+      "키4",
+      "키5",
+      "키6",
+      "키7",
+      "키8",
+      "키9",
+      "키10",
+    ]);
     assert.equal(Object.hasOwn(result, "files"), false);
   });
 });
@@ -156,7 +181,9 @@ test("wrong artifact request id and goods keys are rejected", async () => {
     const wrongGoods = await fetchKeywordRecommendationResult(
       "keyword-rec-test-001",
       "121500",
-      deps({ artifactFiles: files("keyword-rec-test-001", ["121999"]) }),
+      deps({
+        artifactFiles: files("keyword-rec-test-001", ["121999"]),
+      }),
     );
     assert.equal(wrongGoods.status, "error");
     assert.match(wrongGoods.message, /상품번호/);
