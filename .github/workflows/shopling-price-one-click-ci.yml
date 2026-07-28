@@ -1,0 +1,54 @@
+name: Shopling Price One-Click CI
+
+on:
+  push:
+    branches:
+      - codex/shopling-price-simple-one-click-auto
+  pull_request:
+    paths:
+      - "src/app/api/cron/shopling-price-bulk-auto/**"
+      - "src/app/api/shopling-price-modify/bulk/**"
+      - "src/app/shopling-price-modify-runner/**"
+      - "src/components/shopling-price-modify-runner/**"
+      - "src/lib/shoplingPriceModifyBulk*"
+      - "supabase/migrations/20260728000*_shopling_price_bulk_one_click_auto*.sql"
+      - "tests/shoplingPriceModifyBulk*.test.mjs"
+      - "vercel.json"
+      - ".github/workflows/shopling-price-one-click-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Focused tests
+        run: |
+          node --test tests/shoplingPriceModifyBulkOneClickAuto.test.mjs
+          node --test tests/shoplingPriceModifyBulkOneClickSafety.test.mjs
+          node --test tests/shoplingPriceModifyBulkOneClickSafetyPatch.test.mjs
+          node --test tests/shoplingPriceModifyBulkAutoManualGuard.test.mjs
+          node --test tests/shoplingPriceModifyBulkRetryPauseRecovery.test.mjs
+          node --test tests/shoplingPriceModifyBulkAuditPagination.test.mjs
+          node --test tests/shoplingPriceModifyBulkOpsObservability.test.mjs
+          node --test tests/shoplingPriceModifyBulkRetryRecovery.test.mjs
+          node --test tests/shoplingPriceModifyBulkNormalSerial.test.mjs
+          node --test tests/shoplingPriceModifyBulkCanary.test.mjs
+          node --test tests/shoplingPriceModifyRunner.test.mjs
+          node --test tests/shoplingPriceModifyRunnerCandidateLimit.test.mjs
+          node --test tests/supabaseAdminRestClient.test.mjs
+          node --test tests/shoplingPriceModifyBulkDiagnostics.test.mjs
+          node --test tests/shoplingPriceModifyBulkInput.test.mjs
+          node --test tests/shoplingPriceModifyBulkPreparedJobs.test.mjs
+      - run: npm run lint
+      - run: npm run build
+      - run: npx tsc --noEmit
+      - run: git diff --check
