@@ -15,6 +15,7 @@ import {
   parseKeywordRecommendationArtifact,
   type KeywordRecommendationArtifactResult,
 } from "./productLaunchKeywordRecommendations";
+import { prepareNoSpaceRecommendationArtifactFiles } from "./productLaunchNoSpaceArtifactFiles";
 
 export const KEYWORD_RECOMMENDATION_REQUEST_ID_PATTERN =
   /^keyword-rec-[A-Za-z0-9._:-]{1,100}$/;
@@ -273,8 +274,11 @@ export async function fetchKeywordRecommendationResult(
         "키워드 추천 artifact에 exact request_id 메타파일이 없습니다. 최신 키워드 엔진 실행인지 확인하세요.",
       );
     }
-    const parsed = parseKeywordRecommendationArtifact(
+    const prepared = prepareNoSpaceRecommendationArtifactFiles(
       extracted.files,
+    );
+    const parsed = parseKeywordRecommendationArtifact(
+      prepared.files,
       expectedGoodsKeys,
     );
     const recommendations = safeRecommendationResult(
@@ -294,6 +298,7 @@ export async function fetchKeywordRecommendationResult(
       artifactId: artifact.id,
       engineStatus: parsed.status,
       goodsKeys: parsed.goodsKeys,
+      noSpacePolicyExcludedCount: prepared.excludedCount,
       recommendations,
     };
   } catch (error) {
