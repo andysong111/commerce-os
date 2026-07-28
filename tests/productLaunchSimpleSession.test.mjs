@@ -110,11 +110,30 @@ test("simple launch session round trips only the versioned state", () => {
     },
   };
   const session = {
-    ...createEmptyProductLaunchSimpleSession(new Date("2026-07-28T00:00:00Z")),
+    ...createEmptyProductLaunchSimpleSession(
+      new Date("2026-07-28T00:00:00Z"),
+    ),
     rowExpression: "950",
     uploadRequestId: "upload-1",
     uploadResult: successUpload(),
     priceRequestId: "price-1",
+    recommendationRequestId: "keyword-rec-test-001",
+    recommendationResult: {
+      status: "success",
+      phase: "artifact_ready",
+      recommendations: [
+        {
+          goodsKey: "121500",
+          optimizedKeywords: ["검색어1"],
+          items: [],
+          qualityStatus: "PASS",
+          confidenceStatus: "PASS",
+          engineStatus: "success",
+          warnings: [],
+        },
+      ],
+    },
+    recommendationPolls: 3,
     titles: { "121500": "상품명 후보" },
     searches: { "121500": "검색어1,검색어2" },
     directRequestId: "direct-1",
@@ -138,4 +157,22 @@ test("invalid or unknown session versions are ignored", () => {
   assert.equal(parsed.rowExpression, "950");
   assert.equal(parsed.uploadPolls, 0);
   assert.deepEqual(parsed.titles, { "121500": "123" });
+  assert.equal(parsed.recommendationRequestId, "");
+  assert.equal(parsed.recommendationResult, null);
+  assert.equal(parsed.recommendationPolls, 0);
+});
+
+test("legacy sessions that already started direct apply skip late recommendations", () => {
+  const parsed = parseProductLaunchSimpleSession({
+    version: 1,
+    rowExpression: "950",
+    priceRequestId: "price-old",
+    priceResult: { status: "success", phase: "artifact_ready" },
+    directRequestId: "direct-old",
+    directResult: { status: "success", phase: "artifact_ready" },
+  });
+  assert.equal(parsed.recommendationRequestId, "");
+  assert.equal(parsed.recommendationResult.status, "skipped");
+  assert.equal(parsed.recommendationResult.phase, "artifact_ready");
+  assert.match(parsed.recommendationResult.message, /건너뛰었습니다/);
 });
