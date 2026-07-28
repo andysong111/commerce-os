@@ -28,9 +28,11 @@ test("rerun control preserves launch fields and clears only recommendation state
   assert.doesNotMatch(source, /searches: \{\}/);
 });
 
-test("rerun control is unavailable after direct apply starts", async () => {
+test("rerun control is recommendation-only and does not depend on stale direct state", async () => {
   const source = await readFile(buttonPath, "utf8");
-  assert.match(source, /text\(session\.directRequestId\) \|\| session\.directResult/);
   assert.match(source, /현재 상품 추천 다시 만들기/);
-  assert.match(source, /상품업로드·가격설정·입력값은 유지/);
+  assert.match(source, /기존 반영 결과는 건드리지 않고 추천 파일만 새로 생성/);
+  assert.doesNotMatch(source, /directRequestId/);
+  assert.doesNotMatch(source, /directResult/);
+  assert.match(source, /isCompletedRecommendation\(session\.recommendationResult\)/);
 });
