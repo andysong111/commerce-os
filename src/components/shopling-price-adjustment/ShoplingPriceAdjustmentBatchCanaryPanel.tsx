@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseShoplingPriceAdjustmentPaste } from "@/lib/shoplingPriceAdjustmentInput";
+import {\n  parseShoplingPriceAdjustmentPaste,\n  type ShoplingPriceAdjustmentSource,\n} from "@/lib/shoplingPriceAdjustmentInput";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
@@ -71,7 +71,7 @@ function getCurrentRows() {
         }
         return {
           ...parsed,
-          source: typeof stored.source === "string" && stored.source.trim() ? stored.source : parsed.source,
+          source: isAdjustmentSource(stored.source) ? stored.source : parsed.source,
           originalCount: Number.isSafeInteger(stored.originalCount) ? Number(stored.originalCount) : parsed.originalCount,
           duplicateCount: Number.isSafeInteger(stored.duplicateCount) ? Number(stored.duplicateCount) : parsed.duplicateCount,
           invalidCount: Number.isSafeInteger(stored.invalidCount) ? Number(stored.invalidCount) : parsed.invalidCount,
