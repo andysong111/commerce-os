@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   parseShoplingPriceAdjustmentPaste,
-  type ShoplingPriceAdjustmentSource,
 } from "@/lib/shoplingPriceAdjustmentInput";
+import {
+  parseStoredShoplingPriceAdjustmentBulkSelection,
+  SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+} from "@/lib/shoplingPriceAdjustmentBulkSelection";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
-const BULK_SELECTION_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkSelection";
 const MAX_BULK_SIZE = 10_000;
 const AUTO_INTERVAL_MS = 4_000;
+const LOGIN_URL =
+  "/login?error=login_required&next=%2Fshopling-price-adjustment-runner";
 
 type JobRow = {
   id?: string;
@@ -51,11 +55,16 @@ type AdvanceResponse = {
   error?: string;
 };
 
-type PreparedBulkInput = ReturnType<typeof parseShoplingPriceAdjustmentPaste>;
+type ApiFailure = {
+  error?: string;
+  code?: string;
+  stage?: string;
+  detail?: string | null;
+  diagnostic_id?: string;
+  active_job?: JobRow | null;
+};
 
-function isAdjustmentSource(value: unknown): value is ShoplingPriceAdjustmentSource {
-  return value === "paste" || value === "csv" || value === "xlsx";
-}
+type PreparedBulkInput = ReturnType<typeof parseShoplingPriceAdjustmentPaste>;
 
 function samePreparedInput(left: PreparedBulkInput, right: PreparedBulkInput) {
   return left.rows.length === right.rows.length
@@ -66,35 +75,18 @@ function samePreparedInput(left: PreparedBulkInput, right: PreparedBulkInput) {
 }
 
 function getCurrentRows() {
-  const storedText = localStorage.getItem(BULK_SELECTION_STORAGE_KEY);
-  if (storedText) {
-    try {
-      const stored = JSON.parse(storedText) as {
-        source?: unknown;
-        originalCount?: unknown;
-        duplicateCount?: unknown;
-        invalidCount?: unknown;
-        rows?: Array<{ goodsKey?: unknown; adjustmentBps?: unknown }>;
-      };
-      const rows = Array.isArray(stored.rows) ? stored.rows : [];
-      const parsed = parseShoplingPriceAdjustmentPaste(rows.map((row) =>
-        `${String(row.goodsKey ?? "")} ${Number(row.adjustmentBps) / 100}`
-      ).join("\n"));
-      if (parsed.validCount > 0 && parsed.invalidCount === 0) {
-        if (parsed.validCount > MAX_BULK_SIZE) {
-          throw new Error(`최대 ${MAX_BULK_SIZE.toLocaleString("ko-KR")}개까지 실행할 수 있습니다.`);
-        }
-        return {
-          ...parsed,
-          source: isAdjustmentSource(stored.source) ? stored.source : parsed.source,
-          originalCount: Number.isSafeInteger(stored.originalCount) ? Number(stored.originalCount) : parsed.originalCount,
-          duplicateCount: Number.isSafeInteger(stored.duplicateCount) ? Number(stored.duplicateCount) : parsed.duplicateCount,
-          invalidCount: Number.isSafeInteger(stored.invalidCount) ? Number(stored.invalidCount) : parsed.invalidCount,
-        };
-      }
-    } catch {
-      localStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+  const storedSelection = parseStoredShoplingPriceAdjustmentBulkSelection(
+    localStorage.getItem(
+      SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+    ),
+  );
+  if (storedSelection) {
+    if (storedSelection.result.validCount > MAX_BULK_SIZE) {
+      throw new Error(
+        `최대 ${MAX_BULK_SIZE.toLocaleString("ko-KR")}개까지 실행할 수 있습니다.`,
+      );
     }
+    return storedSelection.result;
   }
 
   const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${INPUT_TEXTAREA_LABEL}"]`);
@@ -106,8 +98,28 @@ function getCurrentRows() {
   return parsed;
 }
 
+function apiFailureMessage(
+  body: ApiFailure,
+  status: number,
+  fallback: string,
+) {
+  const context = [
+    body.code,
+    body.stage,
+    body.detail,
+    body.diagnostic_id ? `진단번호 ${body.diagnostic_id}` : null,
+  ].filter(Boolean);
+  return `${body.error ?? `${fallback} status=${status}`}${
+    context.length ? ` · ${context.join(" · ")}` : ""
+  }`;
+}
+
 function isTerminal(status: string | undefined) {
   return ["succeeded", "failed", "dispatch_uncertain", "cancelled"].includes(status ?? "");
+}
+
+function blocksNewJob(status: string | undefined) {
+  return ["prepared", "running", "paused", "dispatch_uncertain"].includes(status ?? "");
 }
 
 function labelStatus(status: string | undefined) {
@@ -131,21 +143,37 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   const [jobId, setJobId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(JOB_STORAGE_KEY) ?? "");
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [creating, setCreating] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [preparedInput, setPreparedInput] = useState<PreparedBulkInput | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loginRequired, setLoginRequired] = useState(false);
+  const [jobMissing, setJobMissing] = useState(false);
   const tickingRef = useRef(false);
 
   const loadDetail = useCallback(async (targetJobId = jobId) => {
     if (!targetJobId) return null;
     setLoading(true);
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(targetJobId)}`, { cache: "no-store" });
-      const body = await response.json() as JobDetail;
-      if (!response.ok || body.error) throw new Error(body.error ?? `작업 조회 실패 status=${response.status}`);
+      const response = await fetch(
+        `/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(targetJobId)}`,
+        {
+          cache: "no-store",
+          credentials: "same-origin",
+        },
+      );
+      const body = await response.json() as JobDetail & ApiFailure;
+      if (!response.ok || body.error) {
+        if (response.status === 401) setLoginRequired(true);
+        if (response.status === 404) setJobMissing(true);
+        throw new Error(
+          apiFailureMessage(body, response.status, "작업 조회 실패"),
+        );
+      }
+      setJobMissing(false);
       setDetail(body);
       if (isTerminal(body.job?.status) || body.job?.status === "paused") setAutoRunning(false);
       return body;
@@ -158,25 +186,81 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   }, [jobId]);
 
   useEffect(() => {
-    if (jobId) void loadDetail(jobId);
+    if (!jobId) return;
+    const timeoutId = window.setTimeout(() => {
+      void loadDetail(jobId);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [jobId, loadDetail]);
 
-  const prepareCreate = () => {
-    if (creating || autoRunning) return;
+  const prepareCreate = async () => {
+    if (creating || checkingSession || autoRunning || (jobId && !jobMissing)) {
+      setError("기존 Bulk 작업을 먼저 완료하거나 상태를 확인하세요.");
+      return;
+    }
     setError("");
     setMessage("");
+    setLoginRequired(false);
+    let parsed: PreparedBulkInput;
     try {
-      setPreparedInput(getCurrentRows());
+      parsed = getCurrentRows();
     } catch (caught) {
       setPreparedInput(null);
       setError(caught instanceof Error ? caught.message : "현재 입력을 읽을 수 없습니다.");
+      return;
+    }
+
+    setCheckingSession(true);
+    try {
+      const response = await fetch(
+        "/api/shopling-price-adjustment/bulk/jobs",
+        {
+          cache: "no-store",
+          credentials: "same-origin",
+        },
+      );
+      const body = await response.json() as {
+        jobs?: JobRow[];
+      } & ApiFailure;
+      if (!response.ok) {
+        if (response.status === 401) setLoginRequired(true);
+        throw new Error(
+          apiFailureMessage(body, response.status, "로그인 상태 확인 실패"),
+        );
+      }
+      const existingJob = body.active_job
+        ?? body.jobs?.find((candidate) =>
+          candidate.id && blocksNewJob(candidate.status)
+        );
+      if (existingJob?.id) {
+        setJobId(existingJob.id);
+        setJobMissing(false);
+        localStorage.setItem(JOB_STORAGE_KEY, existingJob.id);
+        setPreparedInput(null);
+        setMessage(
+          `기존 Bulk 작업(${labelStatus(existingJob.status)})을 복원했습니다. 새 작업을 만들지 않고 기존 작업 상태를 확인하세요.`,
+        );
+        await loadDetail(existingJob.id);
+        return;
+      }
+      setPreparedInput(parsed);
+    } catch (caught) {
+      setPreparedInput(null);
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "로그인 상태를 확인하지 못했습니다.",
+      );
+    } finally {
+      setCheckingSession(false);
     }
   };
 
   const createAndStart = async () => {
-    if (creating || !preparedInput) return;
+    if (creating || !preparedInput || (jobId && !jobMissing)) return;
     setError("");
     setMessage("");
+    setLoginRequired(false);
     let parsed: PreparedBulkInput;
     try {
       parsed = getCurrentRows();
@@ -196,6 +280,8 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
       const createResponse = await fetch("/api/shopling-price-adjustment/bulk/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
         body: JSON.stringify({
           inputSource: parsed.source,
           rows: parsed.rows.map((row) => ({ goodsKey: row.goodsKey, adjustmentBps: row.adjustmentBps })),
@@ -204,17 +290,63 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
           invalidCount: parsed.invalidCount,
         }),
       });
-      const created = await createResponse.json() as { id?: string; error?: string };
-      if (!createResponse.ok || !created.id) throw new Error(created.error ?? `Bulk 작업 저장 실패 status=${createResponse.status}`);
+      const created = await createResponse.json() as {
+        id?: string;
+      } & ApiFailure;
+      if (!createResponse.ok || !created.id) {
+        if (createResponse.status === 401) setLoginRequired(true);
+        const existingJob = created.active_job;
+        if (
+          existingJob?.id
+          && blocksNewJob(existingJob.status)
+        ) {
+          const existingJobId = existingJob.id;
+          setJobId(existingJobId);
+          setJobMissing(false);
+          localStorage.setItem(JOB_STORAGE_KEY, existingJobId);
+          setPreparedInput(null);
+          setMessage(
+            `기존 Bulk 작업(${labelStatus(existingJob.status)})을 복원했습니다. 새 작업은 생성하지 않았습니다.`,
+          );
+          await loadDetail(existingJobId);
+          return;
+        }
+        throw new Error(
+          apiFailureMessage(
+            created,
+            createResponse.status,
+            "Bulk 작업 저장 실패",
+          ),
+        );
+      }
       const id = created.id;
       setJobId(id);
+      setJobMissing(false);
       localStorage.setItem(JOB_STORAGE_KEY, id);
-
-      const startResponse = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(id)}/start`, { method: "POST" });
-      const started = await startResponse.json() as { error?: string };
-      if (!startResponse.ok) throw new Error(started.error ?? `Bulk 작업 시작 실패 status=${startResponse.status}`);
-      setMessage(`${parsed.validCount.toLocaleString("ko-KR")}개 상품의 Bulk 자동 진행을 시작했습니다.`);
+      // The persistent job now exists. Close the create confirmation before
+      // starting so a start/auth failure cannot create a duplicate job.
       setPreparedInput(null);
+
+      const startResponse = await fetch(
+        `/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(id)}/start`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+        },
+      );
+      const started = await startResponse.json() as ApiFailure;
+      if (!startResponse.ok) {
+        if (startResponse.status === 401) setLoginRequired(true);
+        throw new Error(
+          apiFailureMessage(
+            started,
+            startResponse.status,
+            "Bulk 작업 시작 실패",
+          ),
+        );
+      }
+      setMessage(`${parsed.validCount.toLocaleString("ko-KR")}개 상품의 Bulk 자동 진행을 시작했습니다.`);
       setAutoRunning(true);
       await loadDetail(id);
     } catch (caught) {
@@ -292,11 +424,17 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   const clearJob = () => {
     setAutoRunning(false);
     setJobId("");
+    setJobMissing(false);
     setDetail(null);
     setPreparedInput(null);
+    setLoginRequired(false);
     setMessage("");
     setError("");
     localStorage.removeItem(JOB_STORAGE_KEY);
+    localStorage.removeItem(
+      SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+    );
+    window.location.reload();
   };
 
   const job = detail?.job;
@@ -306,6 +444,12 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   const progress = total > 0 ? Math.min(100, Math.round((succeeded / total) * 10_000) / 100) : 0;
   const chunks = Array.isArray(detail?.chunks) ? detail!.chunks! : [];
   const succeededChunks = chunks.filter((chunk) => chunk.status === "succeeded").length;
+  const existingJobBlocksCreate = Boolean(jobId && !jobMissing);
+  const canPrepareNewJob = !autoRunning && (
+    !jobId
+    || jobMissing
+    || Boolean(job && !blocksNewJob(job.status))
+  );
 
   return <section className="mt-8 rounded-2xl border-2 border-fuchsia-300 bg-white p-6 shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -317,11 +461,11 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     </div>
 
     <div className="mt-5 flex flex-wrap gap-3">
-      <button type="button" disabled={creating || autoRunning || Boolean(preparedInput)} onClick={prepareCreate} className="rounded-lg bg-fuchsia-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : "현재 입력으로 Bulk 작업 시작"}</button>
+      <button type="button" disabled={creating || checkingSession || autoRunning || Boolean(preparedInput) || existingJobBlocksCreate} onClick={() => void prepareCreate()} className="rounded-lg bg-fuchsia-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : checkingSession ? "로그인 상태 확인 중..." : "현재 입력으로 Bulk 작업 시작"}</button>
       <button type="button" disabled={!jobId || autoRunning || isTerminal(job?.status)} onClick={() => void resume()} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">자동 진행 재개</button>
       <button type="button" disabled={!jobId || job?.status !== "running" || pausing} onClick={() => void pause()} className="rounded-lg bg-amber-600 px-4 py-3 font-bold text-white disabled:opacity-50">{pausing ? "중지 요청 중..." : "현재 단계 후 일시중지"}</button>
       <button type="button" disabled={!jobId || loading} onClick={() => void loadDetail()} className="rounded-lg bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-50">{loading ? "조회 중..." : "상태 새로고침"}</button>
-      <button type="button" disabled={autoRunning} onClick={clearJob} className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-bold text-slate-700 disabled:opacity-50">새 작업 준비</button>
+      <button type="button" disabled={!canPrepareNewJob} onClick={clearJob} className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-bold text-slate-700 disabled:opacity-50">새 작업 준비</button>
     </div>
 
     {preparedInput && <div className="mt-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
@@ -339,6 +483,10 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     {jobId && <p className="mt-4 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">job_id: {jobId}</p>}
     {message && <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">{message}</p>}
     {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">{error}</p>}
+    {loginRequired && <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-950">
+      <p>입력 목록은 이 브라우저에 보존했습니다. 다시 로그인한 뒤 같은 목록을 재확인하세요.</p>
+      <a href={LOGIN_URL} className="mt-2 inline-block rounded-lg bg-amber-700 px-4 py-2 text-white">로그인 다시 하기</a>
+    </div>}
 
     {job && <div className="mt-5 rounded-xl border border-fuchsia-200 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
