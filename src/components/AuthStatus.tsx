@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 export async function AuthStatus() {
-  const supabase = await createSupabaseServerClient();
-  const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
-  const email = data.user && "email" in data.user ? String(data.user.email ?? "") : "";
+  const { user } = await getOpsCurrentUser();
+  const email = user?.email ?? "";
 
   return (
     <div className="mb-4 flex items-center justify-end gap-3 text-xs text-slate-500">

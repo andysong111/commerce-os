@@ -2,18 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PasswordSettingsForm } from "@/components/account/PasswordSettingsForm";
 import { PageHeader } from "@/components/PageHeader";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountPasswordPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data } = supabase
-    ? await supabase.auth.getUser()
-    : { data: { user: null } };
+  const { user } = await getOpsCurrentUser();
 
-  if (!data.user) {
-    redirect("/login?error=login_required");
+  if (!user) {
+    redirect("/login?error=login_required&next=%2Faccount%2Fpassword");
   }
 
   return (
@@ -37,7 +34,7 @@ export default async function AccountPasswordPage() {
             현재 로그인 계정
           </p>
           <p className="mt-2 break-all text-sm font-bold text-slate-950">
-            {data.user.email ?? "이메일 확인 불가"}
+            {user.email ?? "이메일 확인 불가"}
           </p>
         </section>
 

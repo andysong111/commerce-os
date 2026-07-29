@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { isDetailPageCostAdmin } from "@/lib/detailPageCostAdmin";
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 import type { CommerceModule } from "@/lib/moduleRegistry";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 const statusPresentation = {
   available: {
@@ -52,11 +52,8 @@ const statusPresentation = {
 } as const;
 
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data } = supabase
-    ? await supabase.auth.getUser()
-    : { data: { user: null } };
-  const showDetailPageCosts = isDetailPageCostAdmin(data.user?.email);
+  const { user } = await getOpsCurrentUser();
+  const showDetailPageCosts = isDetailPageCostAdmin(user?.email);
   const visibleModules = extendedModuleRegistry.filter(
     (module) => module.id !== "detail-page-cost-admin" || showDetailPageCosts,
   );
