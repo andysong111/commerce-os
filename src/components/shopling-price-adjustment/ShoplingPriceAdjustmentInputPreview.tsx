@@ -183,7 +183,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
       return;
     }
     localStorage.setItem(BULK_SELECTION_STORAGE_KEY, JSON.stringify({
-      source: selection.label,
+      source: selection.result.source,
       originalCount: selection.result.originalCount,
       duplicateCount: selection.result.duplicateCount,
       invalidCount: selection.result.invalidCount,
