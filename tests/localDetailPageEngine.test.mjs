@@ -145,10 +145,16 @@ test("failed local runs fetch and render expandable diagnostics", () => {
   assert.match(runner, /1688_auth_or_traffic_challenge/);
 });
 
-test("dashboard/sidebar contains local-only and image-upload labels", () => {
-  assert.match(sidebar, /승준컴 로컬 전용/);
-  assert.match(registry, /상세페이지 엔진 \(이미지 업로드\)/);
-  assert.match(registry, /detail-page-image-upload-runner/);
+test("dashboard/sidebar exposes only the latest detail page studio", () => {
+  assert.match(sidebar, /detail-page-studio/);
+  assert.doesNotMatch(sidebar, /detail-page-local-engine/);
+  assert.doesNotMatch(sidebar, /detail-page-image-upload-engine/);
+  assert.match(registry, /상세페이지 스튜디오/);
+  assert.match(registry, /https:\/\/commerce-os-detail-page-studio\.vercel\.app\//);
+  assert.doesNotMatch(registry, /id: "detail-page-local-engine"/);
+  assert.doesNotMatch(registry, /id: "detail-page-image-upload-engine"/);
+  assert.doesNotMatch(registry, /id: "detail-page-engine"/);
+  assert.doesNotMatch(registry, /id: "detail-page-draft-review"/);
 });
 
 test("local runner pages do not call GitHub Actions dispatch", () => {
