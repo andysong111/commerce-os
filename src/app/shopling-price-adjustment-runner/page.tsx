@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ShoplingPriceAdjustmentInputPreview } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview";
 import { ShoplingPriceAdjustmentIndividualBulkEditor } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentIndividualBulkEditor";
-import { ShoplingPriceAdjustmentOptionCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentOptionCanaryPanel";
+import { ShoplingPriceAdjustmentUnifiedCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentUnifiedCanaryPanel";
 import { ShoplingPriceAdjustmentBatchCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel";
 
 export default function ShoplingPriceAdjustmentRunnerPage() {
@@ -11,8 +11,11 @@ export default function ShoplingPriceAdjustmentRunnerPage() {
       description="goods_key별 인상률·인하율을 대량 입력하고 실행 전 계산계획을 검증합니다."
     />
     <ShoplingPriceAdjustmentIndividualBulkEditor />
-    <ShoplingPriceAdjustmentInputPreview />
-    <ShoplingPriceAdjustmentOptionCanaryPanel />
+    <div className="price-adjustment-input-with-unified-single">
+      <ShoplingPriceAdjustmentInputPreview />
+    </div>
+    <ShoplingPriceAdjustmentUnifiedCanaryPanel />
     <ShoplingPriceAdjustmentBatchCanaryPanel />
+    <style>{`.price-adjustment-input-with-unified-single > div > section:nth-of-type(3) { display: none; }`}</style>
   </>;
 }
