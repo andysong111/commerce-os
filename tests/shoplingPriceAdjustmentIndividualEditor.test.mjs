@@ -50,6 +50,12 @@ test("serialization produces the existing two-column individual input contract",
   ]), "102759\t10\n102758\t-5");
 });
 
+test("individual draft accepts 10,000 rows and rejects 10,001", () => {
+  const input = Array.from({ length: 10_000 }, (_, index) => String(900000 + index)).join("\n");
+  assert.equal(editor.parseShoplingIndividualDraft(input).rows.length, 10_000);
+  assert.throws(() => editor.parseShoplingIndividualDraft(`${input}\n999999999`), /10,000/);
+});
+
 test("individual editor UI exposes checkbox selection, selected/all bulk apply, per-row rates and transfer", async () => {
   const [page, component] = await Promise.all([
     readFile(new URL("../src/app/shopling-price-adjustment-runner/page.tsx", import.meta.url), "utf8"),
