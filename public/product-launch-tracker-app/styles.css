@@ -313,7 +313,7 @@ h2 {
 
 table {
   width: 100%;
-  min-width: 1840px;
+  min-width: 1960px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 11px;
@@ -415,6 +415,24 @@ tbody tr.is-archived td {
   color: #1d4ed8;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.barcode-input {
+  width: 88px;
+  border: 1px solid #cfd8e5;
+  border-radius: 7px;
+  background: #fff;
+  padding: 6px 7px;
+  color: #1e40af;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.barcode-input:focus {
+  border-color: #60a5fa;
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 12%);
 }
 
 .product-name {

@@ -4,6 +4,8 @@ import {
   getNextStage,
   getOverallStatus,
   getProgress,
+  hydrateLaunchItem,
+  normalizeBarcode,
   normalizeModelNumber,
   normalizeOptions,
   parsePastedRows,
@@ -72,7 +74,7 @@ async function bootstrap() {
     if (!response.ok) throw new Error(`초기 데이터 응답 오류: ${response.status}`);
     const seed = await response.json();
     state.meta = seed.meta;
-    state.seedItems = seed.items;
+    state.seedItems = seed.items.map(hydrateLaunchItem);
     state.items = loadStoredItems(seed);
     bindControls();
     fillStaticOptions();
@@ -82,20 +84,26 @@ async function bootstrap() {
     console.error(error);
     elements.saveStatus.textContent = "데이터 불러오기 실패";
     elements.tableBody.innerHTML = `
-      <tr><td colspan="15" class="empty-state">초기 데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.</td></tr>
+      <tr><td colspan="16" class="empty-state">초기 데이터를 불러오지 못했습니다. 페이지를 새로고침해 주세요.</td></tr>
     `;
   }
 }
 
 function loadStoredItems(seed) {
   const stored = safeJsonParse(localStorage.getItem(STORAGE_KEY));
-  if (!stored?.items || !Array.isArray(stored.items)) return structuredClone(seed.items);
+  if (!stored?.items || !Array.isArray(stored.items)) {
+    return structuredClone(seed.items).map(hydrateLaunchItem);
+  }
 
-  const storedById = new Map(stored.items.map((item) => [item.id, item]));
-  const merged = seed.items.map((item) => storedById.get(item.id) ?? item);
+  const storedById = new Map(
+    stored.items.map((item) => [item.id, hydrateLaunchItem(item)]),
+  );
+  const merged = seed.items.map((item) =>
+    hydrateLaunchItem(storedById.get(item.id) ?? item),
+  );
   const seedIds = new Set(seed.items.map((item) => item.id));
   for (const item of stored.items) {
-    if (!seedIds.has(item.id)) merged.push(item);
+    if (!seedIds.has(item.id)) merged.push(hydrateLaunchItem(item));
   }
   return merged;
 }
@@ -142,6 +150,7 @@ function bindControls() {
   elements.selectVisible.addEventListener("change", toggleVisibleSelection);
   elements.tableHead.addEventListener("click", handleSortClick);
   elements.tableBody.addEventListener("change", handleTableChange);
+  elements.tableBody.addEventListener("keydown", handleTableKeydown);
   elements.tableBody.addEventListener("click", handleTableClick);
   elements.detailForm.addEventListener("submit", saveDetailForm);
   elements.archiveButton.addEventListener("click", archiveCurrentItem);
@@ -305,6 +314,15 @@ function renderRow(item) {
         item.workBatch,
       )}</td>
       <td>${item.warehouseLocation ? escapeHtml(item.warehouseLocation) : muted("미입력")}</td>
+      <td>
+        <input
+          class="barcode-input"
+          value="${escapeAttribute(item.barcode)}"
+          placeholder="BAA1-1"
+          autocomplete="off"
+          aria-label="${escapeAttribute(item.modelNumber)} 바코드"
+        />
+      </td>
       <td><span class="model-number">${escapeHtml(item.modelNumber)}</span>${
         item.migrationReview
           ? '<span class="review-dot" title="이관 검토 표시"></span>'
@@ -357,6 +375,23 @@ function handleTableChange(event) {
     renderTable();
     return;
   }
+  if (event.target.matches(".barcode-input")) {
+    const item = state.items.find((candidate) => candidate.id === id);
+    if (!item) return;
+    const barcode = normalizeBarcode(event.target.value);
+    if (barcode === item.barcode) {
+      event.target.value = barcode;
+      return;
+    }
+    replaceItem({
+      ...item,
+      barcode,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "승준",
+    });
+    showToast(`${item.modelNumber} 바코드를 저장했습니다.`);
+    return;
+  }
   if (event.target.matches(".status-select")) {
     const item = state.items.find((candidate) => candidate.id === id);
     if (!item) return;
@@ -377,6 +412,13 @@ function handleTableChange(event) {
       changed.notes = appendNote(changed.notes, reason);
     }
     replaceItem(changed);
+  }
+}
+
+function handleTableKeydown(event) {
+  if (event.key === "Enter" && event.target.matches(".barcode-input")) {
+    event.preventDefault();
+    event.target.blur();
   }
 }
 
@@ -434,6 +476,7 @@ function openDetail(id) {
     "id",
     "workBatch",
     "warehouseLocation",
+    "barcode",
     "modelNumber",
     "goodsKey",
     "productName",
@@ -510,6 +553,7 @@ function saveDetailForm(event) {
     ...item,
     workBatch: String(formData.get("workBatch") ?? "").trim(),
     warehouseLocation: String(formData.get("warehouseLocation") ?? "").trim(),
+    barcode: normalizeBarcode(formData.get("barcode")),
     modelNumber: normalizeModelNumber(formData.get("modelNumber")),
     goodsKey: String(formData.get("goodsKey") ?? "").trim(),
     productName: String(formData.get("productName") ?? "").trim(),
@@ -585,7 +629,7 @@ function exportJson() {
     `신규상품출시진행관리_백업_${dateStamp()}.json`,
     JSON.stringify(
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         exportedAt: new Date().toISOString(),
         sourceMeta: state.meta,
         items: state.items,
@@ -618,7 +662,7 @@ async function importBackup(event) {
     if (!window.confirm(`백업 상품 ${number(items.length)}건으로 현재 기록을 교체할까요?`)) {
       return;
     }
-    state.items = items;
+    state.items = items.map(hydrateLaunchItem);
     state.selectedIds.clear();
     persist();
     render();
@@ -657,7 +701,7 @@ function persist() {
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       sourceImportedAt: state.meta.importedAt,
       savedAt: new Date().toISOString(),
       items: state.items,
@@ -672,6 +716,7 @@ function searchableText(item) {
   return [
     item.workBatch,
     item.warehouseLocation,
+    item.barcode,
     item.modelNumber,
     item.productName,
     item.options.join(" "),

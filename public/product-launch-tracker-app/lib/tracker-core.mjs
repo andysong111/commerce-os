@@ -43,6 +43,7 @@ export function sortLaunchItems(items, sort = {}) {
   const textGetter = {
     workBatch: (item) => item.workBatch,
     warehouseLocation: (item) => item.warehouseLocation,
+    barcode: (item) => item.barcode,
     modelNumber: (item) => item.modelNumber,
     productName: (item) => item.productName,
     options: (item) => item.options?.join(", "),
@@ -81,12 +82,36 @@ export function normalizeModelNumber(value) {
   return `AAA${match[1].padStart(3, "0")}`;
 }
 
+export function normalizeBarcode(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+export function hydrateLaunchItem(item) {
+  return {
+    ...item,
+    barcode: normalizeBarcode(item?.barcode),
+    options: normalizeOptions(item?.options),
+    stages: Object.fromEntries(
+      STAGES.map(({ key }) => [
+        key,
+        {
+          status: item?.stages?.[key]?.status ?? "미시작",
+          assignee: item?.stages?.[key]?.assignee ?? "",
+          completedAt: item?.stages?.[key]?.completedAt ?? null,
+          note: item?.stages?.[key]?.note ?? "",
+        },
+      ]),
+    ),
+  };
+}
+
 export function createLaunchItem(input, idFactory = () => crypto.randomUUID()) {
   const now = new Date().toISOString();
   return {
     id: idFactory(),
     workBatch: input.workBatch?.trim() || "새 작업 묶음",
     warehouseLocation: input.warehouseLocation?.trim() || "",
+    barcode: normalizeBarcode(input.barcode),
     modelNumber: normalizeModelNumber(input.modelNumber),
     productName: input.productName?.trim() || "",
     options: normalizeOptions(input.options),
@@ -157,23 +182,42 @@ export function parsePastedRows(text) {
 
   if (!rows.length) return [];
 
-  const first = rows[0].map((value) => value.replace(/\s+/g, ""));
-  const hasHeader =
-    first.includes("모델번호") ||
-    first.includes("상품명") ||
-    first.includes("모델명");
+  const normalizedHeaders = rows[0].map(normalizeHeader);
+  const hasHeader = normalizedHeaders.some((value) =>
+    ["모델번호", "상품명", "모델명", "바코드"].includes(value),
+  );
   const body = hasHeader ? rows.slice(1) : rows;
+  const headerIndexes = hasHeader
+    ? Object.fromEntries(
+        Object.entries(PASTE_HEADER_ALIASES).map(([key, aliases]) => [
+          key,
+          normalizedHeaders.findIndex((header) => aliases.includes(header)),
+        ]),
+      )
+    : null;
 
   return body
     .filter((row) => row.some(Boolean))
-    .map((row) => ({
-      workBatch: row[0] ?? "",
-      warehouseLocation: row[1] ?? "",
-      modelNumber: row[2] ?? "",
-      productName: row[3] ?? "",
-      options: row[4] ?? "",
-      notes: row[5] ?? "",
-    }))
+    .map((row) => {
+      if (headerIndexes) {
+        return Object.fromEntries(
+          Object.keys(PASTE_HEADER_ALIASES).map((key) => [
+            key,
+            headerIndexes[key] >= 0 ? row[headerIndexes[key]] ?? "" : "",
+          ]),
+        );
+      }
+      const hasBarcodeColumn = row.length >= 7;
+      return {
+        workBatch: row[0] ?? "",
+        warehouseLocation: row[1] ?? "",
+        barcode: hasBarcodeColumn ? row[2] ?? "" : "",
+        modelNumber: row[hasBarcodeColumn ? 3 : 2] ?? "",
+        productName: row[hasBarcodeColumn ? 4 : 3] ?? "",
+        options: row[hasBarcodeColumn ? 5 : 4] ?? "",
+        notes: row[hasBarcodeColumn ? 6 : 5] ?? "",
+      };
+    })
     .filter((row) => row.modelNumber || row.productName);
 }
 
@@ -181,6 +225,7 @@ export function toCsv(items) {
   const header = [
     "작업 묶음",
     "창고위치",
+    "바코드",
     "모델번호",
     "상품명",
     "옵션",
@@ -193,6 +238,7 @@ export function toCsv(items) {
   const rows = items.map((item) => [
     item.workBatch,
     item.warehouseLocation,
+    item.barcode,
     item.modelNumber,
     item.productName,
     item.options.join(", "),
@@ -208,6 +254,20 @@ export function toCsv(items) {
 function csvCell(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
+}
+
+const PASTE_HEADER_ALIASES = {
+  workBatch: ["작업묶음", "작업그룹"],
+  warehouseLocation: ["창고위치", "창고위치코드", "위치코드"],
+  barcode: ["바코드", "옵션바코드"],
+  modelNumber: ["모델번호", "모델명"],
+  productName: ["상품명", "제품명"],
+  options: ["옵션", "옵션구성", "옵션명"],
+  notes: ["비고", "메모", "보류사유"],
+};
+
+function normalizeHeader(value) {
+  return String(value ?? "").replace(/\s+/g, "");
 }
 
 function statusSortRank(status) {
