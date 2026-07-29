@@ -127,16 +127,24 @@ test("chunk plan keeps the completed 10-item canary and 50-item serial pattern",
   }
 });
 
-test("new route and UI are read-only and registered as a separate feature", async () => {
-  const [page, component, library] = await Promise.all([
+test("new route and UI are read-only and registered on the dashboard and sidebar", async () => {
+  const [page, component, library, registry, dashboard, sidebar] = await Promise.all([
     readFile(new URL("../src/app/shopling-price-adjustment-runner/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/shoplingPriceAdjustmentInput.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/lib/extendedModuleRegistry.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/Sidebar.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(page, /샵플링 판매가 인상·인하 실행기/);
   for (const phrase of ["최대 20,000개", "가격 쓰기 차단", "goods_key", "adjustment_rate", "10원 단위 올림"]) {
     assert.match(component, new RegExp(phrase));
   }
+  assert.match(registry, /shopling-price-adjustment-runner/);
+  assert.match(registry, /\/shopling-price-adjustment-runner/);
+  assert.match(dashboard, /extendedModuleRegistry/);
+  assert.match(sidebar, /extendedModuleRegistry/);
+  assert.match(sidebar, /shopling-price-adjustment-runner/);
   assert.doesNotMatch(component + library, /fetch\s*\(/);
   assert.doesNotMatch(component + library, /supabase/i);
   assert.doesNotMatch(component + library, /api\.shopling/i);
