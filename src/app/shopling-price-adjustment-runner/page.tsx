@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ShoplingPriceAdjustmentInputPreview } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview";
 import { ShoplingPriceAdjustmentOptionCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentOptionCanaryPanel";
+import { ShoplingPriceAdjustmentBatchCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel";
 
 export default function ShoplingPriceAdjustmentRunnerPage() {
   return <>
@@ -10,5 +11,6 @@ export default function ShoplingPriceAdjustmentRunnerPage() {
     />
     <ShoplingPriceAdjustmentInputPreview />
     <ShoplingPriceAdjustmentOptionCanaryPanel />
+    <ShoplingPriceAdjustmentBatchCanaryPanel />
   </>;
 }
