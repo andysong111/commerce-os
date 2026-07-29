@@ -4,6 +4,7 @@ import { ShoplingPriceAdjustmentInputPreview } from "@/components/shopling-price
 import { ShoplingPriceAdjustmentIndividualBulkEditor } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentIndividualBulkEditor";
 import { ShoplingPriceAdjustmentUnifiedCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentUnifiedCanaryPanel";
 import { ShoplingPriceAdjustmentBatchCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel";
+import { isShoplingPriceAdjustmentOperatorEmail } from "@/lib/shoplingPriceAdjustmentAuth";
 import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ export default async function ShoplingPriceAdjustmentRunnerPage() {
     redirect(
       "/login?error=login_required&next=%2Fshopling-price-adjustment-runner",
     );
+  }
+  if (!isShoplingPriceAdjustmentOperatorEmail(user.email)) {
+    redirect("/");
   }
 
   return <>

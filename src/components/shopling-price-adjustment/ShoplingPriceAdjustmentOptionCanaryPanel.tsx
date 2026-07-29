@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
 
 type PricePlanRow = {
   goods_key?: string;
@@ -99,7 +100,7 @@ export function ShoplingPriceAdjustmentOptionCanaryPanel() {
     setPlanLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(latest)}`, { cache: "no-store" });
+      const response = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(latest)}`, { cache: "no-store" });
       const body = await response.json() as PlanResponse;
       if (!response.ok || body.status === "error") throw new Error(body.message ?? `읽기 전용 결과 조회 실패 status=${response.status}`);
       setPlanResponse(body);
@@ -133,7 +134,7 @@ export function ShoplingPriceAdjustmentOptionCanaryPanel() {
     setCanaryRunning(true);
     setCanaryResponse(null);
     try {
-      const response = await fetch("/api/shopling-price-adjustment/option-canary/run", {
+      const response = await requestShoplingPriceAdjustmentApi("/api/shopling-price-adjustment/option-canary/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input }),
@@ -157,7 +158,7 @@ export function ShoplingPriceAdjustmentOptionCanaryPanel() {
     setCanaryFetching(true);
     setError("");
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/option-canary/result?request_id=${encodeURIComponent(canaryRequestId)}`, { cache: "no-store" });
+      const response = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/option-canary/result?request_id=${encodeURIComponent(canaryRequestId)}`, { cache: "no-store" });
       const body = await response.json() as OptionCanaryResponse;
       if (!response.ok || body.status === "error") throw new Error(body.message ?? `옵션 카나리 결과 조회 실패 status=${response.status}`);
       setCanaryResponse(body);

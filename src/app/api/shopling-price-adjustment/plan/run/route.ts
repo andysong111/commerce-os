@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { dispatchShoplingPriceAdjustmentPlan } from "@/lib/shoplingPriceAdjustmentPlanRunner";
+import { requireShoplingPriceAdjustmentOperator } from "@/lib/shoplingPriceAdjustmentAuth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const auth = await requireShoplingPriceAdjustmentOperator(request);
+  if (!auth.ok) return auth.response;
   let body: { rows?: unknown };
   try {
     body = await request.json();

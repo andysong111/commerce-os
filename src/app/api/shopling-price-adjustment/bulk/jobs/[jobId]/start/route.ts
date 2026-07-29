@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
+import { requireShoplingPriceAdjustmentAdmin } from "@/lib/shoplingPriceAdjustmentAuth";
+import { normalError, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
-  const auth = await normalSession();
-  if (auth.response) return auth.response;
+export async function POST(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  const auth = await requireShoplingPriceAdjustmentAdmin(request);
+  if (!auth.ok) return auth.response;
   const { jobId } = await params;
   const result = await auth.admin.rpc("start_shopling_price_adjustment_bulk_job", {
     p_job_id: jobId,

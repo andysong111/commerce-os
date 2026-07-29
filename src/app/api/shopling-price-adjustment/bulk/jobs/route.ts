@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { normalError, normalSession, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
+import { requireShoplingPriceAdjustmentAdmin } from "@/lib/shoplingPriceAdjustmentAuth";
+import { normalError, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { validateShoplingPriceAdjustmentBulkCreateInput } from "@/lib/shoplingPriceAdjustmentBulkServer";
 
 export async function POST(request: Request) {
-  const auth = await normalSession();
-  if (auth.response) return auth.response;
+  const auth = await requireShoplingPriceAdjustmentAdmin(request);
+  if (!auth.ok) return auth.response;
 
   let input;
   try { input = validateShoplingPriceAdjustmentBulkCreateInput(await request.json()); }
@@ -63,9 +64,9 @@ export async function POST(request: Request) {
   }, { status: 201 });
 }
 
-export async function GET() {
-  const auth = await normalSession();
-  if (auth.response) return auth.response;
+export async function GET(request: Request) {
+  const auth = await requireShoplingPriceAdjustmentAdmin(request);
+  if (!auth.ok) return auth.response;
   const [recent, active] = await Promise.all([
     auth.admin.from("shopling_price_adjustment_bulk_jobs")
       .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,chunk_size,total_chunk_count,last_error,created_at,updated_at,completed_at")
