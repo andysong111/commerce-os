@@ -5,6 +5,7 @@ import {
   calculateShoplingAdjustedPriceColumns,
   parseShoplingPriceAdjustmentFile,
   parseShoplingPriceAdjustmentPaste,
+  parseShoplingPriceAdjustmentRateBps,
   plannedShoplingPriceAdjustmentChunkCount,
   type ShoplingPriceAdjustmentInputResult,
   type ShoplingPriceAdjustmentRow,
@@ -59,9 +60,8 @@ export function ShoplingPriceAdjustmentInputPreview() {
   const sample = useMemo(() => {
     try {
       const current = Number(sampleSellPrice.replaceAll(",", ""));
-      const rate = parseShoplingPriceAdjustmentPaste(`sample ${sampleRate}`).rows[0];
-      if (!rate) throw new Error("조정률을 입력하세요.");
-      return { result: calculateShoplingAdjustedPriceColumns(current, rate.adjustmentBps), error: "" };
+      const adjustmentBps = parseShoplingPriceAdjustmentRateBps(sampleRate);
+      return { result: calculateShoplingAdjustedPriceColumns(current, adjustmentBps), error: "" };
     } catch (caught) {
       return { result: null, error: caught instanceof Error ? caught.message : "계산할 수 없습니다." };
     }
