@@ -16,14 +16,15 @@ import {
   parseShoplingPriceBulkPaste,
   type ShoplingPriceBulkInputResult,
 } from "@/lib/shoplingPriceModifyBulkInput";
+import {
+  parseStoredShoplingPriceAdjustmentBulkSelection,
+  SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+  stringifyShoplingPriceAdjustmentBulkSelection,
+  type ShoplingPriceAdjustmentBulkSelection,
+} from "@/lib/shoplingPriceAdjustmentBulkSelection";
 
 type InputMode = "uniform" | "individual";
-
-type Selection = {
-  label: string;
-  mode: InputMode;
-  result: ShoplingPriceAdjustmentInputResult;
-};
+type Selection = ShoplingPriceAdjustmentBulkSelection;
 
 type PricePlanRow = {
   goods_key?: string;
@@ -95,7 +96,6 @@ type CanaryResponse = {
 
 const PLAN_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentPlanRequestId";
 const CANARY_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentCanaryRequestId";
-const BULK_SELECTION_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkSelection";
 
 const directionLabel = (row: ShoplingPriceAdjustmentRow) =>
   row.direction === "increase" ? "인상" : row.direction === "decrease" ? "인하" : "변경 없음";
@@ -156,8 +156,11 @@ function buildCanaryInput(row: PricePlanRow) {
 export function ShoplingPriceAdjustmentInputPreview() {
   const [inputMode, setInputMode] = useState<InputMode>("uniform");
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [uniformGoodsInput, setUniformGoodsInput] = useState<ShoplingPriceBulkInputResult | null>(null);
+  const [uniformGoodsInput, setUniformGoodsInput] =
+    useState<ShoplingPriceBulkInputResult | null>(null);
   const [uniformRate, setUniformRate] = useState("10");
+  const [bulkSelectionStorageReady, setBulkSelectionStorageReady] =
+    useState(false);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
   const [sampleSellPrice, setSampleSellPrice] = useState("10003");
@@ -178,21 +181,50 @@ export function ShoplingPriceAdjustmentInputPreview() {
   );
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const restoredSelection =
+        parseStoredShoplingPriceAdjustmentBulkSelection(
+          localStorage.getItem(
+            SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+          ),
+        );
+      if (restoredSelection) {
+        setInputMode(restoredSelection.mode);
+        setSelection(restoredSelection);
+        if (restoredSelection.mode === "uniform") {
+          const { result } = restoredSelection;
+          setUniformGoodsInput({
+            source: result.source,
+            originalCount: result.originalCount,
+            goodsKeys: result.goodsKeys,
+            validCount: result.validCount,
+            duplicateCount: result.duplicateCount,
+            invalid: result.invalid,
+            invalidCount: result.invalidCount,
+          });
+          setUniformRate(
+            String((result.rows[0]?.adjustmentBps ?? 1000) / 100),
+          );
+        }
+      }
+      setBulkSelectionStorageReady(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!bulkSelectionStorageReady) return;
     if (!selection || selection.result.validCount === 0 || selection.result.invalidCount > 0) {
-      localStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+      localStorage.removeItem(
+        SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+      );
       return;
     }
-    localStorage.setItem(BULK_SELECTION_STORAGE_KEY, JSON.stringify({
-      source: selection.result.source,
-      originalCount: selection.result.originalCount,
-      duplicateCount: selection.result.duplicateCount,
-      invalidCount: selection.result.invalidCount,
-      rows: selection.result.rows.map((row) => ({
-        goodsKey: row.goodsKey,
-        adjustmentBps: row.adjustmentBps,
-      })),
-    }));
-  }, [selection]);
+    localStorage.setItem(
+      SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
+      stringifyShoplingPriceAdjustmentBulkSelection(selection),
+    );
+  }, [bulkSelectionStorageReady, selection]);
 
   const clearError = () => setError("");
 

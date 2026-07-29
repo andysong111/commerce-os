@@ -1,10 +1,21 @@
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { ShoplingPriceAdjustmentInputPreview } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview";
 import { ShoplingPriceAdjustmentIndividualBulkEditor } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentIndividualBulkEditor";
 import { ShoplingPriceAdjustmentUnifiedCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentUnifiedCanaryPanel";
 import { ShoplingPriceAdjustmentBatchCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
-export default function ShoplingPriceAdjustmentRunnerPage() {
+export const dynamic = "force-dynamic";
+
+export default async function ShoplingPriceAdjustmentRunnerPage() {
+  const { user } = await getOpsCurrentUser();
+  if (!user) {
+    redirect(
+      "/login?error=login_required&next=%2Fshopling-price-adjustment-runner",
+    );
+  }
+
   return <>
     <PageHeader
       title="샵플링 판매가 인상·인하 실행기"
