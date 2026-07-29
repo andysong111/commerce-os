@@ -1,319 +1,293 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parseShoplingPriceAdjustmentPaste } from "@/lib/shoplingPriceAdjustmentInput";
 
-type PlanRow = {
-  goods_key?: string;
-  adjustment_bps?: number;
-  current?: { sell_price?: number; option_amounts?: number[]; option_signature?: string };
-  target?: { sell_price?: number; option_amounts?: number[] };
-};
-
-type PlanResponse = {
-  status?: string;
-  message?: string;
-  requestId?: string;
-  githubActionsUrl?: string;
-  runUrl?: string;
-  summary?: {
-    status?: string;
-    goods_key_count?: number;
-    planned_goods_key_count?: number;
-    failed_goods_key_count?: number;
-    rows?: PlanRow[];
-    errors?: Array<{ goods_key?: string; error?: string }>;
-  };
-};
-
-type BatchResultRow = {
-  position?: number;
-  goods_key?: string;
-  status?: string;
-  requires_option_write?: boolean;
-  current?: { sell_price?: number; option_amounts?: number[] };
-  target?: { sell_price?: number; option_amounts?: number[] };
-  mall_api_success_count?: number;
-  mall_api_failure_count?: number;
-  product_readback_ok?: boolean;
-  option_target_verified?: boolean;
-  option_structure_preserved?: boolean;
-  error?: string;
-  message?: string;
-};
-
-type BatchSummary = {
-  status?: string;
-  requested_count?: number;
-  success_count?: number;
-  failed_count?: number;
-  not_executed_count?: number;
-  fail_stop_used?: boolean;
-  automatic_retry_used?: boolean;
-  max_items?: number;
-  rows?: BatchResultRow[];
-  error?: string;
-};
-
-type BatchResponse = {
-  status?: string;
-  message?: string;
-  requestId?: string;
-  githubActionsUrl?: string;
-  runUrl?: string;
-  summary?: BatchSummary;
-};
-
-const PLAN_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentPlanRequestId";
-const BATCH_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentBatchCanaryRequestId";
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
-const MAX_SERIAL_SIZE = 50;
+const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
+const MAX_BULK_SIZE = 10_000;
+const AUTO_INTERVAL_MS = 4_000;
 
-const won = (value: number | undefined) => Number.isFinite(value) ? `${Number(value).toLocaleString("ko-KR")}원` : "-";
-const amounts = (values: number[] | undefined) => Array.isArray(values) && values.length > 0 ? values.map((value) => value.toLocaleString("ko-KR")).join(", ") : "없음";
+type JobRow = {
+  id?: string;
+  status?: string;
+  valid_count?: number;
+  canary_size?: number;
+  chunk_size?: number;
+  total_chunk_count?: number;
+  last_error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  completed_at?: string | null;
+};
 
-function sameNumberArray(left: number[] | undefined, right: number[] | undefined) {
-  const a = Array.isArray(left) ? left : [];
-  const b = Array.isArray(right) ? right : [];
-  return a.length === b.length && a.every((value, index) => value === b[index]);
-}
+type ChunkRow = {
+  id?: string;
+  chunk_index?: number;
+  chunk_type?: string;
+  goods_key_count?: number;
+  status?: string;
+  last_error?: string | null;
+};
 
-function validPlanRow(row: PlanRow) {
-  return typeof row.goods_key === "string"
-    && /^\d+$/.test(row.goods_key)
-    && typeof row.adjustment_bps === "number"
-    && Number.isInteger(row.adjustment_bps)
-    && typeof row.current?.sell_price === "number"
-    && Number.isSafeInteger(row.current.sell_price)
-    && row.current.sell_price > 0
-    && typeof row.current?.option_signature === "string"
-    && /^[0-9a-f]{64}$/i.test(row.current.option_signature)
-    && typeof row.target?.sell_price === "number"
-    && Number.isSafeInteger(row.target.sell_price)
-    && row.target.sell_price > 0;
-}
+type JobDetail = {
+  job?: JobRow;
+  chunks?: ChunkRow[];
+  item_status_counts?: Record<string, number>;
+  chunk_status_counts?: Record<string, number>;
+  current_chunk?: ChunkRow | null;
+  error?: string;
+};
 
-function buildBatchInput(rows: PlanRow[]) {
-  if (rows.length === 0 || rows.length > MAX_SERIAL_SIZE) {
-    throw new Error(`실제 가격 변경은 한 번에 1~${MAX_SERIAL_SIZE}개 상품만 실행할 수 있습니다.`);
-  }
-  return rows.map((row) => {
-    if (!validPlanRow(row)) throw new Error(`읽기 전용 계획에 실행할 수 없는 상품이 있습니다: ${row.goods_key ?? "-"}`);
-    return {
-      goods_key: row.goods_key!,
-      adjustment_bps: row.adjustment_bps!,
-      expected_current_sell_price: row.current!.sell_price!,
-      expected_option_signature: row.current!.option_signature!,
-      requires_option_write: !sameNumberArray(row.current?.option_amounts, row.target?.option_amounts),
-    };
-  });
-}
+type AdvanceResponse = {
+  status?: string;
+  jobStatus?: string;
+  chunkIndex?: number;
+  message?: string;
+  error?: string;
+};
 
-function readCurrentIndividualRows() {
+function getCurrentRows() {
   const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${INPUT_TEXTAREA_LABEL}"]`);
   if (!textarea) throw new Error("위 입력 영역에서 개별 설정을 선택하고 상품 목록을 반영하세요.");
   const parsed = parseShoplingPriceAdjustmentPaste(textarea.value);
-  if (parsed.invalidCount > 0) throw new Error(`잘못된 입력 ${parsed.invalidCount}개를 먼저 수정하세요.`);
   if (parsed.validCount === 0) throw new Error("실행할 goods_key와 조정률을 입력하세요.");
-  if (parsed.validCount > MAX_SERIAL_SIZE) throw new Error(`현재 실사용 단계는 한 번에 최대 ${MAX_SERIAL_SIZE}개입니다. 첫 ${MAX_SERIAL_SIZE}개 이하로 나눠 실행하세요.`);
-  return parsed.rows.map((row) => ({ goods_key: row.goodsKey, adjustment_bps: row.adjustmentBps }));
+  if (parsed.invalidCount > 0) throw new Error(`잘못된 입력 ${parsed.invalidCount}개를 먼저 수정하세요.`);
+  if (parsed.validCount > MAX_BULK_SIZE) throw new Error(`최대 ${MAX_BULK_SIZE.toLocaleString("ko-KR")}개까지 실행할 수 있습니다.`);
+  return parsed;
+}
+
+function isTerminal(status: string | undefined) {
+  return ["succeeded", "failed", "dispatch_uncertain", "cancelled"].includes(status ?? "");
+}
+
+function labelStatus(status: string | undefined) {
+  const labels: Record<string, string> = {
+    prepared: "실행 대기",
+    running: "자동 진행 중",
+    paused: "일시중지",
+    succeeded: "완료",
+    failed: "실패",
+    dispatch_uncertain: "전송상태 확인 필요",
+    cancelled: "취소",
+    pending: "대기",
+    planning: "현재가·옵션 조회 중",
+    ready: "가격 변경 준비 완료",
+    executing: "실제 가격 변경 중",
+  };
+  return labels[status ?? ""] ?? status ?? "-";
 }
 
 export function ShoplingPriceAdjustmentBatchCanaryPanel() {
-  const [planRunning, setPlanRunning] = useState(false);
-  const [planFetching, setPlanFetching] = useState(false);
-  const [planRequestId, setPlanRequestId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(PLAN_REQUEST_STORAGE_KEY) ?? "");
-  const [planResponse, setPlanResponse] = useState<PlanResponse | null>(null);
-  const [batchRunning, setBatchRunning] = useState(false);
-  const [batchFetching, setBatchFetching] = useState(false);
-  const [batchRequestId, setBatchRequestId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(BATCH_REQUEST_STORAGE_KEY) ?? "");
-  const [batchResponse, setBatchResponse] = useState<BatchResponse | null>(null);
+  const [jobId, setJobId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(JOB_STORAGE_KEY) ?? "");
+  const [detail, setDetail] = useState<JobDetail | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [pausing, setPausing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const tickingRef = useRef(false);
 
-  const planRows = useMemo(() => {
-    if (planResponse?.summary?.status !== "success") return [];
-    const errors = Array.isArray(planResponse.summary.errors) ? planResponse.summary.errors : [];
-    if (errors.length > 0) return [];
-    const rows = Array.isArray(planResponse.summary.rows) ? planResponse.summary.rows : [];
-    return rows.filter(validPlanRow).slice(0, MAX_SERIAL_SIZE);
-  }, [planResponse]);
-  const serialReady = planRows.length > 0 && planRows.length <= MAX_SERIAL_SIZE;
+  const loadDetail = useCallback(async (targetJobId = jobId) => {
+    if (!targetJobId) return null;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(targetJobId)}`, { cache: "no-store" });
+      const body = await response.json() as JobDetail;
+      if (!response.ok || body.error) throw new Error(body.error ?? `작업 조회 실패 status=${response.status}`);
+      setDetail(body);
+      if (isTerminal(body.job?.status) || body.job?.status === "paused") setAutoRunning(false);
+      return body;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "작업 상태를 조회하지 못했습니다.");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
 
-  const runPlan = async () => {
-    if (planRunning) return;
+  useEffect(() => {
+    if (jobId) void loadDetail(jobId);
+  }, [jobId, loadDetail]);
+
+  const createAndStart = async () => {
+    if (creating) return;
     setError("");
-    let rows;
-    try { rows = readCurrentIndividualRows(); }
+    setMessage("");
+    let parsed;
+    try { parsed = getCurrentRows(); }
     catch (caught) {
       setError(caught instanceof Error ? caught.message : "현재 입력을 읽을 수 없습니다.");
       return;
     }
+    const totalChunks = 1 + Math.ceil(Math.max(parsed.validCount - 10, 0) / 50);
     if (!window.confirm(
-      `${rows.length}개 상품의 현재 판매가와 옵션 추가금을 공식 API로 조회합니다.\n` +
-      "이 단계에서는 가격을 변경하지 않습니다. 계속하시겠습니까?",
+      `${parsed.validCount.toLocaleString("ko-KR")}개 상품의 가격을 Bulk 작업으로 저장하고 실행합니다.\n\n` +
+      `첫 시험: ${Math.min(10, parsed.validCount)}개\n` +
+      `이후 청크: 최대 50개씩\n` +
+      `총 청크: ${totalChunks.toLocaleString("ko-KR")}개\n\n` +
+      "각 청크는 현재가·옵션 조회 후 실제 가격을 한 상품씩 직렬 변경합니다. 첫 실패 시 전체 자동 진행을 중단합니다.",
     )) return;
-    setPlanRunning(true);
-    setPlanResponse(null);
-    setBatchResponse(null);
-    setBatchRequestId("");
-    localStorage.removeItem(BATCH_REQUEST_STORAGE_KEY);
+
+    setCreating(true);
     try {
-      const response = await fetch("/api/shopling-price-adjustment/plan/run", {
+      const createResponse = await fetch("/api/shopling-price-adjustment/bulk/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rows }),
+        body: JSON.stringify({
+          inputSource: parsed.source,
+          rows: parsed.rows.map((row) => ({ goodsKey: row.goodsKey, adjustmentBps: row.adjustmentBps })),
+          originalCount: parsed.originalCount,
+          duplicateCount: parsed.duplicateCount,
+          invalidCount: parsed.invalidCount,
+        }),
       });
-      const body = await response.json() as PlanResponse;
-      if (!response.ok || body.status === "error") throw new Error(body.message ?? `읽기 전용 계획 요청 실패 status=${response.status}`);
-      const requestId = body.requestId ?? "";
-      if (!requestId) throw new Error("읽기 전용 계획 요청 추적 ID가 없습니다.");
-      setPlanRequestId(requestId);
-      localStorage.setItem(PLAN_REQUEST_STORAGE_KEY, requestId);
-      setPlanResponse(body);
+      const created = await createResponse.json() as { id?: string; error?: string };
+      if (!createResponse.ok || !created.id) throw new Error(created.error ?? `Bulk 작업 저장 실패 status=${createResponse.status}`);
+      const id = created.id;
+      setJobId(id);
+      localStorage.setItem(JOB_STORAGE_KEY, id);
+
+      const startResponse = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(id)}/start`, { method: "POST" });
+      const started = await startResponse.json() as { error?: string };
+      if (!startResponse.ok) throw new Error(started.error ?? `Bulk 작업 시작 실패 status=${startResponse.status}`);
+      setMessage(`${parsed.validCount.toLocaleString("ko-KR")}개 상품의 Bulk 자동 진행을 시작했습니다.`);
+      setAutoRunning(true);
+      await loadDetail(id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "읽기 전용 계획 요청 중 오류가 발생했습니다.");
+      setError(caught instanceof Error ? caught.message : "Bulk 작업을 시작하지 못했습니다.");
     } finally {
-      setPlanRunning(false);
+      setCreating(false);
     }
   };
 
-  const fetchPlan = async () => {
-    if (!planRequestId || planFetching) return;
-    setPlanFetching(true);
+  const advanceOnce = useCallback(async () => {
+    if (!jobId || tickingRef.current) return;
+    tickingRef.current = true;
+    try {
+      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/advance`, { method: "POST" });
+      const body = await response.json() as AdvanceResponse;
+      if (!response.ok || body.error) throw new Error(body.error ?? body.message ?? `자동 진행 실패 status=${response.status}`);
+      if (body.message) setMessage(body.message);
+      const next = await loadDetail(jobId);
+      if (isTerminal(next?.job?.status) || next?.job?.status === "paused") setAutoRunning(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "자동 진행 중 오류가 발생했습니다.");
+      setAutoRunning(false);
+    } finally {
+      tickingRef.current = false;
+    }
+  }, [jobId, loadDetail]);
+
+  useEffect(() => {
+    if (!autoRunning || !jobId) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const loop = async () => {
+      if (cancelled) return;
+      await advanceOnce();
+      if (!cancelled) timer = setTimeout(loop, AUTO_INTERVAL_MS);
+    };
+    void loop();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [advanceOnce, autoRunning, jobId]);
+
+  const resume = async () => {
+    if (!jobId) return;
+    setError("");
+    if (detail?.job?.status === "paused" || detail?.job?.status === "prepared") {
+      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/start`, { method: "POST" });
+      const body = await response.json() as { error?: string };
+      if (!response.ok) {
+        setError(body.error ?? `재개 실패 status=${response.status}`);
+        return;
+      }
+    }
+    setMessage("Bulk 자동 진행을 재개했습니다.");
+    setAutoRunning(true);
+  };
+
+  const pause = async () => {
+    if (!jobId || pausing) return;
+    setPausing(true);
     setError("");
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(planRequestId)}`, { cache: "no-store" });
-      const body = await response.json() as PlanResponse;
-      if (!response.ok || body.status === "error") throw new Error(body.message ?? `읽기 전용 결과 조회 실패 status=${response.status}`);
-      setPlanResponse(body);
+      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/pause`, { method: "POST" });
+      const body = await response.json() as { error?: string; message?: string };
+      if (!response.ok) throw new Error(body.error ?? `일시중지 실패 status=${response.status}`);
+      setMessage(body.message ?? "현재 진행 단계가 끝난 뒤 일시중지합니다.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "읽기 전용 결과를 가져오지 못했습니다.");
+      setError(caught instanceof Error ? caught.message : "일시중지를 요청하지 못했습니다.");
     } finally {
-      setPlanFetching(false);
+      setPausing(false);
     }
   };
 
-  const runBatch = async () => {
-    if (!serialReady || batchRunning) return;
+  const clearJob = () => {
+    setAutoRunning(false);
+    setJobId("");
+    setDetail(null);
+    setMessage("");
     setError("");
-    let input;
-    try { input = buildBatchInput(planRows); }
-    catch (caught) {
-      setError(caught instanceof Error ? caught.message : "가격 직렬 실행 입력이 올바르지 않습니다.");
-      return;
-    }
-    const optionCount = input.filter((row) => row.requires_option_write).length;
-    if (!window.confirm(
-      `샵플링 상품 ${input.length}개의 가격을 실제로 순차 변경합니다.\n\n` +
-      `기본가격 전용: ${input.length - optionCount}개\n` +
-      `옵션 추가금 포함: ${optionCount}개\n` +
-      "각 상품마다 기본가격과 24개 쇼핑몰 가격을 반영합니다.\n\n" +
-      "자동 재시도는 없으며 첫 실패 시 남은 상품은 실행하지 않습니다. 계속하시겠습니까?",
-    )) return;
-    setBatchRunning(true);
-    setBatchResponse(null);
-    try {
-      const response = await fetch("/api/shopling-price-adjustment/batch-canary/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ input }),
-      });
-      const body = await response.json() as BatchResponse;
-      if (!response.ok || body.status === "error") throw new Error(body.message ?? `실제 가격 직렬 실행 요청 실패 status=${response.status}`);
-      const requestId = body.requestId ?? "";
-      if (!requestId) throw new Error("가격 직렬 실행 요청 추적 ID가 없습니다.");
-      setBatchRequestId(requestId);
-      localStorage.setItem(BATCH_REQUEST_STORAGE_KEY, requestId);
-      setBatchResponse(body);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "가격 직렬 실행 요청 중 오류가 발생했습니다.");
-    } finally {
-      setBatchRunning(false);
-    }
+    localStorage.removeItem(JOB_STORAGE_KEY);
   };
 
-  const fetchBatchResult = async () => {
-    if (!batchRequestId || batchFetching) return;
-    setBatchFetching(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/shopling-price-adjustment/batch-canary/result?request_id=${encodeURIComponent(batchRequestId)}`, { cache: "no-store" });
-      const body = await response.json() as BatchResponse;
-      if (!response.ok || body.status === "error") throw new Error(body.message ?? `가격 직렬 실행 결과 조회 실패 status=${response.status}`);
-      setBatchResponse(body);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "가격 직렬 실행 결과를 가져오지 못했습니다.");
-    } finally {
-      setBatchFetching(false);
-    }
-  };
+  const job = detail?.job;
+  const counts = detail?.item_status_counts ?? {};
+  const succeeded = counts.succeeded ?? 0;
+  const total = job?.valid_count ?? 0;
+  const progress = total > 0 ? Math.min(100, Math.round((succeeded / total) * 10_000) / 100) : 0;
+  const chunks = Array.isArray(detail?.chunks) ? detail!.chunks! : [];
+  const succeededChunks = chunks.filter((chunk) => chunk.status === "succeeded").length;
 
   return <section className="mt-8 rounded-2xl border-2 border-fuchsia-300 bg-white p-6 shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h2 className="text-xl font-bold text-slate-950">최대 50개 실제 가격 변경</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">위 개별 설정 입력칸의 1~50개 상품을 조회한 뒤 한 개씩 직렬 실행합니다. 옵션 추가금 변경 여부는 자동으로 판단하며 첫 실패 시 즉시 중단합니다.</p>
+        <h2 className="text-xl font-bold text-slate-950">최대 10,000개 Bulk 실제 가격 변경</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">위 개별 설정의 goods_key·조정률을 작업으로 저장한 뒤 첫 10개 시험, 이후 50개 청크로 자동 진행합니다. 옵션 추가금 변경 여부는 자동 판단합니다.</p>
       </div>
-      <span className="rounded-full bg-fuchsia-100 px-3 py-1 text-sm font-bold text-fuchsia-900">실사용 MVP</span>
+      <span className="rounded-full bg-fuchsia-100 px-3 py-1 text-sm font-bold text-fuchsia-900">1만개 Bulk</span>
     </div>
 
     <div className="mt-5 flex flex-wrap gap-3">
-      <button type="button" disabled={planRunning} onClick={() => void runPlan()} className="rounded-lg bg-indigo-700 px-4 py-3 font-bold text-white disabled:opacity-50">{planRunning ? "계획 조회 요청 중..." : "현재 입력 1~50개 계획 조회"}</button>
-      <button type="button" disabled={!planRequestId || planFetching} onClick={() => void fetchPlan()} className="rounded-lg bg-slate-800 px-4 py-3 font-bold text-white disabled:opacity-50">{planFetching ? "계획 확인 중..." : "계획 결과 가져오기"}</button>
-      <button type="button" disabled={!serialReady || batchRunning || batchResponse?.summary?.status === "success"} onClick={() => void runBatch()} className="rounded-lg bg-red-700 px-4 py-3 font-bold text-white disabled:opacity-50">{batchRunning ? "실제 변경 요청 중..." : `조회된 ${planRows.length}개 실제 가격 변경`}</button>
-      <button type="button" disabled={!batchRequestId || batchFetching} onClick={() => void fetchBatchResult()} className="rounded-lg bg-slate-950 px-4 py-3 font-bold text-white disabled:opacity-50">{batchFetching ? "결과 확인 중..." : "실제 변경 결과 가져오기"}</button>
+      <button type="button" disabled={creating || autoRunning} onClick={() => void createAndStart()} className="rounded-lg bg-fuchsia-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : "현재 입력으로 Bulk 작업 시작"}</button>
+      <button type="button" disabled={!jobId || autoRunning || isTerminal(job?.status)} onClick={() => void resume()} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">자동 진행 재개</button>
+      <button type="button" disabled={!jobId || job?.status !== "running" || pausing} onClick={() => void pause()} className="rounded-lg bg-amber-600 px-4 py-3 font-bold text-white disabled:opacity-50">{pausing ? "중지 요청 중..." : "현재 단계 후 일시중지"}</button>
+      <button type="button" disabled={!jobId || loading} onClick={() => void loadDetail()} className="rounded-lg bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-50">{loading ? "조회 중..." : "상태 새로고침"}</button>
+      <button type="button" disabled={autoRunning} onClick={clearJob} className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-bold text-slate-700 disabled:opacity-50">새 작업 준비</button>
     </div>
 
-    {planRequestId && <p className="mt-4 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">plan_request_id: {planRequestId}</p>}
-    {batchRequestId && <p className="mt-3 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">serial_request_id: {batchRequestId}</p>}
-    {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">{error}</p>}
-    {planResponse?.message && <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm font-semibold text-blue-900">{planResponse.message}</p>}
-    {batchResponse?.message && <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm font-semibold text-blue-900">{batchResponse.message}</p>}
-    {planResponse && !serialReady && <p className="mt-4 rounded-lg bg-amber-50 p-4 text-sm font-semibold text-amber-900">읽기 전용 계획이 완전히 성공하지 않았습니다. 실패 상품이나 옵션 구조 오류를 확인하고 새 계획을 조회하세요.</p>}
+    {jobId && <p className="mt-4 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">job_id: {jobId}</p>}
+    {message && <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">{message}</p>}
+    {error && <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">{error}</p>}
 
-    {serialReady && <div className="mt-5 overflow-x-auto rounded-xl border border-fuchsia-200">
-      <table className="w-full min-w-[760px] text-left text-sm">
-        <thead><tr className="bg-fuchsia-50"><th className="p-2">순번</th><th className="p-2">goods_key</th><th className="p-2">조정률</th><th className="p-2">판매가</th><th className="p-2">옵션 추가금</th><th className="p-2">실행 모드</th></tr></thead>
-        <tbody>{planRows.map((row, index) => {
-          const optionWrite = !sameNumberArray(row.current?.option_amounts, row.target?.option_amounts);
-          return <tr className="border-t" key={row.goods_key}><td className="p-2">{index + 1}</td><td className="p-2 font-mono">{row.goods_key}</td><td className="p-2">{Number(row.adjustment_bps ?? 0) / 100}%</td><td className="p-2">{won(row.current?.sell_price)} → <strong>{won(row.target?.sell_price)}</strong></td><td className="p-2">{amounts(row.current?.option_amounts)} → {amounts(row.target?.option_amounts)}</td><td className="p-2 font-bold">{optionWrite ? "기본+옵션" : "기본가격"}</td></tr>;
-        })}</tbody>
-      </table>
+    {job && <div className="mt-5 rounded-xl border border-fuchsia-200 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-bold text-fuchsia-950">Bulk 작업 진행상황</h3>
+        <span className={`rounded-full px-3 py-1 text-sm font-bold ${job.status === "succeeded" ? "bg-emerald-100 text-emerald-900" : job.status === "failed" || job.status === "dispatch_uncertain" ? "bg-red-100 text-red-900" : "bg-blue-100 text-blue-900"}`}>{labelStatus(job.status)}</span>
+      </div>
+      <div className="mt-4 h-4 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} /></div>
+      <p className="mt-2 text-sm font-semibold text-slate-700">{succeeded.toLocaleString("ko-KR")} / {total.toLocaleString("ko-KR")}개 완료 · {progress.toLocaleString("ko-KR")}%</p>
+      <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Cell label="전체 상품" value={total.toLocaleString("ko-KR")} />
+        <Cell label="성공" value={succeeded.toLocaleString("ko-KR")} />
+        <Cell label="실패" value={(counts.failed ?? 0).toLocaleString("ko-KR")} />
+        <Cell label="미실행" value={(counts.not_executed ?? 0).toLocaleString("ko-KR")} />
+        <Cell label="완료 청크" value={`${succeededChunks.toLocaleString("ko-KR")} / ${(job.total_chunk_count ?? 0).toLocaleString("ko-KR")}`} />
+        <Cell label="현재 단계" value={labelStatus(detail?.current_chunk?.status ?? job.status)} />
+      </dl>
+      {detail?.current_chunk && <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm">현재 청크 #{Number(detail.current_chunk.chunk_index ?? 0).toLocaleString("ko-KR")} · {Number(detail.current_chunk.goods_key_count ?? 0).toLocaleString("ko-KR")}개 · {labelStatus(detail.current_chunk.status)}</p>}
+      {job.last_error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-900">{job.last_error}</p>}
+      {autoRunning && <p className="mt-4 font-bold text-blue-800">브라우저가 자동으로 다음 단계를 진행하고 있습니다. 탭을 닫아도 작업 상태는 저장되며 다시 열어 재개할 수 있습니다.</p>}
+      {job.status === "succeeded" && <p className="mt-4 font-bold text-emerald-900">전체 가격 변경이 완료됐습니다. 같은 goods_key 목록을 다시 실행하지 마세요.</p>}
     </div>}
-
-    {planResponse?.githubActionsUrl && <a href={planResponse.githubActionsUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-semibold text-blue-700 underline">계획 GitHub Actions 열기</a>}
-    {planResponse?.runUrl && <a href={planResponse.runUrl} target="_blank" rel="noreferrer" className="ml-4 mt-3 inline-block text-sm font-semibold text-blue-700 underline">계획 완료 실행 열기</a>}
-    {batchResponse?.githubActionsUrl && <a href={batchResponse.githubActionsUrl} target="_blank" rel="noreferrer" className="ml-4 mt-3 inline-block text-sm font-semibold text-blue-700 underline">가격 실행 GitHub Actions 열기</a>}
-    {batchResponse?.runUrl && <a href={batchResponse.runUrl} target="_blank" rel="noreferrer" className="ml-4 mt-3 inline-block text-sm font-semibold text-blue-700 underline">가격 실행 완료 열기</a>}
-    {batchResponse?.summary && <BatchResult summary={batchResponse.summary} />}
   </section>;
 }
 
-function BatchResult({ summary }: { summary: BatchSummary }) {
-  const success = summary.status === "success";
-  const rows = Array.isArray(summary.rows) ? summary.rows : [];
-  return <div className={`mt-5 rounded-xl border p-5 ${success ? "border-emerald-300 bg-emerald-50" : "border-red-300 bg-red-50"}`}>
-    <h3 className="font-bold">실제 가격 직렬 실행 결과</h3>
-    <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      <Cell label="상태" value={summary.status ?? "-"} />
-      <Cell label="요청" value={String(summary.requested_count ?? 0)} />
-      <Cell label="성공" value={String(summary.success_count ?? 0)} />
-      <Cell label="실패" value={String(summary.failed_count ?? 0)} />
-      <Cell label="미실행" value={String(summary.not_executed_count ?? 0)} />
-      <Cell label="자동 재시도" value={summary.automatic_retry_used ? "사용" : "없음"} />
-    </dl>
-    <div className="mt-5 overflow-x-auto rounded-lg border bg-white">
-      <table className="w-full min-w-[900px] text-left text-sm">
-        <thead><tr className="bg-slate-50"><th className="p-2">순번</th><th className="p-2">goods_key</th><th className="p-2">모드</th><th className="p-2">상태</th><th className="p-2">판매가</th><th className="p-2">쇼핑몰 성공/실패</th><th className="p-2">재조회</th><th className="p-2">메시지</th></tr></thead>
-        <tbody>{rows.map((row, index) => <tr className="border-t" key={`${row.goods_key ?? "row"}-${index}`}><td className="p-2">{row.position ?? index + 1}</td><td className="p-2 font-mono">{row.goods_key ?? "-"}</td><td className="p-2">{row.requires_option_write ? "기본+옵션" : "기본가격"}</td><td className="p-2 font-bold">{row.status ?? "-"}</td><td className="p-2">{won(row.current?.sell_price)} → {won(row.target?.sell_price)}</td><td className="p-2">{row.mall_api_success_count ?? 0} / {row.mall_api_failure_count ?? 0}</td><td className="p-2">{row.status === "not_executed" ? "미실행" : row.product_readback_ok ? "일치" : "불일치"}</td><td className="p-2">{row.error ?? row.message ?? "-"}</td></tr>)}</tbody>
-      </table>
-    </div>
-    {summary.error && <p className="mt-4 rounded-lg bg-white p-3 text-sm font-semibold text-red-900">{summary.error}</p>}
-    {success && <p className="mt-4 font-bold text-emerald-900">요청한 상품의 직렬 실제 변경을 완료했습니다. 같은 계획은 다시 실행하지 마세요.</p>}
-    {!success && summary.fail_stop_used && <p className="mt-4 font-bold text-red-900">첫 실패에서 실행을 중단했습니다. 성공 상품은 유지하고 실패 원인을 확인한 뒤 새 계획으로 진행해야 합니다.</p>}
-  </div>;
-}
-
 function Cell({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg bg-white p-3"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-all font-bold text-slate-950">{value}</dd></div>;
+  return <div className="rounded-lg bg-slate-50 p-3"><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-all font-bold text-slate-950">{value}</dd></div>;
 }
