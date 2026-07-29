@@ -10,29 +10,25 @@ import {
   type ShoplingPriceAdjustmentInputResult,
   type ShoplingPriceAdjustmentRow,
 } from "@/lib/shoplingPriceAdjustmentInput";
+import {
+  parseShoplingPriceBulkFile,
+  parseShoplingPriceBulkPaste,
+  type ShoplingPriceBulkInputResult,
+} from "@/lib/shoplingPriceModifyBulkInput";
+
+type InputMode = "uniform" | "individual";
 
 type Selection = {
   label: string;
+  mode: InputMode;
   result: ShoplingPriceAdjustmentInputResult;
 };
 
 type PricePlanRow = {
   goods_key?: string;
   adjustment_bps?: number;
-  current?: {
-    sell_price?: number;
-    consumer_price?: number;
-    purchase_price?: number;
-    option_amounts?: number[];
-    option_signature?: string;
-  };
-  target?: {
-    sell_price?: number;
-    consumer_price?: number;
-    purchase_price?: number;
-    option_amounts?: number[];
-    option_signature?: string;
-  };
+  current?: { sell_price?: number; consumer_price?: number; purchase_price?: number; option_amounts?: number[]; option_signature?: string };
+  target?: { sell_price?: number; consumer_price?: number; purchase_price?: number; option_amounts?: number[]; option_signature?: string };
   option_combination_count?: number;
   mall_row_count?: number;
 };
@@ -59,16 +55,32 @@ type PlanResponse = {
 
 const PLAN_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentPlanRequestId";
 
-const directionLabel = (row: ShoplingPriceAdjustmentRow) => {
-  if (row.direction === "increase") return "인상";
-  if (row.direction === "decrease") return "인하";
-  return "변경 없음";
-};
-
+const directionLabel = (row: ShoplingPriceAdjustmentRow) => row.direction === "increase" ? "인상" : row.direction === "decrease" ? "인하" : "변경 없음";
 const won = (value: number | undefined) => Number.isFinite(value) ? `${Number(value).toLocaleString("ko-KR")}원` : "-";
 
+function buildUniformAdjustmentResult(goodsInput: ShoplingPriceBulkInputResult, rateText: string): ShoplingPriceAdjustmentInputResult {
+  const adjustmentBps = parseShoplingPriceAdjustmentRateBps(rateText);
+  const template = parseShoplingPriceAdjustmentPaste(`1 ${rateText}`).rows[0];
+  if (!template) throw new Error("공통 인상·인하율을 입력하세요.");
+  const rows = goodsInput.goodsKeys.map((goodsKey) => ({ ...template, goodsKey, adjustmentBps }));
+  return {
+    source: goodsInput.source,
+    originalCount: goodsInput.originalCount,
+    rows,
+    goodsKeys: goodsInput.goodsKeys,
+    validCount: rows.length,
+    duplicateCount: goodsInput.duplicateCount,
+    conflictCount: 0,
+    invalid: goodsInput.invalid,
+    invalidCount: goodsInput.invalidCount,
+  };
+}
+
 export function ShoplingPriceAdjustmentInputPreview() {
+  const [inputMode, setInputMode] = useState<InputMode>("uniform");
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [uniformGoodsInput, setUniformGoodsInput] = useState<ShoplingPriceBulkInputResult | null>(null);
+  const [uniformRate, setUniformRate] = useState("10");
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
   const [sampleSellPrice, setSampleSellPrice] = useState("10003");
@@ -79,9 +91,27 @@ export function ShoplingPriceAdjustmentInputPreview() {
   const [planRequestId, setPlanRequestId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(PLAN_REQUEST_STORAGE_KEY) ?? "");
 
   const clearError = () => setError("");
+  const clearPlan = () => {
+    setPlanResponse(null);
+    setPlanRequestId("");
+    if (typeof window !== "undefined") localStorage.removeItem(PLAN_REQUEST_STORAGE_KEY);
+  };
   const applySelection = (next: Selection) => {
     setSelection(next);
-    setPlanResponse(null);
+    clearPlan();
+  };
+
+  const changeMode = (mode: InputMode) => {
+    setInputMode(mode);
+    setSelection(null);
+    setUniformGoodsInput(null);
+    clearError();
+    clearPlan();
+  };
+
+  const applyUniformGoods = (goodsInput: ShoplingPriceBulkInputResult, label: string, rateText = uniformRate) => {
+    setUniformGoodsInput(goodsInput);
+    applySelection({ label, mode: "uniform", result: buildUniformAdjustmentResult(goodsInput, rateText) });
   };
 
   const onFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -90,8 +120,11 @@ export function ShoplingPriceAdjustmentInputPreview() {
     setReading(true);
     clearError();
     try {
-      const result = await parseShoplingPriceAdjustmentFile(file);
-      applySelection({ label: file.name, result });
+      if (inputMode === "uniform") {
+        applyUniformGoods(await parseShoplingPriceBulkFile(file), `${file.name} · 일괄 동일률`);
+      } else {
+        applySelection({ label: `${file.name} · 상품별 개별률`, mode: "individual", result: await parseShoplingPriceAdjustmentFile(file) });
+      }
     } catch (caught) {
       setSelection(null);
       setError(caught instanceof Error ? caught.message : "파일을 읽을 수 없습니다.");
@@ -100,10 +133,32 @@ export function ShoplingPriceAdjustmentInputPreview() {
     }
   };
 
-  const onPaste = (value: string) => {
+  const onUniformPaste = (value: string) => {
     clearError();
     try {
-      applySelection({ label: "직접 붙여넣기", result: parseShoplingPriceAdjustmentPaste(value) });
+      applyUniformGoods(parseShoplingPriceBulkPaste(value), "직접 붙여넣기 · 일괄 동일률");
+    } catch (caught) {
+      setSelection(null);
+      setError(caught instanceof Error ? caught.message : "상품번호를 검사할 수 없습니다.");
+    }
+  };
+
+  const onUniformRate = (value: string) => {
+    setUniformRate(value);
+    clearError();
+    if (!uniformGoodsInput) return;
+    try {
+      applySelection({ label: "직접 입력 · 일괄 동일률", mode: "uniform", result: buildUniformAdjustmentResult(uniformGoodsInput, value) });
+    } catch (caught) {
+      setSelection(null);
+      setError(caught instanceof Error ? caught.message : "공통 조정률을 검사할 수 없습니다.");
+    }
+  };
+
+  const onIndividualPaste = (value: string) => {
+    clearError();
+    try {
+      applySelection({ label: "직접 붙여넣기 · 상품별 개별률", mode: "individual", result: parseShoplingPriceAdjustmentPaste(value) });
     } catch (caught) {
       setSelection(null);
       setError(caught instanceof Error ? caught.message : "입력값을 검사할 수 없습니다.");
@@ -113,8 +168,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
   const sample = useMemo(() => {
     try {
       const current = Number(sampleSellPrice.replaceAll(",", ""));
-      const adjustmentBps = parseShoplingPriceAdjustmentRateBps(sampleRate);
-      return { result: calculateShoplingAdjustedPriceColumns(current, adjustmentBps), error: "" };
+      return { result: calculateShoplingAdjustedPriceColumns(current, parseShoplingPriceAdjustmentRateBps(sampleRate)), error: "" };
     } catch (caught) {
       return { result: null, error: caught instanceof Error ? caught.message : "계산할 수 없습니다." };
     }
@@ -123,19 +177,12 @@ export function ShoplingPriceAdjustmentInputPreview() {
   const runReadonlyPlan = async () => {
     if (!selection || planRunning || selection.result.validCount === 0) return;
     const canaryRows = selection.result.rows.slice(0, 10).map((row) => ({ goods_key: row.goodsKey, adjustment_bps: row.adjustmentBps }));
-    if (!window.confirm(
-      `첫 ${canaryRows.length}개 상품의 현재 판매가와 옵션 추가금을 샵플링 공식 조회 API로 읽습니다.\n` +
-      "가격 수정 API는 호출하지 않습니다. 계속하시겠습니까?",
-    )) return;
+    if (!window.confirm(`첫 ${canaryRows.length}개 상품의 현재 판매가와 옵션 추가금을 샵플링 공식 조회 API로 읽습니다.\n가격 수정 API는 호출하지 않습니다. 계속하시겠습니까?`)) return;
     setPlanRunning(true);
     setPlanResponse(null);
     clearError();
     try {
-      const response = await fetch("/api/shopling-price-adjustment/plan/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ rows: canaryRows }),
-      });
+      const response = await fetch("/api/shopling-price-adjustment/plan/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rows: canaryRows }) });
       const body = await response.json() as PlanResponse;
       if (!response.ok || body.status === "error") throw new Error(body.message ?? `읽기 전용 계획 요청 실패 status=${response.status}`);
       const requestId = body.requestId ?? "";
@@ -169,56 +216,37 @@ export function ShoplingPriceAdjustmentInputPreview() {
   return <div className="space-y-8">
     <section className="rounded-2xl border border-blue-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-slate-950">대량 goods_key · 인상/인하율 입력</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            상품별로 서로 다른 인상률·인하율을 최대 20,000개까지 준비합니다. 첫 조회 카나리는 10개, 이후 대량 실행은 최대 50개 직렬 청크 구조로 연결합니다.
-          </p>
-        </div>
+        <div><h2 className="text-xl font-bold text-slate-950">대량 goods_key · 인상/인하율 입력</h2><p className="mt-2 text-sm leading-6 text-slate-600">일괄 동일률 또는 상품별 개별률 중 하나를 선택합니다. 최대 20,000개까지 준비하고 첫 10개를 조회 카나리로 확인합니다.</p></div>
         <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-900">가격 쓰기 차단</span>
       </div>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-2">
-        <div className="rounded-xl border p-4">
-          <h3 className="font-bold">CSV·XLSX 업로드</h3>
-          <input aria-label="가격 조정 파일 업로드" type="file" accept=".csv,.xlsx" onChange={onFile} className="mt-3 block w-full" />
-          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-6 text-slate-700">
-            <strong>고정 양식</strong>
-            <p>A열: <code>goods_key</code></p>
-            <p>B열: <code>adjustment_rate</code></p>
-            <p>예: <code>119836,10</code> · <code>119837,-5</code> · <code>119838,7.25%</code></p>
-          </div>
-        </div>
-
-        <label className="rounded-xl border p-4 font-bold">
-          직접 붙여넣기
-          <textarea
-            aria-label="goods_key와 조정률 직접 붙여넣기"
-            onChange={(event) => onPaste(event.target.value)}
-            placeholder={"119836 10\n119837 -5\n119838 7.25%"}
-            className="mt-3 min-h-44 w-full rounded-lg border p-3 font-mono text-sm"
-          />
-          <span className="mt-2 block text-sm font-normal leading-6 text-slate-600">한 줄에 상품번호와 조정률을 입력합니다. 공백·탭·쉼표 구분을 지원합니다.</span>
-        </label>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <button type="button" onClick={() => changeMode("uniform")} className={`rounded-xl border-2 p-4 text-left ${inputMode === "uniform" ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"}`}><span className="block font-bold">일괄 설정</span><span className="mt-1 block text-sm text-slate-600">goods_key 목록과 공통 인상·인하율을 따로 입력합니다.</span></button>
+        <button type="button" onClick={() => changeMode("individual")} className={`rounded-xl border-2 p-4 text-left ${inputMode === "individual" ? "border-blue-600 bg-blue-50" : "border-slate-200 bg-white"}`}><span className="block font-bold">개별 설정</span><span className="mt-1 block text-sm text-slate-600">상품마다 서로 다른 인상·인하율을 한 행씩 입력합니다.</span></button>
       </div>
+
+      {inputMode === "uniform" ? <div className="mt-6 space-y-5">
+        <label className="block rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-sm font-bold text-slate-800">전체 상품 공통 인상·인하율
+          <input value={uniformRate} onChange={(event) => onUniformRate(event.target.value)} placeholder="예: 30 또는 -10" className="mt-2 w-full rounded-lg border border-slate-300 bg-white p-3 text-base" />
+          <span className="mt-2 block font-normal text-slate-600">30은 30% 인상, -10은 10% 인하입니다.</span>
+        </label>
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="rounded-xl border p-4"><h3 className="font-bold">goods_key 1열 CSV·XLSX</h3><input key="uniform-file" aria-label="일괄 상품번호 파일 업로드" type="file" accept=".csv,.xlsx" onChange={onFile} className="mt-3 block w-full" /><div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm"><strong>고정 양식</strong><p>A1: <code>goods_key</code></p><p>A2부터 상품번호</p><p>B열 이후 데이터 금지</p></div></div>
+          <label className="rounded-xl border p-4 font-bold">goods_key 목록<textarea aria-label="일괄 상품번호 직접 붙여넣기" onChange={(event) => onUniformPaste(event.target.value)} placeholder={"116090\n119836\n119837"} className="mt-3 min-h-44 w-full rounded-lg border p-3 font-mono text-sm" /><span className="mt-2 block text-sm font-normal text-slate-600">쉼표·공백·탭·줄바꿈으로 상품번호만 입력합니다.</span></label>
+        </div>
+      </div> : <div className="mt-6 grid gap-5 lg:grid-cols-2">
+        <div className="rounded-xl border p-4"><h3 className="font-bold">goods_key + 조정률 2열 CSV·XLSX</h3><input key="individual-file" aria-label="개별 가격 조정 파일 업로드" type="file" accept=".csv,.xlsx" onChange={onFile} className="mt-3 block w-full" /><div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm"><strong>고정 양식</strong><p>A열: <code>goods_key</code></p><p>B열: <code>adjustment_rate</code></p><p>예: <code>119836,10</code> · <code>119837,-5</code></p></div></div>
+        <label className="rounded-xl border p-4 font-bold">상품별 개별 입력<textarea aria-label="goods_key와 조정률 직접 붙여넣기" onChange={(event) => onIndividualPaste(event.target.value)} placeholder={"119836 10\n119837 -5\n119838 7.25%"} className="mt-3 min-h-44 w-full rounded-lg border p-3 font-mono text-sm" /><span className="mt-2 block text-sm font-normal text-slate-600">한 줄에 상품번호와 해당 상품의 조정률을 입력합니다.</span></label>
+      </div>}
 
       {reading && <p className="mt-4 rounded-lg bg-blue-50 p-3 font-semibold text-blue-800">파일을 검사하고 있습니다.</p>}
       {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 font-semibold text-red-800">{error}</p>}
-      {selection ? <AdjustmentPreview selection={selection} /> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">파일을 업로드하거나 값을 붙여넣으면 실행 전 미리보기가 표시됩니다.</p>}
+      {selection ? <AdjustmentPreview selection={selection} /> : <p className="mt-6 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">입력 방식을 선택한 뒤 상품번호와 인상·인하율을 입력하면 미리보기가 표시됩니다.</p>}
     </section>
 
     <section className="rounded-2xl border border-indigo-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-slate-950">공식 API 현재가·옵션 읽기 전용 카나리</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">입력 목록의 첫 10개만 조회하여 현재 판매가, 옵션 추가금, 변경 예정가와 24개 쇼핑몰 가격 계획을 만듭니다. 실제 가격은 수정하지 않습니다.</p>
-        </div>
-        <span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-bold text-indigo-900">조회 전용</span>
-      </div>
-      <div className="mt-5 flex flex-wrap gap-3">
-        <button type="button" disabled={!selection?.result.validCount || planRunning} onClick={() => void runReadonlyPlan()} className="rounded-lg bg-indigo-700 px-4 py-3 font-bold text-white disabled:opacity-50">{planRunning ? "조회 요청 중..." : `첫 ${Math.min(selection?.result.validCount ?? 0, 10)}개 현재가·옵션 조회`}</button>
-        <button type="button" disabled={!planRequestId || planFetching} onClick={() => void fetchReadonlyPlan()} className="rounded-lg bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-50">{planFetching ? "결과 확인 중..." : "조회 결과 가져오기"}</button>
-      </div>
+      <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">공식 API 현재가·옵션 읽기 전용 카나리</h2><p className="mt-2 text-sm leading-6 text-slate-600">선택된 계획의 첫 10개만 조회하여 현재 판매가, 옵션 추가금, 변경 예정가와 24개 쇼핑몰 가격 계획을 만듭니다.</p></div><span className="rounded-full bg-indigo-100 px-3 py-1 text-sm font-bold text-indigo-900">조회 전용</span></div>
+      <div className="mt-5 flex flex-wrap gap-3"><button type="button" disabled={!selection?.result.validCount || planRunning} onClick={() => void runReadonlyPlan()} className="rounded-lg bg-indigo-700 px-4 py-3 font-bold text-white disabled:opacity-50">{planRunning ? "조회 요청 중..." : `첫 ${Math.min(selection?.result.validCount ?? 0, 10)}개 현재가·옵션 조회`}</button><button type="button" disabled={!planRequestId || planFetching} onClick={() => void fetchReadonlyPlan()} className="rounded-lg bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-50">{planFetching ? "결과 확인 중..." : "조회 결과 가져오기"}</button></div>
       {planRequestId && <p className="mt-4 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">request_id: {planRequestId}</p>}
       {planResponse?.message && <p className="mt-3 rounded-lg bg-blue-50 p-3 text-sm font-semibold text-blue-900">{planResponse.message}</p>}
       {planResponse?.githubActionsUrl && <a href={planResponse.githubActionsUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-semibold text-blue-700 underline">GitHub Actions 열기</a>}
@@ -226,31 +254,9 @@ export function ShoplingPriceAdjustmentInputPreview() {
       {planResponse?.summary && <ReadonlyPlanResult summary={planResponse.summary} />}
     </section>
 
-    <section className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm">
-      <h2 className="text-xl font-bold text-slate-950">10원 단위 올림 계산 검산</h2>
-      <p className="mt-2 text-sm text-slate-600">현재 판매가를 조정한 뒤 10원 단위로 올리고, 소비자가 1.5배·원가 0.5배를 계산합니다.</p>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <label className="text-sm font-semibold text-slate-700">현재 판매가
-          <input value={sampleSellPrice} onChange={(event) => setSampleSellPrice(event.target.value)} inputMode="numeric" className="mt-2 w-full rounded-lg border p-3" />
-        </label>
-        <label className="text-sm font-semibold text-slate-700">인상·인하율
-          <input value={sampleRate} onChange={(event) => setSampleRate(event.target.value)} placeholder="10 또는 -5" className="mt-2 w-full rounded-lg border p-3" />
-        </label>
-      </div>
-      {sample.result
-        ? <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-            <ResultCell label="변경 판매가" value={`${sample.result.sellPrice.toLocaleString("ko-KR")}원`} />
-            <ResultCell label="소비자가 (×1.5)" value={`${sample.result.consumerPrice.toLocaleString("ko-KR")}원`} />
-            <ResultCell label="원가 (×0.5)" value={`${sample.result.purchasePrice.toLocaleString("ko-KR")}원`} />
-          </dl>
-        : <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-900">{sample.error}</p>}
-    </section>
+    <section className="rounded-2xl border border-emerald-200 bg-white p-6 shadow-sm"><h2 className="text-xl font-bold text-slate-950">10원 단위 올림 계산 검산</h2><p className="mt-2 text-sm text-slate-600">현재 판매가를 조정한 뒤 10원 단위로 올리고, 소비자가 1.5배·원가 0.5배를 계산합니다.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold text-slate-700">현재 판매가<input value={sampleSellPrice} onChange={(event) => setSampleSellPrice(event.target.value)} inputMode="numeric" className="mt-2 w-full rounded-lg border p-3" /></label><label className="text-sm font-semibold text-slate-700">인상·인하율<input value={sampleRate} onChange={(event) => setSampleRate(event.target.value)} placeholder="10 또는 -5" className="mt-2 w-full rounded-lg border p-3" /></label></div>{sample.result ? <dl className="mt-5 grid gap-3 sm:grid-cols-3"><ResultCell label="변경 판매가" value={`${sample.result.sellPrice.toLocaleString("ko-KR")}원`} /><ResultCell label="소비자가 (×1.5)" value={`${sample.result.consumerPrice.toLocaleString("ko-KR")}원`} /><ResultCell label="원가 (×0.5)" value={`${sample.result.purchasePrice.toLocaleString("ko-KR")}원`} /></dl> : <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm font-semibold text-amber-900">{sample.error}</p>}</section>
 
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-700">
-      <h2 className="font-bold text-slate-950">현재 안전 경계</h2>
-      <p className="mt-2">대량 입력은 최대 20,000개까지 가능하고, 첫 10개는 공식 API로 현재가·옵션을 조회할 수 있습니다. 상품수정 API, 옵션수정 API, 쇼핑몰별 가격수정 API는 아직 연결하지 않았습니다.</p>
-      <p className="mt-2">읽기 전용 결과가 실제 샵플링 값과 일치하면 다음 단계에서 단일 상품 쓰기 카나리를 추가한 뒤 기존 10개 카나리·50개 직렬 Bulk 오케스트레이터를 연결합니다.</p>
-    </section>
+    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-700"><h2 className="font-bold text-slate-950">현재 안전 경계</h2><p className="mt-2">일괄·개별 입력 모두 최대 20,000개까지 가능하고, 첫 10개는 공식 API로 현재가·옵션을 조회할 수 있습니다. 실제 가격 쓰기는 아직 연결하지 않았습니다.</p><p className="mt-2">다음 단계는 단일 상품 쓰기 카나리 후 기존 10개 카나리·50개 직렬 Bulk 오케스트레이터 연결입니다.</p></section>
   </div>;
 }
 
@@ -259,68 +265,17 @@ function AdjustmentPreview({ selection }: { selection: Selection }) {
   const chunkCount = plannedShoplingPriceAdjustmentChunkCount(result.validCount);
   const previewRows = result.rows.slice(0, 20);
   const lastRows = result.rows.length > 25 ? result.rows.slice(-5) : [];
-  return <div className="mt-6 rounded-xl border border-emerald-200 p-5">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h3 className="font-bold text-emerald-950">입력 검증 완료</h3>
-        <p className="mt-1 text-sm text-slate-600">{selection.label}</p>
-      </div>
-      <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-bold text-emerald-900">유효 {result.validCount.toLocaleString("ko-KR")}개</span>
-    </div>
-
-    <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-      <ResultCell label="원본 행" value={result.originalCount.toLocaleString("ko-KR")} />
-      <ResultCell label="유효 상품" value={result.validCount.toLocaleString("ko-KR")} />
-      <ResultCell label="동일 중복 제외" value={result.duplicateCount.toLocaleString("ko-KR")} />
-      <ResultCell label="충돌 상품 제외" value={result.conflictCount.toLocaleString("ko-KR")} />
-      <ResultCell label="잘못된 행" value={result.invalidCount.toLocaleString("ko-KR")} />
-      <ResultCell label="예상 청크" value={`${chunkCount.toLocaleString("ko-KR")}개`} />
-      <ResultCell label="첫 시험" value={`최대 ${Math.min(10, result.validCount).toLocaleString("ko-KR")}개`} />
-      <ResultCell label="일반 청크" value="최대 50개씩" />
-    </dl>
-
-    {result.invalidCount > 0 && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-      <p className="font-bold">제외 사유</p>
-      <ul className="mt-2 list-disc pl-5">{result.invalid.slice(0, 20).map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ul>
-      {result.invalid.length > 20 && <p className="mt-2 font-semibold">추가 {result.invalid.length - 20}개는 화면에서 생략했습니다.</p>}
-    </div>}
-
-    <AdjustmentTable title="첫 20개" rows={previewRows} />
-    {lastRows.length > 0 && <AdjustmentTable title="마지막 5개" rows={lastRows} />}
-    {result.rows.length > 25 && <p className="mt-3 text-xs text-slate-500">중간 {(result.rows.length - 25).toLocaleString("ko-KR")}개 상품은 생략했습니다.</p>}
-  </div>;
+  return <div className="mt-6 rounded-xl border border-emerald-200 p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold text-emerald-950">입력 검증 완료</h3><p className="mt-1 text-sm text-slate-600">{selection.label}</p></div><div className="flex gap-2"><span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-bold text-blue-900">{selection.mode === "uniform" ? "일괄 설정" : "개별 설정"}</span><span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-bold text-emerald-900">유효 {result.validCount.toLocaleString("ko-KR")}개</span></div></div><dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-4"><ResultCell label="원본 행" value={result.originalCount.toLocaleString("ko-KR")} /><ResultCell label="유효 상품" value={result.validCount.toLocaleString("ko-KR")} /><ResultCell label="동일 중복 제외" value={result.duplicateCount.toLocaleString("ko-KR")} /><ResultCell label="충돌 상품 제외" value={result.conflictCount.toLocaleString("ko-KR")} /><ResultCell label="잘못된 행" value={result.invalidCount.toLocaleString("ko-KR")} /><ResultCell label="예상 청크" value={`${chunkCount.toLocaleString("ko-KR")}개`} /><ResultCell label="첫 시험" value={`최대 ${Math.min(10, result.validCount).toLocaleString("ko-KR")}개`} /><ResultCell label="일반 청크" value="최대 50개씩" /></dl>{result.invalidCount > 0 && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950"><p className="font-bold">제외 사유</p><ul className="mt-2 list-disc pl-5">{result.invalid.slice(0, 20).map((value, index) => <li key={`${value}-${index}`}>{value}</li>)}</ul></div>}<AdjustmentTable title="첫 20개" rows={previewRows} />{lastRows.length > 0 && <AdjustmentTable title="마지막 5개" rows={lastRows} />}</div>;
 }
 
 function ReadonlyPlanResult({ summary }: { summary: PlanSummary }) {
   const rows = Array.isArray(summary.rows) ? summary.rows : [];
   const errors = Array.isArray(summary.errors) ? summary.errors : [];
-  return <div className="mt-5 rounded-xl border border-indigo-200 p-5">
-    <h3 className="font-bold text-indigo-950">읽기 전용 계획 결과</h3>
-    <dl className="mt-4 grid gap-3 sm:grid-cols-4">
-      <ResultCell label="상태" value={summary.status ?? "-"} />
-      <ResultCell label="요청 상품" value={String(summary.goods_key_count ?? 0)} />
-      <ResultCell label="계획 성공" value={String(summary.planned_goods_key_count ?? 0)} />
-      <ResultCell label="계획 실패" value={String(summary.failed_goods_key_count ?? 0)} />
-      <ResultCell label="예정 쇼핑몰 행" value={String(summary.planned_mall_row_count ?? 0)} />
-    </dl>
-    <div className="mt-5 overflow-x-auto">
-      <table className="w-full min-w-[760px] text-left text-sm">
-        <thead><tr className="border-b bg-slate-50"><th className="p-2">goods_key</th><th className="p-2">조정률</th><th className="p-2">현재 판매가</th><th className="p-2">변경 판매가</th><th className="p-2">현재 옵션 추가금</th><th className="p-2">변경 옵션 추가금</th><th className="p-2">쇼핑몰 행</th></tr></thead>
-        <tbody>{rows.map((row, index) => <tr className="border-b" key={row.goods_key ?? index}><td className="p-2 font-mono">{row.goods_key ?? "-"}</td><td className="p-2">{Number(row.adjustment_bps ?? 0) / 100}%</td><td className="p-2">{won(row.current?.sell_price)}</td><td className="p-2 font-bold">{won(row.target?.sell_price)}</td><td className="p-2">{row.current?.option_amounts?.join(", ") || "없음"}</td><td className="p-2 font-bold">{row.target?.option_amounts?.join(", ") || "없음"}</td><td className="p-2">{row.mall_row_count ?? 0}</td></tr>)}</tbody>
-      </table>
-    </div>
-    {errors.length > 0 && <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900"><p className="font-bold">계획 실패</p><ul className="mt-2 list-disc pl-5">{errors.map((error, index) => <li key={`${error.goods_key}-${index}`}><code>{error.goods_key || "-"}</code>: {error.error || "원인 없음"}</li>)}</ul></div>}
-  </div>;
+  return <div className="mt-5 rounded-xl border border-indigo-200 p-5"><h3 className="font-bold text-indigo-950">읽기 전용 계획 결과</h3><dl className="mt-4 grid gap-3 sm:grid-cols-4"><ResultCell label="상태" value={summary.status ?? "-"} /><ResultCell label="요청 상품" value={String(summary.goods_key_count ?? 0)} /><ResultCell label="계획 성공" value={String(summary.planned_goods_key_count ?? 0)} /><ResultCell label="계획 실패" value={String(summary.failed_goods_key_count ?? 0)} /><ResultCell label="예정 쇼핑몰 행" value={String(summary.planned_mall_row_count ?? 0)} /></dl><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead><tr className="border-b bg-slate-50"><th className="p-2">goods_key</th><th className="p-2">조정률</th><th className="p-2">현재 판매가</th><th className="p-2">변경 판매가</th><th className="p-2">현재 옵션 추가금</th><th className="p-2">변경 옵션 추가금</th><th className="p-2">쇼핑몰 행</th></tr></thead><tbody>{rows.map((row, index) => <tr className="border-b" key={row.goods_key ?? index}><td className="p-2 font-mono">{row.goods_key ?? "-"}</td><td className="p-2">{Number(row.adjustment_bps ?? 0) / 100}%</td><td className="p-2">{won(row.current?.sell_price)}</td><td className="p-2 font-bold">{won(row.target?.sell_price)}</td><td className="p-2">{row.current?.option_amounts?.join(", ") || "없음"}</td><td className="p-2 font-bold">{row.target?.option_amounts?.join(", ") || "없음"}</td><td className="p-2">{row.mall_row_count ?? 0}</td></tr>)}</tbody></table></div>{errors.length > 0 && <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-900"><p className="font-bold">계획 실패</p><ul className="mt-2 list-disc pl-5">{errors.map((item, index) => <li key={`${item.goods_key}-${index}`}><code>{item.goods_key || "-"}</code>: {item.error || "원인 없음"}</li>)}</ul></div>}</div>;
 }
 
 function AdjustmentTable({ title, rows }: { title: string; rows: ShoplingPriceAdjustmentRow[] }) {
-  return <div className="mt-5 overflow-x-auto">
-    <h4 className="mb-2 font-bold text-slate-900">{title}</h4>
-    <table className="w-full min-w-[520px] text-left text-sm">
-      <thead><tr className="border-b bg-slate-50"><th className="p-2">goods_key</th><th className="p-2">방향</th><th className="p-2">조정률</th><th className="p-2">내부 정수값</th></tr></thead>
-      <tbody>{rows.map((row) => <tr className="border-b" key={row.goodsKey}><td className="p-2 font-mono">{row.goodsKey}</td><td className="p-2">{directionLabel(row)}</td><td className="p-2 font-bold">{row.adjustmentRate}</td><td className="p-2 text-slate-500">{row.adjustmentBps} bps</td></tr>)}</tbody>
-    </table>
-  </div>;
+  return <div className="mt-5 overflow-x-auto"><h4 className="mb-2 font-bold text-slate-900">{title}</h4><table className="w-full min-w-[520px] text-left text-sm"><thead><tr className="border-b bg-slate-50"><th className="p-2">goods_key</th><th className="p-2">방향</th><th className="p-2">조정률</th><th className="p-2">내부 정수값</th></tr></thead><tbody>{rows.map((row) => <tr className="border-b" key={row.goodsKey}><td className="p-2 font-mono">{row.goodsKey}</td><td className="p-2">{directionLabel(row)}</td><td className="p-2 font-bold">{row.adjustmentRate}</td><td className="p-2 text-slate-500">{row.adjustmentBps} bps</td></tr>)}</tbody></table></div>;
 }
 
 function ResultCell({ label, value }: { label: string; value: string }) {
