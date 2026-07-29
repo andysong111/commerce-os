@@ -140,6 +140,7 @@ export function buildShoplingPriceAdjustmentBatchCanaryDispatch(inputValue: unkn
   const requestId = generateShoplingPriceAdjustmentBatchCanaryRequestId();
   return {
     requestId,
+    inputCount: input.length,
     token: config.token,
     githubActionsUrl: `https://github.com/${config.repo}/actions/workflows/${encodeURIComponent(config.workflow)}`,
     url: `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/${encodeURIComponent(config.workflow)}/dispatches`,
@@ -170,7 +171,7 @@ export async function dispatchShoplingPriceAdjustmentBatchCanary(inputValue: unk
     if (response.status !== 204 && response.status !== 200) {
       return { status: "error", message: `10개 실제 가격 카나리 요청 실패 status=${response.status}`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
     }
-    return { status: "success", message: `${input.length}개 상품의 직렬 실제 가격 카나리를 시작했습니다.`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
+    return { status: "success", message: `${request.inputCount}개 상품의 직렬 실제 가격 카나리를 시작했습니다.`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "GitHub Actions 요청 중 오류가 발생했습니다.", requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
   }
