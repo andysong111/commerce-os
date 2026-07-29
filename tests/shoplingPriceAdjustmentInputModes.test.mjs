@@ -14,7 +14,7 @@ test("price adjustment screen supports separate uniform and individual input mod
     "goods_key 1열 CSV·XLSX",
     "goods_key + 조정률 2열 CSV·XLSX",
     "상품별 개별 입력",
-    "최대 20,000개",
+    "최대 10,000개",
   ]) assert.match(component, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   assert.match(component, /parseShoplingPriceBulkPaste/);

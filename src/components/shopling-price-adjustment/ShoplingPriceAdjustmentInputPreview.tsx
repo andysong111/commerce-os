@@ -7,6 +7,7 @@ import {
   parseShoplingPriceAdjustmentPaste,
   parseShoplingPriceAdjustmentRateBps,
   plannedShoplingPriceAdjustmentChunkCount,
+  SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS,
   type ShoplingPriceAdjustmentInputResult,
   type ShoplingPriceAdjustmentRow,
 } from "@/lib/shoplingPriceAdjustmentInput";
@@ -111,6 +112,9 @@ function buildUniformAdjustmentResult(
   goodsInput: ShoplingPriceBulkInputResult,
   rateText: string,
 ): ShoplingPriceAdjustmentInputResult {
+  if (goodsInput.goodsKeys.length > SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS) {
+    throw new Error(`유효한 상품은 최대 ${SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS.toLocaleString("ko-KR")}개까지 입력할 수 있습니다.`);
+  }
   const adjustmentBps = parseShoplingPriceAdjustmentRateBps(rateText);
   const template = parseShoplingPriceAdjustmentPaste(`1 ${rateText}`).rows[0];
   if (!template) throw new Error("공통 인상·인하율을 입력하세요.");
@@ -411,9 +415,9 @@ export function ShoplingPriceAdjustmentInputPreview() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-950">대량 goods_key · 인상/인하율 입력</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">일괄 동일률 또는 상품별 개별률 중 하나를 선택합니다. 최대 20,000개까지 준비하고 첫 10개를 조회 카나리로 확인합니다.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">일괄 동일률 또는 상품별 개별률 중 하나를 선택합니다. 최대 10,000개까지 준비하고 첫 10개를 조회 카나리로 확인합니다.</p>
         </div>
-        <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-900">대량 가격 쓰기 차단</span>
+        <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-bold text-amber-900">1만 개 Bulk 준비</span>
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -515,9 +519,9 @@ export function ShoplingPriceAdjustmentInputPreview() {
     </section>
 
     <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-700">
-      <h2 className="font-bold text-slate-950">현재 안전 경계</h2>
-      <p className="mt-2">일괄·개별 입력은 최대 20,000개까지 가능하지만 실제 쓰기는 검증된 첫 상품 1개 카나리만 허용합니다.</p>
-      <p className="mt-2">옵션 추가금 변경, 10개 실제 카나리, 50개 직렬 Bulk 실행은 아직 차단되어 있습니다.</p>
+      <h2 className="font-bold text-slate-950">운영 안전 경계</h2>
+      <p className="mt-2">실제 Bulk 작업은 최대 10,000개이며, 첫 10개를 먼저 실행한 뒤 나머지를 최대 50개씩 직렬 처리합니다.</p>
+      <p className="mt-2">각 상품 실행 직전 현재 판매가·옵션 서명을 재검증하며, 첫 실패 또는 전송 불확실 시 전체 진행을 중단합니다. 자동 재시도는 사용하지 않습니다.</p>
     </section>
   </div>;
 }

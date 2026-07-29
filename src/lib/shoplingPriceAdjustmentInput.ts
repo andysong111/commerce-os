@@ -22,7 +22,7 @@ export type ShoplingPriceAdjustmentInputResult = {
 };
 
 export const SHOPLING_PRICE_ADJUSTMENT_MAX_FILE_SIZE = 5 * 1024 * 1024;
-export const SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS = 20_000;
+export const SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS = 10_000;
 export const SHOPLING_PRICE_ADJUSTMENT_MIN_BPS = -9_999;
 export const SHOPLING_PRICE_ADJUSTMENT_MAX_BPS = 100_000;
 
@@ -118,7 +118,7 @@ function result(source: ShoplingPriceAdjustmentSource, rawRows: RawRow[]): Shopl
     });
 
   if (rows.length > SHOPLING_PRICE_ADJUSTMENT_MAX_ROWS) {
-    throw new Error("유효한 상품은 최대 20,000개까지 입력할 수 있습니다.");
+    throw new Error("유효한 상품은 최대 10,000개까지 입력할 수 있습니다.");
   }
 
   return {
