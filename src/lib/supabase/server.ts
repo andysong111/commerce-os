@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
+import { getOpsAuthCookieOptions } from "@/lib/supabase/session";
 
 type CookieToSet = { name: string; value: string; options?: Record<string, unknown> };
 
@@ -34,6 +35,7 @@ export async function createSupabaseServerClient(): Promise<SupabaseServerClient
   try {
     const cookieStore = await cookies();
     return createServerClient(config.url, config.publicKey, {
+      cookieOptions: getOpsAuthCookieOptions(),
       cookies: {
         getAll() {
           return cookieStore.getAll();

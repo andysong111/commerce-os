@@ -74,6 +74,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <p className="mt-3 text-xs leading-5 text-slate-500">
           매직링크는 이메일 발송 제한이 있으므로 필요한 경우에만 한 번 누르세요.
         </p>
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          로그인은 개인 기기에서 최대 180일 유지되며, 사용 중에는 자동으로
+          갱신됩니다. 공용 기기에서는 사용 후 로그아웃하세요.
+        </p>
         {params.sent ? <p className="mt-3 text-sm font-semibold text-emerald-700">매직링크를 보냈습니다. 이메일을 확인하세요.</p> : null}
         {errorMessage ? <p className="mt-3 text-sm font-semibold text-red-700">{errorMessage}</p> : null}
       </form>
