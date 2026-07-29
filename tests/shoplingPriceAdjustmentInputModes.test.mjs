@@ -49,5 +49,7 @@ test("bulk runner consumes validated file selections and uses an in-page confirm
   assert.match(batch, /localStorage\.getItem\(BULK_SELECTION_STORAGE_KEY\)/);
   assert.match(batch, /확인 후 실제 Bulk 시작/);
   assert.match(batch, /위 일괄 또는 개별 설정/);
+  assert.match(batch, /samePreparedInput\(preparedInput, parsed\)/);
+  assert.match(batch, /입력 상품 또는 조정률이 변경되었습니다/);
   assert.doesNotMatch(batch, /window\.confirm/);
 });
