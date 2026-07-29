@@ -1,4 +1,5 @@
 export const STATUS_OPTIONS = ["미시작", "진행 중", "완료", "보류", "제외"];
+export const STATUS_SORT_ORDER = ["미시작", "진행 중", "보류", "완료", "제외"];
 
 export const STAGES = [
   { key: "detailPage", label: "상세페이지" },
@@ -34,6 +35,40 @@ export function getNextStage(item) {
     ({ key }) => !["완료", "제외"].includes(item.stages?.[key]?.status),
   );
   return next?.label ?? "출시 완료";
+}
+
+export function sortLaunchItems(items, sort = {}) {
+  const direction = sort.direction === "desc" ? -1 : 1;
+  const stage = STAGES.find(({ key }) => key === sort.key);
+  const textGetter = {
+    workBatch: (item) => item.workBatch,
+    warehouseLocation: (item) => item.warehouseLocation,
+    modelNumber: (item) => item.modelNumber,
+    productName: (item) => item.productName,
+    options: (item) => item.options?.join(", "),
+    notes: (item) => item.notes,
+  }[sort.key];
+
+  if (!stage && !textGetter && sort.key !== "nextStage") {
+    return [...items].sort(defaultItemSort);
+  }
+
+  return [...items].sort((left, right) => {
+    let compared = 0;
+    if (stage) {
+      compared = compareRank(
+        statusSortRank(left.stages?.[stage.key]?.status),
+        statusSortRank(right.stages?.[stage.key]?.status),
+      );
+    } else if (sort.key === "nextStage") {
+      compared = compareRank(nextStageSortRank(left), nextStageSortRank(right));
+    } else {
+      compared = compareText(textGetter(left), textGetter(right), direction);
+      return compared || defaultItemSort(left, right);
+    }
+
+    return compared ? compared * direction : defaultItemSort(left, right);
+  });
 }
 
 export function normalizeModelNumber(value) {
@@ -173,4 +208,40 @@ export function toCsv(items) {
 function csvCell(value) {
   const text = String(value ?? "");
   return `"${text.replaceAll('"', '""')}"`;
+}
+
+function statusSortRank(status) {
+  const rank = STATUS_SORT_ORDER.indexOf(status ?? "미시작");
+  return rank === -1 ? STATUS_SORT_ORDER.length : rank;
+}
+
+function nextStageSortRank(item) {
+  if (item.archivedAt) return STAGES.length + 1;
+  const next = getNextStage(item);
+  const stageIndex = STAGES.findIndex(({ label }) => next.startsWith(label));
+  return stageIndex === -1 ? STAGES.length : stageIndex;
+}
+
+function compareRank(left, right) {
+  return left - right;
+}
+
+function compareText(left, right, direction) {
+  const leftText = String(left ?? "").trim();
+  const rightText = String(right ?? "").trim();
+  if (!leftText && !rightText) return 0;
+  if (!leftText) return 1;
+  if (!rightText) return -1;
+  return (
+    leftText.localeCompare(rightText, "ko-KR", {
+      numeric: true,
+      sensitivity: "base",
+    }) * direction
+  );
+}
+
+function defaultItemSort(left, right) {
+  const updated = String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? ""));
+  if (updated) return updated;
+  return (right.source?.rows?.[0] ?? 0) - (left.source?.rows?.[0] ?? 0);
 }
