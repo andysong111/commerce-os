@@ -165,7 +165,7 @@ export const moduleRegistry: readonly CommerceModule[] = [
     route: "https://commerce-os-detail-page-studio.vercel.app/",
     category: "detail-page",
     inputType:
-      "상품 이미지 최대 3장, 상품명, 공급처 정보, 판매 옵션, 타깃 시장, 문구 언어",
+      "상품 이미지 최대 3장, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
     outputType:
       "AI 검수된 8개 섹션 상세페이지, 1000×12000 JPG, 실행·사용량 원장",
     historySupport: false,
