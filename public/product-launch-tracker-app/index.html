@@ -97,24 +97,76 @@
 
           <div class="table-wrap">
             <table>
-              <thead>
+              <thead id="launch-table-head">
                 <tr>
                   <th class="check-column">
                     <input id="select-visible" type="checkbox" aria-label="현재 목록 전체 선택" />
                   </th>
-                  <th>작업 묶음</th>
-                  <th>창고위치</th>
-                  <th>모델번호</th>
-                  <th>상품명</th>
-                  <th>옵션</th>
-                  <th>상세페이지</th>
-                  <th>가격·키워드</th>
-                  <th>샵플링 업로드</th>
-                  <th>마켓 등록</th>
-                  <th>주문 매핑</th>
-                  <th>재고 반영</th>
-                  <th>다음 작업</th>
-                  <th>비고</th>
+                  <th class="sort-header" data-sort-key="workBatch" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="workBatch" data-sort-label="작업 묶음">
+                      작업 묶음 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="warehouseLocation" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="warehouseLocation" data-sort-label="창고위치">
+                      창고위치 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="modelNumber" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="modelNumber" data-sort-label="모델번호">
+                      모델번호 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="productName" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="productName" data-sort-label="상품명">
+                      상품명 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="options" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="options" data-sort-label="옵션">
+                      옵션 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="detailPage" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="detailPage" data-sort-label="상세페이지">
+                      상세페이지 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="priceKeyword" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="priceKeyword" data-sort-label="가격·키워드">
+                      가격·키워드 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="shoplingUpload" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="shoplingUpload" data-sort-label="샵플링 업로드">
+                      샵플링 업로드 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="marketRegistration" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="marketRegistration" data-sort-label="마켓 등록">
+                      마켓 등록 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="orderMapping" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="orderMapping" data-sort-label="주문 매핑">
+                      주문 매핑 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="inventoryReflection" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="inventoryReflection" data-sort-label="재고 반영">
+                      재고 반영 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="nextStage" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="nextStage" data-sort-label="다음 작업">
+                      다음 작업 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
+                  <th class="sort-header" data-sort-key="notes" aria-sort="none">
+                    <button class="sort-button" type="button" data-sort-key="notes" data-sort-label="비고">
+                      비고 <span class="sort-indicator" aria-hidden="true">↕</span>
+                    </button>
+                  </th>
                   <th>관리</th>
                 </tr>
               </thead>
