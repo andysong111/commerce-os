@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
+
+test("신규 상품 출시 진행관리 카드와 사이드바를 제공한다", async () => {
+  const tracker = moduleRegistry.find((item) => item.id === "product-launch-tracker");
+  const sidebarSource = await readFile(
+    new URL("../src/components/Sidebar.tsx", import.meta.url),
+    "utf8",
+  );
+  const pageSource = await readFile(
+    new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(tracker?.title, "신규 상품 출시 진행관리");
+  assert.equal(tracker?.route, "/product-launch-tracker");
+  assert.equal(tracker?.status, "available");
+  assert.match(sidebarSource, /product-launch-tracker/);
+  assert.match(pageSource, /product-launch-tracker-app\/index\.html/);
+});
+
+test("업로드 원본의 실제 상품 데이터가 OPS Center 실행본에 포함된다", async () => {
+  const launchData = JSON.parse(
+    await readFile(
+      new URL(
+        "../public/product-launch-tracker-app/data/launch-items.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  assert.equal(launchData.meta.sourceFile, "동네일등 상품등록 프로세스 (1).xlsx");
+  assert.equal(launchData.meta.sourceProductRows, 1630);
+  assert.equal(launchData.meta.launchItemCount, 389);
+  assert.equal(launchData.meta.distinctModelCount, 359);
+
+  const expected = new Map([
+    ["AAA413", "곰돌이 목도리 넥워머"],
+    ["AAA414", "곰돌이 방울 털모자"],
+    ["AAA444", "투명 라면정리함"],
+    ["AAA451", "반자동 책갈피 3P 색상랜덤"],
+    ["AAA455", "발편한 등산화"],
+    ["AAA456", "메쉬 여성운동화"],
+  ]);
+
+  for (const [modelNumber, productName] of expected) {
+    assert.ok(
+      launchData.items.some(
+        (item) =>
+          item.workBatch === "제작 예정 상품들" &&
+          item.modelNumber === modelNumber &&
+          item.productName === productName,
+      ),
+      `${modelNumber} ${productName} 기록이 필요합니다.`,
+    );
+  }
+});
