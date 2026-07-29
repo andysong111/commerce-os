@@ -1,11 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import {
-  aggregateRecentDetailPageCostRuns,
   detailPageUsdKrwRate,
   isDetailPageCostAdmin,
+  normalizeDetailPageCostRuns,
   normalizeDetailPageCostSummary,
-  type DetailPageCostRow,
 } from "@/lib/detailPageCostAdmin";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -47,28 +46,25 @@ export default async function DetailPageCostsPage() {
 
   const admin = await createSupabaseAdminClient();
   if (!admin) {
-    return <LedgerUnavailable reason="관리자 데이터베이스 연결이 설정되지 않았습니다." />;
+    return (
+      <LedgerUnavailable reason="관리자 데이터베이스 연결이 설정되지 않았습니다." />
+    );
   }
 
-  const [summaryResult, eventsResult] = await Promise.all([
+  const [summaryResult, runsResult] = await Promise.all([
     admin.rpc("get_detail_page_cost_summary", {}),
-    admin
-      .from("detail_page_cost_events")
-      .select(
-        "id,run_id,event_type,generation_profile,model,slot,product_name,output_language,estimated_cost_usd,pricing_status,pricing_version,created_at",
-      )
-      .order("created_at", { ascending: false })
-      .limit(500),
+    admin.rpc("get_recent_detail_page_cost_runs", {
+      requested_limit: 30,
+    }),
   ]);
-  if (summaryResult.error || eventsResult.error) {
-    return <LedgerUnavailable reason="원가 원장 테이블 연결을 완료해야 합니다." />;
+  if (summaryResult.error || runsResult.error) {
+    return (
+      <LedgerUnavailable reason="원가 원장 테이블과 집계 함수 연결을 완료해야 합니다." />
+    );
   }
 
   const summary = normalizeDetailPageCostSummary(summaryResult.data);
-  const rows = Array.isArray(eventsResult.data)
-    ? (eventsResult.data as DetailPageCostRow[])
-    : [];
-  const runs = aggregateRecentDetailPageCostRuns(rows).slice(0, 30);
+  const runs = normalizeDetailPageCostRuns(runsResult.data);
   const rate = detailPageUsdKrwRate();
   const average =
     summary.run_count > 0 ? summary.total_cost_usd / summary.run_count : 0;
@@ -120,7 +116,8 @@ export default async function DetailPageCostsPage() {
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="font-semibold text-slate-950">최근 생성 실행</h2>
           <p className="mt-1 text-xs text-slate-500">
-            최근 호출 500개를 실행 ID별로 묶었습니다. 자동보정과 재검수도 실제 호출에 포함됩니다.
+            최근 30개 실행의 전체 호출을 묶었습니다. 자동보정과 재검수도 실제
+            호출에 포함됩니다.
           </p>
         </div>
         {runs.length === 0 ? (
@@ -177,7 +174,8 @@ export default async function DetailPageCostsPage() {
       </section>
 
       <p className="mt-4 text-xs leading-5 text-slate-500">
-        원가는 API 응답의 실제 토큰 사용량과 버전 고정 요율로 산정한 내부 추정치입니다. 세금·환전 수수료·사용자 판매가격은 포함하지 않습니다.
+        원가는 API 응답의 실제 토큰 사용량과 버전 고정 요율로 산정한 내부
+        추정치입니다. 세금·환전 수수료·사용자 판매가격은 포함하지 않습니다.
       </p>
     </>
   );
@@ -201,7 +199,9 @@ function MetricCard({
         {primary}
       </p>
       <p
-        className={`mt-2 text-xs ${warning ? "font-semibold text-amber-700" : "text-slate-500"}`}
+        className={`mt-2 text-xs ${
+          warning ? "font-semibold text-amber-700" : "text-slate-500"
+        }`}
       >
         {secondary}
       </p>

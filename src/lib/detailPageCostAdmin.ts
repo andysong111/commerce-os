@@ -82,6 +82,38 @@ export function normalizeDetailPageCostSummary(
   };
 }
 
+export function normalizeDetailPageCostRuns(
+  value: unknown,
+): DetailPageCostRun[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const runId = typeof row.run_id === "string" ? row.run_id : "";
+    const createdAt = typeof row.created_at === "string" ? row.created_at : "";
+    if (!runId || !createdAt) return [];
+    return [
+      {
+        run_id: runId,
+        product_name:
+          typeof row.product_name === "string" ? row.product_name : "",
+        output_language:
+          typeof row.output_language === "string" ? row.output_language : "",
+        generation_profile:
+          typeof row.generation_profile === "string"
+            ? row.generation_profile
+            : "",
+        created_at: createdAt,
+        cost_usd: numberValue(row.cost_usd),
+        event_count: Math.round(numberValue(row.event_count)),
+        image_calls: Math.round(numberValue(row.image_calls)),
+        verifier_calls: Math.round(numberValue(row.verifier_calls)),
+        has_unpriced_event: row.has_unpriced_event === true,
+      },
+    ];
+  });
+}
+
 export function aggregateRecentDetailPageCostRuns(
   rows: DetailPageCostRow[],
 ): DetailPageCostRun[] {

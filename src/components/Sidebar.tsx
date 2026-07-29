@@ -18,33 +18,43 @@ const moduleIconLabels: Record<string, string> = {
   "product-launch-tracker": "진",
 };
 
-const navigation = [
-  { href: "/", label: "대시보드", iconLabel: "D" },
-  ...extendedModuleRegistry.flatMap((module) => {
-    if (
-      !["available", "check_mode", "runner_scaffold"].includes(module.status) ||
-      module.route === null
-    ) {
-      return [];
-    }
+function navigationFor(showDetailPageCosts: boolean) {
+  return [
+    { href: "/", label: "대시보드", iconLabel: "D" },
+    ...extendedModuleRegistry.flatMap((module) => {
+      if (
+        (module.id === "detail-page-cost-admin" && !showDetailPageCosts) ||
+        !["available", "check_mode", "runner_scaffold"].includes(
+          module.status,
+        ) ||
+        module.route === null
+      ) {
+        return [];
+      }
 
-    const iconLabel = moduleIconLabels[module.id];
-    if (!iconLabel) {
-      return [];
-    }
+      const iconLabel = moduleIconLabels[module.id];
+      if (!iconLabel) {
+        return [];
+      }
 
-    return [
-      {
-        href: module.route,
-        label: module.navigationLabel ?? module.title,
-        iconLabel,
-      },
-    ];
-  }),
-];
+      return [
+        {
+          href: module.route,
+          label: module.navigationLabel ?? module.title,
+          iconLabel,
+        },
+      ];
+    }),
+  ];
+}
 
-export function Sidebar() {
+export function Sidebar({
+  showDetailPageCosts = false,
+}: {
+  showDetailPageCosts?: boolean;
+}) {
   const pathname = usePathname();
+  const navigation = navigationFor(showDetailPageCosts);
 
   return (
     <>
