@@ -336,6 +336,54 @@ th {
   white-space: nowrap;
 }
 
+.sort-header {
+  padding: 0;
+}
+
+.sort-button {
+  width: 100%;
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 10px 9px;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sort-button:hover {
+  color: #1d4ed8;
+  background: #e8eef8;
+}
+
+.sort-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.sort-indicator {
+  min-width: 10px;
+  color: #94a3b8;
+  font-size: 9px;
+  text-align: center;
+}
+
+.sort-header[aria-sort="ascending"] .sort-button,
+.sort-header[aria-sort="descending"] .sort-button,
+.sort-header[aria-sort="ascending"] .sort-indicator,
+.sort-header[aria-sort="descending"] .sort-indicator {
+  color: #1d4ed8;
+}
+
 td {
   max-width: 220px;
   border-bottom: 1px solid #edf1f6;

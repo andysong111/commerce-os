@@ -7,6 +7,7 @@ import {
   normalizeModelNumber,
   normalizeOptions,
   parsePastedRows,
+  sortLaunchItems,
   STATUS_OPTIONS,
   STAGES,
   toCsv,
@@ -19,6 +20,10 @@ const state = {
   items: [],
   selectedIds: new Set(),
   visibleItems: [],
+  sort: {
+    key: null,
+    direction: "desc",
+  },
   filters: {
     search: "",
     batch: "",
@@ -42,6 +47,7 @@ const elements = {
   bulkStage: document.querySelector("#bulk-stage"),
   bulkStatus: document.querySelector("#bulk-status"),
   tableBody: document.querySelector("#launch-table-body"),
+  tableHead: document.querySelector("#launch-table-head"),
   emptyState: document.querySelector("#empty-state"),
   selectVisible: document.querySelector("#select-visible"),
   detailDialog: document.querySelector("#detail-dialog"),
@@ -134,6 +140,7 @@ function bindControls() {
     .querySelector("#clear-selection-button")
     .addEventListener("click", clearSelection);
   elements.selectVisible.addEventListener("change", toggleVisibleSelection);
+  elements.tableHead.addEventListener("click", handleSortClick);
   elements.tableBody.addEventListener("change", handleTableChange);
   elements.tableBody.addEventListener("click", handleTableClick);
   elements.detailForm.addEventListener("submit", saveDetailForm);
@@ -216,8 +223,8 @@ function renderSummary() {
 
 function renderTable() {
   const search = state.filters.search.trim().toLocaleLowerCase("ko-KR");
-  state.visibleItems = state.items
-    .filter((item) => {
+  state.visibleItems = sortLaunchItems(
+    state.items.filter((item) => {
       const overall = getOverallStatus(item);
       if (state.filters.unfinishedOnly && ["완료", "보관됨"].includes(overall)) {
         return false;
@@ -232,14 +239,12 @@ function renderTable() {
       if (state.filters.overall && overall !== state.filters.overall) return false;
       if (search && !searchableText(item).includes(search)) return false;
       return true;
-    })
-    .sort((left, right) => {
-      const updated = String(right.updatedAt).localeCompare(String(left.updatedAt));
-      if (updated) return updated;
-      return (right.source?.rows?.[0] ?? 0) - (left.source?.rows?.[0] ?? 0);
-    });
+    }),
+    state.sort,
+  );
 
   elements.tableBody.innerHTML = state.visibleItems.map(renderRow).join("");
+  updateSortHeaders();
   elements.visibleCount.textContent = `${number(state.visibleItems.length)}건`;
   elements.selectedCount.textContent = `선택 ${number(state.selectedIds.size)}건`;
   elements.emptyState.hidden = state.visibleItems.length > 0;
@@ -248,6 +253,40 @@ function renderTable() {
     visibleIds.length > 0 && visibleIds.every((id) => state.selectedIds.has(id));
   elements.selectVisible.indeterminate =
     !elements.selectVisible.checked && visibleIds.some((id) => state.selectedIds.has(id));
+}
+
+function handleSortClick(event) {
+  const button = event.target.closest("button[data-sort-key]");
+  if (!button) return;
+  const key = button.dataset.sortKey;
+  state.sort = {
+    key,
+    direction:
+      state.sort.key === key && state.sort.direction === "asc" ? "desc" : "asc",
+  };
+  renderTable();
+}
+
+function updateSortHeaders() {
+  for (const header of elements.tableHead.querySelectorAll("th[data-sort-key]")) {
+    const button = header.querySelector("button[data-sort-key]");
+    const indicator = button.querySelector(".sort-indicator");
+    const active = header.dataset.sortKey === state.sort.key;
+    const direction = active ? state.sort.direction : null;
+    const nextDirection = direction === "asc" ? "내림차순" : "오름차순";
+    header.setAttribute(
+      "aria-sort",
+      direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none",
+    );
+    indicator.textContent = direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕";
+    button.title = `${nextDirection} 정렬`;
+    button.setAttribute(
+      "aria-label",
+      `${button.dataset.sortLabel} 열${
+        active ? `, 현재 ${direction === "asc" ? "오름차순" : "내림차순"}` : ""
+      }. 클릭하면 ${nextDirection} 정렬`,
+    );
+  }
 }
 
 function renderRow(item) {
