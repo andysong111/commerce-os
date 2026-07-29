@@ -58,8 +58,7 @@ test("dashboard descriptions and module labels are Korean-first", async () => {
     "배대지 바코드 PDF 생성기",
     "키워드 엔진 실행기",
     "키워드 검토/승인 큐",
-    "상세페이지 엔진 실행기",
-    "상세페이지 초안 검수 / 미리보기",
+    "상세페이지 스튜디오",
     "재고 / 가격 관리",
     "샵플링 API 자동화",
     "사용 가능",
@@ -72,9 +71,17 @@ test("dashboard descriptions and module labels are Korean-first", async () => {
   }
 
   assert.equal(moduleRegistry.find((module) => module.id === "keyword-engine")?.status, "runner_scaffold");
-  assert.equal(moduleRegistry.find((module) => module.id === "detail-page-engine")?.status, "runner_scaffold");
+  assert.equal(moduleRegistry.find((module) => module.id === "detail-page-studio")?.status, "available");
+  assert.equal(
+    moduleRegistry.find((module) => module.id === "detail-page-studio")?.route,
+    "https://commerce-os-detail-page-studio.vercel.app/",
+  );
+  assert.equal(
+    moduleRegistry.filter((module) => module.category === "detail-page").length,
+    1,
+  );
   assert.match(moduleRegistry.find((module) => module.id === "keyword-review-queue")?.description ?? "", /키워드 엔진 결과물/);
-  assert.match(moduleRegistry.find((module) => module.id === "detail-page-draft-review")?.description ?? "", /상세페이지 엔진 산출물/);
+  assert.match(moduleRegistry.find((module) => module.id === "detail-page-studio")?.description ?? "", /AI 검수/);
 });
 
 

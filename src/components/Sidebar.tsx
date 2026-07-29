@@ -12,8 +12,7 @@ const moduleIconLabels: Record<string, string> = {
   "keyword-review-queue": "K",
   "warehouse-label-generator": "L",
   "warehouse-location-sync": "W",
-  "detail-page-local-engine": "상",
-  "detail-page-image-upload-engine": "U",
+  "detail-page-studio": "상",
   "shopling-price-adjustment-runner": "%",
   "product-launch-tracker": "진",
 };
@@ -70,14 +69,7 @@ export function Sidebar() {
                 <span className="grid size-4 place-items-center rounded bg-white/10 text-[10px] font-bold">
                   {item.iconLabel}
                 </span>
-                <span className="flex flex-col gap-1">
-                  <span>{item.label}</span>
-                  {item.label === "상세페이지 엔진" ? (
-                    <span className="w-fit rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-100">
-                      승준컴 로컬 전용
-                    </span>
-                  ) : null}
-                </span>
+                <span>{item.label}</span>
               </Link>
             );
           })}
@@ -108,14 +100,7 @@ export function Sidebar() {
                     : "bg-slate-100 text-slate-600"
                 }`}
               >
-                <span className="flex flex-col gap-1">
-                  <span>{item.label}</span>
-                  {item.label === "상세페이지 엔진" ? (
-                    <span className="w-fit rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-100">
-                      승준컴 로컬 전용
-                    </span>
-                  ) : null}
-                </span>
+                <span>{item.label}</span>
               </Link>
             );
           })}

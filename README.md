@@ -8,8 +8,7 @@ Commerce OS OPS CENTER is the operational UI for product sourcing, review, appro
 - Freight Barcode PDF: creates freight forwarding barcode/origin label work request PDFs.
 - Keyword Review / Approval Queue: currently usable imported-artifact workflow for reviewing Keyword Engine dry-run outputs, editing rows, approving data, and preparing safe previews.
 - Keyword Engine Runner: future direct execution module; the engine is currently run outside this app and imported into the review queue.
-- Detail Page Draft Review / Preview: currently usable imported-artifact workflow for reviewing generated detail page HTML/JSON artifacts.
-- Detail Page Engine Runner: future direct execution module; the engine is currently run outside this app and imported into the preview/review module.
+- Detail Page Studio: opens the current production image-upload engine for eight-section generation, AI quality review, automatic panel correction, multilingual output, and final JPG download.
 - China Purchase & Receiving Manager: imports the existing China order workbook, allocates landed costs, saves purchase batches, and records normal, defective, and missing receipt quantities without changing Ops Center, Shopling, or sales-channel inventory.
 
 ## Repository role
@@ -32,9 +31,9 @@ Commerce OS OPS CENTER is the operational UI for product sourcing, review, appro
 
 - keyword generation and SearchAd validation engine
 
-### product-detail-page-auto
+### commerce-os-detail-page-studio
 
-- detail page generation engine
+- current production detail page generation studio
 
 ## Running locally
 
