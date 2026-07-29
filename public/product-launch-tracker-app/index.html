@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="신규 입고 상품의 상세페이지, 키워드, 샵플링 업로드, 마켓 등록 진행 상태를 관리합니다."
+    />
+    <title>신규 상품 출시 진행관리</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">COMMERCE OS · OPS CENTER</p>
+          <h1>신규 상품 출시 진행관리</h1>
+          <p class="subtitle">
+            신규 입고 상품의 상세페이지 제작부터 재고 반영까지 한 표에서 기록하고 확인합니다.
+          </p>
+        </div>
+        <div class="topbar-actions">
+          <span id="save-status" class="save-status">불러오는 중</span>
+          <button id="add-items-button" class="button button-primary" type="button">
+            + 상품 추가
+          </button>
+          <button id="export-menu-button" class="button button-secondary" type="button">
+            백업·내보내기
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section id="summary" class="summary-grid" aria-label="진행 요약"></section>
+
+        <section class="notice">
+          <div>
+            <strong>현재 기록은 이 브라우저에 자동 저장됩니다.</strong>
+            회사 PC에서 바로 사용할 수 있으며, 주기적으로 백업 파일을 내려받으면 다른 PC로도 옮길 수 있습니다.
+          </div>
+          <span id="source-meta" class="source-meta"></span>
+        </section>
+
+        <section class="workspace-card">
+          <div class="filter-grid">
+            <label class="field search-field">
+              <span>통합 검색</span>
+              <input
+                id="search-input"
+                type="search"
+                placeholder="모델번호, 상품명, 옵션, 위치코드 검색"
+                autocomplete="off"
+              />
+            </label>
+            <label class="field">
+              <span>작업 묶음</span>
+              <select id="batch-filter"></select>
+            </label>
+            <label class="field">
+              <span>담당자</span>
+              <select id="assignee-filter"></select>
+            </label>
+            <label class="field">
+              <span>전체 상태</span>
+              <select id="overall-filter">
+                <option value="">전체 상태</option>
+                <option value="미시작">미시작</option>
+                <option value="진행 중">진행 중</option>
+                <option value="보류">보류</option>
+                <option value="완료">완료</option>
+                <option value="보관됨">보관됨</option>
+              </select>
+            </label>
+            <label class="toggle-field">
+              <input id="unfinished-only-filter" type="checkbox" checked />
+              <span>미완료 상품만 보기</span>
+            </label>
+          </div>
+
+          <div class="bulkbar">
+            <div>
+              <strong id="visible-count">0건</strong>
+              <span id="selected-count">선택 0건</span>
+            </div>
+            <div class="bulk-controls">
+              <select id="bulk-stage" aria-label="일괄 변경 단계"></select>
+              <select id="bulk-status" aria-label="일괄 변경 상태"></select>
+              <button id="bulk-apply-button" class="button button-secondary" type="button">
+                선택 항목에 적용
+              </button>
+              <button id="clear-selection-button" class="button button-ghost" type="button">
+                선택 해제
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th class="check-column">
+                    <input id="select-visible" type="checkbox" aria-label="현재 목록 전체 선택" />
+                  </th>
+                  <th>작업 묶음</th>
+                  <th>창고위치</th>
+                  <th>모델번호</th>
+                  <th>상품명</th>
+                  <th>옵션</th>
+                  <th>상세페이지</th>
+                  <th>가격·키워드</th>
+                  <th>샵플링 업로드</th>
+                  <th>마켓 등록</th>
+                  <th>주문 매핑</th>
+                  <th>재고 반영</th>
+                  <th>다음 작업</th>
+                  <th>비고</th>
+                  <th>관리</th>
+                </tr>
+              </thead>
+              <tbody id="launch-table-body"></tbody>
+            </table>
+          </div>
+          <div id="empty-state" class="empty-state" hidden>
+            조건에 맞는 상품이 없습니다.
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="detail-dialog" class="dialog dialog-wide">
+      <form id="detail-form" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">출시 항목 상세</p>
+            <h2 id="detail-dialog-title">상품 수정</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="닫기">×</button>
+        </div>
+        <input type="hidden" name="id" />
+        <div class="form-grid">
+          <label class="field">
+            <span>작업 묶음</span>
+            <input name="workBatch" required />
+          </label>
+          <label class="field">
+            <span>창고위치</span>
+            <input name="warehouseLocation" />
+          </label>
+          <label class="field">
+            <span>모델번호</span>
+            <input name="modelNumber" required />
+          </label>
+          <label class="field">
+            <span>goods_key</span>
+            <input name="goodsKey" />
+          </label>
+          <label class="field field-span-2">
+            <span>상품명</span>
+            <input name="productName" required />
+          </label>
+          <label class="field field-span-2">
+            <span>옵션 구성 <small>쉼표로 구분</small></span>
+            <input name="options" />
+          </label>
+          <label class="field field-span-2">
+            <span>비고·보류 사유</span>
+            <textarea name="notes" rows="3"></textarea>
+          </label>
+        </div>
+        <div id="detail-stages" class="stage-editor"></div>
+        <div id="detail-source" class="source-panel"></div>
+        <div class="dialog-actions">
+          <button id="archive-button" class="button button-danger" type="button">
+            보관 처리
+          </button>
+          <div class="dialog-actions-right">
+            <button class="button button-ghost" value="cancel">취소</button>
+            <button class="button button-primary" value="save">저장</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="add-dialog" class="dialog">
+      <form id="add-form" method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">대량 추가</p>
+            <h2>엑셀 표 붙여넣기</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="닫기">×</button>
+        </div>
+        <p class="dialog-description">
+          아래 순서의 6개 열을 엑셀에서 그대로 복사해 붙여넣으세요.
+        </p>
+        <div class="paste-guide">
+          작업 묶음 · 창고위치 · 모델번호 · 상품명 · 옵션 · 비고
+        </div>
+        <textarea
+          name="paste"
+          class="paste-area"
+          rows="12"
+          placeholder="2026 7월 4주차&#9;BAA1-1&#9;AAA493&#9;상품명&#9;블랙,화이트&#9;확인 메모"
+        ></textarea>
+        <p id="paste-preview" class="paste-preview">붙여넣은 상품 0건</p>
+        <div class="dialog-actions dialog-actions-end">
+          <button class="button button-ghost" value="cancel">취소</button>
+          <button class="button button-primary" value="save">상품 추가</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="export-dialog" class="dialog dialog-small">
+      <form method="dialog">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">데이터 관리</p>
+            <h2>백업·내보내기</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="닫기">×</button>
+        </div>
+        <div class="export-actions">
+          <button id="export-json-button" class="export-option" type="button">
+            <strong>전체 백업 파일</strong>
+            <span>수정 상태와 담당자를 포함한 JSON을 내려받습니다.</span>
+          </button>
+          <button id="export-csv-button" class="export-option" type="button">
+            <strong>현재 목록 CSV</strong>
+            <span>현재 검색·필터 결과를 엑셀용 CSV로 내려받습니다.</span>
+          </button>
+          <button id="import-json-button" class="export-option" type="button">
+            <strong>백업 파일 불러오기</strong>
+            <span>다른 PC에서 내려받은 전체 백업을 복원합니다.</span>
+          </button>
+          <button id="reset-seed-button" class="export-option export-option-danger" type="button">
+            <strong>업로드 원본으로 초기화</strong>
+            <span>모든 수정 내용을 지우고 최초 이관 상태로 되돌립니다.</span>
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <input id="backup-file-input" type="file" accept="application/json,.json" hidden />
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

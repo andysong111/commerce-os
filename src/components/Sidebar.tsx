@@ -15,6 +15,7 @@ const moduleIconLabels: Record<string, string> = {
   "detail-page-local-engine": "상",
   "detail-page-image-upload-engine": "U",
   "shopling-price-adjustment-runner": "%",
+  "product-launch-tracker": "진",
 };
 
 const navigation = [
