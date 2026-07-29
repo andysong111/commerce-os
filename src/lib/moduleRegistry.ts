@@ -241,6 +241,23 @@ export const moduleRegistry: readonly CommerceModule[] = [
     actionLabel: "플로우 열기",
   },
   {
+    id: "product-launch-tracker",
+    title: "신규 상품 출시 진행관리",
+    navigationLabel: "신규 상품 출시 진행관리",
+    description:
+      "신규 입고 상품의 상세페이지 제작, 가격·키워드, 샵플링 업로드, 마켓 등록, 주문 매핑, 재고 반영 상태를 한곳에서 기록합니다.",
+    status: "available",
+    route: "/product-launch-tracker",
+    category: "상품 출시 관리",
+    inputType: "신규 상품 목록, 옵션, 작업 단계 상태",
+    outputType: "상품별 진행률, 다음 작업, 담당자, 완료 기록",
+    historySupport: true,
+    externalProject: true,
+    note: "독립 모듈 commerce-os-product-launch-tracker의 검증된 정적 실행본을 OPS Center에서 엽니다. 현재 수정 내용은 브라우저에 자동 저장됩니다.",
+    helperNote: "실제 이관 데이터 · 사용 가능",
+    actionLabel: "진행관리 열기",
+  },
+  {
     id: "shopling-product-upload-runner",
     title: "샵플링 상품등록 실행기",
     navigationLabel: "샵플링 상품등록 실행기",
