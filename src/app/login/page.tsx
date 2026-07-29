@@ -1,30 +1,41 @@
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSafeOpsAuthRedirect } from "@/lib/supabase/session";
 
 async function signIn(formData: FormData) {
   "use server";
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   const intent = String(formData.get("intent") ?? "password");
+  const nextPath = getSafeOpsAuthRedirect(String(formData.get("next") ?? ""));
   const supabase = await createSupabaseServerClient();
-  if (!supabase || !email) redirect("/login?error=missing_config_or_email");
+  const loginUrl = (error: string) =>
+    `/login?error=${encodeURIComponent(error)}&next=${encodeURIComponent(nextPath)}`;
+  if (!supabase || !email) redirect(loginUrl("missing_config_or_email"));
 
   if (intent === "password") {
-    if (!password) redirect("/login?error=missing_password");
+    if (!password) redirect(loginUrl("missing_password"));
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
-    redirect("/sourcing-engine/settings");
+    if (error) redirect(loginUrl(error.message));
+    redirect(nextPath);
   }
 
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback` } });
-  if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  redirect("/login?sent=1");
+  const callbackUrl = new URL("/auth/callback", origin);
+  callbackUrl.searchParams.set("next", nextPath);
+  const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: callbackUrl.toString() } });
+  if (error) redirect(loginUrl(error.message));
+  redirect(`/login?sent=1&next=${encodeURIComponent(nextPath)}`);
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string }> }) {
   const params = await searchParams;
+  const nextPath = getSafeOpsAuthRedirect(params.next);
+  const { user } = await getOpsCurrentUser();
+  if (user) redirect(nextPath);
+
   const errorMessage =
     params.error === "login_required"
       ? "로그인이 필요한 페이지입니다."
@@ -41,6 +52,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         description="기존 비밀번호로 로그인하거나, 비밀번호가 아직 없다면 매직링크를 받을 수 있습니다."
       />
       <form action={signIn} className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <input type="hidden" name="next" value={nextPath} />
         <label className="block text-sm font-semibold text-slate-700">
           이메일
           <input name="email" type="email" required autoComplete="email" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" />

@@ -40,8 +40,8 @@ test("로그인된 현재 사용자만 updateUser로 비밀번호를 설정한�
     "utf8",
   );
 
-  assert.match(page, /supabase\.auth\.getUser\(\)/);
-  assert.match(page, /redirect\("\/login\?error=login_required"\)/);
+  assert.match(page, /getOpsCurrentUser\(\)/);
+  assert.match(page, /next=%2Faccount%2Fpassword/);
   assert.match(form, /supabase\.auth\.updateUser\(\{ password \}\)/);
   assert.doesNotMatch(page + form, /admin|deleteUser|createUser|service_role/i);
 });

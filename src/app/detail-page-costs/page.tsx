@@ -7,7 +7,7 @@ import {
   normalizeDetailPageCostSummary,
 } from "@/lib/detailPageCostAdmin";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +37,11 @@ const dateTime = (value: string) =>
   }).format(new Date(value));
 
 export default async function DetailPageCostsPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data } = supabase
-    ? await supabase.auth.getUser()
-    : { data: { user: null } };
-  if (!data.user) redirect("/login");
-  if (!isDetailPageCostAdmin(data.user.email)) notFound();
+  const { user } = await getOpsCurrentUser();
+  if (!user) {
+    redirect("/login?error=login_required&next=%2Fdetail-page-costs");
+  }
+  if (!isDetailPageCostAdmin(user.email)) notFound();
 
   const admin = await createSupabaseAdminClient();
   if (!admin) {
