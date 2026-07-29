@@ -1,0 +1,35 @@
+name: Detail Page Cost Admin CI
+
+on:
+  pull_request:
+    paths:
+      - "src/app/detail-page-costs/**"
+      - "src/components/Sidebar.tsx"
+      - "src/lib/detailPageCostAdmin.ts"
+      - "src/lib/moduleRegistry.ts"
+      - "supabase/migrations/202607290001_detail_page_cost_events.sql"
+      - "tests/detailPageCostAdmin.test.mjs"
+      - "docs/detail-page-cost-ledger.md"
+      - ".github/workflows/detail-page-cost-admin-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --no-audit --no-fund --silent
+      - name: Focused tests
+        run: node --experimental-strip-types --test tests/detailPageCostAdmin.test.mjs
+      - name: Focused lint
+        run: npx eslint src/app/detail-page-costs/page.tsx src/lib/detailPageCostAdmin.ts tests/detailPageCostAdmin.test.mjs
+      - name: Production build
+        run: npm run build
+      - name: Diff check
+        run: git diff --check
