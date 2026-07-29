@@ -57,6 +57,14 @@ function isAdjustmentSource(value: unknown): value is ShoplingPriceAdjustmentSou
   return value === "paste" || value === "csv" || value === "xlsx";
 }
 
+function samePreparedInput(left: PreparedBulkInput, right: PreparedBulkInput) {
+  return left.rows.length === right.rows.length
+    && left.rows.every((row, index) => {
+      const other = right.rows[index];
+      return row.goodsKey === other?.goodsKey && row.adjustmentBps === other.adjustmentBps;
+    });
+}
+
 function getCurrentRows() {
   const storedText = localStorage.getItem(BULK_SELECTION_STORAGE_KEY);
   if (storedText) {
@@ -169,7 +177,19 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     if (creating || !preparedInput) return;
     setError("");
     setMessage("");
-    const parsed = preparedInput;
+    let parsed: PreparedBulkInput;
+    try {
+      parsed = getCurrentRows();
+    } catch (caught) {
+      setPreparedInput(null);
+      setError(caught instanceof Error ? caught.message : "현재 입력을 다시 읽을 수 없습니다.");
+      return;
+    }
+    if (!samePreparedInput(preparedInput, parsed)) {
+      setPreparedInput(null);
+      setError("입력 상품 또는 조정률이 변경되었습니다. 현재 입력으로 다시 확인하세요.");
+      return;
+    }
 
     setCreating(true);
     try {
