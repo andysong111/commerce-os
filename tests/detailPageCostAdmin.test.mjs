@@ -5,6 +5,7 @@ import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 const {
   aggregateRecentDetailPageCostRuns,
   isDetailPageCostAdmin,
+  normalizeDetailPageCostRuns,
   normalizeDetailPageCostSummary,
 } = await importTranspiledTypeScript(
   new URL("../src/lib/detailPageCostAdmin.ts", import.meta.url),
@@ -42,6 +43,44 @@ test("summary values from PostgREST JSON normalize to numbers", () => {
       unpriced_event_count: 2,
     },
   );
+});
+
+test("complete run aggregates from PostgREST normalize to display rows", () => {
+  assert.deepEqual(
+    normalizeDetailPageCostRuns([
+      {
+        run_id: "run-1",
+        product_name: "쿠션",
+        output_language: "한국어",
+        generation_profile: "standard",
+        created_at: "2026-07-29T12:02:00Z",
+        cost_usd: "0.24",
+        event_count: "3",
+        image_calls: 1,
+        verifier_calls: "1",
+        has_unpriced_event: false,
+      },
+      {
+        run_id: "",
+        created_at: "2026-07-29T12:03:00Z",
+      },
+    ]),
+    [
+      {
+        run_id: "run-1",
+        product_name: "쿠션",
+        output_language: "한국어",
+        generation_profile: "standard",
+        created_at: "2026-07-29T12:02:00Z",
+        cost_usd: 0.24,
+        event_count: 3,
+        image_calls: 1,
+        verifier_calls: 1,
+        has_unpriced_event: false,
+      },
+    ],
+  );
+  assert.deepEqual(normalizeDetailPageCostRuns(null), []);
 });
 
 test("recent events aggregate into one run including retries and verifiers", () => {
