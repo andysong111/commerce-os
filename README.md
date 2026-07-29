@@ -10,7 +10,7 @@ Commerce OS OPS CENTER is the operational UI for product sourcing, review, appro
 - Keyword Engine Runner: future direct execution module; the engine is currently run outside this app and imported into the review queue.
 - Detail Page Draft Review / Preview: currently usable imported-artifact workflow for reviewing generated detail page HTML/JSON artifacts.
 - Detail Page Engine Runner: future direct execution module; the engine is currently run outside this app and imported into the preview/review module.
-- China Order Cost Calculator: allocates China domestic shipping and calculates option-level purchase costs.
+- China Purchase & Receiving Manager: imports the existing China order workbook, allocates landed costs, saves purchase batches, and records normal, defective, and missing receipt quantities without changing Ops Center, Shopling, or sales-channel inventory.
 
 ## Repository role
 
