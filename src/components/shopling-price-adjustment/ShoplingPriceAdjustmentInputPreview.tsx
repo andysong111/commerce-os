@@ -22,6 +22,7 @@ import {
   stringifyShoplingPriceAdjustmentBulkSelection,
   type ShoplingPriceAdjustmentBulkSelection,
 } from "@/lib/shoplingPriceAdjustmentBulkSelection";
+import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
 
 type InputMode = "uniform" | "individual";
 type Selection = ShoplingPriceAdjustmentBulkSelection;
@@ -353,7 +354,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
     clearCanary();
     clearError();
     try {
-      const response = await fetch("/api/shopling-price-adjustment/plan/run", {
+      const response = await requestShoplingPriceAdjustmentApi("/api/shopling-price-adjustment/plan/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ rows: canaryRows }),
@@ -377,7 +378,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
     setPlanFetching(true);
     clearError();
     try {
-      const response = await fetch(
+      const response = await requestShoplingPriceAdjustmentApi(
         `/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(planRequestId)}`,
         { cache: "no-store" },
       );
@@ -422,7 +423,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
     setCanaryRunning(true);
     setCanaryResponse(null);
     try {
-      const response = await fetch("/api/shopling-price-adjustment/canary/run", {
+      const response = await requestShoplingPriceAdjustmentApi("/api/shopling-price-adjustment/canary/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input }),
@@ -446,7 +447,7 @@ export function ShoplingPriceAdjustmentInputPreview() {
     setCanaryFetching(true);
     clearError();
     try {
-      const response = await fetch(
+      const response = await requestShoplingPriceAdjustmentApi(
         `/api/shopling-price-adjustment/canary/result?request_id=${encodeURIComponent(canaryRequestId)}`,
         { cache: "no-store" },
       );

@@ -62,6 +62,8 @@ test("bulk selection survives a login round trip and final writes never auto-ret
   const input = await read("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview.tsx");
   const batch = await read("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx");
   const storage = await read("src/lib/shoplingPriceAdjustmentBulkSelection.ts");
+  const apiClient = await read("src/lib/shoplingPriceAdjustmentApiClient.ts");
+  const login = await read("src/app/login/page.tsx");
 
   assert.match(page, /getOpsCurrentUser\(\)/);
   assert.match(page, /next=%2Fshopling-price-adjustment-runner/);
@@ -70,9 +72,14 @@ test("bulk selection survives a login round trip and final writes never auto-ret
   assert.match(storage, /복원됨/);
   assert.match(storage, /label: selection\.label/);
   assert.match(storage, /mode: selection\.mode/);
-  assert.match(batch, /credentials: "same-origin"/);
+  assert.match(batch, /requestShoplingPriceAdjustmentApi/);
+  assert.match(apiClient, /credentials: "same-origin"/);
+  assert.match(apiClient, /getSession\(\)/);
+  assert.match(apiClient, /Bearer \$\{data\.session\.access_token\}/);
   assert.match(batch, /setLoginRequired\(true\)/);
   assert.match(batch, /로그인 다시 하기/);
+  assert.match(batch, /force=1/);
+  assert.match(login, /params\.force !== "1"/);
   assert.match(batch, /진단번호/);
   assert.match(
     batch,

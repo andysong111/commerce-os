@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { normalError, normalSession } from "@/lib/shoplingPriceModifyBulkApi";
+import { requireShoplingPriceAdjustmentAdmin } from "@/lib/shoplingPriceAdjustmentAuth";
+import { normalError } from "@/lib/shoplingPriceModifyBulkApi";
 import { advanceShoplingPriceAdjustmentBulkJob } from "@/lib/shoplingPriceAdjustmentBulkOrchestrator";
 
-export async function POST(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
-  const auth = await normalSession();
-  if (auth.response) return auth.response;
+export async function POST(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  const auth = await requireShoplingPriceAdjustmentAdmin(request);
+  if (!auth.ok) return auth.response;
   const { jobId } = await params;
   try {
     const result = await advanceShoplingPriceAdjustmentBulkJob(auth.admin, jobId, auth.ownerId);

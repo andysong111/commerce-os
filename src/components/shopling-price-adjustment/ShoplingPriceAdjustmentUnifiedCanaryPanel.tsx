@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
 
 type PricePlanRow = {
   goods_key?: string;
@@ -107,7 +108,7 @@ export function ShoplingPriceAdjustmentUnifiedCanaryPanel() {
     setPlanLoading(true);
     setError("");
     try {
-      const result = await fetch(`/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(planRequestId)}`, { cache: "no-store" });
+      const result = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/plan/result?request_id=${encodeURIComponent(planRequestId)}`, { cache: "no-store" });
       const body = await result.json() as PlanResponse;
       if (!result.ok || body.status === "error") throw new Error(body.message ?? `읽기 전용 결과 조회 실패 status=${result.status}`);
       setPlanResponse(body);
@@ -152,7 +153,7 @@ export function ShoplingPriceAdjustmentUnifiedCanaryPanel() {
       const endpoint = requiresOptionWrite
         ? "/api/shopling-price-adjustment/option-canary/run"
         : "/api/shopling-price-adjustment/canary/run";
-      const result = await fetch(endpoint, {
+      const result = await requestShoplingPriceAdjustmentApi(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ input }),
@@ -181,7 +182,7 @@ export function ShoplingPriceAdjustmentUnifiedCanaryPanel() {
       const endpoint = executionMode === "option"
         ? "/api/shopling-price-adjustment/option-canary/result"
         : "/api/shopling-price-adjustment/canary/result";
-      const result = await fetch(`${endpoint}?request_id=${encodeURIComponent(requestId)}`, { cache: "no-store" });
+      const result = await requestShoplingPriceAdjustmentApi(`${endpoint}?request_id=${encodeURIComponent(requestId)}`, { cache: "no-store" });
       const body = await result.json() as UnifiedResponse;
       if (!result.ok || body.status === "error") throw new Error(body.message ?? `실제 변경 결과 조회 실패 status=${result.status}`);
       setResponse(body);

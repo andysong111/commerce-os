@@ -30,11 +30,11 @@ async function signIn(formData: FormData) {
   redirect(`/login?sent=1&next=${encodeURIComponent(nextPath)}`);
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string; next?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; force?: string; sent?: string; next?: string }> }) {
   const params = await searchParams;
   const nextPath = getSafeOpsAuthRedirect(params.next);
   const { user } = await getOpsCurrentUser();
-  if (user) redirect(nextPath);
+  if (user && params.force !== "1") redirect(nextPath);
 
   const errorMessage =
     params.error === "login_required"

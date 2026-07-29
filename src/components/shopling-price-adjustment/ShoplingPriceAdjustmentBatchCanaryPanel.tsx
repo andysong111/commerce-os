@@ -8,13 +8,17 @@ import {
   parseStoredShoplingPriceAdjustmentBulkSelection,
   SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
 } from "@/lib/shoplingPriceAdjustmentBulkSelection";
+import {
+  requestShoplingPriceAdjustmentApi,
+  SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT,
+} from "@/lib/shoplingPriceAdjustmentApiClient";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
 const MAX_BULK_SIZE = 10_000;
 const AUTO_INTERVAL_MS = 4_000;
 const LOGIN_URL =
-  "/login?error=login_required&next=%2Fshopling-price-adjustment-runner";
+  "/login?force=1&error=login_required&next=%2Fshopling-price-adjustment-runner";
 
 type JobRow = {
   id?: string;
@@ -154,11 +158,25 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   const [jobMissing, setJobMissing] = useState(false);
   const tickingRef = useRef(false);
 
+  useEffect(() => {
+    const requireLogin = () => setLoginRequired(true);
+    window.addEventListener(
+      SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT,
+      requireLogin,
+    );
+    return () => {
+      window.removeEventListener(
+        SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT,
+        requireLogin,
+      );
+    };
+  }, []);
+
   const loadDetail = useCallback(async (targetJobId = jobId) => {
     if (!targetJobId) return null;
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await requestShoplingPriceAdjustmentApi(
         `/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(targetJobId)}`,
         {
           cache: "no-store",
@@ -212,7 +230,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
 
     setCheckingSession(true);
     try {
-      const response = await fetch(
+      const response = await requestShoplingPriceAdjustmentApi(
         "/api/shopling-price-adjustment/bulk/jobs",
         {
           cache: "no-store",
@@ -277,7 +295,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
 
     setCreating(true);
     try {
-      const createResponse = await fetch("/api/shopling-price-adjustment/bulk/jobs", {
+      const createResponse = await requestShoplingPriceAdjustmentApi("/api/shopling-price-adjustment/bulk/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "same-origin",
@@ -327,7 +345,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
       // starting so a start/auth failure cannot create a duplicate job.
       setPreparedInput(null);
 
-      const startResponse = await fetch(
+      const startResponse = await requestShoplingPriceAdjustmentApi(
         `/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(id)}/start`,
         {
           method: "POST",
@@ -360,7 +378,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     if (!jobId || tickingRef.current) return;
     tickingRef.current = true;
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/advance`, { method: "POST" });
+      const response = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/advance`, { method: "POST" });
       const body = await response.json() as AdvanceResponse;
       if (!response.ok || body.error) throw new Error(body.error ?? body.message ?? `자동 진행 실패 status=${response.status}`);
       if (body.message) setMessage(body.message);
@@ -394,7 +412,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     if (!jobId) return;
     setError("");
     if (detail?.job?.status === "paused" || detail?.job?.status === "prepared") {
-      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/start`, { method: "POST" });
+      const response = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/start`, { method: "POST" });
       const body = await response.json() as { error?: string };
       if (!response.ok) {
         setError(body.error ?? `재개 실패 status=${response.status}`);
@@ -410,7 +428,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     setPausing(true);
     setError("");
     try {
-      const response = await fetch(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/pause`, { method: "POST" });
+      const response = await requestShoplingPriceAdjustmentApi(`/api/shopling-price-adjustment/bulk/jobs/${encodeURIComponent(jobId)}/pause`, { method: "POST" });
       const body = await response.json() as { error?: string; message?: string };
       if (!response.ok) throw new Error(body.error ?? `일시중지 실패 status=${response.status}`);
       setMessage(body.message ?? "현재 진행 단계가 끝난 뒤 일시중지합니다.");

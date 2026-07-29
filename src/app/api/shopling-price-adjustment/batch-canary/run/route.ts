@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { dispatchShoplingPriceAdjustmentBatchCanary } from "@/lib/shoplingPriceAdjustmentBatchCanaryRunner";
+import { requireShoplingPriceAdjustmentOperator } from "@/lib/shoplingPriceAdjustmentAuth";
 
 export async function POST(request: Request) {
+  const auth = await requireShoplingPriceAdjustmentOperator(request);
+  if (!auth.ok) return auth.response;
   try {
     const body = await request.json() as { input?: unknown };
     const result = await dispatchShoplingPriceAdjustmentBatchCanary(body.input);
