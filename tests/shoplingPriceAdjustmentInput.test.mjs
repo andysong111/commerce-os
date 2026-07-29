@@ -69,12 +69,12 @@ test("invalid goods keys, missing values and unsafe rate formats are separated",
   assert.equal(parsed.invalidCount, 5);
 });
 
-test("20,000 unique rows are accepted and 20,001 are rejected", () => {
-  const input = Array.from({ length: 20_000 }, (_, index) => `${900000 + index} 10`).join("\n");
-  assert.equal(adjustment.parseShoplingPriceAdjustmentPaste(input).validCount, 20_000);
+test("10,000 unique rows are accepted and 10,001 are rejected", () => {
+  const input = Array.from({ length: 10_000 }, (_, index) => `${900000 + index} 10`).join("\n");
+  assert.equal(adjustment.parseShoplingPriceAdjustmentPaste(input).validCount, 10_000);
   assert.throws(
     () => adjustment.parseShoplingPriceAdjustmentPaste(`${input}\n999999999 10`),
-    /20,000/,
+    /10,000/,
   );
 });
 
@@ -122,12 +122,12 @@ test("price calculations use exact integer math and 10-won ceiling", () => {
 });
 
 test("chunk plan keeps the completed 10-item canary and 50-item serial pattern", () => {
-  for (const [count, expected] of [[0, 0], [1, 1], [10, 1], [11, 2], [60, 2], [61, 3], [20_000, 401]]) {
+  for (const [count, expected] of [[0, 0], [1, 1], [10, 1], [11, 2], [60, 2], [61, 3], [10_000, 201]]) {
     assert.equal(adjustment.plannedShoplingPriceAdjustmentChunkCount(count), expected);
   }
 });
 
-test("new route and UI are read-only and registered on the dashboard and sidebar", async () => {
+test("price adjustment UI is registered and exposes guarded 10k bulk preparation", async () => {
   const [page, component, library, registry, dashboard, sidebar] = await Promise.all([
     readFile(new URL("../src/app/shopling-price-adjustment-runner/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/shopling-price-adjustment/ShoplingPriceAdjustmentInputPreview.tsx", import.meta.url), "utf8"),
@@ -137,7 +137,7 @@ test("new route and UI are read-only and registered on the dashboard and sidebar
     readFile(new URL("../src/components/Sidebar.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(page, /샵플링 판매가 인상·인하 실행기/);
-  for (const phrase of ["최대 20,000개", "가격 쓰기 차단", "goods_key", "adjustment_rate", "10원 단위 올림"]) {
+  for (const phrase of ["최대 10,000개", "1만 개 Bulk 준비", "goods_key", "adjustment_rate", "10원 단위 올림"]) {
     assert.match(component, new RegExp(phrase));
   }
   assert.match(registry, /shopling-price-adjustment-runner/);
@@ -145,8 +145,9 @@ test("new route and UI are read-only and registered on the dashboard and sidebar
   assert.match(dashboard, /extendedModuleRegistry/);
   assert.match(sidebar, /extendedModuleRegistry/);
   assert.match(sidebar, /shopling-price-adjustment-runner/);
-  assert.doesNotMatch(component + library, /fetch\s*\(/);
-  assert.doesNotMatch(component + library, /supabase/i);
-  assert.doesNotMatch(component + library, /api\.shopling/i);
-  assert.doesNotMatch(component + library, /github\.com/i);
+  assert.match(component, /\/api\/shopling-price-adjustment\/plan\/run/);
+  assert.doesNotMatch(library, /fetch\s*\(/);
+  assert.doesNotMatch(library, /supabase/i);
+  assert.doesNotMatch(library, /api\.shopling/i);
+  assert.doesNotMatch(library, /github\.com/i);
 });
