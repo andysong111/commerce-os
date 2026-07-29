@@ -18,7 +18,20 @@ export const shoplingPriceAdjustmentModule: CommerceModule = {
   safetyBadge: "가격 쓰기 차단",
 };
 
+const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) =>
+  module.id === "shopling-price-modify-runner"
+    ? {
+        ...module,
+        title: "샵플링 쇼핑몰별 가격정책 적용기",
+        navigationLabel: "샵플링 가격정책 적용기",
+        description: "goods_key 기준으로 기본 판매가와 쇼핑몰별 지정 가격정책을 일괄 적용합니다.",
+        helperNote: "실제 가격정책 적용",
+        actionLabel: "가격정책 적용기 열기",
+      }
+    : module,
+);
+
 export const extendedModuleRegistry: readonly CommerceModule[] = [
-  ...moduleRegistry,
+  ...renamedModuleRegistry,
   shoplingPriceAdjustmentModule,
 ];
