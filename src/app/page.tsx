@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { isDetailPageCostAdmin } from "@/lib/detailPageCostAdmin";
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 import type { CommerceModule } from "@/lib/moduleRegistry";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const statusPresentation = {
   available: {
@@ -49,8 +51,16 @@ const statusPresentation = {
   },
 } as const;
 
-export default function DashboardPage() {
-  const availableCount = extendedModuleRegistry.filter(
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
+  const { data } = supabase
+    ? await supabase.auth.getUser()
+    : { data: { user: null } };
+  const showDetailPageCosts = isDetailPageCostAdmin(data.user?.email);
+  const visibleModules = extendedModuleRegistry.filter(
+    (module) => module.id !== "detail-page-cost-admin" || showDetailPageCosts,
+  );
+  const availableCount = visibleModules.filter(
     (module) => module.status === "available",
   ).length;
 
@@ -70,11 +80,11 @@ export default function DashboardPage() {
             운영 모듈
           </h2>
           <span className="text-xs text-slate-500">
-            {availableCount} / {extendedModuleRegistry.length} 사용 가능
+            {availableCount} / {visibleModules.length} 사용 가능
           </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {extendedModuleRegistry.map((module, index) => (
+          {visibleModules.map((module, index) => (
             <ModuleCard key={module.id} module={module} index={index} />
           ))}
         </div>
