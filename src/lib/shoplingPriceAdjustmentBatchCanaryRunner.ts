@@ -7,9 +7,9 @@ const SUMMARY_FILENAMES = [
   "price_adjustment_batch_canary_summary.json",
   "output/github_actions/price_adjustment_batch_canary_summary.json",
 ];
-const CONFIRMATION_TEXT = "CONFIRM_TEN_PRICE_ADJUSTMENT_CANARY";
+const CONFIRMATION_TEXT = "CONFIRM_FIFTY_PRICE_ADJUSTMENT_SERIAL";
 const REQUEST_ID_PATTERN = /^price-adjust-batch-canary-\d{8}T\d{6}Z-[0-9a-f]{6}$/i;
-const MAX_ROWS = 10;
+const MAX_ROWS = 50;
 const MAX_PAGES = 2;
 const MAX_CANDIDATES = 20;
 
@@ -38,6 +38,7 @@ export type ShoplingPriceAdjustmentBatchCanarySummary = {
   not_executed_count?: unknown;
   fail_stop_used?: unknown;
   automatic_retry_used?: unknown;
+  max_items?: unknown;
   rows?: unknown;
   error?: unknown;
 };
@@ -60,7 +61,7 @@ function getConfig(): Config {
   const ref = process.env.SHOPLING_PRICE_MODIFY_REF?.trim();
   const token = process.env.SHOPLING_PRICE_MODIFY_ACTIONS_TOKEN?.trim() || process.env.GITHUB_ACTIONS_TOKEN?.trim();
   if (!repo || !/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error("SHOPLING_PRICE_MODIFY_REPO 설정이 필요합니다.");
-  if (!workflow || /[\\/]/.test(workflow)) throw new Error("10개 가격 카나리 workflow 설정이 올바르지 않습니다.");
+  if (!workflow || /[\\/]/.test(workflow)) throw new Error("가격 직렬 실행 workflow 설정이 올바르지 않습니다.");
   if (!ref) throw new Error("SHOPLING_PRICE_MODIFY_REF 설정이 필요합니다.");
   if (!token) throw new Error("SHOPLING_PRICE_MODIFY_ACTIONS_TOKEN 또는 GITHUB_ACTIONS_TOKEN 설정이 필요합니다.");
   return { repo, workflow, ref, token };
@@ -82,15 +83,15 @@ async function readJson(response: Response) {
 
 export function validateShoplingPriceAdjustmentBatchCanaryInput(value: unknown): ShoplingPriceAdjustmentBatchCanaryInput[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_ROWS) {
-    throw new Error(`실제 변경 카나리는 1~${MAX_ROWS}개 상품만 사용할 수 있습니다.`);
+    throw new Error(`실제 가격 변경은 한 번에 1~${MAX_ROWS}개 상품만 사용할 수 있습니다.`);
   }
   const seen = new Set<string>();
   return value.map((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${index + 1}번째 카나리 입력이 올바르지 않습니다.`);
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${index + 1}번째 실행 입력이 올바르지 않습니다.`);
     const record = item as Record<string, unknown>;
     const allowed = ["goods_key", "adjustment_bps", "expected_current_sell_price", "expected_option_signature", "requires_option_write"];
     if (Object.keys(record).length !== allowed.length || Object.keys(record).some((key) => !allowed.includes(key))) {
-      throw new Error(`${index + 1}번째 카나리 입력 필드가 올바르지 않습니다.`);
+      throw new Error(`${index + 1}번째 실행 입력 필드가 올바르지 않습니다.`);
     }
     const goodsKey = record.goods_key;
     const adjustmentBps = record.adjustment_bps;
@@ -157,11 +158,11 @@ export function buildShoplingPriceAdjustmentBatchCanaryDispatch(inputValue: unkn
 
 export async function dispatchShoplingPriceAdjustmentBatchCanary(inputValue: unknown): Promise<ShoplingPriceAdjustmentBatchCanaryResult> {
   if (process.env.SHOPLING_PRICE_MODIFY_ENABLED !== "1") {
-    return { status: "error", message: "SHOPLING_PRICE_MODIFY_ENABLED=1인 경우에만 10개 실제 가격 카나리를 실행할 수 있습니다." };
+    return { status: "error", message: "SHOPLING_PRICE_MODIFY_ENABLED=1인 경우에만 실제 가격 직렬 실행을 사용할 수 있습니다." };
   }
   let request;
   try { request = buildShoplingPriceAdjustmentBatchCanaryDispatch(inputValue); }
-  catch (error) { return { status: "error", message: error instanceof Error ? error.message : "10개 카나리 입력이 올바르지 않습니다." }; }
+  catch (error) { return { status: "error", message: error instanceof Error ? error.message : "가격 직렬 실행 입력이 올바르지 않습니다." }; }
   try {
     const response = await fetch(request.url, {
       method: "POST",
@@ -169,9 +170,9 @@ export async function dispatchShoplingPriceAdjustmentBatchCanary(inputValue: unk
       body: JSON.stringify(request.body),
     });
     if (response.status !== 204 && response.status !== 200) {
-      return { status: "error", message: `10개 실제 가격 카나리 요청 실패 status=${response.status}`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
+      return { status: "error", message: `실제 가격 직렬 실행 요청 실패 status=${response.status}`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
     }
-    return { status: "success", message: `${request.inputCount}개 상품의 직렬 실제 가격 카나리를 시작했습니다.`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
+    return { status: "success", message: `${request.inputCount}개 상품의 직렬 실제 가격 변경을 시작했습니다.`, requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "GitHub Actions 요청 중 오류가 발생했습니다.", requestId: request.requestId, githubActionsUrl: request.githubActionsUrl };
   }
@@ -185,18 +186,18 @@ function findSummaryPath(files: Record<string, Uint8Array>) {
 export function extractShoplingPriceAdjustmentBatchCanarySummary(zipBytes: Uint8Array) {
   const files = unzipSync(zipBytes);
   const path = findSummaryPath(files);
-  if (!path) throw new Error("10개 가격 카나리 artifact에서 summary를 찾을 수 없습니다.");
+  if (!path) throw new Error("가격 직렬 실행 artifact에서 summary를 찾을 수 없습니다.");
   return JSON.parse(new TextDecoder().decode(files[path])) as ShoplingPriceAdjustmentBatchCanarySummary;
 }
 
 export async function fetchShoplingPriceAdjustmentBatchCanaryResult(requestId: string): Promise<ShoplingPriceAdjustmentBatchCanaryResult> {
-  if (!REQUEST_ID_PATTERN.test(requestId)) return { status: "error", message: "10개 카나리 요청 추적 ID 형식이 올바르지 않습니다.", requestId };
+  if (!REQUEST_ID_PATTERN.test(requestId)) return { status: "error", message: "가격 직렬 실행 요청 추적 ID 형식이 올바르지 않습니다.", requestId };
   let config: Config;
   try { config = getConfig(); }
   catch (error) { return { status: "error", message: error instanceof Error ? error.message : "GitHub 설정이 올바르지 않습니다.", requestId }; }
   const [owner, repoName] = config.repo.split("/");
   const requestDate = parseRequestDate(requestId);
-  const created = requestDate ? `${new Date(requestDate.getTime() - 5 * 60_000).toISOString()}..${new Date(requestDate.getTime() + 30 * 60_000).toISOString()}` : undefined;
+  const created = requestDate ? `${new Date(requestDate.getTime() - 5 * 60_000).toISOString()}..${new Date(requestDate.getTime() + 60 * 60_000).toISOString()}` : undefined;
   let candidates = 0;
   try {
     for (let page = 1; page <= MAX_PAGES; page += 1) {
@@ -229,8 +230,8 @@ export async function fetchShoplingPriceAdjustmentBatchCanaryResult(requestId: s
       }
       if (runs.length < 100) break;
     }
-    return { status: "pending", message: "10개 실제 가격 카나리가 아직 완료되지 않았습니다.", requestId };
+    return { status: "pending", message: "실제 가격 직렬 실행이 아직 완료되지 않았습니다.", requestId };
   } catch (error) {
-    return { status: "error", message: error instanceof Error ? error.message : "10개 카나리 결과 조회 중 오류가 발생했습니다.", requestId };
+    return { status: "error", message: error instanceof Error ? error.message : "가격 직렬 실행 결과 조회 중 오류가 발생했습니다.", requestId };
   }
 }

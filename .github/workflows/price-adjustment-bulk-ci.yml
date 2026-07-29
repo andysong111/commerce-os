@@ -1,0 +1,26 @@
+name: Price Adjustment Bulk CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/api/shopling-price-adjustment/bulk/**'
+      - 'src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx'
+      - 'src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts'
+      - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
+      - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
+      - 'supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql'
+      - 'supabase/migrations/202607290002_shopling_price_adjustment_bulk_failures.sql'
+      - 'tests/shoplingPriceAdjustmentBatchCanary.test.mjs'
+      - '.github/workflows/price-adjustment-bulk-ci.yml'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentBatchCanary.test.mjs
+      - run: npm run build

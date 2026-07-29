@@ -4,39 +4,58 @@ import test from "node:test";
 
 const bridge = readFileSync("src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts", "utf8");
 const panel = readFileSync("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx", "utf8");
+const orchestrator = readFileSync("src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts", "utf8");
+const server = readFileSync("src/lib/shoplingPriceAdjustmentBulkServer.ts", "utf8");
+const migration = readFileSync("supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql", "utf8");
 const page = readFileSync("src/app/shopling-price-adjustment-runner/page.tsx", "utf8");
-const runRoute = readFileSync("src/app/api/shopling-price-adjustment/batch-canary/run/route.ts", "utf8");
-const resultRoute = readFileSync("src/app/api/shopling-price-adjustment/batch-canary/result/route.ts", "utf8");
+const advanceRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/advance/route.ts", "utf8");
 
-test("batch bridge uses isolated workflow artifact confirmation and exact request ids", () => {
+test("chunk executor bridge is capped at fifty and uses explicit serial confirmation", () => {
   assert.match(bridge, /shopling-price-adjustment-batch-canary\.yml/);
   assert.match(bridge, /shopling-price-adjustment-batch-canary-summary/);
-  assert.match(bridge, /CONFIRM_TEN_PRICE_ADJUSTMENT_CANARY/);
-  assert.match(bridge, /price-adjust-batch-canary-/);
-  assert.match(bridge, /batch_canary_json/);
+  assert.match(bridge, /CONFIRM_FIFTY_PRICE_ADJUSTMENT_SERIAL/);
+  assert.match(bridge, /const MAX_ROWS = 50/);
+  assert.match(bridge, /inputCount: input\.length/);
   assert.match(bridge, /requires_option_write/);
-  assert.match(bridge, /SHOPLING_PRICE_MODIFY_ENABLED/);
 });
 
-test("batch input is capped at ten and rejects duplicates", () => {
-  assert.match(bridge, /const MAX_ROWS = 10/);
-  assert.match(bridge, /value\.length > MAX_ROWS/);
-  assert.match(bridge, /중복 goods_key/);
-  assert.match(bridge, /expected_current_sell_price/);
-  assert.match(bridge, /expected_option_signature/);
+test("bulk server accepts up to ten thousand unique adjustment rows", () => {
+  assert.match(server, /const MAX_ROWS = 10_000/);
+  assert.match(server, /record\.rows\.length > MAX_ROWS/);
+  assert.match(server, /중복 goods_key/);
+  assert.match(server, /adjustmentBps/);
 });
 
-test("batch panel requires exactly ten read-only rows and exposes fail-stop warning", () => {
-  assert.match(panel, /const REQUIRED_BATCH_SIZE = 10/);
-  assert.match(panel, /rows\.length !== REQUIRED_BATCH_SIZE/);
-  assert.match(panel, /requires_option_write/);
-  assert.match(panel, /첫 실패 시 남은 상품은 실행하지 않습니다/);
-  assert.match(panel, /이미 단일 테스트한 상품은 다시 넣지 마세요/);
-  assert.match(panel, /10개 변경 결과 가져오기/);
+test("bulk schema isolates adjustment jobs and chunks first ten then fifty", () => {
+  assert.match(migration, /shopling_price_adjustment_bulk_jobs/);
+  assert.match(migration, /valid_count between 1 and 10000/);
+  assert.match(migration, /ordinal <= 10 then 0/);
+  assert.match(migration, /\(\(ordinal - 11\) \/ 50\)/);
+  assert.match(migration, /claim_shopling_price_adjustment_bulk_job/);
+  assert.match(migration, /dispatch_uncertain/);
 });
 
-test("page and routes connect the isolated batch panel", () => {
+test("orchestrator plans and executes one persistent chunk at a time", () => {
+  assert.match(orchestrator, /dispatchShoplingPriceAdjustmentPlan/);
+  assert.match(orchestrator, /fetchShoplingPriceAdjustmentPlanResult/);
+  assert.match(orchestrator, /dispatchShoplingPriceAdjustmentBatchCanary/);
+  assert.match(orchestrator, /fetchShoplingPriceAdjustmentBatchCanaryResult/);
+  assert.match(orchestrator, /buildExecutionRowsFromPlan/);
+  assert.match(orchestrator, /claim_shopling_price_adjustment_bulk_job/);
+  assert.match(orchestrator, /first failure|실패/);
+});
+
+test("bulk panel creates, resumes and pauses a persistent ten-thousand item job", () => {
+  assert.match(panel, /const MAX_BULK_SIZE = 10_000/);
+  assert.match(panel, /현재 입력으로 Bulk 작업 시작/);
+  assert.match(panel, /자동 진행 재개/);
+  assert.match(panel, /현재 단계 후 일시중지/);
+  assert.match(panel, /최대 10,000개 Bulk 실제 가격 변경/);
+  assert.match(panel, /shoplingPriceAdjustment\.currentBulkJobId/);
+  assert.match(panel, /\/api\/shopling-price-adjustment\/bulk\/jobs/);
+});
+
+test("page and advance route connect the 10k bulk runner", () => {
   assert.match(page, /ShoplingPriceAdjustmentBatchCanaryPanel/);
-  assert.match(runRoute, /dispatchShoplingPriceAdjustmentBatchCanary/);
-  assert.match(resultRoute, /fetchShoplingPriceAdjustmentBatchCanaryResult/);
+  assert.match(advanceRoute, /advanceShoplingPriceAdjustmentBulkJob/);
 });
