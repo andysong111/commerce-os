@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
-import { moduleRegistry, type CommerceModule } from "@/lib/moduleRegistry";
+import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
+import type { CommerceModule } from "@/lib/moduleRegistry";
 
 const statusPresentation = {
   available: {
@@ -49,7 +50,7 @@ const statusPresentation = {
 } as const;
 
 export default function DashboardPage() {
-  const availableCount = moduleRegistry.filter(
+  const availableCount = extendedModuleRegistry.filter(
     (module) => module.status === "available",
   ).length;
 
@@ -69,11 +70,11 @@ export default function DashboardPage() {
             운영 모듈
           </h2>
           <span className="text-xs text-slate-500">
-            {availableCount} / {moduleRegistry.length} 사용 가능
+            {availableCount} / {extendedModuleRegistry.length} 사용 가능
           </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {moduleRegistry.map((module, index) => (
+          {extendedModuleRegistry.map((module, index) => (
             <ModuleCard key={module.id} module={module} index={index} />
           ))}
         </div>
