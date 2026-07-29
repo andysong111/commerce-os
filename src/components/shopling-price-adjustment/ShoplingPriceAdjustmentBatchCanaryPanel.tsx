@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {\n  parseShoplingPriceAdjustmentPaste,\n  type ShoplingPriceAdjustmentSource,\n} from "@/lib/shoplingPriceAdjustmentInput";
+import {
+  parseShoplingPriceAdjustmentPaste,
+  type ShoplingPriceAdjustmentSource,
+} from "@/lib/shoplingPriceAdjustmentInput";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
@@ -49,6 +52,10 @@ type AdvanceResponse = {
 };
 
 type PreparedBulkInput = ReturnType<typeof parseShoplingPriceAdjustmentPaste>;
+
+function isAdjustmentSource(value: unknown): value is ShoplingPriceAdjustmentSource {
+  return value === "paste" || value === "csv" || value === "xlsx";
+}
 
 function getCurrentRows() {
   const storedText = localStorage.getItem(BULK_SELECTION_STORAGE_KEY);
