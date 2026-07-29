@@ -309,15 +309,16 @@ test("Detail Page Engine Runner page renders safety banner and expected artifact
   );
 });
 
-test("Dashboard links point to runner pages", () => {
+test("Dashboard links point to the keyword runner and latest detail page studio", () => {
   assert.equal(
     moduleRegistry.find((module) => module.id === "keyword-engine")?.route,
     "/keyword-engine-runner",
   );
   assert.equal(
-    moduleRegistry.find((module) => module.id === "detail-page-engine")?.route,
-    "/detail-page-engine-runner",
+    moduleRegistry.find((module) => module.id === "detail-page-studio")?.route,
+    "https://commerce-os-detail-page-studio.vercel.app/",
   );
+  assert.equal(moduleRegistry.find((module) => module.id === "detail-page-engine"), undefined);
 });
 
 test("run listing API rejects invalid runner kind", async () => {
