@@ -6,13 +6,17 @@ async function signIn(formData: FormData) {
   "use server";
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const intent = String(formData.get("intent") ?? "password");
   const supabase = await createSupabaseServerClient();
   if (!supabase || !email) redirect("/login?error=missing_config_or_email");
-  if (password) {
+
+  if (intent === "password") {
+    if (!password) redirect("/login?error=missing_password");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
     redirect("/sourcing-engine/settings");
   }
+
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
   const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: `${origin}/auth/callback` } });
   if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
@@ -21,15 +25,57 @@ async function signIn(formData: FormData) {
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; sent?: string }> }) {
   const params = await searchParams;
+  const errorMessage =
+    params.error === "login_required"
+      ? "로그인이 필요한 페이지입니다."
+      : params.error === "missing_password"
+        ? "기존 비밀번호를 입력하세요. 비밀번호가 아직 없다면 매직링크 받기를 누르세요."
+        : params.error === "missing_config_or_email"
+          ? "이메일 또는 로그인 설정을 확인하세요."
+          : params.error;
+
   return (
     <>
-      <PageHeader title="Login" description="Sign in to sync sourcing cards and feedback with Supabase server storage." />
+      <PageHeader
+        title="로그인"
+        description="기존 비밀번호로 로그인하거나, 비밀번호가 아직 없다면 매직링크를 받을 수 있습니다."
+      />
       <form action={signIn} className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <label className="block text-sm font-semibold text-slate-700">Email<input name="email" type="email" required className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label>
-        <label className="mt-4 block text-sm font-semibold text-slate-700">Password <span className="font-normal text-slate-400">(optional for magic link)</span><input name="password" type="password" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label>
-        <button className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Sign in / Send magic link</button>
-        {params.sent ? <p className="mt-3 text-sm font-semibold text-emerald-700">Magic link sent. Check your email.</p> : null}
-        {params.error ? <p className="mt-3 text-sm font-semibold text-red-700">{params.error}</p> : null}
+        <label className="block text-sm font-semibold text-slate-700">
+          이메일
+          <input name="email" type="email" required autoComplete="email" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" />
+        </label>
+        <label className="mt-4 block text-sm font-semibold text-slate-700">
+          기존 비밀번호
+          <input name="password" type="password" autoComplete="current-password" className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" />
+          <span className="mt-2 block text-xs font-normal leading-5 text-slate-500">
+            새 비밀번호를 만드는 칸이 아닙니다.
+          </span>
+        </label>
+        <button
+          name="intent"
+          value="password"
+          className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white"
+        >
+          비밀번호로 로그인
+        </button>
+        <div className="my-4 flex items-center gap-3 text-xs text-slate-400">
+          <span className="h-px flex-1 bg-slate-200" />
+          또는
+          <span className="h-px flex-1 bg-slate-200" />
+        </div>
+        <button
+          name="intent"
+          value="magic_link"
+          className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          매직링크 받기
+        </button>
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          매직링크는 이메일 발송 제한이 있으므로 필요한 경우에만 한 번 누르세요.
+        </p>
+        {params.sent ? <p className="mt-3 text-sm font-semibold text-emerald-700">매직링크를 보냈습니다. 이메일을 확인하세요.</p> : null}
+        {errorMessage ? <p className="mt-3 text-sm font-semibold text-red-700">{errorMessage}</p> : null}
       </form>
     </>
   );

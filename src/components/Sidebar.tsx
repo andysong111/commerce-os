@@ -18,8 +18,8 @@ const moduleIconLabels: Record<string, string> = {
   "product-launch-tracker": "진",
 };
 
-function navigationFor(showDetailPageCosts: boolean) {
-  return [
+function navigationFor(showDetailPageCosts: boolean, signedIn: boolean) {
+  const primary = [
     { href: "/", label: "대시보드", iconLabel: "D" },
     ...extendedModuleRegistry.flatMap((module) => {
       if (
@@ -46,15 +46,28 @@ function navigationFor(showDetailPageCosts: boolean) {
       ];
     }),
   ];
+
+  return [
+    ...primary,
+    {
+      href: signedIn ? "/account/password" : "/login",
+      label: signedIn ? "비밀번호 설정·변경" : "로그인",
+      iconLabel: "계",
+    },
+  ];
 }
 
 export function Sidebar({
   showDetailPageCosts = false,
+  signedIn = false,
+  email = "",
 }: {
   showDetailPageCosts?: boolean;
+  signedIn?: boolean;
+  email?: string;
 }) {
   const pathname = usePathname();
-  const navigation = navigationFor(showDetailPageCosts);
+  const navigation = navigationFor(showDetailPageCosts, signedIn);
 
   return (
     <>
@@ -86,7 +99,16 @@ export function Sidebar({
           })}
         </nav>
         <div className="border-t border-slate-800 px-5 py-4 text-xs text-slate-500">
-          운영 자동화 워크스페이스
+          {signedIn ? (
+            <>
+              <p className="truncate" title={email}>{email}</p>
+              <Link href="/logout" className="mt-2 inline-block font-semibold text-slate-300 hover:text-white">
+                로그아웃
+              </Link>
+            </>
+          ) : (
+            "운영 자동화 워크스페이스"
+          )}
         </div>
       </aside>
 
