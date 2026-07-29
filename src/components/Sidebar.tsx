@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { moduleRegistry } from "@/lib/moduleRegistry";
+import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 
 const moduleIconLabels: Record<string, string> = {
   "china-order-cost": "₩",
@@ -14,11 +14,12 @@ const moduleIconLabels: Record<string, string> = {
   "warehouse-location-sync": "W",
   "detail-page-local-engine": "상",
   "detail-page-image-upload-engine": "U",
+  "shopling-price-adjustment-runner": "%",
 };
 
 const navigation = [
   { href: "/", label: "대시보드", iconLabel: "D" },
-  ...moduleRegistry.flatMap((module) => {
+  ...extendedModuleRegistry.flatMap((module) => {
     if (
       !["available", "check_mode", "runner_scaffold"].includes(module.status) ||
       module.route === null
