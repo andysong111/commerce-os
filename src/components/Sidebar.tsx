@@ -13,6 +13,7 @@ const moduleIconLabels: Record<string, string> = {
   "warehouse-label-generator": "L",
   "warehouse-location-sync": "W",
   "detail-page-studio": "상",
+  "detail-page-cost-admin": "비",
   "shopling-price-adjustment-runner": "%",
   "product-launch-tracker": "진",
 };
