@@ -254,7 +254,7 @@ export function parseShoplingPriceAdjustmentXlsxBytes(bytes: Uint8Array): Shopli
     }
     if (!value.trim()) continue;
     if (!new Set(["A", "B"]).has(column)) throw new Error("XLSX는 A열 goods_key와 B열 adjustment_rate만 사용할 수 있습니다.");
-    const current = rowValues.get(rowNumber) ?? {};
+    const current: { A?: string; B?: string } = rowValues.get(rowNumber) ?? {};
     current[column as "A" | "B"] = value;
     rowValues.set(rowNumber, current);
   }
@@ -289,10 +289,6 @@ export function plannedShoplingPriceAdjustmentChunkCount(goodsKeyCount: number):
   return 1 + Math.ceil(Math.max(0, goodsKeyCount - 10) / 50);
 }
 
-function ceilDivide(numerator: bigint, denominator: bigint) {
-  return (numerator + denominator - 1n) / denominator;
-}
-
 export function calculateShoplingAdjustedSellPrice(currentSellPrice: number, adjustmentBps: number) {
   if (!Number.isSafeInteger(currentSellPrice) || currentSellPrice <= 0) throw new Error("현재 판매가는 0보다 큰 정수여야 합니다.");
   if (!Number.isInteger(adjustmentBps) || adjustmentBps < SHOPLING_PRICE_ADJUSTMENT_MIN_BPS || adjustmentBps > SHOPLING_PRICE_ADJUSTMENT_MAX_BPS) {
@@ -300,17 +296,21 @@ export function calculateShoplingAdjustedSellPrice(currentSellPrice: number, adj
   }
   if (adjustmentBps === 0) return currentSellPrice;
   const factor = 10_000 + adjustmentBps;
-  const adjustedWon = ceilDivide(BigInt(currentSellPrice) * BigInt(factor), 10_000n);
-  const roundedToTen = ceilDivide(adjustedWon, 10n) * 10n;
-  if (roundedToTen > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("계산된 판매가가 너무 큽니다.");
-  return Number(roundedToTen);
+  const numerator = currentSellPrice * factor;
+  if (!Number.isSafeInteger(numerator)) throw new Error("계산할 판매가가 너무 큽니다.");
+  const adjustedWon = Math.floor((numerator + 9_999) / 10_000);
+  const roundedToTen = Math.floor((adjustedWon + 9) / 10) * 10;
+  if (!Number.isSafeInteger(roundedToTen)) throw new Error("계산된 판매가가 너무 큽니다.");
+  return roundedToTen;
 }
 
 export function calculateShoplingAdjustedPriceColumns(currentSellPrice: number, adjustmentBps: number) {
   const sellPrice = calculateShoplingAdjustedSellPrice(currentSellPrice, adjustmentBps);
+  const consumerNumerator = sellPrice * 3;
+  if (!Number.isSafeInteger(consumerNumerator)) throw new Error("계산된 소비자가가 너무 큽니다.");
   return {
     sellPrice,
-    consumerPrice: Math.floor((sellPrice * 3) / 2),
+    consumerPrice: Math.floor(consumerNumerator / 2),
     purchasePrice: Math.floor(sellPrice / 2),
   };
 }
