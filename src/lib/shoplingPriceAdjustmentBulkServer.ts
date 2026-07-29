@@ -21,9 +21,9 @@ export function validateShoplingPriceAdjustmentBulkCreateInput(value: unknown): 
   const originalCount = record.originalCount;
   const duplicateCount = record.duplicateCount;
   const invalidCount = record.invalidCount;
-  for (const [label, number] of [["원본 행", originalCount], ["중복", duplicateCount], ["잘못된 행", invalidCount]] as const) {
-    if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0) throw new Error(`${label} 통계가 올바르지 않습니다.`);
-  }
+  if (typeof originalCount !== "number" || !Number.isSafeInteger(originalCount) || originalCount < 0) throw new Error("원본 행 통계가 올바르지 않습니다.");
+  if (typeof duplicateCount !== "number" || !Number.isSafeInteger(duplicateCount) || duplicateCount < 0) throw new Error("중복 통계가 올바르지 않습니다.");
+  if (typeof invalidCount !== "number" || !Number.isSafeInteger(invalidCount) || invalidCount < 0) throw new Error("잘못된 행 통계가 올바르지 않습니다.");
   if (originalCount !== record.rows.length + duplicateCount + invalidCount) throw new Error("입력 통계가 일치하지 않습니다.");
 
   const seen = new Set<string>();
