@@ -41,7 +41,7 @@ export function parseShoplingIndividualDraft(input: string): ShoplingIndividualD
     rows.push({ goodsKey, rateText });
   }
 
-  if (rows.length > 20_000) throw new Error("상품은 최대 20,000개까지 편집할 수 있습니다.");
+  if (rows.length > 10_000) throw new Error("상품은 최대 10,000개까지 편집할 수 있습니다.");
   return { rows, duplicateCount, invalid };
 }
 
