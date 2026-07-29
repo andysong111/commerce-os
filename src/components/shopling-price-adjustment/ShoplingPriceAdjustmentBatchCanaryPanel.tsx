@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parseShoplingPriceAdjustmentPaste } from "@/lib/shoplingPriceAdjustmentInput";
+import {
+  parseShoplingPriceAdjustmentPaste,
+  type ShoplingPriceAdjustmentSource,
+} from "@/lib/shoplingPriceAdjustmentInput";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
+const BULK_SELECTION_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkSelection";
 const MAX_BULK_SIZE = 10_000;
 const AUTO_INTERVAL_MS = 4_000;
 
@@ -47,9 +51,54 @@ type AdvanceResponse = {
   error?: string;
 };
 
+type PreparedBulkInput = ReturnType<typeof parseShoplingPriceAdjustmentPaste>;
+
+function isAdjustmentSource(value: unknown): value is ShoplingPriceAdjustmentSource {
+  return value === "paste" || value === "csv" || value === "xlsx";
+}
+
+function samePreparedInput(left: PreparedBulkInput, right: PreparedBulkInput) {
+  return left.rows.length === right.rows.length
+    && left.rows.every((row, index) => {
+      const other = right.rows[index];
+      return row.goodsKey === other?.goodsKey && row.adjustmentBps === other.adjustmentBps;
+    });
+}
+
 function getCurrentRows() {
+  const storedText = localStorage.getItem(BULK_SELECTION_STORAGE_KEY);
+  if (storedText) {
+    try {
+      const stored = JSON.parse(storedText) as {
+        source?: unknown;
+        originalCount?: unknown;
+        duplicateCount?: unknown;
+        invalidCount?: unknown;
+        rows?: Array<{ goodsKey?: unknown; adjustmentBps?: unknown }>;
+      };
+      const rows = Array.isArray(stored.rows) ? stored.rows : [];
+      const parsed = parseShoplingPriceAdjustmentPaste(rows.map((row) =>
+        `${String(row.goodsKey ?? "")} ${Number(row.adjustmentBps) / 100}`
+      ).join("\n"));
+      if (parsed.validCount > 0 && parsed.invalidCount === 0) {
+        if (parsed.validCount > MAX_BULK_SIZE) {
+          throw new Error(`최대 ${MAX_BULK_SIZE.toLocaleString("ko-KR")}개까지 실행할 수 있습니다.`);
+        }
+        return {
+          ...parsed,
+          source: isAdjustmentSource(stored.source) ? stored.source : parsed.source,
+          originalCount: Number.isSafeInteger(stored.originalCount) ? Number(stored.originalCount) : parsed.originalCount,
+          duplicateCount: Number.isSafeInteger(stored.duplicateCount) ? Number(stored.duplicateCount) : parsed.duplicateCount,
+          invalidCount: Number.isSafeInteger(stored.invalidCount) ? Number(stored.invalidCount) : parsed.invalidCount,
+        };
+      }
+    } catch {
+      localStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+    }
+  }
+
   const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${INPUT_TEXTAREA_LABEL}"]`);
-  if (!textarea) throw new Error("위 입력 영역에서 개별 설정을 선택하고 상품 목록을 반영하세요.");
+  if (!textarea) throw new Error("위 입력 영역에서 일괄 또는 개별 설정으로 상품 목록을 반영하세요.");
   const parsed = parseShoplingPriceAdjustmentPaste(textarea.value);
   if (parsed.validCount === 0) throw new Error("실행할 goods_key와 조정률을 입력하세요.");
   if (parsed.invalidCount > 0) throw new Error(`잘못된 입력 ${parsed.invalidCount}개를 먼저 수정하세요.`);
@@ -85,6 +134,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [preparedInput, setPreparedInput] = useState<PreparedBulkInput | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const tickingRef = useRef(false);
@@ -111,24 +161,35 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     if (jobId) void loadDetail(jobId);
   }, [jobId, loadDetail]);
 
-  const createAndStart = async () => {
-    if (creating) return;
+  const prepareCreate = () => {
+    if (creating || autoRunning) return;
     setError("");
     setMessage("");
-    let parsed;
-    try { parsed = getCurrentRows(); }
-    catch (caught) {
+    try {
+      setPreparedInput(getCurrentRows());
+    } catch (caught) {
+      setPreparedInput(null);
       setError(caught instanceof Error ? caught.message : "현재 입력을 읽을 수 없습니다.");
+    }
+  };
+
+  const createAndStart = async () => {
+    if (creating || !preparedInput) return;
+    setError("");
+    setMessage("");
+    let parsed: PreparedBulkInput;
+    try {
+      parsed = getCurrentRows();
+    } catch (caught) {
+      setPreparedInput(null);
+      setError(caught instanceof Error ? caught.message : "현재 입력을 다시 읽을 수 없습니다.");
       return;
     }
-    const totalChunks = 1 + Math.ceil(Math.max(parsed.validCount - 10, 0) / 50);
-    if (!window.confirm(
-      `${parsed.validCount.toLocaleString("ko-KR")}개 상품의 가격을 Bulk 작업으로 저장하고 실행합니다.\n\n` +
-      `첫 시험: ${Math.min(10, parsed.validCount)}개\n` +
-      `이후 청크: 최대 50개씩\n` +
-      `총 청크: ${totalChunks.toLocaleString("ko-KR")}개\n\n` +
-      "각 청크는 현재가·옵션 조회 후 실제 가격을 한 상품씩 직렬 변경합니다. 첫 실패 시 전체 자동 진행을 중단합니다.",
-    )) return;
+    if (!samePreparedInput(preparedInput, parsed)) {
+      setPreparedInput(null);
+      setError("입력 상품 또는 조정률이 변경되었습니다. 현재 입력으로 다시 확인하세요.");
+      return;
+    }
 
     setCreating(true);
     try {
@@ -153,6 +214,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
       const started = await startResponse.json() as { error?: string };
       if (!startResponse.ok) throw new Error(started.error ?? `Bulk 작업 시작 실패 status=${startResponse.status}`);
       setMessage(`${parsed.validCount.toLocaleString("ko-KR")}개 상품의 Bulk 자동 진행을 시작했습니다.`);
+      setPreparedInput(null);
       setAutoRunning(true);
       await loadDetail(id);
     } catch (caught) {
@@ -231,6 +293,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     setAutoRunning(false);
     setJobId("");
     setDetail(null);
+    setPreparedInput(null);
     setMessage("");
     setError("");
     localStorage.removeItem(JOB_STORAGE_KEY);
@@ -248,18 +311,30 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h2 className="text-xl font-bold text-slate-950">최대 10,000개 Bulk 실제 가격 변경</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-600">위 개별 설정의 goods_key·조정률을 작업으로 저장한 뒤 첫 10개 시험, 이후 50개 청크로 자동 진행합니다. 옵션 추가금 변경 여부는 자동 판단합니다.</p>
+        <p className="mt-2 text-sm leading-6 text-slate-600">위 일괄 또는 개별 설정의 goods_key·조정률을 작업으로 저장한 뒤 첫 10개 시험, 이후 50개 청크로 자동 진행합니다. 옵션 추가금 변경 여부는 자동 판단합니다.</p>
       </div>
       <span className="rounded-full bg-fuchsia-100 px-3 py-1 text-sm font-bold text-fuchsia-900">1만개 Bulk</span>
     </div>
 
     <div className="mt-5 flex flex-wrap gap-3">
-      <button type="button" disabled={creating || autoRunning} onClick={() => void createAndStart()} className="rounded-lg bg-fuchsia-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : "현재 입력으로 Bulk 작업 시작"}</button>
+      <button type="button" disabled={creating || autoRunning || Boolean(preparedInput)} onClick={prepareCreate} className="rounded-lg bg-fuchsia-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : "현재 입력으로 Bulk 작업 시작"}</button>
       <button type="button" disabled={!jobId || autoRunning || isTerminal(job?.status)} onClick={() => void resume()} className="rounded-lg bg-blue-700 px-4 py-3 font-bold text-white disabled:opacity-50">자동 진행 재개</button>
       <button type="button" disabled={!jobId || job?.status !== "running" || pausing} onClick={() => void pause()} className="rounded-lg bg-amber-600 px-4 py-3 font-bold text-white disabled:opacity-50">{pausing ? "중지 요청 중..." : "현재 단계 후 일시중지"}</button>
       <button type="button" disabled={!jobId || loading} onClick={() => void loadDetail()} className="rounded-lg bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-50">{loading ? "조회 중..." : "상태 새로고침"}</button>
       <button type="button" disabled={autoRunning} onClick={clearJob} className="rounded-lg border border-slate-300 bg-white px-4 py-3 font-bold text-slate-700 disabled:opacity-50">새 작업 준비</button>
     </div>
+
+    {preparedInput && <div className="mt-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
+      <p className="font-bold text-amber-950">실제 실행 최종 확인</p>
+      <p className="mt-2 text-sm leading-6 text-amber-900">
+        {preparedInput.validCount.toLocaleString("ko-KR")}개 상품 · 첫 {Math.min(10, preparedInput.validCount).toLocaleString("ko-KR")}개 시험 · 총 {(1 + Math.ceil(Math.max(preparedInput.validCount - 10, 0) / 50)).toLocaleString("ko-KR")}개 청크
+      </p>
+      <p className="mt-1 text-sm text-amber-900">각 청크는 현재가·옵션을 재검증하고 첫 실패 또는 전송 불확실 시 전체 진행을 중단합니다.</p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button type="button" disabled={creating} onClick={() => void createAndStart()} className="rounded-lg bg-red-700 px-4 py-3 font-bold text-white disabled:opacity-50">{creating ? "작업 저장·시작 중..." : "확인 후 실제 Bulk 시작"}</button>
+        <button type="button" disabled={creating} onClick={() => setPreparedInput(null)} className="rounded-lg border border-amber-400 bg-white px-4 py-3 font-bold text-amber-900 disabled:opacity-50">취소</button>
+      </div>
+    </div>}
 
     {jobId && <p className="mt-4 break-all rounded-lg bg-slate-50 p-3 font-mono text-xs">job_id: {jobId}</p>}
     {message && <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-900">{message}</p>}

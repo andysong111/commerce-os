@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   calculateShoplingAdjustedPriceColumns,
   parseShoplingPriceAdjustmentFile,
@@ -95,6 +95,7 @@ type CanaryResponse = {
 
 const PLAN_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentPlanRequestId";
 const CANARY_REQUEST_STORAGE_KEY = "shoplingPriceAdjustment.currentCanaryRequestId";
+const BULK_SELECTION_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkSelection";
 
 const directionLabel = (row: ShoplingPriceAdjustmentRow) =>
   row.direction === "increase" ? "인상" : row.direction === "decrease" ? "인하" : "변경 없음";
@@ -175,6 +176,23 @@ export function ShoplingPriceAdjustmentInputPreview() {
   const [canaryRequestId, setCanaryRequestId] = useState(() =>
     typeof window === "undefined" ? "" : localStorage.getItem(CANARY_REQUEST_STORAGE_KEY) ?? "",
   );
+
+  useEffect(() => {
+    if (!selection || selection.result.validCount === 0 || selection.result.invalidCount > 0) {
+      localStorage.removeItem(BULK_SELECTION_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(BULK_SELECTION_STORAGE_KEY, JSON.stringify({
+      source: selection.result.source,
+      originalCount: selection.result.originalCount,
+      duplicateCount: selection.result.duplicateCount,
+      invalidCount: selection.result.invalidCount,
+      rows: selection.result.rows.map((row) => ({
+        goodsKey: row.goodsKey,
+        adjustmentBps: row.adjustmentBps,
+      })),
+    }));
+  }, [selection]);
 
   const clearError = () => setError("");
 
