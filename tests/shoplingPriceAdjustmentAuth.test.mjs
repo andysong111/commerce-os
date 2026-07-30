@@ -47,10 +47,16 @@ test("every price-adjustment API route requires an allowed operator", async () =
 
 test("operator auth verifies a server-rendered bearer and falls back to the canonical cookie", async () => {
   const source = await read("src/lib/shoplingPriceAdjustmentAuth.ts");
+  const bypass = await read("src/lib/opsLoginBypass.ts");
   const identity = await read(
     "src/lib/shoplingPriceAdjustmentIdentity.ts",
   );
 
+  assert.match(source, /isOpsLoginTemporarilyDisabled/);
+  assert.match(source, /isSameOriginOpsRequest/);
+  assert.match(source, /temporaryOpsIdentity/);
+  assert.match(source, /OPS_LOGIN_BYPASS_SAME_ORIGIN_REQUIRED/);
+  assert.match(bypass, /OPS_LOGIN_DISABLED/);
   assert.match(source, /await createSupabaseServerClient\(\)/);
   assert.match(source, /supabase\.auth\.getUser\(\)/);
   assert.match(source, /supabase\.auth\.getUser\(bearer\.token\)/);

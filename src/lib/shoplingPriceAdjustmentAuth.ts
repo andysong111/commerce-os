@@ -7,6 +7,11 @@ import { getSupabasePublicConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isOpsAuthCookieName } from "@/lib/supabase/session";
 import {
+  isOpsLoginTemporarilyDisabled,
+  isSameOriginOpsRequest,
+  temporaryOpsIdentity,
+} from "@/lib/opsLoginBypass";
+import {
   resolveShoplingPriceAdjustmentIdentity,
   type ShoplingPriceAdjustmentIdentityProbe,
 } from "@/lib/shoplingPriceAdjustmentIdentity";
@@ -266,6 +271,25 @@ async function ambientAuthCookieCount() {
 export async function requireShoplingPriceAdjustmentOperator(
   request: Request,
 ): Promise<OperatorAuthResult> {
+  if (isOpsLoginTemporarilyDisabled()) {
+    if (!isSameOriginOpsRequest(request)) {
+      return authFailure(
+        "Ops Center 화면에서 다시 실행하세요.",
+        403,
+        "OPS_LOGIN_BYPASS_SAME_ORIGIN_REQUIRED",
+        "temporary_login_bypass_same_origin_required",
+      );
+    }
+    const identity = temporaryOpsIdentity();
+    return {
+      ok: true,
+      operator: {
+        userId: identity.userId,
+        email: identity.email,
+      },
+    };
+  }
+
   const resolved = await resolveShoplingPriceAdjustmentIdentity({
     verifyBearer: () => verifyBearerIdentity(request),
     verifyCookie: verifyCookieIdentity,

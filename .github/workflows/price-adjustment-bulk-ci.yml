@@ -11,6 +11,7 @@ on:
       - 'src/lib/shoplingPriceAdjustmentApiClient.ts'
       - 'src/lib/shoplingPriceAdjustmentIdentity.ts'
       - 'src/lib/shoplingPriceAdjustmentResponse.ts'
+      - 'src/lib/opsLoginBypass.ts'
       - 'src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
@@ -27,6 +28,7 @@ on:
       - 'scripts/verify-price-auth-client-bundle.mjs'
       - 'scripts/verify-price-auth-route.mjs'
       - 'tests/shoplingPriceAdjustmentAuth.test.mjs'
+      - 'tests/opsLoginBypass.test.mjs'
       - 'tests/shoplingPriceAdjustmentBatchCanary.test.mjs'
       - 'tests/shoplingPriceAdjustmentInputModes.test.mjs'
       - 'tests/shoplingPriceAdjustmentIdentity.test.mjs'
@@ -59,7 +61,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentIdentity.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs tests/supabaseSsrAuthRoundTrip.test.mjs
+      - run: node --experimental-strip-types --test tests/opsLoginBypass.test.mjs tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentIdentity.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs tests/supabaseSsrAuthRoundTrip.test.mjs
       - run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -f scripts/verify-price-adjustment-bulk-migration.sql
         env:
           PGPASSWORD: postgres
