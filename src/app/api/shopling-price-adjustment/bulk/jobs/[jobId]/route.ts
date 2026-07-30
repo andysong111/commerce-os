@@ -16,18 +16,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   if (!jobResult.data) return normalError("작업을 찾을 수 없거나 접근 권한이 없습니다.", 404, "ADJUSTMENT_BULK_JOB_NOT_FOUND", "adjustment_bulk.detail.job");
 
   const statuses = ["pending", "running", "succeeded", "failed", "not_executed"];
-  const [chunks, ...counts] = await Promise.all([
+  const [chunks, excludedItems, ...counts] = await Promise.all([
     auth.admin.from("shopling_price_adjustment_bulk_chunks")
       .select("id,chunk_index,chunk_type,goods_key_count,status,plan_request_id,execute_request_id,plan_run_url,execute_run_url,last_error,started_at,completed_at,updated_at")
       .eq("job_id", jobId)
       .order("chunk_index", { ascending: true }),
+    auth.admin.from("shopling_price_adjustment_bulk_items")
+      .select("goods_key,ordinal,status,result")
+      .eq("job_id", jobId)
+      .eq("status", "not_executed")
+      .order("ordinal", { ascending: true })
+      .limit(10_000),
     ...statuses.map((status) => auth.admin.from("shopling_price_adjustment_bulk_items")
       .select("goods_key", { count: "exact", head: true })
       .eq("job_id", jobId)
       .eq("status", status)),
   ]);
-  if (chunks.error || counts.some((result) => result.error)) {
-    return normalError("Bulk 진행상황 조회에 실패했습니다.", 500, "ADJUSTMENT_BULK_PROGRESS_QUERY_FAILED", "adjustment_bulk.detail.progress", chunks.error ?? counts.find((result) => result.error)?.error);
+  if (chunks.error || excludedItems.error || counts.some((result) => result.error)) {
+    return normalError(
+      "Bulk 진행상황 조회에 실패했습니다.",
+      500,
+      "ADJUSTMENT_BULK_PROGRESS_QUERY_FAILED",
+      "adjustment_bulk.detail.progress",
+      chunks.error ?? excludedItems.error ?? counts.find((result) => result.error)?.error,
+    );
   }
 
   const itemStatusCounts = Object.fromEntries(statuses.map((status, index) => [status, counts[index].count ?? 0]));
@@ -39,6 +51,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     job: jobResult.data,
     chunks: chunkRows,
     item_status_counts: itemStatusCounts,
+    excluded_items: Array.isArray(excludedItems.data) ? excludedItems.data : [],
     chunk_status_counts: chunkStatusCounts,
     current_chunk: chunkRows.find((row) => ["planning", "ready", "executing", "dispatch_uncertain"].includes(String(row.status)))
       ?? chunkRows.find((row) => row.status === "pending")

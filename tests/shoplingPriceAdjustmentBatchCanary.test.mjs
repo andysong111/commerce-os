@@ -4,6 +4,7 @@ import test from "node:test";
 
 const bridge = readFileSync("src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts", "utf8");
 const panel = readFileSync("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx", "utf8");
+const resultPanel = readFileSync("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentJobResultPanel.tsx", "utf8");
 const orchestrator = readFileSync("src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts", "utf8");
 const workflowStatus = readFileSync("src/lib/shoplingPriceAdjustmentWorkflowStatus.ts", "utf8");
 const server = readFileSync("src/lib/shoplingPriceAdjustmentBulkServer.ts", "utf8");
@@ -11,6 +12,7 @@ const migration = readFileSync("supabase/migrations/202607290001_shopling_price_
 const createHotfix = readFileSync("supabase/migrations/202607300002_shopling_price_adjustment_bulk_create_hotfix.sql", "utf8");
 const page = readFileSync("src/app/shopling-price-adjustment-runner/page.tsx", "utf8");
 const advanceRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/advance/route.ts", "utf8");
+const detailRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/route.ts", "utf8");
 
 test("chunk executor bridge is capped at fifty and uses explicit serial confirmation", () => {
   assert.match(bridge, /shopling-price-adjustment-batch-canary\.yml/);
@@ -76,6 +78,21 @@ test("bulk panel creates, resumes and pauses a persistent ten-thousand item job"
   assert.match(panel, /최대 10,000개 Bulk 실제 가격 변경/);
   assert.match(panel, /shoplingPriceAdjustment\.currentBulkJobId/);
   assert.match(panel, /\/api\/shopling-price-adjustment\/bulk\/jobs/);
+});
+
+test("runner hides manual canaries and shows excluded goods keys inline", () => {
+  assert.doesNotMatch(page, /ShoplingPriceAdjustmentUnifiedCanaryPanel/);
+  assert.match(page, /price-adjustment-input-simple/);
+  assert.match(page, /section:nth-of-type\(2\)/);
+  assert.match(page, /section:nth-of-type\(3\)/);
+  assert.match(page, /button:nth-child\(4\)/);
+  assert.match(page, /button:nth-child\(5\)/);
+  assert.match(page, /ShoplingPriceAdjustmentJobResultPanel/);
+  assert.match(resultPanel, /조회 오류·미실행/);
+  assert.match(resultPanel, /새 작업 시작/);
+  assert.match(resultPanel, /가격 변경 안 됨/);
+  assert.match(detailRoute, /excluded_items/);
+  assert.match(detailRoute, /goods_key,ordinal,status,result/);
 });
 
 test("page and advance route connect the 10k bulk runner", () => {
