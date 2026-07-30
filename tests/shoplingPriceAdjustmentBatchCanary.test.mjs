@@ -5,6 +5,7 @@ import test from "node:test";
 const bridge = readFileSync("src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts", "utf8");
 const panel = readFileSync("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx", "utf8");
 const orchestrator = readFileSync("src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts", "utf8");
+const workflowStatus = readFileSync("src/lib/shoplingPriceAdjustmentWorkflowStatus.ts", "utf8");
 const server = readFileSync("src/lib/shoplingPriceAdjustmentBulkServer.ts", "utf8");
 const migration = readFileSync("supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql", "utf8");
 const createHotfix = readFileSync("supabase/migrations/202607300002_shopling_price_adjustment_bulk_create_hotfix.sql", "utf8");
@@ -55,6 +56,16 @@ test("orchestrator plans and executes one persistent chunk at a time", () => {
   assert.match(orchestrator, /buildExecutionRowsFromPlan/);
   assert.match(orchestrator, /claim_shopling_price_adjustment_bulk_job/);
   assert.match(orchestrator, /first failure|실패/);
+});
+
+test("completed Actions failures cannot remain in an infinite waiting loop", () => {
+  assert.match(workflowStatus, /githubWorkflowRunMatchesRequestId/);
+  assert.match(workflowStatus, /결과 파일이 생성되지 않았습니다/);
+  assert.match(workflowStatus, /결제 실패·Actions 사용 한도/);
+  assert.match(orchestrator, /findTerminalGithubWorkflowFailure/);
+  assert.match(orchestrator, /return failJob\(/);
+  assert.match(orchestrator, /return blockUncertain\(/);
+  assert.match(orchestrator, /중복 실행하지 말고/);
 });
 
 test("bulk panel creates, resumes and pauses a persistent ten-thousand item job", () => {

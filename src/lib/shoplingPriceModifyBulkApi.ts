@@ -10,6 +10,7 @@ type BulkQueryResult = { data: Array<Record<string, unknown>> | null; error: unk
 type BulkSingleResult = { data: Record<string, unknown> | null; error: unknown; count?: number | null };
 type BulkAdminQuery = PromiseLike<BulkQueryResult> & {
   select(columns: string, options?: { count?: "exact"; head?: boolean }): BulkAdminQuery;
+  update(values: Record<string, unknown>): BulkAdminQuery;
   eq(column: string, value: unknown): BulkAdminQuery;
   gt(column: string, value: unknown): BulkAdminQuery;
   lt(column: string, value: unknown): BulkAdminQuery;

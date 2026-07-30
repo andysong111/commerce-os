@@ -15,6 +15,8 @@ on:
       - 'src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
+      - 'src/lib/shoplingPriceAdjustmentPartialPlan.ts'
+      - 'src/lib/shoplingPriceAdjustmentWorkflowStatus.ts'
       - 'src/lib/supabase/browser.ts'
       - 'src/lib/supabase/browserConfig.ts'
       - 'src/lib/supabase/config.ts'
@@ -32,6 +34,9 @@ on:
       - 'tests/shoplingPriceAdjustmentBatchCanary.test.mjs'
       - 'tests/shoplingPriceAdjustmentInputModes.test.mjs'
       - 'tests/shoplingPriceAdjustmentIdentity.test.mjs'
+      - 'tests/shoplingPriceAdjustmentPartialPlan.test.mjs'
+      - 'tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs'
+      - 'tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs'
       - 'tests/supabaseSession.test.mjs'
       - 'tests/supabaseSsrAuthRoundTrip.test.mjs'
       - 'package.json'
@@ -61,7 +66,18 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - run: node --experimental-strip-types --test tests/opsLoginBypass.test.mjs tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentIdentity.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs tests/supabaseSsrAuthRoundTrip.test.mjs
+      - run: >-
+          node --experimental-strip-types --test
+          tests/opsLoginBypass.test.mjs
+          tests/shoplingPriceAdjustmentAuth.test.mjs
+          tests/shoplingPriceAdjustmentBatchCanary.test.mjs
+          tests/shoplingPriceAdjustmentIdentity.test.mjs
+          tests/shoplingPriceAdjustmentInputModes.test.mjs
+          tests/shoplingPriceAdjustmentPartialPlan.test.mjs
+          tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
+          tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
+          tests/supabaseSession.test.mjs
+          tests/supabaseSsrAuthRoundTrip.test.mjs
       - run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -f scripts/verify-price-adjustment-bulk-migration.sql
         env:
           PGPASSWORD: postgres
