@@ -31,7 +31,7 @@ if (remote?.state && shouldUseRemoteState(remote, localState)) {
   shouldUploadLocalAfterBoot = true;
 }
 
-await import("./app.js");
+await import("./main-app.js");
 
 if (shouldUploadLocalAfterBoot) {
   queueServerSave(JSON.stringify(localState), 0);
