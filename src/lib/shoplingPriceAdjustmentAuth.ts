@@ -181,17 +181,15 @@ async function verifyBearerIdentity(
         persistSession: false,
       },
     });
-    const { data, error } = await supabase.auth.getClaims(bearer.token);
-    const userId =
-      typeof data?.claims?.sub === "string" ? data.claims.sub : "";
-    const email =
-      typeof data?.claims?.email === "string" ? data.claims.email : "";
+    const { data, error } = await supabase.auth.getUser(bearer.token);
+    const userId = data.user?.id ?? "";
+    const email = data.user?.email ?? "";
     if (error || !userId || !email) {
       return {
         status: "invalid",
         reason: error
           ? safeAuthErrorReason(error)
-          : "claims_identity_missing",
+          : "user_identity_missing",
       };
     }
     return {

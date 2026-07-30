@@ -53,7 +53,8 @@ test("operator auth verifies a server-rendered bearer and falls back to the cano
 
   assert.match(source, /await createSupabaseServerClient\(\)/);
   assert.match(source, /supabase\.auth\.getUser\(\)/);
-  assert.match(source, /supabase\.auth\.getClaims\(bearer\.token\)/);
+  assert.match(source, /supabase\.auth\.getUser\(bearer\.token\)/);
+  assert.doesNotMatch(source, /supabase\.auth\.getClaims\(bearer\.token\)/);
   assert.match(source, /resolveShoplingPriceAdjustmentIdentity/);
   assert.match(source, /shoplingPriceAdjustmentOperatorEmails/);
   assert.match(source, /SHOPLING_PRICE_ADJUSTMENT_ALLOWED_EMAILS/);
