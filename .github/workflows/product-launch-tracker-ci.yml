@@ -1,0 +1,29 @@
+name: Product Launch Tracker CI
+
+on:
+  pull_request:
+    paths:
+      - 'public/product-launch-tracker-app/**'
+      - 'src/app/api/product-launch-tracker/**'
+      - 'src/lib/productLaunchTracker*.ts'
+      - 'supabase/migrations/20260731000*_product_launch*.sql'
+      - 'tests/productLaunchTracker*.test.mjs'
+      - '.github/workflows/product-launch-tracker-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run product launch tracker tests
+        run: >-
+          npx tsx --test
+          tests/productLaunchTrackerEntry.test.mjs
+          tests/productLaunchTrackerSorting.test.mjs
+          tests/productLaunchTrackerShopling.test.mjs

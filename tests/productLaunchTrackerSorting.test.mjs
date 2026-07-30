@@ -13,6 +13,14 @@ const indexSource = await readFile(
   "utf8",
 );
 const appSource = await readFile(
+  new URL("../public/product-launch-tracker-app/main-app.js", import.meta.url),
+  "utf8",
+);
+const bootstrapSource = await readFile(
+  new URL("../public/product-launch-tracker-app/bootstrap.js", import.meta.url),
+  "utf8",
+);
+const entrySource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
@@ -26,7 +34,7 @@ test("신규 상품 진행관리의 업무 헤더 14개가 오름차순·내림�
     appSource,
     /elements\.tableHead\.addEventListener\("click", handleSortClick\)/,
   );
-  assert.match(appSource, /header\.setAttribute\(\s*"aria-sort"/);
+  assert.match(appSource, /header\.setAttribute\("aria-sort"/);
 });
 
 test("바코드는 모델번호 왼쪽에서 직접 입력·저장하고 기존 기록에는 빈값을 보완한다", () => {
@@ -44,6 +52,13 @@ test("바코드는 모델번호 왼쪽에서 직접 입력·저장하고 기존 
       .barcode,
     "",
   );
+});
+
+test("진행관리 앱은 서버 저장 동기화를 거쳐 실행된다", () => {
+  assert.match(entrySource, /bootstrap\.js/);
+  assert.match(bootstrapSource, /\/api\/product-launch-tracker\/state/);
+  assert.match(bootstrapSource, /main-app\.js/);
+  assert.match(bootstrapSource, /Storage\.prototype\.setItem/);
 });
 
 test("상태 헤더 정렬은 미시작·진행 중·보류·완료·제외 업무 순서를 따른다", () => {
