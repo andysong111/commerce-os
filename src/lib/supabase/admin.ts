@@ -6,6 +6,8 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
   private readonly params = new URLSearchParams();
   private count: "exact" | undefined;
   private head = false;
+  private method: "GET" | "PATCH" = "GET";
+  private requestBody: Record<string, unknown> | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -17,6 +19,16 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     this.params.set("select", columns);
     this.count = options.count;
     this.head = options.head === true;
+    return this;
+  }
+
+  update(values: Record<string, unknown>) {
+    if (!values || typeof values !== "object" || Array.isArray(values)) {
+      throw new TypeError("Supabase REST update requires an object body.");
+    }
+    this.method = "PATCH";
+    this.requestBody = values;
+    this.head = false;
     return this;
   }
 
@@ -91,10 +103,14 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
 
   private async execute(): Promise<AdminResult> {
     const headers = createSupabaseAdminHeaders(this.secretKey);
-    if (this.count === "exact") headers.Prefer = "count=exact";
+    const preferences: string[] = [];
+    if (this.count === "exact") preferences.push("count=exact");
+    if (this.method === "PATCH") preferences.push("return=representation");
+    if (preferences.length > 0) headers.Prefer = preferences.join(",");
     const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
-      method: this.head ? "HEAD" : "GET",
+      method: this.head ? "HEAD" : this.method,
       headers,
+      body: this.method === "PATCH" ? JSON.stringify(this.requestBody ?? {}) : undefined,
       cache: "no-store",
     });
     return readAdminResponse(response);
