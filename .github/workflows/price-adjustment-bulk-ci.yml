@@ -12,8 +12,10 @@ on:
       - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
       - 'src/lib/supabase/browser.ts'
+      - 'src/lib/supabase/browserConfig.ts'
       - 'src/lib/supabase/config.ts'
       - 'src/lib/supabase/proxy.ts'
+      - 'src/lib/supabase/requestCookies.ts'
       - 'src/lib/supabase/server.ts'
       - 'src/lib/supabase/session.ts'
       - 'supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql'
@@ -39,9 +41,7 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: anon_price_auth_build_check
       - run: node scripts/verify-price-auth-client-bundle.mjs
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: anon_price_auth_build_check

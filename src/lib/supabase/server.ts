@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
+import { createSupabaseRequestCookieStore } from "@/lib/supabase/requestCookies";
 import { getOpsAuthCookieOptions } from "@/lib/supabase/session";
 
 type CookieToSet = { name: string; value: string; options?: Record<string, unknown> };
@@ -46,6 +47,24 @@ export async function createSupabaseServerClient(): Promise<SupabaseServerClient
           } catch {}
         },
       },
+    }) as unknown as SupabaseServerClient;
+  } catch {
+    return null;
+  }
+}
+
+export function createSupabaseRequestClient(
+  request: Request,
+): SupabaseServerClient | null {
+  const config = getSupabasePublicConfig();
+  if (!config.ok) return null;
+
+  try {
+    // Route handlers authenticate the exact Cookie header that arrived with
+    // this request instead of depending on ambient Next.js request context.
+    return createServerClient(config.url, config.publicKey, {
+      cookieOptions: getOpsAuthCookieOptions(),
+      cookies: createSupabaseRequestCookieStore(request),
     }) as unknown as SupabaseServerClient;
   } catch {
     return null;

@@ -56,24 +56,21 @@ test("operator auth validates bearer tokens server-side and enforces an email al
   assert.doesNotMatch(source, /service_role|SUPABASE_SECRET_KEY/);
 });
 
-test("browser auth tokens stay inside the same-origin price-adjustment API boundary", async () => {
+test("price-adjustment requests use one server-validated same-origin cookie authority", async () => {
   const source = await read("src/lib/shoplingPriceAdjustmentApiClient.ts");
+  const auth = await read("src/lib/shoplingPriceAdjustmentAuth.ts");
+  const server = await read("src/lib/supabase/server.ts");
 
   assert.match(source, /target\.origin !== origin/);
   assert.match(source, /target\.pathname\.startsWith\(SHOPLING_PRICE_ADJUSTMENT_API_PREFIX\)/);
-  assert.match(source, /headers\.set\([\s\S]*"authorization"/);
   assert.match(source, /credentials: "same-origin"/);
   assert.match(source, /redirect: "error"/);
-  assert.match(source, /if \(!supabase\)/);
-  assert.match(source, /if \(error \|\| !data\.session\?\.access_token\)/);
-  assert.match(
-    source,
-    /PRICE_ADJUSTMENT_BROWSER_AUTH_CONFIGURATION_ERROR/,
-  );
-  assert.match(source, /PRICE_ADJUSTMENT_BROWSER_SESSION_CHECK_FAILED/);
-  assert.match(source, /price_adjustment\.browser_auth/);
   assert.match(source, /response\.status === 401/);
   assert.match(source, /SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT/);
+  assert.doesNotMatch(source, /createSupabaseBrowserClient|getSession\(\)|authorization/);
+  assert.match(auth, /createSupabaseRequestClient\(request\)/);
+  assert.doesNotMatch(auth, /createSupabaseServerClient\(\)/);
+  assert.match(server, /createSupabaseRequestCookieStore\(request\)/);
 });
 
 test("all price-adjustment UI requests use the guarded API client", async () => {
