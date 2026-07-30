@@ -10,6 +10,9 @@ import {
   getShoplingReadiness,
   SHOPLING_CHANNELS,
 } from "../public/product-launch-tracker-app/lib/tracker-core.mjs";
+import {
+  buildProductLaunchShoplingPayload,
+} from "../src/lib/productLaunchTrackerShopling.ts";
 
 function readyItem() {
   return createLaunchItem(
@@ -90,6 +93,28 @@ test("옵션별 최종가 차액으로 샵플링 옵션 추가금을 계산한�
   );
 });
 
+test("서버 실행 payload도 화면 미리보기와 동일한 가격·코드를 생성한다", () => {
+  const item = readyItem();
+  const browserPreview = buildShoplingPreview(item, DEFAULT_POLICY);
+  const serverPayload = buildProductLaunchShoplingPayload(
+    item,
+    DEFAULT_POLICY,
+    "request-test",
+  );
+  assert.deepEqual(
+    serverPayload.channels.map(({ ptnGoodsCd }) => ptnGoodsCd),
+    browserPreview.channels.map(({ ptnGoodsCd }) => ptnGoodsCd),
+  );
+  assert.deepEqual(
+    serverPayload.channels.map(({ salePrice }) => salePrice),
+    browserPreview.channels.map(({ salePrice }) => salePrice),
+  );
+  assert.deepEqual(
+    serverPayload.channels[5].options.map(({ additionalAmountKrw }) => additionalAmountKrw),
+    [0, 2800, 7000],
+  );
+});
+
 test("상품정보고시 38의 모든 속성은 상세설명 참고로 생성한다", () => {
   const preview = buildShoplingPreview(readyItem(), DEFAULT_POLICY);
   assert.equal(preview.goodsNotice.code, "38");
@@ -124,11 +149,19 @@ test("카테고리·상세페이지·옵션가격 누락은 등록을 차단한�
   assert.ok(readiness.errors.some((message) => message.includes("카테고리")));
   assert.ok(readiness.errors.some((message) => message.includes("상세페이지")));
   assert.ok(readiness.errors.some((message) => message.includes("기준 판매가")));
+  assert.throws(
+    () => buildProductLaunchShoplingPayload(item, DEFAULT_POLICY),
+    /카테고리/,
+  );
 });
 
-test("OPS Center는 서버 저장 테이블·API·발주 연동 프록시를 포함한다", async () => {
-  const migration = await readFile(
+test("OPS Center는 서버 저장·실제 업로드·발주 연동 경로를 포함한다", async () => {
+  const stateMigration = await readFile(
     new URL("../supabase/migrations/202607310001_product_launch_tracker_state.sql", import.meta.url),
+    "utf8",
+  );
+  const jobMigration = await readFile(
+    new URL("../supabase/migrations/202607310002_product_launch_upload_jobs.sql", import.meta.url),
     "utf8",
   );
   const stateRoute = await readFile(
@@ -139,9 +172,25 @@ test("OPS Center는 서버 저장 테이블·API·발주 연동 프록시를 포
     new URL("../src/app/api/product-launch-tracker/china-order-options/route.ts", import.meta.url),
     "utf8",
   );
-  assert.match(migration, /product_launch_tracker_states/);
+  const uploadRoute = await readFile(
+    new URL("../src/app/api/product-launch-tracker/shopling-upload/route.ts", import.meta.url),
+    "utf8",
+  );
+  const workerRoute = await readFile(
+    new URL("../src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts", import.meta.url),
+    "utf8",
+  );
+  const uploadUi = await readFile(
+    new URL("../public/product-launch-tracker-app/shopling-upload-ui.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(stateMigration, /product_launch_tracker_states/);
+  assert.match(jobMigration, /product_launch_upload_jobs/);
   assert.match(stateRoute, /export async function GET/);
   assert.match(stateRoute, /export async function PUT/);
   assert.match(chinaRoute, /CHINA_ORDER_MANAGER_BASE_URL/);
   assert.match(chinaRoute, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
+  assert.match(uploadRoute, /shopling-product-launch-upload\.yml/);
+  assert.match(workerRoute, /PRODUCT_LAUNCH_UPLOAD_SECRET/);
+  assert.match(uploadUi, /실제 샵플링 6채널 등록/);
 });
