@@ -33,11 +33,24 @@ async function javascriptFiles(directory) {
 const files = await javascriptFiles(chunksRoot);
 const chunks = await Promise.all(files.map((path) => readFile(path, "utf8")));
 const clientBundle = chunks.join("\n");
+const priceAuthChunks = chunks.filter((chunk) =>
+  chunk.includes("shopling-price-adjustment-auth-required"),
+);
 
-assert.match(
-  clientBundle,
-  /shopling-price-adjustment-auth-required/,
+assert.ok(
+  priceAuthChunks.length > 0,
   "the price-adjustment auth client was not emitted",
+);
+const priceAuthBundle = priceAuthChunks.join("\n");
+assert.match(
+  priceAuthBundle,
+  /same-origin/,
+  "the price-adjustment client must send same-origin cookies",
+);
+assert.doesNotMatch(
+  priceAuthBundle,
+  /price_adjustment\.browser_auth|PRICE_ADJUSTMENT_BROWSER_AUTH_CONFIGURATION_ERROR/,
+  "the price-adjustment client must not block on a second browser-only session",
 );
 assert.ok(
   clientBundle.includes(expectedUrl),
@@ -55,4 +68,4 @@ assert.doesNotMatch(
   "a dynamic Supabase public env lookup remains in the client bundle",
 );
 
-console.log("Price-adjustment browser auth config is embedded in the client bundle.");
+console.log("Price-adjustment auth uses server-validated same-origin cookies.");

@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabasePublicConfig } from "@/lib/supabase/config";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseRequestClient } from "@/lib/supabase/server";
 import type { BulkAdmin } from "@/lib/shoplingPriceModifyBulkApi";
 
 export const DEFAULT_SHOPLING_PRICE_ADJUSTMENT_OPERATOR_EMAIL =
@@ -128,7 +128,7 @@ export async function requireShoplingPriceAdjustmentOperator(
       user = result.data.user;
       authError = result.error;
     } else {
-      const supabase = await createSupabaseServerClient();
+      const supabase = createSupabaseRequestClient(request);
       if (!supabase) {
         return authFailure(
           "Supabase 서버 인증 설정이 필요합니다.",

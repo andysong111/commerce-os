@@ -1,5 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
-import { getSupabaseBrowserPublicConfig } from "@/lib/supabase/config";
+import { getSupabaseBrowserPublicConfig } from "@/lib/supabase/browserConfig";
 import { getOpsAuthCookieOptions } from "@/lib/supabase/session";
 
 export async function createSupabaseBrowserClient() {
