@@ -1,8 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getSupabasePublicConfig } from "@/lib/supabase/config";
-import { createSupabaseRequestClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { BulkAdmin } from "@/lib/shoplingPriceModifyBulkApi";
 
 export const DEFAULT_SHOPLING_PRICE_ADJUSTMENT_OPERATOR_EMAIL =
@@ -60,19 +58,6 @@ export function isShoplingPriceAdjustmentOperatorEmail(
   );
 }
 
-export function readShoplingPriceAdjustmentBearerToken(
-  headers: Headers,
-) {
-  const authorization = headers.get("authorization");
-  if (authorization === null) {
-    return { present: false as const, token: null };
-  }
-  const match = authorization.match(/^Bearer ([A-Za-z0-9._~-]+)$/);
-  return match
-    ? { present: true as const, token: match[1] }
-    : { present: true as const, token: null };
-}
-
 function authFailure(
   error: string,
   status: number,
@@ -95,51 +80,22 @@ function authFailure(
 export async function requireShoplingPriceAdjustmentOperator(
   request: Request,
 ): Promise<OperatorAuthResult> {
-  const config = getSupabasePublicConfig();
-  if (!config.ok) {
-    return authFailure(
-      "Supabase 서버 인증 설정이 필요합니다.",
-      503,
-      "PRICE_ADJUSTMENT_AUTH_CONFIGURATION_ERROR",
-    );
-  }
-
-  const bearer = readShoplingPriceAdjustmentBearerToken(request.headers);
+  void request;
   let user: { id: string; email?: string } | null = null;
   let authError: { message: string } | null = null;
 
   try {
-    if (bearer.present) {
-      if (!bearer.token) {
-        return authFailure(
-          "로그인이 필요합니다.",
-          401,
-          "PRICE_ADJUSTMENT_AUTH_REQUIRED",
-        );
-      }
-      const supabase = createClient(config.url, config.publicKey, {
-        auth: {
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-          persistSession: false,
-        },
-      });
-      const result = await supabase.auth.getUser(bearer.token);
-      user = result.data.user;
-      authError = result.error;
-    } else {
-      const supabase = createSupabaseRequestClient(request);
-      if (!supabase) {
-        return authFailure(
-          "Supabase 서버 인증 설정이 필요합니다.",
-          503,
-          "PRICE_ADJUSTMENT_AUTH_CONFIGURATION_ERROR",
-        );
-      }
-      const result = await supabase.auth.getUser();
-      user = result.data.user;
-      authError = result.error;
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) {
+      return authFailure(
+        "Supabase 서버 인증 설정이 필요합니다.",
+        503,
+        "PRICE_ADJUSTMENT_AUTH_CONFIGURATION_ERROR",
+      );
     }
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+    authError = result.error;
   } catch {
     return authFailure(
       "로그인 세션을 확인할 수 없습니다.",

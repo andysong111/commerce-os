@@ -11,10 +11,6 @@ const {
 } = await importTranspiledTypeScript(
   new URL("../src/lib/supabase/session.ts", import.meta.url),
 );
-const { createSupabaseRequestCookieStore } =
-  await importTranspiledTypeScript(
-    new URL("../src/lib/supabase/requestCookies.ts", import.meta.url),
-  );
 
 test("OPS 로그인 쿠키는 개인 기기에서 180일 유지된다", () => {
   assert.equal(OPS_AUTH_SESSION_DAYS, 180);
@@ -80,50 +76,22 @@ test("서버와 브라우저 Supabase 클라이언트가 같은 장기 쿠키 �
   assert.match(browser, /cookieOptions: getOpsAuthCookieOptions\(\)/);
 });
 
-test("가격 API 인증은 ambient 쿠키가 아닌 실제 요청 Cookie 헤더를 읽는다", async () => {
-  const requestCookies = await readFile(
-    new URL("../src/lib/supabase/requestCookies.ts", import.meta.url),
-    "utf8",
-  );
-  const server = await readFile(
-    new URL("../src/lib/supabase/server.ts", import.meta.url),
-    "utf8",
-  );
+test("가격 API와 보호 화면은 동일한 Next.js 쿠키 인증 경로를 쓴다", async () => {
   const priceAuth = await readFile(
     new URL("../src/lib/shoplingPriceAdjustmentAuth.ts", import.meta.url),
     "utf8",
   );
+  const currentUser = await readFile(
+    new URL("../src/lib/supabase/currentUser.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(requestCookies, /request\.headers\.get\("cookie"\)/);
-  assert.match(requestCookies, /parseCookieHeader/);
-  assert.match(server, /createSupabaseRequestClient/);
-  assert.match(server, /createSupabaseRequestCookieStore\(request\)/);
-  assert.match(priceAuth, /createSupabaseRequestClient\(request\)/);
-});
-
-test("요청 전용 쿠키 저장소는 분할된 인증 쿠키를 보존하고 갱신한다", () => {
-  const request = new Request("https://ops.example/api", {
-    headers: {
-      cookie:
-        "theme=dark; sb-project-auth-token.0=first; sb-project-auth-token.1=second",
-    },
-  });
-  const store = createSupabaseRequestCookieStore(request);
-
-  assert.deepEqual(store.getAll(), [
-    { name: "theme", value: "dark" },
-    { name: "sb-project-auth-token.0", value: "first" },
-    { name: "sb-project-auth-token.1", value: "second" },
-  ]);
-
-  store.setAll([
-    { name: "sb-project-auth-token.0", value: "refreshed" },
-    { name: "sb-project-auth-token.1", value: "" },
-  ]);
-  assert.deepEqual(store.getAll(), [
-    { name: "theme", value: "dark" },
-    { name: "sb-project-auth-token.0", value: "refreshed" },
-  ]);
+  assert.match(priceAuth, /await createSupabaseServerClient\(\)/);
+  assert.match(currentUser, /await createSupabaseServerClient\(\)/);
+  assert.doesNotMatch(
+    priceAuth,
+    /request\.headers|get\("cookie"\)|createSupabaseRequestClient|Bearer/,
+  );
 });
 
 test("브라우저 Supabase 설정은 Next.js가 정적으로 주입할 공개 환경변수를 직접 참조한다", async () => {
