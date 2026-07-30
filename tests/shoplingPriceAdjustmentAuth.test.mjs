@@ -64,6 +64,14 @@ test("browser auth tokens stay inside the same-origin price-adjustment API bound
   assert.match(source, /headers\.set\([\s\S]*"authorization"/);
   assert.match(source, /credentials: "same-origin"/);
   assert.match(source, /redirect: "error"/);
+  assert.match(source, /if \(!supabase\)/);
+  assert.match(source, /if \(error \|\| !data\.session\?\.access_token\)/);
+  assert.match(
+    source,
+    /PRICE_ADJUSTMENT_BROWSER_AUTH_CONFIGURATION_ERROR/,
+  );
+  assert.match(source, /PRICE_ADJUSTMENT_BROWSER_SESSION_CHECK_FAILED/);
+  assert.match(source, /price_adjustment\.browser_auth/);
   assert.match(source, /response\.status === 401/);
   assert.match(source, /SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT/);
 });
