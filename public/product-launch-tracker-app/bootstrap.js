@@ -35,7 +35,8 @@ await import("./main-app.js");
 await import("./shopling-upload-ui.js");
 
 if (shouldUploadLocalAfterBoot) {
-  queueServerSave(JSON.stringify(localState), 0);
+  const latestLocalState = localStorage.getItem(STORAGE_KEY);
+  if (latestLocalState) queueServerSave(latestLocalState, 0);
 } else if (remote?.state) {
   setSaveStatus("서버 저장본 불러옴");
 } else if (!serverStorageAvailable) {
