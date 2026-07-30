@@ -21,4 +21,9 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm test
+      - name: Run product launch tracker tests
+        run: >-
+          npx tsx --test
+          tests/productLaunchTrackerEntry.test.mjs
+          tests/productLaunchTrackerSorting.test.mjs
+          tests/productLaunchTrackerShopling.test.mjs
