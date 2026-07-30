@@ -32,10 +32,11 @@ export async function requestShoplingPriceAdjustmentApi(
     window.location.origin,
   );
   const headers = new Headers(init.headers);
+  headers.delete("authorization");
 
-  // The protected page and these same-origin APIs use the same server-validated
-  // cookie session. A second client-side session gate can disagree with the
-  // server and must never block the canonical API authentication path.
+  // Price-adjustment APIs deliberately use the same server-validated cookie
+  // session as the protected page. Dropping Authorization also makes an old
+  // browser chunk unable to override a valid cookie with a stale bearer token.
   const response = await fetch(target, {
     ...init,
     headers,

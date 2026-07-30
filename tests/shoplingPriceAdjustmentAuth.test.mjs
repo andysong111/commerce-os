@@ -44,33 +44,99 @@ test("every price-adjustment API route requires an allowed operator", async () =
   }
 });
 
-test("operator auth validates bearer tokens server-side and enforces an email allowlist", async () => {
+test("operator auth validates the canonical server cookie and enforces an email allowlist", async () => {
   const source = await read("src/lib/shoplingPriceAdjustmentAuth.ts");
 
-  assert.match(source, /supabase\.auth\.getUser\(bearer\.token\)/);
+  assert.match(source, /await createSupabaseServerClient\(\)/);
+  assert.match(source, /supabase\.auth\.getUser\(\)/);
   assert.match(source, /shoplingPriceAdjustmentOperatorEmails/);
   assert.match(source, /SHOPLING_PRICE_ADJUSTMENT_ALLOWED_EMAILS/);
   assert.match(source, /OPS_OWNER_EMAILS/);
   assert.match(source, /PRICE_ADJUSTMENT_OPERATOR_REQUIRED/);
   assert.match(source, /status \},/);
-  assert.doesNotMatch(source, /service_role|SUPABASE_SECRET_KEY/);
+  assert.doesNotMatch(
+    source,
+    /createClient|Bearer|authorization|service_role|SUPABASE_SECRET_KEY/,
+  );
 });
 
 test("price-adjustment requests use one server-validated same-origin cookie authority", async () => {
   const source = await read("src/lib/shoplingPriceAdjustmentApiClient.ts");
   const auth = await read("src/lib/shoplingPriceAdjustmentAuth.ts");
-  const server = await read("src/lib/supabase/server.ts");
+  const currentUser = await read("src/lib/supabase/currentUser.ts");
 
   assert.match(source, /target\.origin !== origin/);
   assert.match(source, /target\.pathname\.startsWith\(SHOPLING_PRICE_ADJUSTMENT_API_PREFIX\)/);
   assert.match(source, /credentials: "same-origin"/);
   assert.match(source, /redirect: "error"/);
+  assert.match(source, /headers\.delete\("authorization"\)/);
   assert.match(source, /response\.status === 401/);
   assert.match(source, /SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT/);
-  assert.doesNotMatch(source, /createSupabaseBrowserClient|getSession\(\)|authorization/);
-  assert.match(auth, /createSupabaseRequestClient\(request\)/);
-  assert.doesNotMatch(auth, /createSupabaseServerClient\(\)/);
-  assert.match(server, /createSupabaseRequestCookieStore\(request\)/);
+  assert.doesNotMatch(source, /createSupabaseBrowserClient|getSession\(\)/);
+  assert.match(auth, /await createSupabaseServerClient\(\)/);
+  assert.match(currentUser, /await createSupabaseServerClient\(\)/);
+  assert.doesNotMatch(
+    auth,
+    /createSupabaseRequestClient|readShoplingPriceAdjustmentBearerToken|authorization/,
+  );
+});
+
+test("a stale Authorization header cannot override the canonical cookie session", async () => {
+  const {
+    requestShoplingPriceAdjustmentApi,
+  } = await import(
+    "../src/lib/shoplingPriceAdjustmentApiClient.ts"
+  );
+  const hadWindow = Object.hasOwn(globalThis, "window");
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  let captured = null;
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { origin: "https://ops.example" },
+      dispatchEvent() {},
+    },
+  });
+  globalThis.fetch = async (input, init) => {
+    captured = { input, init };
+    return new Response("{}", {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const response = await requestShoplingPriceAdjustmentApi(
+      "/api/shopling-price-adjustment/bulk/jobs",
+      {
+        headers: {
+          Authorization: "Bearer stale-browser-token",
+        },
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(
+      captured.input,
+      "https://ops.example/api/shopling-price-adjustment/bulk/jobs",
+    );
+    assert.equal(captured.init.credentials, "same-origin");
+    assert.equal(
+      new Headers(captured.init.headers).has("authorization"),
+      false,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (hadWindow) {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
+    } else {
+      delete globalThis.window;
+    }
+  }
 });
 
 test("all price-adjustment UI requests use the guarded API client", async () => {
