@@ -75,7 +75,7 @@ test("bulk selection survives a login round trip and final writes never auto-ret
   assert.match(batch, /requestShoplingPriceAdjustmentApi/);
   assert.match(apiClient, /credentials: "same-origin"/);
   assert.doesNotMatch(apiClient, /getSession\(\)/);
-  assert.doesNotMatch(apiClient, /Bearer \$\{data\.session\.access_token\}/);
+  assert.match(apiClient, /Bearer \$\{verifiedAccessToken\}/);
   assert.match(batch, /setLoginRequired\(true\)/);
   assert.match(batch, /로그인 다시 하기/);
   assert.match(batch, /force=1/);

@@ -22,7 +22,7 @@ import {
   stringifyShoplingPriceAdjustmentBulkSelection,
   type ShoplingPriceAdjustmentBulkSelection,
 } from "@/lib/shoplingPriceAdjustmentBulkSelection";
-import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
+import { useShoplingPriceAdjustmentApi } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 
 type InputMode = "uniform" | "individual";
 type Selection = ShoplingPriceAdjustmentBulkSelection;
@@ -155,6 +155,8 @@ function buildCanaryInput(row: PricePlanRow) {
 }
 
 export function ShoplingPriceAdjustmentInputPreview() {
+  const requestShoplingPriceAdjustmentApi =
+    useShoplingPriceAdjustmentApi();
   const [inputMode, setInputMode] = useState<InputMode>("uniform");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [uniformGoodsInput, setUniformGoodsInput] =

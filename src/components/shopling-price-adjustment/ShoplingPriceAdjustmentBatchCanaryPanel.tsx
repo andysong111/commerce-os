@@ -9,9 +9,9 @@ import {
   SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY,
 } from "@/lib/shoplingPriceAdjustmentBulkSelection";
 import {
-  requestShoplingPriceAdjustmentApi,
   SHOPLING_PRICE_ADJUSTMENT_AUTH_REQUIRED_EVENT,
 } from "@/lib/shoplingPriceAdjustmentApiClient";
+import { useShoplingPriceAdjustmentApi } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 
 const INPUT_TEXTAREA_LABEL = "goods_key와 조정률 직접 붙여넣기";
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
@@ -144,6 +144,8 @@ function labelStatus(status: string | undefined) {
 }
 
 export function ShoplingPriceAdjustmentBatchCanaryPanel() {
+  const requestShoplingPriceAdjustmentApi =
+    useShoplingPriceAdjustmentApi();
   const [jobId, setJobId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(JOB_STORAGE_KEY) ?? "");
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [creating, setCreating] = useState(false);
@@ -201,7 +203,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     } finally {
       setLoading(false);
     }
-  }, [jobId]);
+  }, [jobId, requestShoplingPriceAdjustmentApi]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -209,7 +211,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
       void loadDetail(jobId);
     }, 0);
     return () => window.clearTimeout(timeoutId);
-  }, [jobId, loadDetail]);
+  }, [jobId, loadDetail, requestShoplingPriceAdjustmentApi]);
 
   const prepareCreate = async () => {
     if (creating || checkingSession || autoRunning || (jobId && !jobMissing)) {
@@ -390,7 +392,7 @@ export function ShoplingPriceAdjustmentBatchCanaryPanel() {
     } finally {
       tickingRef.current = false;
     }
-  }, [jobId, loadDetail]);
+  }, [jobId, loadDetail, requestShoplingPriceAdjustmentApi]);
 
   useEffect(() => {
     if (!autoRunning || !jobId) return;

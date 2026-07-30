@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { requireShoplingPriceAdjustmentAdmin } from "@/lib/shoplingPriceAdjustmentAuth";
 import { normalError, rpcData } from "@/lib/shoplingPriceModifyBulkApi";
 import { validateShoplingPriceAdjustmentBulkCreateInput } from "@/lib/shoplingPriceAdjustmentBulkServer";
+import { shoplingPriceAdjustmentPrivateHeaders } from "@/lib/shoplingPriceAdjustmentResponse";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function POST(request: Request) {
   const auth = await requireShoplingPriceAdjustmentAdmin(request);
@@ -38,7 +42,10 @@ export async function POST(request: Request) {
       detail: null,
       diagnostic_id: randomUUID(),
       active_job: existing.data,
-    }, { status: 409 });
+    }, {
+      status: 409,
+      headers: shoplingPriceAdjustmentPrivateHeaders(),
+    });
   }
 
   const result = await auth.admin.rpc("create_shopling_price_adjustment_bulk_job", {
@@ -61,7 +68,10 @@ export async function POST(request: Request) {
     chunk_size: job.chunk_size,
     total_chunk_count: job.total_chunk_count,
     created_at: job.created_at,
-  }, { status: 201 });
+  }, {
+    status: 201,
+    headers: shoplingPriceAdjustmentPrivateHeaders(),
+  });
 }
 
 export async function GET(request: Request) {
@@ -93,5 +103,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     jobs: recent.data ?? [],
     active_job: active.data ?? null,
+  }, {
+    headers: shoplingPriceAdjustmentPrivateHeaders(),
   });
 }

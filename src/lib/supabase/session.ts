@@ -2,16 +2,29 @@ export const OPS_AUTH_SESSION_DAYS = 180;
 export const OPS_AUTH_COOKIE_MAX_AGE_SECONDS =
   OPS_AUTH_SESSION_DAYS * 24 * 60 * 60;
 export const OPS_AUTH_DEFAULT_REDIRECT = "/sourcing-engine/settings";
+export const OPS_AUTH_COOKIE_NAME = "commerce-os-ops-auth-v2";
 
 export function getOpsAuthCookieOptions(
   nodeEnv: string | undefined = process.env.NODE_ENV,
 ) {
   return {
+    name: OPS_AUTH_COOKIE_NAME,
     maxAge: OPS_AUTH_COOKIE_MAX_AGE_SECONDS,
     path: "/",
     sameSite: "lax" as const,
     secure: nodeEnv === "production",
   };
+}
+
+export function isOpsAuthCookieName(name: string) {
+  return (
+    name === OPS_AUTH_COOKIE_NAME ||
+    name.startsWith(`${OPS_AUTH_COOKIE_NAME}.`) ||
+    (
+      name.startsWith("sb-") &&
+      name.includes("-auth-token")
+    )
+  );
 }
 
 export function getSafeOpsAuthRedirect(

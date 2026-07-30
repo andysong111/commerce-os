@@ -3,27 +3,37 @@ name: Price Adjustment Bulk CI
 on:
   pull_request:
     paths:
-      - 'src/app/api/shopling-price-adjustment/bulk/**'
+      - 'src/app/api/shopling-price-adjustment/**'
       - 'src/app/login/**'
-      - 'src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx'
+      - 'src/app/shopling-price-adjustment-runner/**'
+      - 'src/components/shopling-price-adjustment/**'
       - 'src/lib/shoplingPriceAdjustmentAuth.ts'
       - 'src/lib/shoplingPriceAdjustmentApiClient.ts'
+      - 'src/lib/shoplingPriceAdjustmentIdentity.ts'
+      - 'src/lib/shoplingPriceAdjustmentResponse.ts'
       - 'src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
       - 'src/lib/supabase/browser.ts'
       - 'src/lib/supabase/browserConfig.ts'
       - 'src/lib/supabase/config.ts'
+      - 'src/lib/supabase/currentUser.ts'
       - 'src/lib/supabase/proxy.ts'
+      - 'src/lib/supabase/resetSession.ts'
       - 'src/lib/supabase/server.ts'
       - 'src/lib/supabase/session.ts'
       - 'supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql'
       - 'supabase/migrations/202607290002_shopling_price_adjustment_bulk_failures.sql'
       - 'scripts/verify-price-auth-client-bundle.mjs'
+      - 'scripts/verify-price-auth-route.mjs'
       - 'tests/shoplingPriceAdjustmentAuth.test.mjs'
       - 'tests/shoplingPriceAdjustmentBatchCanary.test.mjs'
       - 'tests/shoplingPriceAdjustmentInputModes.test.mjs'
+      - 'tests/shoplingPriceAdjustmentIdentity.test.mjs'
       - 'tests/supabaseSession.test.mjs'
+      - 'tests/supabaseSsrAuthRoundTrip.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/price-adjustment-bulk-ci.yml'
 
 jobs:
@@ -34,9 +44,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install
-      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs
+      - run: npm ci
+      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentIdentity.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs tests/supabaseSsrAuthRoundTrip.test.mjs
       - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+      - run: node scripts/verify-price-auth-route.mjs
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
