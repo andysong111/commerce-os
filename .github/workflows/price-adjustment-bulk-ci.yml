@@ -4,13 +4,25 @@ on:
   pull_request:
     paths:
       - 'src/app/api/shopling-price-adjustment/bulk/**'
+      - 'src/app/login/**'
       - 'src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx'
+      - 'src/lib/shoplingPriceAdjustmentAuth.ts'
+      - 'src/lib/shoplingPriceAdjustmentApiClient.ts'
       - 'src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts'
       - 'src/lib/shoplingPriceAdjustmentBulkServer.ts'
+      - 'src/lib/supabase/browser.ts'
+      - 'src/lib/supabase/config.ts'
+      - 'src/lib/supabase/proxy.ts'
+      - 'src/lib/supabase/server.ts'
+      - 'src/lib/supabase/session.ts'
       - 'supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql'
       - 'supabase/migrations/202607290002_shopling_price_adjustment_bulk_failures.sql'
+      - 'scripts/verify-price-auth-client-bundle.mjs'
+      - 'tests/shoplingPriceAdjustmentAuth.test.mjs'
       - 'tests/shoplingPriceAdjustmentBatchCanary.test.mjs'
+      - 'tests/shoplingPriceAdjustmentInputModes.test.mjs'
+      - 'tests/supabaseSession.test.mjs'
       - '.github/workflows/price-adjustment-bulk-ci.yml'
 
 jobs:
@@ -22,5 +34,14 @@ jobs:
         with:
           node-version: '22'
       - run: npm install
-      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentBatchCanary.test.mjs
+      - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs
       - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: anon_price_auth_build_check
+      - run: node scripts/verify-price-auth-client-bundle.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: anon_price_auth_build_check

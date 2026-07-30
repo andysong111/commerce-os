@@ -76,6 +76,32 @@ test("서버와 브라우저 Supabase 클라이언트가 같은 장기 쿠키 �
   assert.match(browser, /cookieOptions: getOpsAuthCookieOptions\(\)/);
 });
 
+test("브라우저 Supabase 설정은 Next.js가 정적으로 주입할 공개 환경변수를 직접 참조한다", async () => {
+  const config = await readFile(
+    new URL("../src/lib/supabase/config.ts", import.meta.url),
+    "utf8",
+  );
+  const browser = await readFile(
+    new URL("../src/lib/supabase/browser.ts", import.meta.url),
+    "utf8",
+  );
+
+  for (const name of [
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+  ]) {
+    assert.match(
+      config,
+      new RegExp(`process\\.env\\.${name}`),
+      `${name} must be a statically analyzable client reference`,
+    );
+  }
+  assert.match(config, /export function getSupabaseBrowserPublicConfig/);
+  assert.match(browser, /getSupabaseBrowserPublicConfig\(\)/);
+  assert.doesNotMatch(browser, /getSupabasePublicConfig\(\)/);
+});
+
 test("한 RSC 요청 안의 인증 조회는 React cache로 한 번만 실행한다", async () => {
   const currentUser = await readFile(
     new URL("../src/lib/supabase/currentUser.ts", import.meta.url),
@@ -100,6 +126,6 @@ test("한 RSC 요청 안의 인증 조회는 React cache로 한 번만 실행한
   assert.match(detailCosts, /getOpsCurrentUser\(\)/);
   assert.doesNotMatch(appShell + detailCosts, /auth\.getUser\(\)/);
   assert.match(detailCosts, /next=%2Fdetail-page-costs/);
-  assert.match(login, /if \(user\) redirect\(nextPath\)/);
+  assert.match(login, /if \(user && params\.force !== "1"\) redirect\(nextPath\)/);
   assert.match(login, /name="next" value=\{nextPath\}/);
 });
