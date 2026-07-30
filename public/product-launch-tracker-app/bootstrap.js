@@ -32,6 +32,7 @@ if (remote?.state && shouldUseRemoteState(remote, localState)) {
 }
 
 await import("./main-app.js");
+await import("./shopling-upload-ui.js");
 
 if (shouldUploadLocalAfterBoot) {
   queueServerSave(JSON.stringify(localState), 0);
