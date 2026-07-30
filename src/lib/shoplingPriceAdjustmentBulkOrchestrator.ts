@@ -8,9 +8,19 @@ import {
   dispatchShoplingPriceAdjustmentBatchCanary,
   fetchShoplingPriceAdjustmentBatchCanaryResult,
 } from "@/lib/shoplingPriceAdjustmentBatchCanaryRunner";
+import {
+  findTerminalGithubWorkflowFailure,
+} from "@/lib/shoplingPriceAdjustmentWorkflowStatus";
 
 const ACTIVE_CHUNK_STATUSES = ["pending", "planning", "ready", "executing"] as const;
 const LEASE_SECONDS = 90;
+const PLAN_WORKFLOW = process.env.SHOPLING_PRICE_ADJUSTMENT_PLAN_WORKFLOW?.trim()
+  || "shopling-price-adjustment-plan.yml";
+const PLAN_ARTIFACT = "shopling-price-adjustment-plan-summary";
+const EXECUTION_WORKFLOW =
+  process.env.SHOPLING_PRICE_ADJUSTMENT_BATCH_CANARY_WORKFLOW?.trim()
+  || "shopling-price-adjustment-batch-canary.yml";
+const EXECUTION_ARTIFACT = "shopling-price-adjustment-batch-canary-summary";
 
 export type ShoplingPriceAdjustmentBulkAdvanceResult = {
   status: "waiting" | "progressed" | "dispatched" | "finished" | "stopped" | "busy";
@@ -208,8 +218,30 @@ async function advancePlanning(admin: BulkAdmin, job: JobRow, chunk: ChunkRow) {
   const requestId = chunk.plan_request_id ?? "";
   if (!requestId) return failJob(admin, job, chunk, "계획 request_id가 없습니다.");
   const result = await fetchShoplingPriceAdjustmentPlanResult(requestId);
-  if (result.status === "pending") return { status: "waiting" as const, jobStatus: "running", chunkIndex: chunk.chunk_index, message: result.message ?? "계획 결과 대기 중" };
-  if (result.status === "error" || !result.summary) return { status: "waiting" as const, jobStatus: "running", chunkIndex: chunk.chunk_index, message: result.message ?? "계획 결과를 아직 확인하지 못했습니다." };
+  if (result.status === "pending" || result.status === "error" || !result.summary) {
+    const terminalFailure = await findTerminalGithubWorkflowFailure({
+      requestId,
+      workflow: PLAN_WORKFLOW,
+      artifactName: PLAN_ARTIFACT,
+      operationLabel: "현재가·옵션 조회",
+    });
+    if (terminalFailure) {
+      return failJob(
+        admin,
+        job,
+        chunk,
+        `${terminalFailure.message}${
+          terminalFailure.runUrl ? ` · 실행 로그: ${terminalFailure.runUrl}` : ""
+        }`,
+      );
+    }
+    return {
+      status: "waiting" as const,
+      jobStatus: "running",
+      chunkIndex: chunk.chunk_index,
+      message: result.message ?? "계획 결과를 아직 확인하지 못했습니다.",
+    };
+  }
   let executionRows;
   try { executionRows = buildExecutionRowsFromPlan(result.summary, chunk.input_rows); }
   catch (error) { return failJob(admin, job, chunk, `읽기 전용 계획 검증 실패: ${text(error)}`); }
@@ -248,8 +280,30 @@ async function advanceExecuting(admin: BulkAdmin, job: JobRow, chunk: ChunkRow) 
   const requestId = chunk.execute_request_id ?? "";
   if (!requestId) return failJob(admin, job, chunk, "실행 request_id가 없습니다.");
   const result = await fetchShoplingPriceAdjustmentBatchCanaryResult(requestId);
-  if (result.status === "pending") return { status: "waiting" as const, jobStatus: "running", chunkIndex: chunk.chunk_index, message: result.message ?? "실행 결과 대기 중" };
-  if (result.status === "error" || !result.summary) return { status: "waiting" as const, jobStatus: "running", chunkIndex: chunk.chunk_index, message: result.message ?? "실행 결과를 아직 확인하지 못했습니다." };
+  if (result.status === "pending" || result.status === "error" || !result.summary) {
+    const terminalFailure = await findTerminalGithubWorkflowFailure({
+      requestId,
+      workflow: EXECUTION_WORKFLOW,
+      artifactName: EXECUTION_ARTIFACT,
+      operationLabel: "실제 가격 변경",
+    });
+    if (terminalFailure) {
+      return blockUncertain(
+        admin,
+        job,
+        chunk,
+        `${terminalFailure.message} 실제 변경 단계였으므로 중복 실행하지 말고 실행 로그와 샵플링 반영 여부를 먼저 확인하세요.${
+          terminalFailure.runUrl ? ` · 실행 로그: ${terminalFailure.runUrl}` : ""
+        }`,
+      );
+    }
+    return {
+      status: "waiting" as const,
+      jobStatus: "running",
+      chunkIndex: chunk.chunk_index,
+      message: result.message ?? "실행 결과를 아직 확인하지 못했습니다.",
+    };
+  }
   const success = executionSucceeded(result.summary, chunk.goods_key_count);
   const finish = await rpc(admin, "finish_shopling_price_adjustment_execution", {
     p_job_id: job.id,
