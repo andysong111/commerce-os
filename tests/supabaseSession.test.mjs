@@ -104,7 +104,8 @@ test("가격 API는 검증된 bearer와 최신 쿠키 namespace를 함께 지원
   );
 
   assert.match(priceAuth, /await createSupabaseServerClient\(\)/);
-  assert.match(priceAuth, /getClaims\(bearer\.token\)/);
+  assert.match(priceAuth, /getUser\(bearer\.token\)/);
+  assert.doesNotMatch(priceAuth, /getClaims\(bearer\.token\)/);
   assert.match(currentUser, /await createSupabaseServerClient\(\)/);
   assert.match(login, /clearOpsAuthCookiesBeforeSignIn/);
   assert.match(reset, /isOpsAuthCookieName/);

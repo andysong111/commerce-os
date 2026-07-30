@@ -168,7 +168,7 @@ test("Supabase SSR 0.12 keeps a password session in the v2 cookie namespace and 
   });
 });
 
-test("the bearer verifier accepts the same server-issued token without cookies", async () => {
+test("the bearer verifier rechecks the same server-issued token with Auth", async () => {
   await withFakeSupabaseAuth(async ({ accessToken, requests, url }) => {
     const client = createClient(url, TEST_PUBLIC_KEY, {
       auth: {
@@ -177,10 +177,10 @@ test("the bearer verifier accepts the same server-issued token without cookies",
         persistSession: false,
       },
     });
-    const result = await client.auth.getClaims(accessToken);
+    const result = await client.auth.getUser(accessToken);
     assert.equal(result.error, null);
-    assert.equal(result.data?.claims.sub, TEST_USER_ID);
-    assert.equal(result.data?.claims.email, TEST_EMAIL);
+    assert.equal(result.data.user?.id, TEST_USER_ID);
+    assert.equal(result.data.user?.email, TEST_EMAIL);
     assert.ok(
       requests.some((request) =>
         request.url === "/auth/v1/user" &&

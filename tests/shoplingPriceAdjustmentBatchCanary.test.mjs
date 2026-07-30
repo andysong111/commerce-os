@@ -7,6 +7,7 @@ const panel = readFileSync("src/components/shopling-price-adjustment/ShoplingPri
 const orchestrator = readFileSync("src/lib/shoplingPriceAdjustmentBulkOrchestrator.ts", "utf8");
 const server = readFileSync("src/lib/shoplingPriceAdjustmentBulkServer.ts", "utf8");
 const migration = readFileSync("supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql", "utf8");
+const createHotfix = readFileSync("supabase/migrations/202607300002_shopling_price_adjustment_bulk_create_hotfix.sql", "utf8");
 const page = readFileSync("src/app/shopling-price-adjustment-runner/page.tsx", "utf8");
 const advanceRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/advance/route.ts", "utf8");
 
@@ -33,6 +34,17 @@ test("bulk schema isolates adjustment jobs and chunks first ten then fifty", () 
   assert.match(migration, /\(\(ordinal - 11\) \/ 50\)/);
   assert.match(migration, /claim_shopling_price_adjustment_bulk_job/);
   assert.match(migration, /dispatch_uncertain/);
+});
+
+test("bulk create hotfix uses supported JSON functions and enforces one active job", () => {
+  assert.doesNotMatch(createHotfix, /jsonb_object_length/);
+  assert.match(createHotfix, /pg_catalog\.jsonb_object_keys/);
+  assert.match(
+    createHotfix,
+    /shopling_price_adjustment_bulk_jobs_one_active_per_owner/,
+  );
+  assert.match(createHotfix, /pg_advisory_xact_lock/);
+  assert.match(createHotfix, /status in \('prepared','running','paused','dispatch_uncertain'\)/);
 });
 
 test("orchestrator plans and executes one persistent chunk at a time", () => {

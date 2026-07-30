@@ -93,7 +93,9 @@ test("bulk selection survives a login round trip and final writes never auto-ret
   assert.match(batch, /SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY/);
   assert.match(batch, /window\.location\.reload\(\)/);
   assert.match(route, /ADJUSTMENT_BULK_ACTIVE_JOB_EXISTS/);
-  assert.match(route, /active_job: existing\.data/);
+  assert.match(route, /active_job: activeJob/);
+  assert.match(route, /activeJobResponse\(existing\.data\)/);
+  assert.match(route, /databaseErrorCode\(result\.error\) === "23505"/);
   assert.match(route, /active_job: active\.data \?\? null/);
   assert.match(route, /\.in\("status", \["prepared", "running", "paused", "dispatch_uncertain"\]\)/);
   assert.doesNotMatch(batch, /retry|재시도/);

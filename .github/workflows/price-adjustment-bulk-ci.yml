@@ -22,8 +22,8 @@ on:
       - 'src/lib/supabase/resetSession.ts'
       - 'src/lib/supabase/server.ts'
       - 'src/lib/supabase/session.ts'
-      - 'supabase/migrations/202607290001_shopling_price_adjustment_bulk_10000.sql'
-      - 'supabase/migrations/202607290002_shopling_price_adjustment_bulk_failures.sql'
+      - 'supabase/migrations/*shopling_price_adjustment_bulk*.sql'
+      - 'scripts/verify-price-adjustment-bulk-migration.sql'
       - 'scripts/verify-price-auth-client-bundle.mjs'
       - 'scripts/verify-price-auth-route.mjs'
       - 'tests/shoplingPriceAdjustmentAuth.test.mjs'
@@ -39,6 +39,20 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +60,9 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: node --experimental-strip-types --test tests/shoplingPriceAdjustmentAuth.test.mjs tests/shoplingPriceAdjustmentBatchCanary.test.mjs tests/shoplingPriceAdjustmentIdentity.test.mjs tests/shoplingPriceAdjustmentInputModes.test.mjs tests/supabaseSession.test.mjs tests/supabaseSsrAuthRoundTrip.test.mjs
+      - run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d postgres -f scripts/verify-price-adjustment-bulk-migration.sql
+        env:
+          PGPASSWORD: postgres
       - run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
