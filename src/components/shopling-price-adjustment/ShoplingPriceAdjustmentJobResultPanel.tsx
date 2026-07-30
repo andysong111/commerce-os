@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useShoplingPriceAdjustmentApi } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 import { SHOPLING_PRICE_ADJUSTMENT_BULK_SELECTION_STORAGE_KEY } from "@/lib/shoplingPriceAdjustmentBulkSelection";
+import { humanizeShoplingPriceAdjustmentError } from "@/lib/shoplingPriceAdjustmentErrorLabel";
 
 const JOB_STORAGE_KEY = "shoplingPriceAdjustment.currentBulkJobId";
 const TERMINAL_STATUSES = new Set([
@@ -29,16 +30,18 @@ type JobDetail = {
 };
 
 function resultReason(value: unknown) {
-  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "string" && value.trim()) {
+    return humanizeShoplingPriceAdjustmentError(value);
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "현재가·옵션 조회 결과를 만들지 못했습니다.";
+    return humanizeShoplingPriceAdjustmentError("");
   }
   const record = value as Record<string, unknown>;
   const stage = typeof record.stage === "string" ? record.stage : "";
   const error = typeof record.error === "string" ? record.error.trim() : "";
   const stageLabel = stage === "planning" ? "조회 단계" : stage;
-  return [stageLabel, error].filter(Boolean).join(" · ")
-    || "현재가·옵션 조회 결과를 만들지 못했습니다.";
+  const reason = humanizeShoplingPriceAdjustmentError(error);
+  return [stageLabel, reason].filter(Boolean).join(" · ");
 }
 
 export function ShoplingPriceAdjustmentJobResultPanel() {
@@ -151,7 +154,7 @@ export function ShoplingPriceAdjustmentJobResultPanel() {
                 <tr className="border-b border-amber-200">
                   <th className="px-3 py-2">순번</th>
                   <th className="px-3 py-2">goods_key</th>
-                  <th className="px-3 py-2">오류 사유</th>
+                  <th className="px-3 py-2">오류 사유와 조치 방법</th>
                 </tr>
               </thead>
               <tbody>
@@ -166,7 +169,7 @@ export function ShoplingPriceAdjustmentJobResultPanel() {
                     <td className="px-3 py-3 font-mono font-bold text-slate-950">
                       {item.goods_key ?? "-"}
                     </td>
-                    <td className="px-3 py-3 text-slate-700">
+                    <td className="px-3 py-3 leading-6 text-slate-700">
                       {resultReason(item.result)}
                     </td>
                   </tr>
