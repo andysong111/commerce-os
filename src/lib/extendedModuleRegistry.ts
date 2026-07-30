@@ -18,6 +18,25 @@ export const shoplingPriceAdjustmentModule: CommerceModule = {
   safetyBadge: "첫 10개 안전 확인",
 };
 
+export const productDecisionAgentModule: CommerceModule = {
+  id: "product-decision-agent",
+  title: "발주·단종 추천",
+  navigationLabel: "발주·단종 추천",
+  description:
+    "같은 바코드 상품을 하나로 합쳐 1·2·3·6·12개월 판매와 클레임·포장 난이도를 분석하고, 이번 달 발주수량과 단종 후보를 제안합니다.",
+  status: "available",
+  route: "https://commerce-os-product-decision-agent.andy123df23.chatgpt.site",
+  category: "발주·입고 관리",
+  inputType: "샵플링 상품·주문·클레임, 포장 난이도",
+  outputType: "월간 발주안, 재고 차감 전 권장수량, 단종·보류 목록",
+  historySupport: true,
+  externalProject: true,
+  note: "독립 에이전트가 매월 발주안을 자동 생성합니다. 실제 발주와 단종은 사용자가 최종 결정합니다.",
+  helperNote: "매월 자동 생성 · 사용 가능",
+  actionLabel: "이번 달 발주안 보기",
+  safetyBadge: "재고 차감 전",
+};
+
 const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) =>
   module.id === "shopling-price-modify-runner"
     ? {
@@ -33,5 +52,6 @@ const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((mod
 
 export const extendedModuleRegistry: readonly CommerceModule[] = [
   ...renamedModuleRegistry,
+  productDecisionAgentModule,
   shoplingPriceAdjustmentModule,
 ];
