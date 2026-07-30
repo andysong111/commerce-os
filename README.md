@@ -10,6 +10,7 @@ Commerce OS OPS CENTER is the operational UI for product sourcing, review, appro
 - Keyword Engine Runner: future direct execution module; the engine is currently run outside this app and imported into the review queue.
 - Detail Page Studio: opens the current production image-upload engine for eight-section generation, AI quality review, automatic panel correction, multilingual output, and final JPG download.
 - China Purchase & Receiving Manager: imports the existing China order workbook, allocates landed costs, saves purchase batches, and records normal, defective, and missing receipt quantities without changing Ops Center, Shopling, or sales-channel inventory.
+- Product Decision Agent: combines Shopling products by barcode and opens the monthly purchase, hold, and discontinuation recommendation workspace.
 
 ## Repository role
 

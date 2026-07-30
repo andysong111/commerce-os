@@ -6,6 +6,7 @@ import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 
 const moduleIconLabels: Record<string, string> = {
   "china-order-cost": "₩",
+  "product-decision-agent": "발",
   "product-master": "P",
   "sourcing-engine": "S",
   "freight-barcode-pdf": "B",
