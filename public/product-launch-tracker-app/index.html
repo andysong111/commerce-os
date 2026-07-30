@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="신규 입고 상품의 상세페이지, 키워드, 샵플링 업로드, 마켓 등록 진행 상태를 관리합니다."
+      content="신규 상품의 상세페이지, 발주·입고 옵션가격, 샵플링 기본상품 등록과 후속 출시 상태를 관리합니다."
     />
     <title>신규 상품 출시 진행관리</title>
     <link rel="stylesheet" href="./styles.css" />
@@ -17,11 +17,14 @@
           <p class="eyebrow">COMMERCE OS · OPS CENTER</p>
           <h1>신규 상품 출시 진행관리</h1>
           <p class="subtitle">
-            신규 입고 상품의 상세페이지 제작부터 재고 반영까지 한 표에서 기록하고 확인합니다.
+            상품 고유정보만 확인하고, 반복 정책·옵션가격·상세페이지 결과는 자동으로 연결합니다.
           </p>
         </div>
         <div class="topbar-actions">
           <span id="save-status" class="save-status">불러오는 중</span>
+          <button id="policy-button" class="button button-secondary" type="button">
+            통합정책 관리
+          </button>
           <button id="add-items-button" class="button button-primary" type="button">
             + 상품 추가
           </button>
@@ -36,8 +39,8 @@
 
         <section class="notice">
           <div>
-            <strong>현재 기록은 이 브라우저에 자동 저장됩니다.</strong>
-            회사 PC에서 바로 사용할 수 있으며, 주기적으로 백업 파일을 내려받으면 다른 PC로도 옮길 수 있습니다.
+            <strong>상품마다 모델명·기준 바코드·샵플링 표준 카테고리만 정확히 확인하세요.</strong>
+            자사상품코드, 채널별 가격, 옵션 추가금, 제조·배송·상품정보고시는 통합정책으로 생성됩니다.
           </div>
           <span id="source-meta" class="source-meta"></span>
         </section>
@@ -49,7 +52,7 @@
               <input
                 id="search-input"
                 type="search"
-                placeholder="바코드, 모델번호, 상품명, 옵션, 위치코드 검색"
+                placeholder="바코드, 모델번호, 모델명, 카테고리, 옵션 검색"
                 autocomplete="off"
               />
             </label>
@@ -102,85 +105,27 @@
                   <th class="check-column">
                     <input id="select-visible" type="checkbox" aria-label="현재 목록 전체 선택" />
                   </th>
-                  <th class="sort-header" data-sort-key="workBatch" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="workBatch" data-sort-label="작업 묶음">
-                      작업 묶음 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="warehouseLocation" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="warehouseLocation" data-sort-label="창고위치">
-                      창고위치 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="barcode" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="barcode" data-sort-label="바코드">
-                      바코드 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="modelNumber" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="modelNumber" data-sort-label="모델번호">
-                      모델번호 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="productName" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="productName" data-sort-label="상품명">
-                      상품명 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="options" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="options" data-sort-label="옵션">
-                      옵션 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="detailPage" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="detailPage" data-sort-label="상세페이지">
-                      상세페이지 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="priceKeyword" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="priceKeyword" data-sort-label="가격·키워드">
-                      가격·키워드 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="shoplingUpload" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="shoplingUpload" data-sort-label="샵플링 업로드">
-                      샵플링 업로드 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="marketRegistration" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="marketRegistration" data-sort-label="마켓 등록">
-                      마켓 등록 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="orderMapping" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="orderMapping" data-sort-label="주문 매핑">
-                      주문 매핑 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="inventoryReflection" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="inventoryReflection" data-sort-label="재고 반영">
-                      재고 반영 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="nextStage" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="nextStage" data-sort-label="다음 작업">
-                      다음 작업 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
-                  <th class="sort-header" data-sort-key="notes" aria-sort="none">
-                    <button class="sort-button" type="button" data-sort-key="notes" data-sort-label="비고">
-                      비고 <span class="sort-indicator" aria-hidden="true">↕</span>
-                    </button>
-                  </th>
+                  <th class="sort-header" data-sort-key="workBatch" aria-sort="none"><button class="sort-button" type="button" data-sort-key="workBatch" data-sort-label="작업 묶음">작업 묶음 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="barcode" aria-sort="none"><button class="sort-button" type="button" data-sort-key="barcode" data-sort-label="기준 바코드">기준 바코드 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="modelNumber" aria-sort="none"><button class="sort-button" type="button" data-sort-key="modelNumber" data-sort-label="모델번호">모델번호 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="productName" aria-sort="none"><button class="sort-button" type="button" data-sort-key="productName" data-sort-label="모델명">모델명 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="shoplingCategory" aria-sort="none"><button class="sort-button" type="button" data-sort-key="shoplingCategory" data-sort-label="샵플링 표준 카테고리">샵플링 표준 카테고리 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="options" aria-sort="none"><button class="sort-button" type="button" data-sort-key="options" data-sort-label="옵션">옵션 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="readiness" aria-sort="none"><button class="sort-button" type="button" data-sort-key="readiness" data-sort-label="등록 준비">등록 준비 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="detailPage" aria-sort="none"><button class="sort-button" type="button" data-sort-key="detailPage" data-sort-label="상세페이지">상세페이지 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="priceKeyword" aria-sort="none"><button class="sort-button" type="button" data-sort-key="priceKeyword" data-sort-label="가격·키워드">가격·키워드 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="shoplingUpload" aria-sort="none"><button class="sort-button" type="button" data-sort-key="shoplingUpload" data-sort-label="샵플링 업로드">샵플링 업로드 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="marketRegistration" aria-sort="none"><button class="sort-button" type="button" data-sort-key="marketRegistration" data-sort-label="마켓 등록">마켓 등록 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="orderMapping" aria-sort="none"><button class="sort-button" type="button" data-sort-key="orderMapping" data-sort-label="주문 매핑">주문 매핑 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="inventoryReflection" aria-sort="none"><button class="sort-button" type="button" data-sort-key="inventoryReflection" data-sort-label="재고 반영">재고 반영 <span class="sort-indicator">↕</span></button></th>
+                  <th class="sort-header" data-sort-key="nextStage" aria-sort="none"><button class="sort-button" type="button" data-sort-key="nextStage" data-sort-label="다음 작업">다음 작업 <span class="sort-indicator">↕</span></button></th>
                   <th>관리</th>
                 </tr>
               </thead>
               <tbody id="launch-table-body"></tbody>
             </table>
           </div>
-          <div id="empty-state" class="empty-state" hidden>
-            조건에 맞는 상품이 없습니다.
-          </div>
+          <div id="empty-state" class="empty-state" hidden>조건에 맞는 상품이 없습니다.</div>
         </section>
       </main>
     </div>
@@ -195,46 +140,61 @@
           <button class="icon-button" value="cancel" aria-label="닫기">×</button>
         </div>
         <input type="hidden" name="id" />
-        <div class="form-grid">
-          <label class="field">
-            <span>작업 묶음</span>
-            <input name="workBatch" required />
-          </label>
-          <label class="field">
-            <span>창고위치</span>
-            <input name="warehouseLocation" />
-          </label>
-          <label class="field">
-            <span>바코드</span>
-            <input name="barcode" placeholder="예: BAA1-1" autocomplete="off" />
-          </label>
-          <label class="field">
-            <span>모델번호</span>
-            <input name="modelNumber" required />
-          </label>
-          <label class="field">
-            <span>goods_key</span>
-            <input name="goodsKey" />
-          </label>
-          <label class="field field-span-2">
-            <span>상품명</span>
-            <input name="productName" required />
-          </label>
-          <label class="field field-span-2">
-            <span>옵션 구성 <small>쉼표로 구분</small></span>
-            <input name="options" />
-          </label>
-          <label class="field field-span-2">
-            <span>비고·보류 사유</span>
-            <textarea name="notes" rows="3"></textarea>
-          </label>
+        <div class="section-title-row">
+          <div><h3>상품 고유정보</h3><p>상품마다 달라지는 값만 입력합니다.</p></div>
+          <button id="preview-button" class="button button-secondary" type="button">샵플링 등록 미리보기</button>
         </div>
+        <div class="form-grid">
+          <label class="field"><span>작업 묶음</span><input name="workBatch" required /></label>
+          <label class="field"><span>창고위치 <small>운영 참고값</small></span><input name="warehouseLocation" /></label>
+          <label class="field"><span>기준 바코드</span><input name="barcode" placeholder="예: BAA1-1" autocomplete="off" /></label>
+          <label class="field"><span>모델번호</span><input name="modelNumber" required /></label>
+          <label class="field field-span-2"><span>모델명</span><input name="productName" required /></label>
+          <label class="field field-span-2 category-field">
+            <span>샵플링 표준 카테고리</span>
+            <input name="shoplingCategory" placeholder="샵플링 표준 카테고리로 정확하게 등록" autocomplete="off" />
+            <small>샵플링에 표시된 전체 카테고리명을 마지막 단계까지 그대로 입력하세요.</small>
+          </label>
+          <label class="field"><span>자사상품 기본코드 <small>자동생성</small></span><input name="selfCodeBase" readonly /></label>
+          <div class="field field-action"><span>코드 관리</span><button id="regenerate-code-button" class="button button-ghost" type="button">새 코드 생성</button></div>
+          <label class="field field-span-2"><span>비고·보류 사유</span><textarea name="notes" rows="3"></textarea></label>
+        </div>
+
+        <section class="integration-section">
+          <div class="section-title-row">
+            <div>
+              <h3>발주·입고 옵션가격</h3>
+              <p>china-order-manager에서 옵션값·바코드·기준 판매가·원가를 불러옵니다.</p>
+            </div>
+            <div class="inline-actions">
+              <span id="china-sync-status" class="sync-status"></span>
+              <button id="china-sync-button" class="button button-secondary" type="button">발주·입고 데이터 불러오기</button>
+              <button id="add-option-button" class="button button-ghost" type="button">+ 옵션 직접 추가</button>
+            </div>
+          </div>
+          <div class="option-table-wrap">
+            <table class="option-table">
+              <thead><tr><th>옵션명</th><th>옵션값</th><th>바코드·위치코드</th><th>기준 판매가</th><th>원가</th><th></th></tr></thead>
+              <tbody id="detail-options"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="integration-section">
+          <div class="section-title-row">
+            <div><h3>상세페이지 엔진 결과</h3><p>최종 승인 HTML과 이미지를 연결합니다. 배송공지는 등록 시 자동으로 끝에 붙습니다.</p></div>
+          </div>
+          <div class="form-grid">
+            <label class="field field-span-2"><span>상세페이지 HTML</span><textarea name="detailHtml" rows="6" placeholder="상세페이지 엔진의 승인된 HTML"></textarea></label>
+            <label class="field field-span-2"><span>대표이미지 URL</span><input name="mainImageUrl" placeholder="https://..." /></label>
+            <label class="field field-span-2"><span>추가이미지 URL <small>줄바꿈 또는 쉼표 구분, 최대 10개</small></span><textarea name="additionalImageUrls" rows="3"></textarea></label>
+          </div>
+        </section>
+
         <div id="detail-stages" class="stage-editor"></div>
         <div id="detail-source" class="source-panel"></div>
         <div class="dialog-actions">
-          <button id="archive-button" class="button button-danger" type="button">
-            보관 처리
-          </button>
+          <button id="archive-button" class="button button-danger" type="button">보관 처리</button>
           <div class="dialog-actions-right">
             <button class="button button-ghost" value="cancel">취소</button>
             <button class="button button-primary" value="save">저장</button>
@@ -243,68 +203,94 @@
       </form>
     </dialog>
 
-    <dialog id="add-dialog" class="dialog">
-      <form id="add-form" method="dialog">
+    <dialog id="policy-dialog" class="dialog dialog-wide">
+      <form id="policy-form" method="dialog">
         <div class="dialog-header">
-          <div>
-            <p class="eyebrow">대량 추가</p>
-            <h2>엑셀 표 붙여넣기</h2>
-          </div>
+          <div><p class="eyebrow">반복값 제거</p><h2>통합정책 관리</h2></div>
           <button class="icon-button" value="cancel" aria-label="닫기">×</button>
         </div>
-        <p class="dialog-description">
-          아래 순서의 7개 열을 엑셀에서 그대로 복사해 붙여넣으세요.
-        </p>
-        <div class="paste-guide">
-          작업 묶음 · 창고위치 · 바코드 · 모델번호 · 상품명 · 옵션 · 비고
+        <p class="dialog-description">신규 등록부터 적용되는 공통값입니다. 상품별 표에서 반복 입력하지 않습니다.</p>
+        <div class="policy-grid">
+          <section class="policy-card">
+            <h3>상품그룹 가격정책</h3>
+            <div class="compact-grid">
+              <label class="field"><span>도매1 배수</span><input name="multiplier.wholesale1" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>도매2 배수</span><input name="multiplier.wholesale2" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>도매3 배수</span><input name="multiplier.wholesale3" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>도매4 배수</span><input name="multiplier.wholesale4" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>소매1 배수</span><input name="multiplier.retail1" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>소매2 배수</span><input name="multiplier.retail2" type="number" min="0.01" step="0.01" /></label>
+              <label class="field"><span>소비자가 배수</span><input name="listPriceMultiplier" type="number" min="0.01" step="0.01" /></label>
+            </div>
+          </section>
+          <section class="policy-card">
+            <h3>제조·배송·브랜드</h3>
+            <div class="compact-grid">
+              <label class="field"><span>제조사명</span><input name="makerName" /></label>
+              <label class="field"><span>상품중량</span><input name="productWeight" type="number" min="0" step="0.01" /></label>
+              <label class="field"><span>배송비구분</span><input name="deliveryType" /></label>
+              <label class="field"><span>배송비</span><input name="deliveryCost" type="number" min="0" step="1" /></label>
+              <label class="field field-span-2"><span>소매1 브랜드명</span><input name="retail1BrandName" /></label>
+            </div>
+          </section>
+          <section class="policy-card">
+            <h3>옵션·상품정보고시</h3>
+            <div class="compact-grid">
+              <label class="field"><span>옵션 판매상태</span><input name="optionStatus" /></label>
+              <label class="field"><span>옵션 재고</span><input name="optionQuantity" type="number" min="0" step="1" /></label>
+              <label class="field"><span>옵션 가상재고</span><input name="optionVirtualQuantity" type="number" min="0" step="1" /></label>
+              <label class="field"><span>고시 분류코드</span><input name="goodsNoticeCode" /></label>
+              <label class="field field-span-2"><span>모든 고시 속성값</span><input name="goodsNoticeValue" /></label>
+            </div>
+          </section>
+          <section class="policy-card policy-card-wide">
+            <h3>상세페이지 하단 배송공지 HTML</h3>
+            <label class="field"><textarea name="shippingNoticeHtml" rows="5"></textarea></label>
+          </section>
         </div>
-        <textarea
-          name="paste"
-          class="paste-area"
-          rows="12"
-          placeholder="2026 7월 4주차&#9;창고위치&#9;BAA1-1&#9;AAA493&#9;상품명&#9;블랙,화이트&#9;확인 메모"
-        ></textarea>
+        <div class="dialog-actions">
+          <button id="reset-policy-button" class="button button-ghost" type="button">기본정책으로 되돌리기</button>
+          <div class="dialog-actions-right"><button class="button button-ghost" value="cancel">취소</button><button class="button button-primary" value="save">정책 저장</button></div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="preview-dialog" class="dialog dialog-preview">
+      <form method="dialog">
+        <div class="dialog-header">
+          <div><p class="eyebrow">실행 전 확인</p><h2 id="preview-title">샵플링 등록 미리보기</h2></div>
+          <button class="icon-button" value="cancel" aria-label="닫기">×</button>
+        </div>
+        <div id="preview-content"></div>
+        <div class="dialog-actions dialog-actions-end"><button class="button button-primary" value="cancel">확인</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="add-dialog" class="dialog">
+      <form id="add-form" method="dialog">
+        <div class="dialog-header"><div><p class="eyebrow">대량 추가</p><h2>엑셀 표 붙여넣기</h2></div><button class="icon-button" value="cancel" aria-label="닫기">×</button></div>
+        <p class="dialog-description">아래 순서의 8개 열을 엑셀에서 그대로 복사해 붙여넣으세요.</p>
+        <div class="paste-guide">작업 묶음 · 창고위치 · 기준 바코드 · 모델번호 · 모델명 · 샵플링 표준 카테고리 · 옵션 · 비고</div>
+        <textarea name="paste" class="paste-area" rows="12" placeholder="2026 7월 4주차&#9;창고위치&#9;BAA1-1&#9;AAA493&#9;모델명&#9;대>중>소&#9;블랙,화이트&#9;확인 메모"></textarea>
         <p id="paste-preview" class="paste-preview">붙여넣은 상품 0건</p>
-        <div class="dialog-actions dialog-actions-end">
-          <button class="button button-ghost" value="cancel">취소</button>
-          <button class="button button-primary" value="save">상품 추가</button>
-        </div>
+        <div class="dialog-actions dialog-actions-end"><button class="button button-ghost" value="cancel">취소</button><button class="button button-primary" value="save">상품 추가</button></div>
       </form>
     </dialog>
 
     <dialog id="export-dialog" class="dialog dialog-small">
       <form method="dialog">
-        <div class="dialog-header">
-          <div>
-            <p class="eyebrow">데이터 관리</p>
-            <h2>백업·내보내기</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="닫기">×</button>
-        </div>
+        <div class="dialog-header"><div><p class="eyebrow">데이터 관리</p><h2>백업·내보내기</h2></div><button class="icon-button" value="cancel" aria-label="닫기">×</button></div>
         <div class="export-actions">
-          <button id="export-json-button" class="export-option" type="button">
-            <strong>전체 백업 파일</strong>
-            <span>수정 상태와 담당자를 포함한 JSON을 내려받습니다.</span>
-          </button>
-          <button id="export-csv-button" class="export-option" type="button">
-            <strong>현재 목록 CSV</strong>
-            <span>현재 검색·필터 결과를 엑셀용 CSV로 내려받습니다.</span>
-          </button>
-          <button id="import-json-button" class="export-option" type="button">
-            <strong>백업 파일 불러오기</strong>
-            <span>다른 PC에서 내려받은 전체 백업을 복원합니다.</span>
-          </button>
-          <button id="reset-seed-button" class="export-option export-option-danger" type="button">
-            <strong>업로드 원본으로 초기화</strong>
-            <span>모든 수정 내용을 지우고 최초 이관 상태로 되돌립니다.</span>
-          </button>
+          <button id="export-json-button" class="export-option" type="button"><strong>전체 백업 파일</strong><span>상품·옵션·통합정책을 포함한 JSON을 내려받습니다.</span></button>
+          <button id="export-csv-button" class="export-option" type="button"><strong>현재 목록 CSV</strong><span>현재 검색·필터 결과를 엑셀용 CSV로 내려받습니다.</span></button>
+          <button id="import-json-button" class="export-option" type="button"><strong>백업 파일 불러오기</strong><span>다른 PC에서 내려받은 전체 백업을 복원합니다.</span></button>
+          <button id="reset-seed-button" class="export-option export-option-danger" type="button"><strong>업로드 원본으로 초기화</strong><span>모든 수정 내용을 지우고 최초 이관 상태로 되돌립니다.</span></button>
         </div>
       </form>
     </dialog>
 
     <input id="backup-file-input" type="file" accept="application/json,.json" hidden />
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-
     <script type="module" src="./app.js"></script>
   </body>
 </html>
