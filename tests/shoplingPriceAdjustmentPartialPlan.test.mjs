@@ -44,6 +44,50 @@ test("keeps valid rows and isolates read-only plan errors", () => {
   assert.equal(result.executionRows[0].requires_option_write, true);
 });
 
+test("accepts sparse Shopling option matrices and detects active amount changes", () => {
+  const result = partialPlan.buildPartialExecutionPlan({
+    status: "success",
+    rows: [{
+      goods_key: "112969",
+      adjustment_bps: 1000,
+      current: {
+        sell_price: 10000,
+        option_amounts: [0, null, null, null, 390, null, null, null, 390],
+        option_signature: sig,
+      },
+      target: {
+        sell_price: 11000,
+        option_amounts: [0, null, null, null, 430, null, null, null, 430],
+      },
+    }],
+    errors: [],
+  }, [{ goods_key: "112969", adjustment_bps: 1000 }]);
+
+  assert.equal(result.rejectedRows.length, 0);
+  assert.equal(result.executionRows.length, 1);
+  assert.equal(result.executionRows[0].requires_option_write, true);
+});
+
+test("rejects invalid sparse option cells instead of treating them as blanks", () => {
+  assert.throws(() => partialPlan.buildPartialExecutionPlan({
+    status: "success",
+    rows: [{
+      goods_key: "112969",
+      adjustment_bps: 1000,
+      current: {
+        sell_price: 10000,
+        option_amounts: [0, "", 390],
+        option_signature: sig,
+      },
+      target: {
+        sell_price: 11000,
+        option_amounts: [0, null, 430],
+      },
+    }],
+    errors: [],
+  }, [{ goods_key: "112969", adjustment_bps: 1000 }]), /option amount array is invalid/);
+});
+
 test("rejects summaries that omit an expected goods_key", () => {
   assert.throws(() => partialPlan.buildPartialExecutionPlan({
     status: "partial_failure",
