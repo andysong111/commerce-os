@@ -11,6 +11,10 @@ import {
 import {
   findTerminalGithubWorkflowFailure,
 } from "@/lib/shoplingPriceAdjustmentWorkflowStatus";
+import {
+  buildPartialExecutionPlan,
+  type PartialExecutionPlan,
+} from "@/lib/shoplingPriceAdjustmentPartialPlan";
 
 const ACTIVE_CHUNK_STATUSES = ["pending", "planning", "ready", "executing"] as const;
 const LEASE_SECONDS = 90;
@@ -51,23 +55,8 @@ type ChunkRow = {
   execute_request_id?: string | null;
 };
 
-type PlanRow = {
-  goods_key?: unknown;
-  adjustment_bps?: unknown;
-  current?: {
-    sell_price?: unknown;
-    option_amounts?: unknown;
-    option_signature?: unknown;
-  };
-  target?: {
-    sell_price?: unknown;
-    option_amounts?: unknown;
-  };
-};
-
 const text = (value: unknown) => value instanceof Error ? value.message : typeof value === "string" ? value : JSON.stringify(value ?? null);
 const firstRecord = (value: unknown) => (Array.isArray(value) ? value[0] : value) as Record<string, unknown> | null;
-const records = (value: unknown) => Array.isArray(value) ? value as Array<Record<string, unknown>> : [];
 
 async function rpc(admin: BulkAdmin, name: string, parameters: Record<string, unknown>) {
   const result = await admin.rpc(name, parameters);
@@ -116,47 +105,12 @@ function parsePlanInputs(value: unknown) {
   });
 }
 
-function numberArray(value: unknown): number[] {
-  if (!Array.isArray(value)) return [];
-  if (!value.every((item) => typeof item === "number" && Number.isSafeInteger(item))) throw new Error("option amount array is invalid");
-  return value as number[];
-}
-
-function sameNumberArray(left: number[], right: number[]) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 export function buildExecutionRowsFromPlan(summaryValue: unknown, expectedInputsValue: unknown) {
-  const summary = (summaryValue ?? {}) as Record<string, unknown>;
-  if (summary.status !== "success") throw new Error(`read-only plan did not succeed: ${String(summary.status ?? "unknown")}`);
-  const errors = Array.isArray(summary.errors) ? summary.errors : [];
-  if (errors.length > 0) throw new Error(`read-only plan contains ${errors.length} error rows`);
-
-  const expectedInputs = parsePlanInputs(expectedInputsValue);
-  const rows = Array.isArray(summary.rows) ? summary.rows as PlanRow[] : [];
-  if (rows.length !== expectedInputs.length) throw new Error(`planned row count mismatch expected=${expectedInputs.length} actual=${rows.length}`);
-  const byKey = new Map(rows.map((row) => [row.goods_key, row]));
-
-  return expectedInputs.map((expected, index) => {
-    const row = byKey.get(expected.goods_key);
-    if (!row) throw new Error(`plan result missing goods_key ${expected.goods_key}`);
-    if (row.adjustment_bps !== expected.adjustment_bps) throw new Error(`plan rate mismatch for ${expected.goods_key}`);
-    const currentSell = row.current?.sell_price;
-    const optionSignature = row.current?.option_signature;
-    const targetSell = row.target?.sell_price;
-    if (typeof currentSell !== "number" || !Number.isSafeInteger(currentSell) || currentSell <= 0) throw new Error(`plan current price missing for row ${index + 1}`);
-    if (typeof targetSell !== "number" || !Number.isSafeInteger(targetSell) || targetSell <= 0) throw new Error(`plan target price missing for row ${index + 1}`);
-    if (typeof optionSignature !== "string" || !/^[0-9a-f]{64}$/i.test(optionSignature)) throw new Error(`plan option signature missing for ${expected.goods_key}`);
-    const currentOptions = numberArray(row.current?.option_amounts);
-    const targetOptions = numberArray(row.target?.option_amounts);
-    return {
-      goods_key: expected.goods_key,
-      adjustment_bps: expected.adjustment_bps,
-      expected_current_sell_price: currentSell,
-      expected_option_signature: optionSignature.toLowerCase(),
-      requires_option_write: !sameNumberArray(currentOptions, targetOptions),
-    };
-  });
+  const plan = buildPartialExecutionPlan(summaryValue, expectedInputsValue);
+  if (plan.rejectedRows.length > 0) {
+    throw new Error(`read-only plan contains ${plan.rejectedRows.length} error rows`);
+  }
+  return plan.executionRows;
 }
 
 function executionSucceeded(summaryValue: unknown, expectedCount: number) {
@@ -185,6 +139,69 @@ async function blockUncertain(admin: BulkAdmin, job: JobRow, chunk: ChunkRow, re
     p_error: reason,
   });
   return { status: "stopped", jobStatus: "dispatch_uncertain", chunkIndex: chunk.chunk_index, message: reason };
+}
+
+async function markPlanReady(
+  admin: BulkAdmin,
+  job: JobRow,
+  chunk: ChunkRow,
+  plan: PartialExecutionPlan,
+  summary: unknown,
+  runUrl: string,
+) {
+  if (plan.rejectedRows.length === 0) {
+    await rpc(admin, "mark_shopling_price_adjustment_plan_ready", {
+      p_job_id: job.id,
+      p_owner_id: job.owner_id,
+      p_chunk_id: chunk.id,
+      p_execution_rows: plan.executionRows,
+      p_summary: summary,
+      p_run_url: runUrl,
+    });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  for (const rejected of plan.rejectedRows) {
+    const itemResult = await admin
+      .from("shopling_price_adjustment_bulk_items")
+      .update({
+        status: "not_executed",
+        result: {
+          status: "not_executed",
+          stage: "planning",
+          error: rejected.error,
+        },
+        updated_at: now,
+      })
+      .eq("job_id", job.id)
+      .eq("goods_key", rejected.goods_key)
+      .in("status", ["pending", "not_executed"]);
+    if (itemResult.error) {
+      throw new Error(`rejected item state update failed: ${text(itemResult.error)}`);
+    }
+  }
+
+  const chunkResult = await admin
+    .from("shopling_price_adjustment_bulk_chunks")
+    .update({
+      status: "ready",
+      input_rows: plan.validInputs,
+      execution_rows: plan.executionRows,
+      goods_key_count: plan.executionRows.length,
+      plan_summary: summary,
+      plan_run_url: runUrl,
+      last_error: `${plan.rejectedRows.length}개 조회 오류 상품 자동 제외`,
+      updated_at: now,
+    })
+    .eq("id", chunk.id)
+    .eq("job_id", job.id)
+    .eq("status", "planning")
+    .select("id")
+    .maybeSingle();
+  if (chunkResult.error || !chunkResult.data) {
+    throw new Error(`partial plan ready transition failed: ${text(chunkResult.error)}`);
+  }
 }
 
 async function advancePending(admin: BulkAdmin, job: JobRow, chunk: ChunkRow) {
@@ -242,18 +259,34 @@ async function advancePlanning(admin: BulkAdmin, job: JobRow, chunk: ChunkRow) {
       message: result.message ?? "계획 결과를 아직 확인하지 못했습니다.",
     };
   }
-  let executionRows;
-  try { executionRows = buildExecutionRowsFromPlan(result.summary, chunk.input_rows); }
-  catch (error) { return failJob(admin, job, chunk, `읽기 전용 계획 검증 실패: ${text(error)}`); }
-  await rpc(admin, "mark_shopling_price_adjustment_plan_ready", {
-    p_job_id: job.id,
-    p_owner_id: job.owner_id,
-    p_chunk_id: chunk.id,
-    p_execution_rows: executionRows,
-    p_summary: result.summary,
-    p_run_url: result.runUrl ?? "",
-  });
-  return { status: "progressed" as const, jobStatus: "running", chunkIndex: chunk.chunk_index, message: `${executionRows.length}개 상품의 실행 계획을 확정했습니다.` };
+
+  let plan: PartialExecutionPlan;
+  try {
+    plan = buildPartialExecutionPlan(result.summary, chunk.input_rows);
+  } catch (error) {
+    return failJob(admin, job, chunk, `읽기 전용 계획 검증 실패: ${text(error)}`);
+  }
+  try {
+    await markPlanReady(
+      admin,
+      job,
+      chunk,
+      plan,
+      result.summary,
+      result.runUrl ?? "",
+    );
+  } catch (error) {
+    return failJob(admin, job, chunk, `읽기 전용 계획 저장 실패: ${text(error)}`);
+  }
+  const excluded = plan.rejectedRows.length;
+  return {
+    status: "progressed" as const,
+    jobStatus: "running",
+    chunkIndex: chunk.chunk_index,
+    message: excluded > 0
+      ? `${plan.executionRows.length}개 상품의 실행 계획을 확정하고 조회 오류 ${excluded}개를 자동 제외했습니다.`
+      : `${plan.executionRows.length}개 상품의 실행 계획을 확정했습니다.`,
+  };
 }
 
 async function advanceReady(admin: BulkAdmin, job: JobRow, chunk: ChunkRow) {
