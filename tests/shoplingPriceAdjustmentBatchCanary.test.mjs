@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 
 const bridge = readFileSync("src/lib/shoplingPriceAdjustmentBatchCanaryRunner.ts", "utf8");
 const panel = readFileSync("src/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel.tsx", "utf8");
@@ -13,6 +14,9 @@ const createHotfix = readFileSync("supabase/migrations/202607300002_shopling_pri
 const page = readFileSync("src/app/shopling-price-adjustment-runner/page.tsx", "utf8");
 const advanceRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/advance/route.ts", "utf8");
 const detailRoute = readFileSync("src/app/api/shopling-price-adjustment/bulk/jobs/[jobId]/route.ts", "utf8");
+const errorLabel = await importTranspiledTypeScript(
+  new URL("../src/lib/shoplingPriceAdjustmentErrorLabel.ts", import.meta.url),
+);
 
 test("chunk executor bridge is capped at fifty and uses explicit serial confirmation", () => {
   assert.match(bridge, /shopling-price-adjustment-batch-canary\.yml/);
@@ -91,8 +95,36 @@ test("runner hides manual canaries and shows excluded goods keys inline", () => 
   assert.match(resultPanel, /조회 오류·미실행/);
   assert.match(resultPanel, /새 작업 시작/);
   assert.match(resultPanel, /가격 변경 안 됨/);
+  assert.match(resultPanel, /오류 사유와 조치 방법/);
   assert.match(detailRoute, /excluded_items/);
   assert.match(detailRoute, /goods_key,ordinal,status,result/);
+});
+
+test("technical Shopling option errors are explained in plain Korean", () => {
+  assert.match(
+    errorLabel.humanizeShoplingPriceAdjustmentError(
+      "option amount contains a non-integer value",
+    ),
+    /숫자가 아닌 값/,
+  );
+  assert.match(
+    errorLabel.humanizeShoplingPriceAdjustmentError(
+      "negative option amount is not supported",
+    ),
+    /음수 금액/,
+  );
+  assert.match(
+    errorLabel.humanizeShoplingPriceAdjustmentError(
+      "option combination count mismatch: expected=6 amounts=5",
+    ),
+    /옵션 조합은 6개.*옵션 추가금은 5개/,
+  );
+  assert.match(
+    errorLabel.humanizeShoplingPriceAdjustmentError(
+      "current Shopling sale_price is missing or zero",
+    ),
+    /판매가가 없거나 0원/,
+  );
 });
 
 test("page and advance route connect the 10k bulk runner", () => {
