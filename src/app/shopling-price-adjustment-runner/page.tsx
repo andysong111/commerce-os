@@ -4,6 +4,7 @@ import { ShoplingPriceAdjustmentInputPreview } from "@/components/shopling-price
 import { ShoplingPriceAdjustmentIndividualBulkEditor } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentIndividualBulkEditor";
 import { ShoplingPriceAdjustmentUnifiedCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentUnifiedCanaryPanel";
 import { ShoplingPriceAdjustmentBatchCanaryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentBatchCanaryPanel";
+import { ShoplingPriceAdjustmentPartialRecoveryPanel } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentPartialRecoveryPanel";
 import { ShoplingPriceAdjustmentAuthProvider } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 import { isOpsLoginTemporarilyDisabled } from "@/lib/opsLoginBypass";
 import { isShoplingPriceAdjustmentOperatorEmail } from "@/lib/shoplingPriceAdjustmentAuth";
@@ -47,6 +48,7 @@ export default async function ShoplingPriceAdjustmentRunnerPage() {
       </div>
       <ShoplingPriceAdjustmentUnifiedCanaryPanel />
       <ShoplingPriceAdjustmentBatchCanaryPanel />
+      <ShoplingPriceAdjustmentPartialRecoveryPanel />
       <style>{`.price-adjustment-input-with-unified-single > div > section:nth-of-type(3) { display: none; }`}</style>
     </ShoplingPriceAdjustmentAuthProvider>
   );
