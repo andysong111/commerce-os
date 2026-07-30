@@ -3,6 +3,8 @@ type InputRow = {
   adjustment_bps: number;
 };
 
+type OptionAmount = number | null;
+
 type PlanRow = {
   goods_key?: unknown;
   adjustment_bps?: unknown;
@@ -69,15 +71,19 @@ function parseInputs(value: unknown): InputRow[] {
   });
 }
 
-function numberArray(value: unknown): number[] {
+function optionAmountArray(value: unknown): OptionAmount[] {
   if (!Array.isArray(value)) return [];
-  if (!value.every((item) => typeof item === "number" && Number.isSafeInteger(item))) {
+  if (!value.every((item) => item === null || (
+    typeof item === "number"
+    && Number.isSafeInteger(item)
+    && item >= 0
+  ))) {
     throw new Error("option amount array is invalid");
   }
-  return value as number[];
+  return value as OptionAmount[];
 }
 
-function sameNumberArray(left: number[], right: number[]) {
+function sameOptionAmountArray(left: OptionAmount[], right: OptionAmount[]) {
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
 }
@@ -164,15 +170,15 @@ export function buildPartialExecutionPlan(
     ) {
       throw new Error(`plan option signature missing for ${expected.goods_key}`);
     }
-    const currentOptions = numberArray(row.current?.option_amounts);
-    const targetOptions = numberArray(row.target?.option_amounts);
+    const currentOptions = optionAmountArray(row.current?.option_amounts);
+    const targetOptions = optionAmountArray(row.target?.option_amounts);
     validInputs.push(expected);
     executionRows.push({
       goods_key: expected.goods_key,
       adjustment_bps: expected.adjustment_bps,
       expected_current_sell_price: currentSell,
       expected_option_signature: optionSignature.toLowerCase(),
-      requires_option_write: !sameNumberArray(currentOptions, targetOptions),
+      requires_option_write: !sameOptionAmountArray(currentOptions, targetOptions),
     });
   });
 
