@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
+import { useShoplingPriceAdjustmentApi } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 
 type PricePlanRow = {
   goods_key?: string;
@@ -77,6 +77,8 @@ function buildCanaryInput(row: PricePlanRow) {
 }
 
 export function ShoplingPriceAdjustmentUnifiedCanaryPanel() {
+  const requestShoplingPriceAdjustmentApi =
+    useShoplingPriceAdjustmentApi();
   const [planLoading, setPlanLoading] = useState(false);
   const [planResponse, setPlanResponse] = useState<PlanResponse | null>(null);
   const [running, setRunning] = useState(false);

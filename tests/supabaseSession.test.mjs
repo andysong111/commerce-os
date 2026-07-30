@@ -6,8 +6,10 @@ import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 const {
   OPS_AUTH_SESSION_DAYS,
   OPS_AUTH_COOKIE_MAX_AGE_SECONDS,
+  OPS_AUTH_COOKIE_NAME,
   getOpsAuthCookieOptions,
   getSafeOpsAuthRedirect,
+  isOpsAuthCookieName,
 } = await importTranspiledTypeScript(
   new URL("../src/lib/supabase/session.ts", import.meta.url),
 );
@@ -15,13 +17,19 @@ const {
 test("OPS 로그인 쿠키는 개인 기기에서 180일 유지된다", () => {
   assert.equal(OPS_AUTH_SESSION_DAYS, 180);
   assert.equal(OPS_AUTH_COOKIE_MAX_AGE_SECONDS, 15_552_000);
+  assert.equal(OPS_AUTH_COOKIE_NAME, "commerce-os-ops-auth-v2");
   assert.deepEqual(getOpsAuthCookieOptions("production"), {
+    name: "commerce-os-ops-auth-v2",
     maxAge: 15_552_000,
     path: "/",
     sameSite: "lax",
     secure: true,
   });
   assert.equal(getOpsAuthCookieOptions("development").secure, false);
+  assert.equal(isOpsAuthCookieName("commerce-os-ops-auth-v2"), true);
+  assert.equal(isOpsAuthCookieName("commerce-os-ops-auth-v2.0"), true);
+  assert.equal(isOpsAuthCookieName("sb-project-auth-token.1"), true);
+  assert.equal(isOpsAuthCookieName("theme"), false);
 });
 
 test("로그인 후 복귀 경로는 같은 OPS Center 내부 경로만 허용한다", () => {
@@ -58,6 +66,7 @@ test("Next.js Proxy가 요청과 응답 쿠키를 함께 갱신한다", async ()
   assert.match(rootProxy, /updateSession\(request\)/);
   assert.match(sessionProxy, /request\.cookies\.set\(name, value\)/);
   assert.match(sessionProxy, /response\.cookies\.set\(name, value, options\)/);
+  assert.match(sessionProxy, /Object\.entries\(headersToSet\)/);
   assert.match(sessionProxy, /supabase\.auth\.getClaims\(\)/);
   assert.match(sessionProxy, /private, no-store/);
 });
@@ -76,7 +85,7 @@ test("서버와 브라우저 Supabase 클라이언트가 같은 장기 쿠키 �
   assert.match(browser, /cookieOptions: getOpsAuthCookieOptions\(\)/);
 });
 
-test("가격 API와 보호 화면은 동일한 Next.js 쿠키 인증 경로를 쓴다", async () => {
+test("가격 API는 검증된 bearer와 최신 쿠키 namespace를 함께 지원한다", async () => {
   const priceAuth = await readFile(
     new URL("../src/lib/shoplingPriceAdjustmentAuth.ts", import.meta.url),
     "utf8",
@@ -85,13 +94,21 @@ test("가격 API와 보호 화면은 동일한 Next.js 쿠키 인증 경로를 �
     new URL("../src/lib/supabase/currentUser.ts", import.meta.url),
     "utf8",
   );
+  const login = await readFile(
+    new URL("../src/app/login/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const reset = await readFile(
+    new URL("../src/lib/supabase/resetSession.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(priceAuth, /await createSupabaseServerClient\(\)/);
+  assert.match(priceAuth, /getClaims\(bearer\.token\)/);
   assert.match(currentUser, /await createSupabaseServerClient\(\)/);
-  assert.doesNotMatch(
-    priceAuth,
-    /request\.headers|get\("cookie"\)|createSupabaseRequestClient|Bearer/,
-  );
+  assert.match(login, /clearOpsAuthCookiesBeforeSignIn/);
+  assert.match(reset, /isOpsAuthCookieName/);
+  assert.match(reset, /maxAge: 0/);
 });
 
 test("브라우저 Supabase 설정은 Next.js가 정적으로 주입할 공개 환경변수를 직접 참조한다", async () => {
@@ -149,7 +166,8 @@ test("한 RSC 요청 안의 인증 조회는 React cache로 한 번만 실행한
   );
 
   assert.match(currentUser, /cache\(loadOpsCurrentUser\)/);
-  assert.match(currentUser, /supabase\.auth\.getUser\(\)/);
+  assert.match(currentUser, /supabase\.auth\.getSession\(\)/);
+  assert.match(currentUser, /supabase\.auth\.getUser\(accessToken\)/);
   assert.match(appShell, /getOpsCurrentUser\(\)/);
   assert.match(detailCosts, /getOpsCurrentUser\(\)/);
   assert.doesNotMatch(appShell + detailCosts, /auth\.getUser\(\)/);

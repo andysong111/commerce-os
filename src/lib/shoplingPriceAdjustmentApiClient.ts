@@ -22,6 +22,7 @@ export function resolveShoplingPriceAdjustmentApiUrl(
 export async function requestShoplingPriceAdjustmentApi(
   input: string,
   init: RequestInit = {},
+  verifiedAccessToken: string | null = null,
 ) {
   if (typeof window === "undefined") {
     throw new Error("샵플링 가격 API는 브라우저에서만 호출할 수 있습니다.");
@@ -32,11 +33,16 @@ export async function requestShoplingPriceAdjustmentApi(
     window.location.origin,
   );
   const headers = new Headers(init.headers);
-  headers.delete("authorization");
+  if (verifiedAccessToken) {
+    headers.set("authorization", `Bearer ${verifiedAccessToken}`);
+  } else {
+    headers.delete("authorization");
+  }
 
-  // Price-adjustment APIs deliberately use the same server-validated cookie
-  // session as the protected page. Dropping Authorization also makes an old
-  // browser chunk unable to override a valid cookie with a stale bearer token.
+  // The token is verified by the server before it is rendered into this
+  // protected, non-cached page and is kept only in React memory. The API still
+  // falls back to the canonical cookie, so an expired token cannot override a
+  // valid refreshed session.
   const response = await fetch(target, {
     ...init,
     headers,

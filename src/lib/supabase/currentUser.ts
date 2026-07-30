@@ -8,6 +8,7 @@ export type OpsCurrentUser = {
 
 export type OpsCurrentUserResult = {
   user: OpsCurrentUser | null;
+  accessToken: string | null;
   error: string | null;
   configured: boolean;
 };
@@ -17,14 +18,27 @@ async function loadOpsCurrentUser(): Promise<OpsCurrentUserResult> {
   if (!supabase) {
     return {
       user: null,
+      accessToken: null,
       error: "Supabase public auth configuration is missing.",
       configured: false,
     };
   }
 
-  const { data, error } = await supabase.auth.getUser();
+  const sessionResult = await supabase.auth.getSession();
+  const session = sessionResult.data.session;
+  const accessToken = session?.access_token ?? null;
+  const { data, error } = accessToken
+    ? await supabase.auth.getUser(accessToken)
+    : await supabase.auth.getUser();
+  const verifiedAccessToken =
+    data.user &&
+    accessToken &&
+    (!session?.user?.id || session.user.id === data.user.id)
+      ? accessToken
+      : null;
   return {
     user: data.user,
+    accessToken: verifiedAccessToken,
     error: error?.message ?? null,
     configured: true,
   };

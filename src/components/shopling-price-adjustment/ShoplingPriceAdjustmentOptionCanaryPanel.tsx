@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { requestShoplingPriceAdjustmentApi } from "@/lib/shoplingPriceAdjustmentApiClient";
+import { useShoplingPriceAdjustmentApi } from "@/components/shopling-price-adjustment/ShoplingPriceAdjustmentAuthProvider";
 
 type PricePlanRow = {
   goods_key?: string;
@@ -75,6 +75,8 @@ function buildOptionCanaryInput(row: PricePlanRow) {
 }
 
 export function ShoplingPriceAdjustmentOptionCanaryPanel() {
+  const requestShoplingPriceAdjustmentApi =
+    useShoplingPriceAdjustmentApi();
   const [planRequestId, setPlanRequestId] = useState(() => typeof window === "undefined" ? "" : localStorage.getItem(PLAN_REQUEST_STORAGE_KEY) ?? "");
   const [planLoading, setPlanLoading] = useState(false);
   const [planResponse, setPlanResponse] = useState<PlanResponse | null>(null);

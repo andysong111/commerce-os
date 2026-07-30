@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
+import { clearOpsAuthCookiesBeforeSignIn } from "@/lib/supabase/resetSession";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSafeOpsAuthRedirect } from "@/lib/supabase/session";
 
@@ -10,6 +11,7 @@ async function signIn(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const intent = String(formData.get("intent") ?? "password");
   const nextPath = getSafeOpsAuthRedirect(String(formData.get("next") ?? ""));
+  await clearOpsAuthCookiesBeforeSignIn();
   const supabase = await createSupabaseServerClient();
   const loginUrl = (error: string) =>
     `/login?error=${encodeURIComponent(error)}&next=${encodeURIComponent(nextPath)}`;

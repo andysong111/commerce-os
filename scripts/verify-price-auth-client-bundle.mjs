@@ -52,6 +52,11 @@ assert.doesNotMatch(
   /price_adjustment\.browser_auth|PRICE_ADJUSTMENT_BROWSER_AUTH_CONFIGURATION_ERROR/,
   "the price-adjustment client must not block on a second browser-only session",
 );
+assert.match(
+  priceAuthBundle,
+  /authorization[\s\S]*Bearer |Bearer [\s\S]*authorization/,
+  "the server-verified price-adjustment token transport was not emitted",
+);
 assert.ok(
   clientBundle.includes(expectedUrl),
   "the Supabase URL was not statically embedded in the client bundle",
@@ -68,4 +73,4 @@ assert.doesNotMatch(
   "a dynamic Supabase public env lookup remains in the client bundle",
 );
 
-console.log("Price-adjustment auth uses server-validated same-origin cookies.");
+console.log("Price-adjustment auth uses a server-verified token with same-origin cookie fallback.");

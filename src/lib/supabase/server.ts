@@ -7,7 +7,16 @@ type CookieToSet = { name: string; value: string; options?: Record<string, unkno
 
 type SupabaseServerClient = {
   auth: {
-    getUser: () => Promise<{ data: { user: { id: string; email?: string } | null }; error: { message: string } | null }>;
+    getUser: (jwt?: string) => Promise<{ data: { user: { id: string; email?: string } | null }; error: { message: string; code?: string; name?: string; status?: number } | null }>;
+    getSession: () => Promise<{
+      data: {
+        session: {
+          access_token: string;
+          user?: { id?: string; email?: string };
+        } | null;
+      };
+      error: { message: string; code?: string; name?: string; status?: number } | null;
+    }>;
     signInWithPassword: (credentials: { email: string; password: string }) => Promise<{ error: { message: string } | null }>;
     signInWithOtp: (credentials: { email: string; options?: { emailRedirectTo?: string } }) => Promise<{ error: { message: string } | null }>;
     exchangeCodeForSession: (code: string) => Promise<{ error: { message: string } | null }>;
@@ -40,7 +49,11 @@ export async function createSupabaseServerClient(): Promise<SupabaseServerClient
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet: CookieToSet[]) {
+        setAll(
+          cookiesToSet: CookieToSet[],
+          headersToSet?: Record<string, string>,
+        ) {
+          void headersToSet;
           try {
             cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
           } catch {}
