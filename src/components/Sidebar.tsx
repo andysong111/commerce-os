@@ -19,7 +19,11 @@ const moduleIconLabels: Record<string, string> = {
   "product-launch-tracker": "진",
 };
 
-function navigationFor(showDetailPageCosts: boolean, signedIn: boolean) {
+function navigationFor(
+  showDetailPageCosts: boolean,
+  signedIn: boolean,
+  loginDisabled: boolean,
+) {
   const primary = [
     { href: "/", label: "대시보드", iconLabel: "D" },
     ...extendedModuleRegistry.flatMap((module) => {
@@ -48,6 +52,8 @@ function navigationFor(showDetailPageCosts: boolean, signedIn: boolean) {
     }),
   ];
 
+  if (loginDisabled) return primary;
+
   return [
     ...primary,
     {
@@ -62,13 +68,19 @@ export function Sidebar({
   showDetailPageCosts = false,
   signedIn = false,
   email = "",
+  loginDisabled = false,
 }: {
   showDetailPageCosts?: boolean;
   signedIn?: boolean;
   email?: string;
+  loginDisabled?: boolean;
 }) {
   const pathname = usePathname();
-  const navigation = navigationFor(showDetailPageCosts, signedIn);
+  const navigation = navigationFor(
+    showDetailPageCosts,
+    signedIn,
+    loginDisabled,
+  );
 
   return (
     <>
@@ -100,7 +112,11 @@ export function Sidebar({
           })}
         </nav>
         <div className="border-t border-slate-800 px-5 py-4 text-xs text-slate-500">
-          {signedIn ? (
+          {loginDisabled ? (
+            <span className="font-semibold text-amber-300">
+              로그인 임시 해제
+            </span>
+          ) : signedIn ? (
             <>
               <p className="truncate" title={email}>{email}</p>
               <Link href="/logout" className="mt-2 inline-block font-semibold text-slate-300 hover:text-white">
