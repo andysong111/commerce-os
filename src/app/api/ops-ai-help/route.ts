@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { answerOpsAiHelpQuestion } from "@/lib/opsAiHelp";
+import { answerOpsAiHelpWithRecovery } from "@/lib/opsAiHelpRecovery";
 import {
   consumeOpsAiHelpRateLimit,
   requireOpsAiHelpOperator,
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await answerOpsAiHelpQuestion(body);
+    const result = await answerOpsAiHelpWithRecovery(body);
     return NextResponse.json(result, {
       headers: {
         "Cache-Control": "no-store",
