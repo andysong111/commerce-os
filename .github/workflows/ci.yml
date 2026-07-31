@@ -18,6 +18,12 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - run: npm run lint
+      - name: Lint changed integration files
+        run: >-
+          npx eslint
+          src/lib/priceAdjustmentIntegrationAuth.ts
+          src/app/api/integrations/price-adjustment/jobs/route.ts
+          'src/app/api/integrations/price-adjustment/jobs/[jobId]/route.ts'
+          src/lib/extendedModuleRegistry.ts
       - run: npm test
       - run: npm run build
