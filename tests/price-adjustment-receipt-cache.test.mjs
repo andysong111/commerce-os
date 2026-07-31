@@ -23,5 +23,5 @@ test("exposes authenticated receipt cache read and push endpoints", async () => 
   assert.match(reader, /x-commerce-os-integration-secret/);
   assert.match(writer, /mergePriceAdjustmentReceiptCachePage/);
   assert.match(writer, /MAX_RECEIPTS_PER_PAGE = 500/);
-  assert.match(writer, /실제 샵플링 가격/);
+  assert.match(writer, /가격조정 입고원가 캐시/);
 });
