@@ -12,7 +12,7 @@ export const maxDuration = 50;
 const INTEGRATION_HEADER = "x-commerce-os-integration-secret";
 const MAX_PRODUCTS_PER_PAGE = 250;
 const MAX_MONTHS = 24;
-const BARCODE_PATTERN = /^[A-Z0-9_-]{1,120}$/;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const GOODS_KEY_PATTERN = /^\d+$/;
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 
@@ -146,9 +146,13 @@ function normalizeProduct(value: unknown, index: number): PriceAdjustmentSalesPr
     throw new Error(`상품 ${index + 1} 형식을 확인하세요.`);
   }
   const raw = value as Record<string, unknown>;
-  const barcode = text(raw.barcode).toUpperCase();
-  if (!BARCODE_PATTERN.test(barcode)) {
-    throw new Error(`상품 ${index + 1}의 바코드를 확인하세요.`);
+  const barcode = text(raw.barcode).normalize("NFKC").toUpperCase();
+  if (
+    !barcode ||
+    barcode.length > 120 ||
+    CONTROL_CHARACTER_PATTERN.test(barcode)
+  ) {
+    throw new Error(`상품 ${index + 1}의 바코드·위치코드를 확인하세요.`);
   }
   const sourceMonths = Array.isArray(raw.months) ? raw.months : [];
   if (sourceMonths.length > MAX_MONTHS) {
