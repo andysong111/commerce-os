@@ -1,4 +1,5 @@
 import { Suspense, type ReactNode } from "react";
+import { OpsAiHelpDesk } from "@/components/OpsAiHelpDesk";
 import { OpsRetryPrefill } from "@/components/OpsRetryPrefill";
 import { Sidebar } from "@/components/Sidebar";
 import { isDetailPageCostAdmin } from "@/lib/detailPageCostAdmin";
@@ -21,6 +22,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         />
       </Suspense>
       <OpsRetryPrefill />
+      <OpsAiHelpDesk />
       <main className="app-main min-w-0 px-4 py-6 sm:px-6 lg:ml-60 lg:px-8 lg:py-8">
         <div className="app-content mx-auto max-w-[1600px]">{children}</div>
       </main>
