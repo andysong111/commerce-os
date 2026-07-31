@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
 
-test("신규 상품 출시 진행관리 카드와 사이드바를 제공한다", async () => {
-  const tracker = moduleRegistry.find((item) => item.id === "product-launch-tracker");
-  const sidebarSource = await readFile(
-    new URL("../src/components/Sidebar.tsx", import.meta.url),
+test("신규 상품 출시 진행관리를 상품·출시 업무 영역에서 제공한다", async () => {
+  const tracker = moduleRegistry.find(
+    (item) => item.id === "product-launch-tracker",
+  );
+  const workspaceSource = await readFile(
+    new URL("../src/lib/opsWorkspace.ts", import.meta.url),
     "utf8",
   );
   const pageSource = await readFile(
@@ -17,7 +19,8 @@ test("신규 상품 출시 진행관리 카드와 사이드바를 제공한다",
   assert.equal(tracker?.title, "신규 상품 출시 진행관리");
   assert.equal(tracker?.route, "/product-launch-tracker");
   assert.equal(tracker?.status, "available");
-  assert.match(sidebarSource, /product-launch-tracker/);
+  assert.match(workspaceSource, /"product-launch-tracker"/);
+  assert.match(workspaceSource, /id: "product-launch"/);
   assert.match(pageSource, /product-launch-tracker-app\/index\.html/);
 });
 
@@ -32,7 +35,10 @@ test("업로드 원본의 실제 상품 데이터가 OPS Center 실행본에 포
     ),
   );
 
-  assert.equal(launchData.meta.sourceFile, "동네일등 상품등록 프로세스 (1).xlsx");
+  assert.equal(
+    launchData.meta.sourceFile,
+    "동네일등 상품등록 프로세스 (1).xlsx",
+  );
   assert.equal(launchData.meta.sourceProductRows, 1630);
   assert.equal(launchData.meta.launchItemCount, 389);
   assert.equal(launchData.meta.distinctModelCount, 359);
