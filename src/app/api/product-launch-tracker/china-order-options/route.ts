@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 const MODEL_PATTERN = /^[A-Z0-9_-]{1,80}$/;
 const BARCODE_PATTERN = /^[A-Z0-9_-]{1,120}$/;
+const INTEGRATION_HEADER = "x-commerce-os-integration-secret";
 
 export async function GET(request: NextRequest) {
   const access = await canUseIntegration(request);
@@ -26,7 +27,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const barcode = normalizeIdentifier(request.nextUrl.searchParams.get("barcode"), BARCODE_PATTERN);
+  const barcode = normalizeIdentifier(
+    request.nextUrl.searchParams.get("barcode"),
+    BARCODE_PATTERN,
+  );
   const modelNumber = normalizeIdentifier(
     request.nextUrl.searchParams.get("modelNumber"),
     MODEL_PATTERN,
@@ -45,16 +49,34 @@ export async function GET(request: NextRequest) {
   const query = new URLSearchParams();
   if (barcode) query.set("barcode", barcode);
   if (modelNumber) query.set("modelNumber", modelNumber);
-  const response = await fetch(
-    `${baseUrl}/api/integrations/product-launch-options?${query.toString()}`,
-    {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${secret}`,
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${baseUrl}/api/integrations/product-launch-options?${query.toString()}`,
+      {
+        headers: {
+          Accept: "application/json",
+          [INTEGRATION_HEADER]: secret,
+          Authorization: `Bearer ${secret}`,
+        },
+        cache: "no-store",
       },
-      cache: "no-store",
-    },
-  );
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        ok: false,
+        code: "CHINA_ORDER_NETWORK_FAILED",
+        message:
+          error instanceof Error
+            ? `발주·입고관리 서버에 연결하지 못했습니다: ${error.message}`
+            : "발주·입고관리 서버에 연결하지 못했습니다.",
+      },
+      { status: 502 },
+    );
+  }
+
   const text = await response.text();
   let body: unknown = null;
   try {
@@ -67,10 +89,18 @@ export async function GET(request: NextRequest) {
     return Response.json(
       {
         ok: false,
-        code: "CHINA_ORDER_INTEGRATION_FAILED",
-        message: readMessage(body) || `발주·입고관리 조회에 실패했습니다. status=${response.status}`,
+        code: readCode(body) || "CHINA_ORDER_INTEGRATION_FAILED",
+        message:
+          readMessage(body) ||
+          `발주·입고관리 조회에 실패했습니다. status=${response.status}`,
+        upstreamStatus: response.status,
       },
-      { status: response.status >= 400 && response.status < 500 ? response.status : 502 },
+      {
+        status:
+          response.status >= 400 && response.status < 500
+            ? response.status
+            : 502,
+      },
     );
   }
 
@@ -81,7 +111,11 @@ async function canUseIntegration(
   request: NextRequest,
 ): Promise<
   | { ok: true }
-  | { ok: false; status: number; body: { ok: false; code: string; message: string } }
+  | {
+      ok: false;
+      status: number;
+      body: { ok: false; code: string; message: string };
+    }
 > {
   if (!isSameOriginOpsRequest(request)) {
     return {
@@ -132,4 +166,10 @@ function readMessage(value: unknown) {
   if (!value || typeof value !== "object") return "";
   const message = (value as { message?: unknown }).message;
   return typeof message === "string" ? message : "";
+}
+
+function readCode(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const code = (value as { code?: unknown }).code;
+  return typeof code === "string" ? code : "";
 }
