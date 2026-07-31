@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const registry = await readFile("src/lib/extendedModuleRegistry.ts", "utf8");
-const sidebar = await readFile("src/components/Sidebar.tsx", "utf8");
+const workspace = await readFile("src/lib/opsWorkspace.ts", "utf8");
 
 test("product decision agent is available from the dashboard registry", () => {
   assert.match(registry, /id: "product-decision-agent"/);
@@ -16,6 +16,9 @@ test("product decision agent is available from the dashboard registry", () => {
   assert.match(registry, /safetyBadge: "재고 차감 전"/);
 });
 
-test("product decision agent has a compact sidebar entry", () => {
-  assert.match(sidebar, /"product-decision-agent": "발"/);
+test("product decision agent is grouped under sourcing and ordering", () => {
+  assert.match(
+    workspace,
+    /"sourcing-engine", "product-decision-agent", "china-order-cost"/,
+  );
 });

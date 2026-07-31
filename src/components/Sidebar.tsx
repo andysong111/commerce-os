@@ -1,55 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
+import {
+  getWorkspaceGroup,
+  getWorkspaceGroupById,
+  OPS_WORKSPACE_GROUPS,
+} from "@/lib/opsWorkspace";
 
-const moduleIconLabels: Record<string, string> = {
-  "china-order-cost": "₩",
-  "product-decision-agent": "발",
-  "product-master": "P",
-  "sourcing-engine": "S",
-  "freight-barcode-pdf": "B",
-  "keyword-review-queue": "K",
-  "warehouse-label-generator": "L",
-  "warehouse-location-sync": "W",
-  "detail-page-studio": "상",
-  "detail-page-cost-admin": "비",
-  "shopling-price-adjustment-runner": "%",
-  "product-launch-tracker": "진",
+type NavigationItem = {
+  href: string;
+  label: string;
+  iconLabel: string;
+  groupId?: string;
 };
 
-function navigationFor(
-  showDetailPageCosts: boolean,
-  signedIn: boolean,
-  loginDisabled: boolean,
-) {
-  const primary = [
+function navigationFor(signedIn: boolean, loginDisabled: boolean) {
+  const primary: NavigationItem[] = [
     { href: "/", label: "대시보드", iconLabel: "D" },
-    ...extendedModuleRegistry.flatMap((module) => {
-      if (
-        (module.id === "detail-page-cost-admin" && !showDetailPageCosts) ||
-        !["available", "check_mode", "runner_scaffold"].includes(
-          module.status,
-        ) ||
-        module.route === null
-      ) {
-        return [];
-      }
-
-      const iconLabel = moduleIconLabels[module.id];
-      if (!iconLabel) {
-        return [];
-      }
-
-      return [
-        {
-          href: module.route,
-          label: module.navigationLabel ?? module.title,
-          iconLabel,
-        },
-      ];
-    }),
+    ...OPS_WORKSPACE_GROUPS.map((group) => ({
+      href: `/?group=${group.id}`,
+      label: group.shortLabel,
+      iconLabel: group.iconLabel,
+      groupId: group.id,
+    })),
   ];
 
   if (loginDisabled) return primary;
@@ -65,7 +40,7 @@ function navigationFor(
 }
 
 export function Sidebar({
-  showDetailPageCosts = false,
+  showDetailPageCosts: _showDetailPageCosts = false,
   signedIn = false,
   email = "",
   loginDisabled = false,
@@ -76,34 +51,54 @@ export function Sidebar({
   loginDisabled?: boolean;
 }) {
   const pathname = usePathname();
-  const navigation = navigationFor(
-    showDetailPageCosts,
-    signedIn,
-    loginDisabled,
+  const searchParams = useSearchParams();
+  const selectedGroupId =
+    getWorkspaceGroupById(searchParams.get("group"))?.id ?? null;
+  const currentModule = extendedModuleRegistry.find(
+    (module) =>
+      module.route?.startsWith("/") &&
+      module.route !== "/" &&
+      pathname.startsWith(module.route),
   );
+  const currentModuleGroupId = currentModule
+    ? getWorkspaceGroup(currentModule.id)?.id ?? null
+    : null;
+  const navigation = navigationFor(signedIn, loginDisabled);
+
+  function isActive(item: NavigationItem) {
+    if (item.groupId) {
+      return pathname === "/"
+        ? selectedGroupId === item.groupId
+        : currentModuleGroupId === item.groupId;
+    }
+    if (item.href === "/") return pathname === "/" && !selectedGroupId;
+    return pathname.startsWith(item.href);
+  }
 
   return (
     <>
-      <aside className="app-navigation fixed inset-y-0 left-0 z-20 hidden w-60 border-r border-slate-200 bg-slate-950 text-slate-100 lg:flex lg:flex-col">
+      <aside className="app-navigation fixed inset-y-0 left-0 z-20 hidden w-60 border-r border-slate-800 bg-slate-950 text-slate-100 lg:flex lg:flex-col">
         <Brand />
-        <nav className="flex-1 space-y-1 px-3 py-4" aria-label="주요 메뉴">
+        <div className="px-5 pb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">
+          업무 영역
+        </div>
+        <nav
+          className="flex-1 space-y-1 overflow-y-auto px-3 pb-4"
+          aria-label="주요 메뉴"
+        >
           {navigation.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
-
+            const active = isActive(item);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors ${
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   active
-                    ? "bg-blue-600 text-white"
+                    ? "bg-blue-600 text-white shadow-sm"
                     : "text-slate-300 hover:bg-slate-800 hover:text-white"
                 }`}
               >
-                <span className="grid size-4 place-items-center rounded bg-white/10 text-[10px] font-bold">
+                <span className="grid size-5 place-items-center rounded bg-white/10 text-[10px] font-black">
                   {item.iconLabel}
                 </span>
                 <span>{item.label}</span>
@@ -118,8 +113,13 @@ export function Sidebar({
             </span>
           ) : signedIn ? (
             <>
-              <p className="truncate" title={email}>{email}</p>
-              <Link href="/logout" className="mt-2 inline-block font-semibold text-slate-300 hover:text-white">
+              <p className="truncate" title={email}>
+                {email}
+              </p>
+              <Link
+                href="/logout"
+                className="mt-2 inline-block font-semibold text-slate-300 hover:text-white"
+              >
                 로그아웃
               </Link>
             </>
@@ -132,25 +132,22 @@ export function Sidebar({
       <header className="app-navigation border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
         <Brand compact />
         <nav
-          className="mt-3 flex gap-2 overflow-x-auto"
+          className="mt-3 flex gap-2 overflow-x-auto pb-1"
           aria-label="모바일 메뉴"
         >
           {navigation.map((item) => {
-            const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
+            const active = isActive(item);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${
+                className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
                   active
                     ? "bg-blue-600 text-white"
                     : "bg-slate-100 text-slate-600"
                 }`}
               >
-                <span>{item.label}</span>
+                {item.label}
               </Link>
             );
           })}
@@ -169,13 +166,15 @@ function Brand({ compact = false }: { compact?: boolean }) {
         </span>
         <div>
           <p
-            className={`font-bold tracking-tight ${compact ? "text-slate-900" : "text-white"}`}
+            className={`font-bold tracking-tight ${
+              compact ? "text-slate-900" : "text-white"
+            }`}
           >
             Commerce OS OPS
           </p>
-          {!compact && (
+          {!compact ? (
             <p className="mt-0.5 text-xs text-slate-500">OPS CENTER</p>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
