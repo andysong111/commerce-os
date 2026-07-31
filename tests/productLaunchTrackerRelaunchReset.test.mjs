@@ -10,14 +10,14 @@ import {
   STAGES,
 } from "../public/product-launch-tracker-app/lib/tracker-core.mjs";
 
-function registeredItem() {
+function registeredItem(id = "item-aaa492", modelNumber = "AAA492", selfCodeBase = "PLOLD000001") {
   return {
-    id: "item-aaa492",
-    modelNumber: "AAA492",
+    id,
+    modelNumber,
     productName: "미니짐볼 300g 색상랜덤",
     barcode: "BFF1-1",
     shoplingCategory: "스포츠>헬스",
-    selfCodeBase: "PLOLD000001",
+    selfCodeBase,
     orderOptions: [
       {
         id: "option-1",
@@ -111,6 +111,25 @@ test("등록완료 상품을 재출시 초기화하면 원본 데이터는 유�
   assert.equal(canResetForRelaunch(reset), false);
 });
 
+test("여러 상품을 순차 초기화할 때 새 자사상품코드가 서로 중복되지 않는다", () => {
+  const first = registeredItem("item-1", "AAA492", "PLOLD000001");
+  const second = registeredItem("item-2", "AAA493", "PLOLD000002");
+  let items = [first, second];
+  const generated = ["AAAAAAAAAA", "AAAAAAAAAA", "BBBBBBBBBB"];
+
+  const firstReset = resetLaunchItemForRelaunch(first, items, {
+    randomFactory: () => generated.shift() ?? "CCCCCCCCCC",
+  });
+  items = items.map((item) => (item.id === first.id ? firstReset : item));
+  const secondReset = resetLaunchItemForRelaunch(second, items, {
+    randomFactory: () => generated.shift() ?? "DDDDDDDDDD",
+  });
+
+  assert.equal(firstReset.selfCodeBase, "PLAAAAAAAAAA");
+  assert.equal(secondReset.selfCodeBase, "PLBBBBBBBBBB");
+  assert.notEqual(firstReset.selfCodeBase, secondReset.selfCodeBase);
+});
+
 test("등록 결과가 없는 상품은 재출시 초기화하지 않는다", () => {
   const item = registeredItem();
   item.shoplingProducts = {};
@@ -121,7 +140,7 @@ test("등록 결과가 없는 상품은 재출시 초기화하지 않는다", ()
   );
 });
 
-test("재출시 UI는 모델번호 확인·서버 저장·이전 흐름 정리를 포함한다", async () => {
+test("재출시 UI는 입력 확인 없이 단건·선택 일괄 초기화를 지원한다", async () => {
   const source = await readFile(
     new URL(
       "../public/product-launch-tracker-app/relaunch-reset.js",
@@ -130,7 +149,13 @@ test("재출시 UI는 모델번호 확인·서버 저장·이전 흐름 정리�
     "utf8",
   );
   assert.match(source, /재출시 초기화/);
-  assert.match(source, /계속하려면 모델번호/);
+  assert.match(source, /bulk-relaunch-reset-button/);
+  assert.match(source, /선택 재출시 초기화/);
+  assert.match(source, /readSelectedRowIds/);
+  assert.match(source, /등록 이력이 없는.*자동 제외/);
+  assert.match(source, /window\.confirm/);
+  assert.doesNotMatch(source, /window\.prompt/);
+  assert.doesNotMatch(source, /계속하려면 모델번호/);
   assert.match(source, /TRACKER_STATE_ENDPOINT/);
   assert.match(source, /PRODUCT_LAUNCH_TRACKER_HANDOFF_KEY/);
   assert.match(source, /PRODUCT_LAUNCH_SIMPLE_SESSION_KEY/);
