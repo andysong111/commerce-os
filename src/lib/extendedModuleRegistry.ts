@@ -18,6 +18,27 @@ export const shoplingPriceAdjustmentModule: CommerceModule = {
   safetyBadge: "첫 10개 안전 확인",
 };
 
+export const priceAdjustmentEngineModule: CommerceModule = {
+  id: "price-adjustment-engine",
+  title: "입고원가·판매추이 가격조정",
+  navigationLabel: "입고원가 가격조정",
+  description:
+    "확정 입고원가와 전년 동일기간을 포함한 장기 판매추이를 바코드별로 합쳐 가격 인상 필요 상품과 보수적 인하 검토 상품을 제안합니다.",
+  status: "available",
+  route:
+    process.env.NEXT_PUBLIC_PRICE_ADJUSTMENT_ENGINE_URL?.trim() ||
+    "https://commerce-os-price-adjustment-engine.andy123df23.chatgpt.site",
+  category: "가격·수익 관리",
+  inputType: "확정 입고원가, 샵플링 현재 판매가, 최대 24개월 월별 판매량",
+  outputType: "인상 필요, 인하 검토, 단종 정리, 가격 유지 목록",
+  historySupport: true,
+  externalProject: true,
+  note: "인상은 기본 선택하고, 일반 인하와 단종 정리는 사용자가 직접 선택합니다. 현재 재고수량 입력은 필요하지 않습니다.",
+  helperNote: "마진 방어 · 인하는 수동 선택",
+  actionLabel: "가격조정안 보기",
+  safetyBadge: "인하는 수동 선택",
+};
+
 export const productDecisionAgentModule: CommerceModule = {
   id: "product-decision-agent",
   title: "발주·단종 추천",
@@ -53,5 +74,6 @@ const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((mod
 export const extendedModuleRegistry: readonly CommerceModule[] = [
   ...renamedModuleRegistry,
   productDecisionAgentModule,
+  priceAdjustmentEngineModule,
   shoplingPriceAdjustmentModule,
 ];
