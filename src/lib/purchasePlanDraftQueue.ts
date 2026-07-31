@@ -3,6 +3,8 @@ import {
   getProductLaunchAdminConfig,
   readProductLaunchState,
   writeProductLaunchState,
+  type ProductLaunchAdminConfig,
+  type ProductLaunchIdentity,
 } from "@/lib/productLaunchTrackerServer";
 
 export const PURCHASE_PLAN_DRAFT_QUEUE_KEY = "purchasePlanDraftQueue";
@@ -168,10 +170,8 @@ async function readQueueContext() {
 }
 
 async function writeQueue(
-  config: ReturnType<typeof getProductLaunchAdminConfig> extends { ok: true; value: infer T }
-    ? T
-    : never,
-  identity: ReturnType<typeof temporaryOpsIdentity>,
+  config: ProductLaunchAdminConfig,
+  identity: ProductLaunchIdentity,
   state: TrackerState,
   queue: QueueState,
 ) {
