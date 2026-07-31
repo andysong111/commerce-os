@@ -31,7 +31,7 @@ function keywordIdentity(keyword: string) {
 export function parseManualMallTitleKeywords(input: string) {
   const seen = new Set<string>();
   const keywords: string[] = [];
-  for (const rawKeyword of input.split(/[,;|\n\r]+/)) {
+  for (const rawKeyword of input.split(/[,;|\s]+/)) {
     const keyword = normalizeKeyword(rawKeyword);
     if (!keyword) continue;
     const identity = keywordIdentity(keyword);
