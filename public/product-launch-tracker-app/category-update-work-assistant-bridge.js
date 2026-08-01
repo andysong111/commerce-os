@@ -1,15 +1,18 @@
 const CATEGORY_UPDATE_BUTTON_ID = "shopling-category-refresh-button";
+const CATEGORY_UPDATE_CANCEL_ENDPOINT = "/api/shopling-categories/cancel";
 const CATEGORY_UPDATE_SESSION_KEY = "commerce-os:shopling-category-update:v1";
 const CATEGORY_WORK_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
 const CATEGORY_WORK_EVENT_SOURCE = "commerce-os-category-update";
-const TERMINAL_TONES = new Set(["success", "warning", "failed"]);
+const TERMINAL_TONES = new Set(["success", "warning", "failed", "cancelled"]);
 let progressObserver = null;
 let syncTimer = null;
+let cancelBusy = false;
 
 installCategoryUpdateBridge();
 
 function installCategoryUpdateBridge() {
   document.addEventListener("click", handleCaptureClick, true);
+  window.addEventListener("message", handleParentMessage);
   observeProgressUi();
   window.setInterval(() => {
     observeProgressUi();
@@ -25,6 +28,15 @@ function handleCaptureClick(event) {
   if (updateButton && !updateButton.hasAttribute("disabled")) {
     window.setTimeout(() => syncGlobalTaskFromPage({ forceActive: true }), 0);
     window.setTimeout(() => syncGlobalTaskFromPage({ forceActive: true }), 300);
+    return;
+  }
+
+  const cancelButton = target.closest(".category-update-progress-cancel");
+  if (cancelButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    void cancelCategoryUpdate(cancelButton);
     return;
   }
 
@@ -56,12 +68,26 @@ function handleCaptureClick(event) {
   notifyParent();
 }
 
+function handleParentMessage(event) {
+  if (event.origin !== window.location.origin) return;
+  if (event.data?.source !== "commerce-os-work-assistant") return;
+  if (event.data?.type !== "category-update-cancelled") return;
+  finalizeLocalCancellation(
+    String(event.data?.message || "사용자가 카테고리 업데이트를 취소했습니다."),
+    String(event.data?.actionsUrl || ""),
+  );
+}
+
 function observeProgressUi() {
   const card = document.querySelector("#category-update-progress-card");
   if (!(card instanceof HTMLElement)) return;
+  ensureCancelButton(card);
   if (progressObserver?.target === card) return;
   progressObserver?.observer.disconnect();
-  const observer = new MutationObserver(scheduleSync);
+  const observer = new MutationObserver(() => {
+    ensureCancelButton(card);
+    scheduleSync();
+  });
   observer.observe(card, {
     attributes: true,
     attributeFilter: ["data-tone", "hidden"],
@@ -71,6 +97,95 @@ function observeProgressUi() {
   });
   progressObserver = { target: card, observer };
   scheduleSync();
+}
+
+function ensureCancelButton(card) {
+  const actions = card.querySelector(".category-update-progress-actions");
+  const minimizeButton = card.querySelector(".category-update-progress-minimize");
+  if (!actions || actions.querySelector(".category-update-progress-cancel")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary category-update-progress-cancel";
+  button.textContent = "업데이트 취소";
+  button.style.borderColor = "#fca5a5";
+  button.style.color = "#b91c1c";
+  button.style.background = "#fff";
+  button.title = "현재 GitHub Actions 작업을 중단하고 다시 업데이트할 수 있게 합니다.";
+  if (minimizeButton) actions.insertBefore(button, minimizeButton);
+  else actions.append(button);
+}
+
+async function cancelCategoryUpdate(button) {
+  if (cancelBusy) return;
+  if (!window.confirm("현재 샵플링 카테고리 업데이트를 취소할까요?\n취소 후 업데이트 버튼을 다시 눌러 새 작업을 시작할 수 있습니다.")) {
+    return;
+  }
+  const session = readJson(CATEGORY_UPDATE_SESSION_KEY) ?? {};
+  const task = readJson(CATEGORY_WORK_TASK_KEY) ?? {};
+  cancelBusy = true;
+  const previousText = button.textContent;
+  button.disabled = true;
+  button.textContent = "취소 중...";
+  try {
+    const response = await fetch(CATEGORY_UPDATE_CANCEL_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        requestId: session.requestId || task.requestId || "",
+        startedAt: session.startedAt || task.startedAt || "",
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok !== true) {
+      throw new Error(body?.message || "카테고리 업데이트를 취소하지 못했습니다.");
+    }
+    finalizeLocalCancellation(
+      body.message || "샵플링 카테고리 업데이트를 취소했습니다.",
+      body.actionsUrl || session.actionsUrl || task.actionsUrl || "",
+    );
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = previousText;
+    window.alert(
+      error instanceof Error
+        ? error.message
+        : "샵플링 카테고리 업데이트를 취소하지 못했습니다.",
+    );
+  } finally {
+    cancelBusy = false;
+  }
+}
+
+function finalizeLocalCancellation(message, actionsUrl) {
+  const now = new Date().toISOString();
+  const session = readJson(CATEGORY_UPDATE_SESSION_KEY) ?? {};
+  const existing = readJson(CATEGORY_WORK_TASK_KEY) ?? {};
+  try {
+    localStorage.removeItem(CATEGORY_UPDATE_SESSION_KEY);
+  } catch {
+    // The page reload below clears the in-memory progress session.
+  }
+  writeGlobalTask({
+    ...taskFromPage(session, document.querySelector("#category-update-progress-card"), existing),
+    active: false,
+    status: "cancelled",
+    tone: "cancelled",
+    backgrounded: true,
+    actionsUrl: text(actionsUrl || existing.actionsUrl || session.actionsUrl),
+    title: "샵플링 카테고리 업데이트 취소됨",
+    message: text(message) || "사용자가 카테고리 업데이트를 취소했습니다.",
+    detail: "다시 업데이트 가능",
+    finishedAt: now,
+    updatedAt: now,
+  });
+  const backdrop = document.querySelector("#category-update-progress-backdrop");
+  if (backdrop instanceof HTMLElement) backdrop.hidden = true;
+  notifyParent();
+  window.setTimeout(() => window.location.reload(), 250);
 }
 
 function scheduleSync() {
