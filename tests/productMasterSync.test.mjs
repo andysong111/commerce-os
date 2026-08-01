@@ -77,13 +77,17 @@ test("does not mistake dimensions for bundle quantities", () => {
   assert.equal(inferUnitsPerOrder("단품"), 1);
 });
 
-test("exposes a guarded manual sync control and redirects the legacy page", async () => {
-  const [endpoint, button, page, legacy] = await Promise.all([
+test("exposes a guarded canonical sync control and redirects the legacy page", async () => {
+  const [endpoint, canonical, button, page, legacy] = await Promise.all([
     readFile(
       new URL(
         "../src/app/api/product-launch-tracker/product-master-sync/route.ts",
         import.meta.url,
       ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/lib/productMasterCanonicalSync.ts", import.meta.url),
       "utf8",
     ),
     readFile(
@@ -102,7 +106,11 @@ test("exposes a guarded manual sync control and redirects the legacy page", asyn
 
   assert.match(endpoint, /resolveProductLaunchIdentity/);
   assert.match(endpoint, /readProductLaunchState/);
-  assert.match(endpoint, /pushProductMasterSnapshotFromTrackerState/);
+  assert.match(endpoint, /pushCanonicalProductMasterSnapshotFromTrackerState/);
+  assert.match(canonical, /sourceSkuKey/);
+  assert.match(canonical, /sku-source:/);
+  assert.match(canonical, /api\/integrations\/canonical-snapshot/);
+  assert.match(canonical, /TRACKER_BARCODE_CONFLICT/);
   assert.match(button, /상품마스터 동기화/);
   assert.match(button, /credentials: "same-origin"/);
   assert.match(page, /ProductMasterSyncButton/);
