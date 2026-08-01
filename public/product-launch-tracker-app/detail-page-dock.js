@@ -6,6 +6,12 @@ const MESSAGE_SOURCE = "commerce-os-detail-page-studio";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
 const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
+const PAGE_PARAMS = new URLSearchParams(window.location.search);
+const DETAIL_PAGE_MODE = PAGE_PARAMS.get("detail_page_mode") || "standalone";
+const CAN_REGISTER_JOBS = DETAIL_PAGE_MODE !== "worker";
+const CAN_EXECUTE_JOBS = DETAIL_PAGE_MODE !== "client";
+const SHOW_LOCAL_MONITOR = DETAIL_PAGE_MODE === "standalone";
+const REQUESTED_ITEM_ID = cleanText(PAGE_PARAMS.get("open_item"), 160);
 
 const bulkControls = document.querySelector(".bulk-controls");
 const tableBody = document.querySelector("#launch-table-body");
@@ -17,14 +23,42 @@ let activeFrame = null;
 let activeTimer = null;
 let engineConfig = null;
 let syncing = false;
+let enqueueing = false;
 const jobsById = new Map();
 const workerResumeAt = new Map();
 const finalizerRetryAt = new Map();
+const retryingItems = new Set();
 
 installStyles();
-installControls();
-void restoreMonitor();
-window.addEventListener("message", (event) => void handleEngineMessage(event));
+if (CAN_REGISTER_JOBS) installControls();
+if (CAN_EXECUTE_JOBS) {
+  void restoreMonitor();
+  window.addEventListener("message", (event) => void handleEngineMessage(event));
+} else {
+  void startClientSync();
+}
+if (DETAIL_PAGE_MODE === "worker") {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
+    const payload = event.data;
+    if (payload?.source !== "commerce-os-work-assistant") return;
+    if (payload.type === "retry-detail-page-job") {
+      const itemId = cleanText(payload.itemId, 160);
+      if (itemId) void retryItem(itemId);
+    }
+  });
+}
+window.addEventListener("storage", (event) => {
+  if (event.key !== STORAGE_KEY) return;
+  window.dispatchEvent(new CustomEvent("product-launch-tracker:external-state"));
+  if (CAN_EXECUTE_JOBS) {
+    queueCollectingJobsFromState();
+    void processNext();
+  }
+});
+if (CAN_REGISTER_JOBS && REQUESTED_ITEM_ID) {
+  window.setTimeout(() => openRequestedItem(REQUESTED_ITEM_ID), 250);
+}
 
 if (tableBody) {
   new MutationObserver(syncRunButton).observe(tableBody, {
@@ -57,7 +91,7 @@ function installControls() {
 function syncRunButton() {
   if (!runButton) return;
   const count = selectedRowIds().length;
-  runButton.disabled = count === 0;
+  runButton.disabled = count === 0 || enqueueing;
   runButton.textContent = count
     ? `선택 상세페이지 생성 (${count}건)`
     : "선택 상세페이지 생성";
@@ -79,7 +113,10 @@ async function enqueueSelected() {
     `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
   )) return;
 
-  ensureMonitor();
+  enqueueing = true;
+  syncRunButton();
+  try {
+  if (SHOW_LOCAL_MONITOR) ensureMonitor();
   const existingItems = new Set(
     [...jobsById.values()]
       .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
@@ -126,7 +163,11 @@ async function enqueueSelected() {
     }
   }
   renderMonitor();
-  void processNext();
+  if (CAN_EXECUTE_JOBS) void processNext();
+  } finally {
+    enqueueing = false;
+    syncRunButton();
+  }
 }
 
 async function createServerJob(job) {
@@ -519,16 +560,19 @@ function finishActive() {
 }
 
 async function retryItem(itemId) {
+  const normalizedItemId = String(itemId);
+  if (retryingItems.has(normalizedItemId)) return;
   const state = readState();
-  const item = state?.items?.find((candidate) => String(candidate.id) === String(itemId));
+  const item = state?.items?.find((candidate) => String(candidate.id) === normalizedItemId);
   const sourceUrl = readPrimaryChinaLink(item);
   if (!item || !sourceUrl) {
     showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
     return;
   }
-  if (active?.itemId === String(itemId) || queue.some((job) => job.itemId === String(itemId))) return;
+  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) return;
+  retryingItems.add(normalizedItemId);
   const job = {
-    itemId: String(itemId),
+    itemId: normalizedItemId,
     jobId: crypto.randomUUID(),
     sourceUrl,
     productName: String(item.productName || item.modelNumber || "상품"),
@@ -559,36 +603,99 @@ async function retryItem(itemId) {
         executionMode: "server-v1",
       },
     });
-    ensureMonitor();
+    if (SHOW_LOCAL_MONITOR) ensureMonitor();
     renderMonitor();
-    void processNext();
+    if (CAN_EXECUTE_JOBS) void processNext();
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.");
+  } finally {
+    retryingItems.delete(normalizedItemId);
   }
 }
 
 async function restoreMonitor() {
   const state = readState();
   const hasHistory = state?.items?.some((item) => item.detailPageAutomation?.jobId);
-  if (hasHistory) ensureMonitor();
+  if (hasHistory && SHOW_LOCAL_MONITOR) ensureMonitor();
+  const synced = await syncJobs();
+  queueCollectingJobsFromState({ markLegacyFailed: synced });
+  renderMonitor();
+  void processNext();
+  window.setInterval(() => void syncJobs(), POLL_INTERVAL_MS);
+}
+
+async function startClientSync() {
   await syncJobs();
+  window.setInterval(() => void syncJobs(), POLL_INTERVAL_MS);
+}
+
+async function syncJobs() {
+  if (syncing) return false;
+  syncing = true;
+  try {
+    const response = await fetch(JOBS_API, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok !== true || !Array.isArray(payload.jobs)) return false;
+    for (const job of payload.jobs) {
+      jobsById.set(job.jobId, job);
+      mirrorServerJob(job);
+      if (job.status === "success") applyDockedJob(job);
+      if (
+        CAN_EXECUTE_JOBS &&
+        job.status === "queued" &&
+        Date.now() - (workerResumeAt.get(job.jobId) || 0) > 30_000
+      ) {
+        workerResumeAt.set(job.jobId, Date.now());
+        void startWorker(job.jobId).catch(() => undefined);
+      }
+      if (
+        CAN_EXECUTE_JOBS &&
+        ["queued", "running"].includes(job.status) &&
+        Date.now() - Date.parse(job.updatedAt || 0) > STALE_WORKER_MS &&
+        Date.now() - (workerResumeAt.get(job.jobId) || 0) > STALE_WORKER_MS
+      ) {
+        workerResumeAt.set(job.jobId, Date.now());
+        void startWorker(job.jobId);
+      }
+    }
+    if (CAN_EXECUTE_JOBS) queueCollectingJobsFromState();
+    renderMonitor();
+    if (CAN_EXECUTE_JOBS) void processNext();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    syncing = false;
+  }
+}
+
+function queueCollectingJobsFromState({ markLegacyFailed = false } = {}) {
   const latest = readState();
   for (const item of latest?.items || []) {
     const automation = item.detailPageAutomation;
     if (!automation?.jobId || !["queued", "running", "uploading"].includes(automation.status)) continue;
     const job = jobsById.get(automation.jobId);
     if (!job) {
-      updateAutomation(item.id, {
-        status: "failed",
-        stage: "legacy_browser_job",
-        message: "기존 브라우저 실행 작업은 종료되었습니다. 다시 생성하면 서버 작업으로 실행됩니다.",
-        qaStatus: "failed",
-        completedAt: new Date().toISOString(),
-        error: "새 백그라운드 작업 원장이 없는 구형 실행입니다.",
-      });
+      if (markLegacyFailed) {
+        updateAutomation(item.id, {
+          status: "failed",
+          stage: "legacy_browser_job",
+          message: "기존 브라우저 실행 작업은 종료되었습니다. 다시 생성하면 서버 작업으로 실행됩니다.",
+          qaStatus: "failed",
+          completedAt: new Date().toISOString(),
+          error: "새 백그라운드 작업 원장이 없는 구형 실행입니다.",
+        });
+      }
       continue;
     }
-    if (job.status === "collecting" && !queue.some((queued) => queued.jobId === job.jobId)) {
+    if (
+      job.status === "collecting" &&
+      active?.jobId !== job.jobId &&
+      !queue.some((queued) => queued.jobId === job.jobId)
+    ) {
       queue.push({
         itemId: job.itemId,
         jobId: job.jobId,
@@ -599,46 +706,6 @@ async function restoreMonitor() {
         sourceRunId: job.sourceRunId || automation.sourceRunId || "",
       });
     }
-  }
-  renderMonitor();
-  void processNext();
-  window.setInterval(() => void syncJobs(), POLL_INTERVAL_MS);
-}
-
-async function syncJobs() {
-  if (syncing) return;
-  syncing = true;
-  try {
-    const response = await fetch(JOBS_API, {
-      cache: "no-store",
-      credentials: "same-origin",
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok !== true || !Array.isArray(payload.jobs)) return;
-    for (const job of payload.jobs) {
-      jobsById.set(job.jobId, job);
-      mirrorServerJob(job);
-      if (job.status === "success") applyDockedJob(job);
-      if (
-        job.status === "queued" &&
-        Date.now() - (workerResumeAt.get(job.jobId) || 0) > 30_000
-      ) {
-        workerResumeAt.set(job.jobId, Date.now());
-        void startWorker(job.jobId).catch(() => undefined);
-      }
-      if (
-        ["queued", "running"].includes(job.status) &&
-        Date.now() - Date.parse(job.updatedAt || 0) > STALE_WORKER_MS &&
-        Date.now() - (workerResumeAt.get(job.jobId) || 0) > STALE_WORKER_MS
-      ) {
-        workerResumeAt.set(job.jobId, Date.now());
-        void startWorker(job.jobId);
-      }
-    }
-    renderMonitor();
-    void processNext();
-  } finally {
-    syncing = false;
   }
 }
 
@@ -757,6 +824,7 @@ async function updateServerJob(jobId, body) {
 }
 
 function ensureMonitor() {
+  if (!SHOW_LOCAL_MONITOR) return null;
   if (monitor) return monitor;
   monitor = document.createElement("aside");
   monitor.id = "detail-page-dock-monitor";
@@ -793,6 +861,19 @@ function ensureMonitor() {
     }
   });
   return monitor;
+}
+
+function openRequestedItem(itemId, attempts = 0) {
+  const detailButton = document.querySelector(
+    `tr[data-id='${cssEscape(itemId)}'] button[data-action='detail']`,
+  );
+  if (detailButton) {
+    detailButton.click();
+    return;
+  }
+  if (attempts < 40) {
+    window.setTimeout(() => openRequestedItem(itemId, attempts + 1), 250);
+  }
 }
 
 function renderMonitor() {

@@ -12,6 +12,18 @@ const dockSource = await readFile(
   new URL("../public/product-launch-tracker-app/detail-page-dock.js", import.meta.url),
   "utf8",
 );
+const appShell = await readFile(
+  new URL("../src/components/AppShell.tsx", import.meta.url),
+  "utf8",
+);
+const workAssistant = await readFile(
+  new URL("../src/components/OpsWorkAssistant.tsx", import.meta.url),
+  "utf8",
+);
+const trackerPage = await readFile(
+  new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
+  "utf8",
+);
 const trackerEntry = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
@@ -121,6 +133,28 @@ test("interrupted generation is recoverable instead of remaining permanently act
   assert.match(dockSource, /화면 종료 가능/);
   assert.match(dockSource, /finalizerRetryAt\.set\(jobId, Date\.now\(\) \+ 30_000\)/);
   assert.doesNotMatch(dockSource, /browser_interrupted/);
+});
+
+test("OPS-wide work assistant survives route changes and owns the persistent browser worker", () => {
+  assert.match(appShell, /OpsWorkAssistant/);
+  assert.match(workAssistant, /실시간 작업 도우미/);
+  assert.match(workAssistant, /현재 진행 중인 작업/);
+  assert.match(workAssistant, /detail_page_mode=worker/);
+  assert.match(workAssistant, /POLL_INTERVAL_MS = 2_500/);
+  assert.match(workAssistant, /visibleJobs\.map/);
+  assert.match(workAssistant, /retry-detail-page-job/);
+  assert.match(workAssistant, /detailPageItem=/);
+  assert.match(trackerPage, /detail_page_mode: "client"/);
+  assert.match(dockSource, /DETAIL_PAGE_MODE/);
+  assert.match(dockSource, /CAN_REGISTER_JOBS/);
+  assert.match(dockSource, /CAN_EXECUTE_JOBS/);
+  assert.match(dockSource, /startClientSync/);
+  assert.match(dockSource, /queueCollectingJobsFromState/);
+  assert.match(dockSource, /retryingItems\.has/);
+  assert.match(dockSource, /runButton\.disabled = count === 0 \|\| enqueueing/);
+  assert.match(dockSource, /markLegacyFailed: synced/);
+  assert.match(dockSource, /event\.source !== window\.parent/);
+  assert.match(dockSource, /event\.key !== STORAGE_KEY/);
 });
 
 test("durable jobs reuse the deployed job ledger and require a signed per-job worker token", () => {
