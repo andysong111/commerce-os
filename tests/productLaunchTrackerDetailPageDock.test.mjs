@@ -122,6 +122,10 @@ test("detail page dependency checks stay visible and always restore the selectio
     dockSource,
     /!\["success", "failed", "cancelled"\]\.includes\(job\.status\)/,
   );
+  assert.match(dockSource, /announceServerJob\(created\)/);
+  assert.match(dockSource, /상세페이지 작업 \$\{createdCount\}건을 작업도우미에 등록했습니다/);
+  assert.match(dockSource, /이미 진행 중입니다\. 작업도우미에서 현재 상태를 확인하세요/);
+  assert.match(dockSource, /showMessage\([\s\S]*15_000/);
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
@@ -180,6 +184,9 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(workAssistant, /POLL_MS = 2_500/);
   assert.match(workAssistant, /visibleJobs\.map/);
   assert.match(workAssistant, /retry-detail-page-job/);
+  assert.match(workAssistant, /detail-page-job-created/);
+  assert.match(workAssistant, /activate-detail-page-job/);
+  assert.match(workAssistant, /setJobs\(\(current\) => \[job, \.\.\.current\.filter/);
   assert.match(workAssistant, /detailPageItem=/);
   assert.match(trackerPage, /detail_page_mode: "client"/);
   assert.match(dockSource, /DETAIL_PAGE_MODE/);
@@ -192,6 +199,8 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(dockSource, /markLegacyFailed: synced/);
   assert.match(dockSource, /event\.source !== window\.parent/);
   assert.match(dockSource, /event\.key !== STORAGE_KEY/);
+  assert.match(dockSource, /payload\.type === "activate-detail-page-job"/);
+  assert.match(dockSource, /jobsById\.set\(job\.jobId, job\)/);
 });
 
 test("failed detail-page jobs can be removed from the shared assistant without deleting audit history", () => {

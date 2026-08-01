@@ -21,6 +21,8 @@ type DetailJob = {
   progress: number;
   qaStatus: string;
   attempt: number;
+  sourceUrl?: string;
+  sourceRunId?: string;
   error: string;
   payload?: Record<string, unknown>;
   updatedAt: string;
@@ -67,6 +69,8 @@ const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const CATEGORY_STATUS_API = "/api/shopling-categories/status";
 const CATEGORY_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
 const CATEGORY_EVENT_SOURCE = "commerce-os-category-update";
+const DETAIL_DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
+const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
 const DISMISSED_KEY = "commerce-os-work-assistant:dismissed-jobs:v1";
 const COLLAPSED_KEY = "commerce-os-work-assistant:collapsed:v1";
 const POLL_MS = 2_500;
@@ -89,6 +93,20 @@ function safeProgress(value: number) {
 function detailName(job: DetailJob) {
   const payload = job.payload ?? {};
   return txt(payload.product_name || payload.product_name_hint || job.itemId || "상품");
+}
+
+function isDetailJob(value: unknown): value is DetailJob {
+  if (!value || typeof value !== "object") return false;
+  const job = value as Partial<DetailJob>;
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      txt(job.jobId),
+    ) &&
+    Boolean(txt(job.itemId)) &&
+    ["collecting", "queued", "running", "render_pending", "success", "failed", "cancelled"].includes(
+      txt(job.status),
+    )
+  );
 }
 
 function detailPresentation(job: DetailJob): {
@@ -371,6 +389,32 @@ export function OpsWorkAssistant() {
   }, []);
 
   useEffect(() => {
+    const onDetailDockMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data;
+      if (
+        payload?.source !== DETAIL_DOCK_EVENT_SOURCE ||
+        payload?.type !== "detail-page-job-created" ||
+        !isDetailJob(payload.job)
+      ) return;
+
+      const job = payload.job;
+      setJobs((current) => [job, ...current.filter((item) => item.jobId !== job.jobId)]);
+      setNow(Date.now());
+      workerRef.current?.contentWindow?.postMessage(
+        {
+          source: WORK_ASSISTANT_SOURCE,
+          type: "activate-detail-page-job",
+          job,
+        },
+        window.location.origin,
+      );
+    };
+    window.addEventListener("message", onDetailDockMessage);
+    return () => window.removeEventListener("message", onDetailDockMessage);
+  }, []);
+
+  useEffect(() => {
     const syncCategory = () => {
       setCategoryTask(readCategoryTask());
       setNow(Date.now());
@@ -459,7 +503,7 @@ export function OpsWorkAssistant() {
   function retryDetail(itemId: string) {
     workerRef.current?.contentWindow?.postMessage(
       {
-        source: "commerce-os-work-assistant",
+        source: WORK_ASSISTANT_SOURCE,
         type: "retry-detail-page-job",
         itemId,
       },

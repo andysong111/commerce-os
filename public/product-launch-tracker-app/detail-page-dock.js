@@ -3,6 +3,8 @@ const ENGINE_CONFIG_API = "/api/product-launch-tracker/detail-page-engine-config
 const ASSET_UPLOAD_API = "/api/product-launch-tracker/detail-page-assets";
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const MESSAGE_SOURCE = "commerce-os-detail-page-studio";
+const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
+const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
 const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
 const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
@@ -47,10 +49,17 @@ if (DETAIL_PAGE_MODE === "worker") {
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
     const payload = event.data;
-    if (payload?.source !== "commerce-os-work-assistant") return;
+    if (payload?.source !== WORK_ASSISTANT_SOURCE) return;
     if (payload.type === "retry-detail-page-job") {
       const itemId = cleanText(payload.itemId, 160);
       if (itemId) void retryItem(itemId);
+    }
+    if (payload.type === "activate-detail-page-job") {
+      const job = payload.job;
+      if (!job || !isValidJobId(job.jobId) || !cleanText(job.itemId, 160)) return;
+      jobsById.set(job.jobId, job);
+      queueCollectingJobsFromState();
+      void processNext();
     }
   });
 }
@@ -142,6 +151,8 @@ async function enqueueSelected() {
     enqueuePhase = "registering";
     syncRunButton();
     if (SHOW_LOCAL_MONITOR) ensureMonitor();
+    let createdCount = 0;
+    let existingCount = 0;
     const existingItems = new Set(
       [...jobsById.values()]
         .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
@@ -149,7 +160,10 @@ async function enqueueSelected() {
     );
     for (const item of selected) {
       const itemId = String(item.id);
-      if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) continue;
+      if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) {
+        existingCount += 1;
+        continue;
+      }
       const job = {
         itemId,
         jobId: crypto.randomUUID(),
@@ -182,13 +196,29 @@ async function enqueueSelected() {
           },
         });
         existingItems.add(itemId);
+        createdCount += 1;
+        announceServerJob(created);
       } catch (error) {
-        showMessage(error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.");
+        showMessage(
+          error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.",
+          15_000,
+        );
         break;
       }
     }
     renderMonitor();
     if (CAN_EXECUTE_JOBS) void processNext();
+    if (createdCount) {
+      showMessage(
+        `상세페이지 작업 ${createdCount}건을 작업도우미에 등록했습니다.${existingCount ? ` 이미 진행 중 ${existingCount}건은 중복 등록하지 않았습니다.` : ""}`,
+        8_000,
+      );
+    } else if (existingCount) {
+      showMessage(
+        `선택한 ${existingCount}건은 이미 진행 중입니다. 작업도우미에서 현재 상태를 확인하세요.`,
+        10_000,
+      );
+    }
   } finally {
     enqueueing = false;
     enqueuePhase = "idle";
@@ -208,6 +238,18 @@ async function createServerJob(job) {
     throw new Error(payload.message || "상세페이지 서버 작업을 만들지 못했습니다.");
   }
   return payload.job;
+}
+
+function announceServerJob(job) {
+  if (!job || !isValidJobId(job.jobId)) return;
+  window.parent?.postMessage(
+    {
+      source: DOCK_EVENT_SOURCE,
+      type: "detail-page-job-created",
+      job,
+    },
+    window.location.origin,
+  );
 }
 
 async function processNext() {
@@ -1103,6 +1145,12 @@ function cleanMultiline(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function isValidJobId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || ""),
+  );
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1121,7 +1169,7 @@ function cssEscape(value) {
   return window.CSS?.escape ? window.CSS.escape(String(value || "")) : String(value || "").replace(/['\\]/g, "\\$&");
 }
 
-function showMessage(message) {
+function showMessage(message, duration = 4200) {
   const toast = document.querySelector("#toast");
   if (toast) {
     toast.textContent = message;
@@ -1130,7 +1178,7 @@ function showMessage(message) {
     messageTimer = window.setTimeout(() => {
       toast.hidden = true;
       messageTimer = null;
-    }, 4200);
+    }, duration);
   } else window.alert(message);
 }
 
