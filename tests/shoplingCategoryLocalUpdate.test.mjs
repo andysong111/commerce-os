@@ -66,6 +66,13 @@ test("전역 작업 도우미는 로컬 작업 중 클라우드 상태로 덮어
     new URL("../src/components/OpsLocalCategoryStatusBridge.tsx", import.meta.url),
     "utf8",
   );
+  const legacyBridge = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-update-work-assistant-bridge.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   const shell = await readFile(
     new URL("../src/components/AppShell.tsx", import.meta.url),
     "utf8",
@@ -73,6 +80,8 @@ test("전역 작업 도우미는 로컬 작업 중 클라우드 상태로 덮어
   assert.match(bridge, /mode === "local"/);
   assert.match(bridge, /CATEGORY_STATUS_PATH/);
   assert.match(bridge, /local_shopling_category_runner/);
+  assert.match(legacyBridge, /isLocalCategoryState/);
+  assert.match(legacyBridge, /session\?\.mode === "local"/);
   assert.ok(
     shell.indexOf("<OpsLocalCategoryStatusBridge />") <
       shell.indexOf("<OpsWorkAssistant />"),
