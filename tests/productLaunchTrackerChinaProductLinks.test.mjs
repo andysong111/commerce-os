@@ -91,3 +91,29 @@ test("중국 링크 UI는 5칸·1번 고정·서버 저장·상세 재열기를 
   assert.doesNotMatch(ui, /MutationObserver/);
   assert.match(app, /china-product-links\.js/);
 });
+
+test("기본 상세 저장의 preventDefault 이후에도 중국 링크를 저장하고 저장 버튼을 화면에 고정한다", async () => {
+  const ui = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/china-product-links.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const html = await readFile(
+    new URL("../public/product-launch-tracker-app/index.html", import.meta.url),
+    "utf8",
+  );
+  const styles = await readFile(
+    new URL("../public/product-launch-tracker-app/styles.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    ui,
+    /event\.defaultPrevented \|\| event\.submitter\?\.value !== "save"/,
+  );
+  assert.match(ui, /if \(detailDialog\?\.open\) return/);
+  assert.match(html, /class="button button-primary detail-floating-save" value="save"/);
+  assert.match(styles, /\.detail-floating-save\s*\{[^}]*position: fixed/s);
+});

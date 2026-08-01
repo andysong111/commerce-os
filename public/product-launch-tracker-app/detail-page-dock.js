@@ -1,0 +1,1038 @@
+const STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const ENGINE_CONFIG_API = "/api/product-launch-tracker/detail-page-engine-config";
+const ASSET_UPLOAD_API = "/api/product-launch-tracker/detail-page-assets";
+const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
+const MESSAGE_SOURCE = "commerce-os-detail-page-studio";
+const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
+const POLL_INTERVAL_MS = 2500;
+const STALE_WORKER_MS = 8 * 60 * 1000;
+const PAGE_PARAMS = new URLSearchParams(window.location.search);
+const DETAIL_PAGE_MODE = PAGE_PARAMS.get("detail_page_mode") || "standalone";
+const CAN_REGISTER_JOBS = DETAIL_PAGE_MODE !== "worker";
+const CAN_EXECUTE_JOBS = DETAIL_PAGE_MODE !== "client";
+const SHOW_LOCAL_MONITOR = DETAIL_PAGE_MODE === "standalone";
+const REQUESTED_ITEM_ID = cleanText(PAGE_PARAMS.get("open_item"), 160);
+
+const bulkControls = document.querySelector(".bulk-controls");
+const tableBody = document.querySelector("#launch-table-body");
+let runButton = null;
+let monitor = null;
+let queue = [];
+let active = null;
+let activeFrame = null;
+let activeTimer = null;
+let engineConfig = null;
+let syncing = false;
+let enqueueing = false;
+const jobsById = new Map();
+const workerResumeAt = new Map();
+const finalizerRetryAt = new Map();
+const retryingItems = new Set();
+
+installStyles();
+if (CAN_REGISTER_JOBS) installControls();
+if (CAN_EXECUTE_JOBS) {
+  void restoreMonitor();
+  window.addEventListener("message", (event) => void handleEngineMessage(event));
+} else {
+  void startClientSync();
+}
+if (DETAIL_PAGE_MODE === "worker") {
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent || event.origin !== window.location.origin) return;
+    const payload = event.data;
+    if (payload?.source !== "commerce-os-work-assistant") return;
+    if (payload.type === "retry-detail-page-job") {
+      const itemId = cleanText(payload.itemId, 160);
+      if (itemId) void retryItem(itemId);
+    }
+  });
+}
+window.addEventListener("storage", (event) => {
+  if (event.key !== STORAGE_KEY) return;
+  window.dispatchEvent(new CustomEvent("product-launch-tracker:external-state"));
+  if (CAN_EXECUTE_JOBS) {
+    queueCollectingJobsFromState();
+    void processNext();
+  }
+});
+if (CAN_REGISTER_JOBS && REQUESTED_ITEM_ID) {
+  window.setTimeout(() => openRequestedItem(REQUESTED_ITEM_ID), 250);
+}
+
+if (tableBody) {
+  new MutationObserver(syncRunButton).observe(tableBody, {
+    childList: true,
+    subtree: true,
+  });
+}
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") return;
+  if (target.id === "select-visible" || target.closest("#launch-table-body")) {
+    window.setTimeout(syncRunButton, 0);
+  }
+}, true);
+
+function installControls() {
+  if (!bulkControls || bulkControls.querySelector("#detail-page-dock-run-button")) return;
+  runButton = document.createElement("button");
+  runButton.id = "detail-page-dock-run-button";
+  runButton.type = "button";
+  runButton.className = "button button-primary";
+  runButton.title = "체크한 상품을 서버 작업으로 등록합니다. 화면을 닫아도 AI 생성은 계속됩니다.";
+  runButton.addEventListener("click", () => void enqueueSelected());
+  const clear = bulkControls.querySelector("#clear-selection-button");
+  if (clear) clear.before(runButton);
+  else bulkControls.append(runButton);
+  syncRunButton();
+}
+
+function syncRunButton() {
+  if (!runButton) return;
+  const count = selectedRowIds().length;
+  runButton.disabled = count === 0 || enqueueing;
+  runButton.textContent = count
+    ? `선택 상세페이지 생성 (${count}건)`
+    : "선택 상세페이지 생성";
+}
+
+async function enqueueSelected() {
+  const selectedIds = selectedRowIds();
+  const state = readState();
+  if (!selectedIds.length || !state?.items) return;
+  const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
+  const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
+  if (invalid.length) {
+    showMessage(
+      `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다.`,
+    );
+    return;
+  }
+  if (!window.confirm(
+    `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
+  )) return;
+
+  enqueueing = true;
+  syncRunButton();
+  try {
+  if (SHOW_LOCAL_MONITOR) ensureMonitor();
+  const existingItems = new Set(
+    [...jobsById.values()]
+      .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
+      .map((job) => job.itemId),
+  );
+  for (const item of selected) {
+    const itemId = String(item.id);
+    if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) continue;
+    const job = {
+      itemId,
+      jobId: crypto.randomUUID(),
+      sourceUrl: readPrimaryChinaLink(item),
+      productName: String(item.productName || item.modelNumber || "상품"),
+      salesOptions: readSalesOptions(item),
+      attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
+      sourceRunId: "",
+    };
+    try {
+      const created = await createServerJob(job);
+      jobsById.set(job.jobId, created);
+      queue.push(job);
+      patchItem(itemId, {
+        detailPageAutomation: {
+          jobId: job.jobId,
+          status: "queued",
+          stage: "source_collection",
+          message: "1688 상품정보·이미지 수집 대기 중",
+          progress: 1,
+          qaStatus: "pending",
+          sourceUrl: job.sourceUrl,
+          sourceRunId: "",
+          attempt: job.attempt,
+          queuedAt: new Date().toISOString(),
+          startedAt: null,
+          completedAt: null,
+          error: "",
+          executionMode: "server-v1",
+        },
+      });
+      existingItems.add(itemId);
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.");
+      break;
+    }
+  }
+  renderMonitor();
+  if (CAN_EXECUTE_JOBS) void processNext();
+  } finally {
+    enqueueing = false;
+    syncRunButton();
+  }
+}
+
+async function createServerJob(job) {
+  const response = await fetch(JOBS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(job),
+    credentials: "same-origin",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok !== true || !payload.job) {
+    throw new Error(payload.message || "상세페이지 서버 작업을 만들지 못했습니다.");
+  }
+  return payload.job;
+}
+
+async function processNext() {
+  if (active) return;
+  const renderJob = [...jobsById.values()].find(
+    (job) =>
+      job.status === "render_pending" &&
+      Date.now() >= (finalizerRetryAt.get(job.jobId) || 0),
+  );
+  if (renderJob) {
+    await openFinalizer(renderJob);
+    return;
+  }
+  while (queue.length) {
+    const next = queue.shift();
+    const server = jobsById.get(next.jobId);
+    if (!server || server.status !== "collecting") continue;
+    await openEvidenceCollector({ ...next, sourceRunId: server.sourceRunId || next.sourceRunId || "" });
+    return;
+  }
+}
+
+async function openEvidenceCollector(job) {
+  active = { ...job, mode: "collect" };
+  updateAutomation(job.itemId, {
+    status: "running",
+    stage: "source_collection",
+    message: job.sourceRunId
+      ? "기존 1688 수집 작업에 다시 연결 중"
+      : "1688 상품정보·이미지 수집기 연결 중",
+    progress: job.sourceRunId ? 5 : 3,
+    qaStatus: "pending",
+    sourceRunId: job.sourceRunId,
+    startedAt: new Date().toISOString(),
+    error: "",
+  });
+  renderMonitor();
+  try {
+    const config = await getEngineConfig();
+    const url = new URL(config.engineUrl);
+    url.searchParams.set("ops_dock", "1");
+    url.searchParams.set("execution_mode", "server");
+    url.searchParams.set("job_id", job.jobId);
+    url.searchParams.set("item_id", job.itemId);
+    url.searchParams.set("target_origin", window.location.origin);
+    url.searchParams.set("source_url", job.sourceUrl);
+    if (job.salesOptions) url.searchParams.set("sales_options", job.salesOptions);
+    if (job.sourceRunId) url.searchParams.set("source_run_id", job.sourceRunId);
+    mountFrame(url, "1688 근거 수집기");
+  } catch (error) {
+    await failActive(error instanceof Error ? error.message : "1688 수집기를 열지 못했습니다.", "source_collection");
+  }
+}
+
+async function openFinalizer(job) {
+  const state = readState();
+  const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
+  if (!item) return;
+  active = {
+    itemId: String(job.itemId),
+    jobId: String(job.jobId),
+    sourceUrl: job.sourceUrl,
+    productName: String(item.productName || item.modelNumber || "상품"),
+    salesOptions: readSalesOptions(item),
+    attempt: Number(job.attempt || item.detailPageAutomation?.attempt || 1),
+    mode: "finalize",
+  };
+  updateAutomation(active.itemId, {
+    status: "uploading",
+    stage: "render_pending",
+    message: "AI 생성·검수 완료 · 최종 14,000px 조립 중",
+    progress: 96,
+    qaStatus: "passed",
+    error: "",
+  });
+  renderMonitor();
+  try {
+    const config = await getEngineConfig();
+    const url = new URL(config.engineUrl);
+    url.searchParams.set("ops_finalize", "1");
+    url.searchParams.set("job_id", active.jobId);
+    url.searchParams.set("item_id", active.itemId);
+    url.searchParams.set("target_origin", window.location.origin);
+    mountFrame(url, "상세페이지 최종 조립기");
+  } catch (error) {
+    finishActive();
+    updateAutomation(job.itemId, {
+      status: "uploading",
+      message: "최종 조립기 연결 대기 · 새로고침하면 자동 재연결됩니다.",
+      error: error instanceof Error ? error.message : "최종 조립기를 열지 못했습니다.",
+    });
+  }
+}
+
+function mountFrame(url, title) {
+  activeFrame = document.createElement("iframe");
+  activeFrame.id = "detail-page-dock-engine-frame";
+  activeFrame.title = title;
+  activeFrame.src = url.toString();
+  activeFrame.setAttribute("aria-hidden", "true");
+  document.body.append(activeFrame);
+  activeTimer = window.setTimeout(() => {
+    void handleFrameTimeout();
+  }, FRAME_TIMEOUT_MS);
+}
+
+async function handleFrameTimeout() {
+  if (!active) return;
+  if (active.mode === "collect") {
+    await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
+    return;
+  }
+  const itemId = active.itemId;
+  const jobId = active.jobId;
+  finishActive();
+  finalizerRetryAt.set(jobId, Date.now() + 30_000);
+  updateAutomation(itemId, {
+    status: "uploading",
+    stage: "render_pending",
+    message: "최종 조립 대기 · 화면을 다시 열면 자동 재개됩니다.",
+    error: "최종 조립 시간이 15분을 초과했습니다.",
+  });
+}
+
+async function handleEngineMessage(event) {
+  if (!active || !activeFrame || event.source !== activeFrame.contentWindow) return;
+  if (!engineConfig || event.origin !== engineConfig.engineOrigin) return;
+  const payload = event.data;
+  if (!payload || payload.source !== MESSAGE_SOURCE || payload.jobId !== active.jobId) return;
+
+  if (payload.type === "ops-dock-progress") {
+    updateAutomation(active.itemId, {
+      status: active.mode === "finalize" ? "uploading" : "running",
+      stage: cleanText(payload.stage, 80) || "running",
+      message: cleanText(payload.message, 240) || "생성 준비 중",
+      progress: clamp(Number(payload.progress) || 0, 1, 99),
+      qaStatus: payload.qaStatus === "passed" ? "passed" : "pending",
+    });
+    renderMonitor();
+    return;
+  }
+  if (payload.type === "ops-dock-source-run") {
+    const sourceRunId = cleanText(payload.sourceRunId, 200);
+    if (!sourceRunId) return;
+    active.sourceRunId = sourceRunId;
+    updateAutomation(active.itemId, { sourceRunId });
+    await updateServerJob(active.jobId, { action: "source_started", sourceRunId });
+    return;
+  }
+  if (payload.type === "ops-dock-evidence-ready") {
+    await acceptEvidence(payload);
+    return;
+  }
+  if (payload.type === "ops-dock-failed") {
+    await failActive(
+      cleanText(payload.message, 500) || "상세페이지 준비 단계에 실패했습니다.",
+      cleanText(payload.stage, 80) || "source_collection",
+    );
+    return;
+  }
+  if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
+    if (active.snapshotSent) return;
+    const job = jobsById.get(active.jobId);
+    if (!job) return;
+    active.snapshotSent = true;
+    const frame = activeFrame;
+    const jobId = active.jobId;
+    const itemId = active.itemId;
+    window.setTimeout(() => {
+      if (activeFrame !== frame || active?.jobId !== jobId) return;
+      frame.contentWindow?.postMessage(
+        {
+          type: "ops-dock-finalize-snapshot",
+          jobId,
+          itemId,
+          job,
+        },
+        engineConfig.engineOrigin,
+      );
+    }, 120);
+    return;
+  }
+  if (payload.type === "ops-dock-finalize-complete" && active.mode === "finalize") {
+    await completeFinalization(payload);
+    return;
+  }
+  if (payload.type === "ops-dock-finalize-failed" && active.mode === "finalize") {
+    const itemId = active.itemId;
+    const jobId = active.jobId;
+    finishActive();
+    finalizerRetryAt.set(jobId, Date.now() + 30_000);
+    updateAutomation(itemId, {
+      status: "uploading",
+      stage: "render_pending",
+      message: "최종 조립 대기 · 화면을 새로 열면 자동 재시도됩니다.",
+      error: cleanText(payload.message, 800),
+    });
+  }
+}
+
+async function acceptEvidence(payload) {
+  if (!active || active.mode !== "collect") return;
+  const evidence = Array.isArray(payload.evidence) ? payload.evidence.slice(0, 60) : [];
+  if (!evidence.length || evidence.some((image) => !image?.base64)) {
+    await failActive("Studio가 전달한 1688 근거 이미지가 올바르지 않습니다.", "evidence_checkpoint");
+    return;
+  }
+  try {
+    updateAutomation(active.itemId, {
+      status: "uploading",
+      stage: "evidence_upload",
+      message: `1688 근거 이미지 ${evidence.length}장 서버 저장 중`,
+      progress: 9,
+    });
+    const urls = new Array(evidence.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(4, evidence.length) }, async () => {
+      while (cursor < evidence.length) {
+        const index = cursor;
+        cursor += 1;
+        urls[index] = await uploadOne(
+          active,
+          `evidence-${index + 1}`,
+          evidence[index],
+        );
+      }
+    });
+    await Promise.all(workers);
+    await updateServerJob(active.jobId, {
+      action: "evidence_ready",
+      productName: cleanText(payload.productName, 250) || active.productName,
+      sourceProductInfo: cleanMultiline(payload.sourceProductInfo, 8000),
+      evidenceUrls: urls,
+      evidenceNames: evidence.map((image, index) =>
+        cleanText(image.name, 160) || `evidence-${index + 1}.jpg`,
+      ),
+    });
+    const jobId = active.jobId;
+    const itemId = active.itemId;
+    finishActive();
+    updateAutomation(itemId, {
+      status: "running",
+      stage: "queued",
+      message: "서버 생성 대기 중 · 창을 닫아도 계속됩니다.",
+      progress: 10,
+      qaStatus: "pending",
+      error: "",
+    });
+    try {
+      await startWorker(jobId);
+      await syncJobs();
+    } catch (error) {
+      updateAutomation(itemId, {
+        status: "running",
+        stage: "queued",
+        message: "서버 생성 자동 재시작 대기 중 · 근거 이미지는 저장됨",
+        error: error instanceof Error ? error.message : "서버 작업을 즉시 시작하지 못했습니다.",
+      });
+      window.setTimeout(() => void startWorker(jobId).catch(() => undefined), 5000);
+    }
+  } catch (error) {
+    await failActive(
+      error instanceof Error ? error.message : "1688 근거 이미지를 서버에 저장하지 못했습니다.",
+      "evidence_upload",
+    );
+  }
+}
+
+async function completeFinalization(payload) {
+  if (!active) return;
+  try {
+    const job = jobsById.get(active.jobId);
+    const representatives = Array.isArray(job?.result?.representatives)
+      ? job.result.representatives
+      : [];
+    const byRole = new Map(representatives.map((image) => [String(image.roleId), image.assetUrl]));
+    const mainImageUrl = byRole.get("main_catalog") || "";
+    const additionalImageUrls = [
+      byRole.get("alternate_whole"),
+      byRole.get("evidence_detail"),
+      byRole.get("lifestyle_usage"),
+      byRole.get("adaptive_support"),
+    ].filter(Boolean);
+    if (!payload.detail?.base64 || !mainImageUrl || additionalImageUrls.length !== 4) {
+      throw new Error("최종 상세·대표·부가 이미지 구성이 완전하지 않습니다.");
+    }
+    updateAutomation(active.itemId, {
+      status: "uploading",
+      stage: "asset_upload",
+      message: "14,000px 상세페이지 저장·URL 도킹 중",
+      progress: 98,
+      qaStatus: "passed",
+    });
+    const detailImageUrl = await uploadOne(active, "detail-page", payload.detail);
+    await updateServerJob(active.jobId, {
+      action: "final_complete",
+      detailImageUrl,
+      mainImageUrl,
+      additionalImageUrls,
+    });
+    const completedJob = {
+      ...job,
+      status: "success",
+      stage: "docked",
+      progress: 100,
+      qaStatus: "passed",
+      result: { ...job.result, detailImageUrl, mainImageUrl, additionalImageUrls },
+    };
+    jobsById.set(active.jobId, completedJob);
+    finalizerRetryAt.delete(active.jobId);
+    applyDockedJob(completedJob, payload.productName || active.productName);
+    finishActive();
+  } catch (error) {
+    const itemId = active.itemId;
+    const jobId = active.jobId;
+    finishActive();
+    finalizerRetryAt.set(jobId, Date.now() + 30_000);
+    updateAutomation(itemId, {
+      status: "uploading",
+      stage: "asset_upload",
+      message: "최종 저장 재시도 대기 · 생성 결과는 서버에 보존됨",
+      error: error instanceof Error ? error.message : "최종 결과를 저장하지 못했습니다.",
+    });
+  }
+}
+
+async function uploadOne(job, role, image) {
+  const body = new FormData();
+  body.set("item_id", job.itemId);
+  body.set("job_id", job.jobId);
+  body.set("role", role);
+  body.set("file", base64File(image.base64, image.mimeType || "image/jpeg", `${role}.jpg`));
+  const response = await fetch(ASSET_UPLOAD_API, {
+    method: "POST",
+    body,
+    credentials: "same-origin",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok !== true || !payload.publicUrl) {
+    throw new Error(payload.message || `작업 이미지 저장에 실패했습니다. (${role})`);
+  }
+  return payload.publicUrl;
+}
+
+async function failActive(message, stage = "failed") {
+  if (!active) return;
+  const failed = active;
+  try {
+    await updateServerJob(failed.jobId, {
+      action: "source_failed",
+      stage,
+      error: message,
+    });
+  } catch {
+    // The local monitor still records the error if the durable store is unavailable.
+  }
+  updateAutomation(failed.itemId, {
+    status: "failed",
+    stage: stage || "failed",
+    message: "생성 실패 · 다시 생성할 수 있습니다.",
+    qaStatus: "failed",
+    error: message,
+    completedAt: new Date().toISOString(),
+  });
+  finishActive();
+}
+
+function finishActive() {
+  window.clearTimeout(activeTimer);
+  activeTimer = null;
+  activeFrame?.remove();
+  activeFrame = null;
+  active = null;
+  renderMonitor();
+  window.setTimeout(() => void processNext(), 250);
+}
+
+async function retryItem(itemId) {
+  const normalizedItemId = String(itemId);
+  if (retryingItems.has(normalizedItemId)) return;
+  const state = readState();
+  const item = state?.items?.find((candidate) => String(candidate.id) === normalizedItemId);
+  const sourceUrl = readPrimaryChinaLink(item);
+  if (!item || !sourceUrl) {
+    showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
+    return;
+  }
+  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) return;
+  retryingItems.add(normalizedItemId);
+  const job = {
+    itemId: normalizedItemId,
+    jobId: crypto.randomUUID(),
+    sourceUrl,
+    productName: String(item.productName || item.modelNumber || "상품"),
+    salesOptions: readSalesOptions(item),
+    attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
+    sourceRunId: "",
+  };
+  try {
+    const created = await createServerJob(job);
+    jobsById.set(job.jobId, created);
+    queue.push(job);
+    patchItem(job.itemId, {
+      detailPageAutomation: {
+        ...item.detailPageAutomation,
+        jobId: job.jobId,
+        status: "queued",
+        stage: "source_collection",
+        message: "다시 생성 · 1688 수집 대기 중",
+        progress: 0,
+        qaStatus: "pending",
+        sourceUrl,
+        sourceRunId: "",
+        attempt: job.attempt,
+        queuedAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        error: "",
+        executionMode: "server-v1",
+      },
+    });
+    if (SHOW_LOCAL_MONITOR) ensureMonitor();
+    renderMonitor();
+    if (CAN_EXECUTE_JOBS) void processNext();
+  } catch (error) {
+    showMessage(error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.");
+  } finally {
+    retryingItems.delete(normalizedItemId);
+  }
+}
+
+async function restoreMonitor() {
+  const state = readState();
+  const hasHistory = state?.items?.some((item) => item.detailPageAutomation?.jobId);
+  if (hasHistory && SHOW_LOCAL_MONITOR) ensureMonitor();
+  const synced = await syncJobs();
+  queueCollectingJobsFromState({ markLegacyFailed: synced });
+  renderMonitor();
+  void processNext();
+  window.setInterval(() => void syncJobs(), POLL_INTERVAL_MS);
+}
+
+async function startClientSync() {
+  await syncJobs();
+  window.setInterval(() => void syncJobs(), POLL_INTERVAL_MS);
+}
+
+async function syncJobs() {
+  if (syncing) return false;
+  syncing = true;
+  try {
+    const response = await fetch(JOBS_API, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok !== true || !Array.isArray(payload.jobs)) return false;
+    for (const job of payload.jobs) {
+      jobsById.set(job.jobId, job);
+      mirrorServerJob(job);
+      if (job.status === "success") applyDockedJob(job);
+      if (
+        CAN_EXECUTE_JOBS &&
+        job.status === "queued" &&
+        Date.now() - (workerResumeAt.get(job.jobId) || 0) > 30_000
+      ) {
+        workerResumeAt.set(job.jobId, Date.now());
+        void startWorker(job.jobId).catch(() => undefined);
+      }
+      if (
+        CAN_EXECUTE_JOBS &&
+        ["queued", "running"].includes(job.status) &&
+        Date.now() - Date.parse(job.updatedAt || 0) > STALE_WORKER_MS &&
+        Date.now() - (workerResumeAt.get(job.jobId) || 0) > STALE_WORKER_MS
+      ) {
+        workerResumeAt.set(job.jobId, Date.now());
+        void startWorker(job.jobId);
+      }
+    }
+    if (CAN_EXECUTE_JOBS) queueCollectingJobsFromState();
+    renderMonitor();
+    if (CAN_EXECUTE_JOBS) void processNext();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    syncing = false;
+  }
+}
+
+function queueCollectingJobsFromState({ markLegacyFailed = false } = {}) {
+  const latest = readState();
+  for (const item of latest?.items || []) {
+    const automation = item.detailPageAutomation;
+    if (!automation?.jobId || !["queued", "running", "uploading"].includes(automation.status)) continue;
+    const job = jobsById.get(automation.jobId);
+    if (!job) {
+      if (markLegacyFailed) {
+        updateAutomation(item.id, {
+          status: "failed",
+          stage: "legacy_browser_job",
+          message: "기존 브라우저 실행 작업은 종료되었습니다. 다시 생성하면 서버 작업으로 실행됩니다.",
+          qaStatus: "failed",
+          completedAt: new Date().toISOString(),
+          error: "새 백그라운드 작업 원장이 없는 구형 실행입니다.",
+        });
+      }
+      continue;
+    }
+    if (
+      job.status === "collecting" &&
+      active?.jobId !== job.jobId &&
+      !queue.some((queued) => queued.jobId === job.jobId)
+    ) {
+      queue.push({
+        itemId: job.itemId,
+        jobId: job.jobId,
+        sourceUrl: job.sourceUrl,
+        productName: String(item.productName || item.modelNumber || "상품"),
+        salesOptions: readSalesOptions(item),
+        attempt: Number(job.attempt || automation.attempt || 1),
+        sourceRunId: job.sourceRunId || automation.sourceRunId || "",
+      });
+    }
+  }
+}
+
+function mirrorServerJob(job) {
+  const state = readState();
+  const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
+  if (!item || item.detailPageAutomation?.jobId !== job.jobId) return;
+  const mappedStatus =
+    job.status === "success"
+      ? "completed"
+      : ["failed", "cancelled"].includes(job.status)
+        ? "failed"
+        : job.status === "render_pending"
+          ? "uploading"
+          : "running";
+  const current = item.detailPageAutomation || {};
+  const next = {
+    status: mappedStatus,
+    stage: job.stage,
+    message: job.message,
+    progress: Number(job.progress || 0),
+    qaStatus: job.qaStatus,
+    sourceRunId: job.sourceRunId || current.sourceRunId || "",
+    error: job.error || "",
+    startedAt: job.startedAt || current.startedAt,
+    completedAt: job.completedAt || current.completedAt,
+    executionMode: "server-v1",
+  };
+  if (
+    current.status === next.status &&
+    current.stage === next.stage &&
+    current.message === next.message &&
+    Number(current.progress || 0) === next.progress &&
+    current.qaStatus === next.qaStatus &&
+    current.error === next.error &&
+    current.sourceRunId === next.sourceRunId
+  ) return;
+  updateAutomation(job.itemId, next);
+}
+
+function applyDockedJob(job, fallbackName = "") {
+  const result = job.result || {};
+  const detailImageUrl = String(result.detailImageUrl || "");
+  const mainImageUrl = String(result.mainImageUrl || "");
+  const additionalImageUrls = Array.isArray(result.additionalImageUrls)
+    ? result.additionalImageUrls.filter(Boolean).slice(0, 4)
+    : [];
+  if (!detailImageUrl || !mainImageUrl || additionalImageUrls.length !== 4) return;
+  const state = readState();
+  const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
+  if (!item || item.detailPageAutomation?.jobId !== job.jobId) return;
+  if (item.detailPageAsset?.resultId === job.jobId && item.detailPageAutomation?.status === "completed") return;
+  const now = job.completedAt || new Date().toISOString();
+  const productName = fallbackName || item.productName || item.modelNumber || "상품";
+  patchItem(job.itemId, (current) => ({
+    detailPageAsset: {
+      ...current.detailPageAsset,
+      status: "ready",
+      resultId: job.jobId,
+      html: buildDetailHtml(detailImageUrl, productName),
+      detailImageUrl,
+      mainImageUrl,
+      additionalImageUrls,
+      syncedAt: now,
+    },
+    detailPageAutomation: {
+      ...current.detailPageAutomation,
+      status: "completed",
+      stage: "docked",
+      message: "검수 통과 · 상세 HTML과 이미지 URL 자동 도킹 완료",
+      progress: 100,
+      qaStatus: "passed",
+      completedAt: now,
+      error: "",
+      executionMode: "server-v1",
+    },
+    stages: {
+      ...current.stages,
+      detailPage: {
+        ...current.stages?.detailPage,
+        status: "완료",
+        completedAt: now,
+        note: "상세페이지 서버 자동 생성·검수 통과 후 결과 도킹",
+      },
+    },
+    updatedAt: now,
+    updatedBy: "상세페이지 백그라운드 자동 도킹",
+  }));
+}
+
+async function startWorker(jobId) {
+  const response = await fetch(`${JOBS_API}/${encodeURIComponent(jobId)}/start`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.message || "Studio 서버 작업을 시작하지 못했습니다.");
+  }
+  return payload;
+}
+
+async function updateServerJob(jobId, body) {
+  const response = await fetch(`${JOBS_API}/${encodeURIComponent(jobId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    credentials: "same-origin",
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.message || "상세페이지 작업 상태를 저장하지 못했습니다.");
+  }
+  if (payload.job) jobsById.set(jobId, payload.job);
+  return payload.job;
+}
+
+function ensureMonitor() {
+  if (!SHOW_LOCAL_MONITOR) return null;
+  if (monitor) return monitor;
+  monitor = document.createElement("aside");
+  monitor.id = "detail-page-dock-monitor";
+  monitor.innerHTML = `
+    <div class="dock-monitor-header">
+      <div><strong>상세페이지 자동 생성</strong><span id="dock-monitor-summary"></span></div>
+      <button type="button" id="dock-monitor-toggle" aria-label="진행창 접기">−</button>
+    </div>
+    <div id="dock-monitor-body">
+      <div id="dock-monitor-jobs"></div>
+      <div class="dock-monitor-footer">
+        <span>AI 생성은 서버에서 계속됩니다.</span>
+        <button type="button" id="dock-retry-failed">실패 작업 다시 생성</button>
+      </div>
+    </div>`;
+  document.body.append(monitor);
+  monitor.querySelector("#dock-monitor-toggle")?.addEventListener("click", () => {
+    monitor.classList.toggle("is-collapsed");
+    const button = monitor.querySelector("#dock-monitor-toggle");
+    if (button) button.textContent = monitor.classList.contains("is-collapsed") ? "+" : "−";
+  });
+  monitor.querySelector("#dock-retry-failed")?.addEventListener("click", () => {
+    const state = readState();
+    for (const item of state?.items || []) {
+      if (item.detailPageAutomation?.status === "failed") void retryItem(item.id);
+    }
+  });
+  monitor.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-retry-item]");
+    if (button) void retryItem(button.dataset.retryItem);
+    const detail = event.target.closest("button[data-open-item]");
+    if (detail) {
+      document.querySelector(`tr[data-id='${cssEscape(detail.dataset.openItem)}'] button[data-action='detail']`)?.click();
+    }
+  });
+  return monitor;
+}
+
+function openRequestedItem(itemId, attempts = 0) {
+  const detailButton = document.querySelector(
+    `tr[data-id='${cssEscape(itemId)}'] button[data-action='detail']`,
+  );
+  if (detailButton) {
+    detailButton.click();
+    return;
+  }
+  if (attempts < 40) {
+    window.setTimeout(() => openRequestedItem(itemId, attempts + 1), 250);
+  }
+}
+
+function renderMonitor() {
+  if (!monitor) return;
+  const state = readState();
+  const items = (state?.items || [])
+    .filter((item) => item.detailPageAutomation?.jobId)
+    .sort((left, right) => Date.parse(right.detailPageAutomation?.queuedAt || 0) - Date.parse(left.detailPageAutomation?.queuedAt || 0))
+    .slice(0, 8);
+  const runningCount = items.filter((item) => ["queued", "running", "uploading"].includes(item.detailPageAutomation?.status)).length;
+  const failedCount = items.filter((item) => item.detailPageAutomation?.status === "failed").length;
+  const summary = monitor.querySelector("#dock-monitor-summary");
+  if (summary) summary.textContent = runningCount ? `진행 ${runningCount}건 · 화면 종료 가능` : failedCount ? `실패 ${failedCount}건` : "대기 작업 없음";
+  const body = monitor.querySelector("#dock-monitor-jobs");
+  if (!body) return;
+  body.innerHTML = items.length ? items.map((item) => {
+    const job = item.detailPageAutomation || {};
+    const status = job.status || "queued";
+    const label = {
+      queued: "대기",
+      running: "서버 생성 중",
+      uploading: "최종 도킹 중",
+      completed: "완료",
+      failed: "실패",
+    }[status] || status;
+    return `<article class="dock-job dock-status-${escapeAttribute(status)}">
+      <div class="dock-job-title"><strong>${escapeHtml(item.modelNumber || item.productName || item.id)}</strong><span>${label}</span></div>
+      <p>${escapeHtml(job.message || "생성 대기 중")}</p>
+      <div class="dock-progress"><i style="width:${clamp(Number(job.progress) || 0, 0, 100)}%"></i></div>
+      ${job.error ? `<p class="dock-error">${escapeHtml(job.error)}</p>` : ""}
+      <div class="dock-job-meta">시도 ${Number(job.attempt || 1)}회 · 검수 ${job.qaStatus === "passed" ? "통과" : job.qaStatus === "failed" ? "실패" : "진행 중"}${["running", "uploading"].includes(status) ? " · 새로고침·화면이동 가능" : ""}</div>
+      <div class="dock-job-actions">
+        <button type="button" data-open-item="${escapeAttribute(item.id)}">상품 상세</button>
+        ${["failed", "completed"].includes(status) ? `<button type="button" data-retry-item="${escapeAttribute(item.id)}">다시 생성</button>` : ""}
+      </div>
+    </article>`;
+  }).join("") : '<p class="dock-empty">생성 작업이 없습니다.</p>';
+  const retry = monitor.querySelector("#dock-retry-failed");
+  if (retry) retry.disabled = failedCount === 0;
+}
+
+async function getEngineConfig() {
+  if (engineConfig) return engineConfig;
+  const response = await fetch(ENGINE_CONFIG_API, { cache: "no-store", credentials: "same-origin" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.ok !== true || !payload.engineUrl || !payload.engineOrigin) {
+    throw new Error(payload.message || "상세페이지 엔진 연결 설정을 읽지 못했습니다.");
+  }
+  engineConfig = payload;
+  return payload;
+}
+
+function selectedRowIds() {
+  return [...document.querySelectorAll("#launch-table-body tr[data-id] input.row-check:checked")]
+    .map((input) => String(input.closest("tr[data-id]")?.dataset.id || ""))
+    .filter(Boolean);
+}
+
+function readPrimaryChinaLink(item) {
+  return String(item?.primaryChinaProductLink || item?.detailPageSource?.primaryUrl || item?.chinaProductLinks?.[0] || "").trim();
+}
+
+function readSalesOptions(item) {
+  return (Array.isArray(item?.orderOptions) ? item.orderOptions : [])
+    .map((option) => String(option?.saleOption || "").trim())
+    .filter(Boolean)
+    .join(" / ")
+    .slice(0, 2000);
+}
+
+function readState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function patchItem(itemId, patch) {
+  const state = readState();
+  if (!state?.items) return;
+  const now = new Date().toISOString();
+  state.items = state.items.map((item) => {
+    if (String(item.id) !== String(itemId)) return item;
+    const changes = typeof patch === "function" ? patch(item) : patch;
+    return { ...item, ...changes, updatedAt: changes.updatedAt || now };
+  });
+  state.savedAt = now;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  window.dispatchEvent(new CustomEvent("product-launch-tracker:external-state"));
+}
+
+function updateAutomation(itemId, patch) {
+  patchItem(itemId, (item) => ({
+    detailPageAutomation: { ...item.detailPageAutomation, ...patch },
+  }));
+}
+
+function buildDetailHtml(url, productName) {
+  const safeUrl = escapeAttribute(url);
+  const safeName = escapeAttribute(productName || "상품 상세페이지");
+  return `<div style="margin:0 auto;max-width:1000px;text-align:center;"><img src="${safeUrl}" alt="${safeName}" style="display:block;width:100%;height:auto;margin:0 auto;" loading="lazy"></div>`;
+}
+
+function base64File(base64, mimeType, name) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new File([bytes], name, { type: mimeType });
+}
+
+function cleanText(value, maxLength) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, maxLength);
+}
+
+function cleanMultiline(value, maxLength) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]);
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
+}
+
+function cssEscape(value) {
+  return window.CSS?.escape ? window.CSS.escape(String(value || "")) : String(value || "").replace(/['\\]/g, "\\$&");
+}
+
+function showMessage(message) {
+  const toast = document.querySelector("#toast");
+  if (toast) {
+    toast.textContent = message;
+    toast.classList.add("show");
+    window.setTimeout(() => toast.classList.remove("show"), 3200);
+  } else window.alert(message);
+}
+
+function installStyles() {
+  const style = document.createElement("style");
+  style.id = "detail-page-dock-styles";
+  style.textContent = `
+    #detail-page-dock-engine-frame{position:fixed!important;left:-20px!important;bottom:-20px!important;width:1px!important;height:1px!important;opacity:.01!important;border:0!important;pointer-events:none!important}
+    #detail-page-dock-monitor{position:fixed;right:18px;bottom:18px;z-index:70;width:min(390px,calc(100vw - 36px));max-height:min(620px,calc(100vh - 36px));overflow:hidden;border:1px solid #cbd5e1;border-radius:16px;background:#fff;box-shadow:0 18px 48px rgba(15,23,42,.24);font-size:13px;color:#0f172a}
+    .dock-monitor-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;background:#0f172a;color:#fff}.dock-monitor-header div{display:flex;flex-direction:column;gap:2px}.dock-monitor-header span{font-size:11px;color:#cbd5e1}.dock-monitor-header button{width:28px;height:28px;border:0;border-radius:8px;background:#334155;color:#fff;font-weight:900;cursor:pointer}
+    #dock-monitor-body{max-height:540px;overflow:auto;padding:10px;background:#f8fafc}.is-collapsed #dock-monitor-body{display:none}.dock-job{margin-bottom:9px;padding:11px;border:1px solid #e2e8f0;border-left:4px solid #2563eb;border-radius:10px;background:#fff}.dock-status-completed{border-left-color:#059669}.dock-status-failed{border-left-color:#dc2626}.dock-job-title{display:flex;justify-content:space-between;gap:10px}.dock-job-title span{font-size:11px;font-weight:800}.dock-job p{margin:6px 0 0;line-height:1.45;color:#475569}.dock-progress{height:6px;margin-top:8px;overflow:hidden;border-radius:999px;background:#e2e8f0}.dock-progress i{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.dock-status-completed .dock-progress i{background:#059669}.dock-status-failed .dock-progress i{background:#dc2626}.dock-error{color:#b91c1c!important}.dock-job-meta{margin-top:7px;font-size:11px;color:#64748b}.dock-job-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.dock-job-actions button,.dock-monitor-footer button{min-height:30px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 9px;font:inherit;font-weight:800;cursor:pointer}.dock-monitor-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:2px}.dock-monitor-footer span{font-size:11px;color:#2563eb}.dock-monitor-footer button:disabled{opacity:.45;cursor:not-allowed}.dock-empty{padding:18px;text-align:center;color:#64748b}
+  `;
+  document.head.append(style);
+}

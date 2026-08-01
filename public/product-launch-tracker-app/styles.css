@@ -139,6 +139,14 @@ tbody tr.is-archived td { color: #94a3b8; background: #f8fafc; }
 .source-panel { margin-top: 18px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; padding: 12px; color: #64748b; font-size: 11px; line-height: 1.7; }
 .dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #e7ecf3; }
 .dialog-actions-end { justify-content: flex-end; }
+.detail-floating-save {
+  position: fixed;
+  right: max(48px, calc((100vw - 1120px) / 2 + 48px));
+  bottom: 36px;
+  z-index: 30;
+  min-width: 96px;
+  box-shadow: 0 12px 28px rgb(30 64 175 / 32%);
+}
 .dialog-description { margin: -6px 0 12px; color: #64748b; font-size: 13px; }
 
 .policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

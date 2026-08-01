@@ -51,6 +51,7 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
     moduleIds: [
       "product-master",
       "product-launch-tracker",
+      "detail-page-studio-launch-connector",
       "product-launch-flow",
       "shopling-product-upload-runner",
     ],
@@ -148,7 +149,7 @@ const COMMAND_INTENTS: readonly (OpsCommandIntent & { patterns: readonly RegExp[
   {
     label: "상세페이지",
     reason: "상세페이지·상품 이미지 제작 관련 표현을 인식했습니다.",
-    moduleIds: ["detail-page-studio"],
+    moduleIds: ["detail-page-studio", "detail-page-studio-launch-connector"],
     patterns: [/상세페이지/, /상세.*이미지/, /이미지.*제작/],
   },
   {

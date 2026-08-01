@@ -247,9 +247,24 @@ export function hydrateLaunchItem(item) {
       status: item?.detailPageAsset?.status ?? "not_linked",
       resultId: item?.detailPageAsset?.resultId ?? "",
       html: item?.detailPageAsset?.html ?? "",
+      detailImageUrl: item?.detailPageAsset?.detailImageUrl ?? "",
       mainImageUrl: item?.detailPageAsset?.mainImageUrl ?? "",
       additionalImageUrls: asStringArray(item?.detailPageAsset?.additionalImageUrls),
       syncedAt: item?.detailPageAsset?.syncedAt ?? null,
+    },
+    detailPageAutomation: {
+      jobId: item?.detailPageAutomation?.jobId ?? "",
+      status: item?.detailPageAutomation?.status ?? "idle",
+      stage: item?.detailPageAutomation?.stage ?? "",
+      message: item?.detailPageAutomation?.message ?? "",
+      progress: Math.min(100, Math.max(0, Number(item?.detailPageAutomation?.progress) || 0)),
+      qaStatus: item?.detailPageAutomation?.qaStatus ?? "pending",
+      sourceUrl: item?.detailPageAutomation?.sourceUrl ?? "",
+      attempt: Math.max(0, Number(item?.detailPageAutomation?.attempt) || 0),
+      queuedAt: item?.detailPageAutomation?.queuedAt ?? null,
+      startedAt: item?.detailPageAutomation?.startedAt ?? null,
+      completedAt: item?.detailPageAutomation?.completedAt ?? null,
+      error: item?.detailPageAutomation?.error ?? "",
     },
     shoplingProducts: normalizeShoplingProducts(item?.shoplingProducts, item?.goodsKey),
     stages: Object.fromEntries(
@@ -295,6 +310,7 @@ export function createLaunchItem(input, idFactory = () => crypto.randomUUID()) {
     stages: input.stages,
     chinaOrderLink: input.chinaOrderLink,
     detailPageAsset: input.detailPageAsset,
+    detailPageAutomation: input.detailPageAutomation,
     shoplingProducts: input.shoplingProducts,
   });
 }
