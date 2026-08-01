@@ -12,9 +12,11 @@ type OperationRun = {
   created_at: string;
 };
 
+type DataSourceStatus = "FRESH" | "STALE" | "MISSING" | "FAILED";
+
 type DataSourceHealth = {
   source_key: string;
-  status: "FRESH" | "STALE" | "MISSING" | "FAILED";
+  status: DataSourceStatus;
   generated_at: string | null;
   received_at: string;
   max_age_minutes: number;
@@ -38,7 +40,7 @@ export type OperationsDashboardData = {
   runs: OperationRun[];
   sources: Array<
     DataSourceHealth & {
-      effectiveStatus: "FRESH" | "STALE" | "MISSING" | "FAILED";
+      effectiveStatus: DataSourceStatus;
       ageMinutes: number | null;
     }
   >;
@@ -96,7 +98,7 @@ export async function loadOperationsDashboard(
       : null;
     const expired =
       ageMinutes === null || ageMinutes > Math.max(1, source.max_age_minutes);
-    const effectiveStatus =
+    const effectiveStatus: DataSourceStatus =
       source.status === "FAILED"
         ? "FAILED"
         : source.status === "MISSING"
