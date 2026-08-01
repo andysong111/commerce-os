@@ -4,9 +4,13 @@ on:
   pull_request:
     paths:
       - 'src/app/api/integrations/receipt-automation/**'
+      - 'src/app/operations/**'
       - 'src/lib/receiptAutomationControl.ts'
+      - 'src/lib/commerceOperationsDashboard.ts'
+      - 'src/lib/extendedModuleRegistry.ts'
       - 'supabase/migrations/202608020001_receipt_automation_control.sql'
       - 'tests/receiptAutomationControl.test.mjs'
+      - 'tests/operationsDashboard.test.mjs'
       - '.github/workflows/receipt-automation-control-ci.yml'
 
 jobs:
@@ -20,7 +24,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: Run receipt automation contract tests
-        run: node --experimental-strip-types --test tests/receiptAutomationControl.test.mjs
+      - name: Run operations safety contract tests
+        run: node --experimental-strip-types --test tests/receiptAutomationControl.test.mjs tests/operationsDashboard.test.mjs
       - name: Build Ops Center
         run: npm run build
