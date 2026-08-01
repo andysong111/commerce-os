@@ -37,3 +37,4 @@ jobs:
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/shoplingCategoryRunStatus.test.mjs
           tests/shoplingCategoryLocalUpdate.test.mjs
+          tests/shoplingCategorySupabaseStore.test.mjs
