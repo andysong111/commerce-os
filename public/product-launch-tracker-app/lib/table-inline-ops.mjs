@@ -1,0 +1,92 @@
+export const TABLE_COLUMN_DEFINITIONS = [
+  { key: "select", label: "선택", movable: false },
+  { key: "workBatch", label: "작업 묶음" },
+  { key: "barcode", label: "기준 바코드" },
+  { key: "modelNumber", label: "모델번호" },
+  { key: "productName", label: "모델명" },
+  { key: "shoplingCategory", label: "샵플링 표준 카테고리" },
+  { key: "options", label: "옵션" },
+  { key: "readiness", label: "등록 준비" },
+  { key: "detailPage", label: "상세페이지" },
+  { key: "priceKeyword", label: "가격·키워드" },
+  { key: "shoplingUpload", label: "샵플링 업로드" },
+  { key: "marketRegistration", label: "마켓 등록" },
+  { key: "orderMapping", label: "주문 매핑" },
+  { key: "inventoryReflection", label: "재고 반영" },
+  { key: "nextStage", label: "다음 작업" },
+  { key: "manage", label: "관리" },
+];
+
+export const DEFAULT_TABLE_COLUMN_ORDER = TABLE_COLUMN_DEFINITIONS.map(
+  (column) => column.key,
+);
+
+export function normalizeColumnOrder(value) {
+  const source = Array.isArray(value) ? value.map(String) : [];
+  const allowed = new Set(DEFAULT_TABLE_COLUMN_ORDER);
+  const unique = [];
+  for (const key of source) {
+    if (allowed.has(key) && !unique.includes(key)) unique.push(key);
+  }
+  for (const key of DEFAULT_TABLE_COLUMN_ORDER) {
+    if (!unique.includes(key)) unique.push(key);
+  }
+  const withoutSelect = unique.filter((key) => key !== "select");
+  return ["select", ...withoutSelect];
+}
+
+export function moveColumn(orderInput, sourceKey, targetKey) {
+  const order = normalizeColumnOrder(orderInput);
+  if (
+    sourceKey === "select" ||
+    sourceKey === targetKey ||
+    !order.includes(sourceKey) ||
+    !order.includes(targetKey)
+  ) {
+    return order;
+  }
+  const next = order.filter((key) => key !== sourceKey);
+  const targetIndex = next.indexOf(targetKey);
+  next.splice(targetIndex, 0, sourceKey);
+  return normalizeColumnOrder(next);
+}
+
+export function frozenColumnKeys(orderInput, frozenThrough) {
+  const order = normalizeColumnOrder(orderInput);
+  if (!frozenThrough || !order.includes(frozenThrough)) return [];
+  return order.slice(0, order.indexOf(frozenThrough) + 1);
+}
+
+export function parseInlineOptionLabels(value, maximum = 50) {
+  const labels = String(value ?? "")
+    .split(/[,\n]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return [...new Set(labels)].slice(0, maximum);
+}
+
+export function applyInlineOptionLabels(existingValue, labelsValue) {
+  const existing = Array.isArray(existingValue)
+    ? existingValue.filter((entry) => entry && typeof entry === "object")
+    : [];
+  const labels = Array.isArray(labelsValue)
+    ? labelsValue.map((entry) => String(entry).trim()).filter(Boolean)
+    : parseInlineOptionLabels(labelsValue);
+  return labels.map((saleOption, index) => ({
+    ...(existing[index] ?? {}),
+    id: String(existing[index]?.id ?? `inline-option-${index + 1}`),
+    optionName: String(existing[index]?.optionName ?? "옵션").trim() || "옵션",
+    saleOption,
+    chinaOption: String(existing[index]?.chinaOption ?? "").trim(),
+    barcode: String(existing[index]?.barcode ?? "").trim().toUpperCase(),
+    baseSalePriceKrw: Math.max(
+      0,
+      Math.ceil(Number(existing[index]?.baseSalePriceKrw) || 0),
+    ),
+    unitCostKrw: Math.max(
+      0,
+      Math.ceil(Number(existing[index]?.unitCostKrw) || 0),
+    ),
+    sourceOrderItemId: existing[index]?.sourceOrderItemId ?? null,
+  }));
+}
