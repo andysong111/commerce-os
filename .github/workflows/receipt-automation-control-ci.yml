@@ -7,6 +7,8 @@ on:
       - 'src/app/operations/**'
       - 'src/lib/receiptAutomationControl.ts'
       - 'src/lib/commerceOperationsDashboard.ts'
+      - 'src/lib/commerceDataSourceHealth.ts'
+      - 'src/lib/priceAdjustmentSalesCache.ts'
       - 'src/lib/extendedModuleRegistry.ts'
       - 'supabase/migrations/202608020001_receipt_automation_control.sql'
       - 'tests/receiptAutomationControl.test.mjs'
