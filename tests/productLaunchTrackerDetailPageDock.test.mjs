@@ -144,7 +144,7 @@ test("Chrome local network permission is delegated through both nested detail-pa
     dockSource,
     /activeFrame\.allow = "local-network; loopback-network; local-network-access"/,
   );
-  assert.match(dockSource, /targetAddressSpace: "local"/);
+  assert.match(dockSource, /targetAddressSpace: "loopback"/);
   assert.match(dockSource, /Chrome 주소창 왼쪽 사이트 설정/);
   assert.match(nextConfig, /Permissions-Policy/);
   assert.match(nextConfig, /local-network=/);
