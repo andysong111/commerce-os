@@ -8,6 +8,7 @@ on:
       - 'src/app/api/shopling-categories/**'
       - 'src/components/AppShell.tsx'
       - 'src/components/OpsCategoryUpdateCancelControl.tsx'
+      - 'src/components/OpsLocalCategoryStatusBridge.tsx'
       - 'src/components/OpsWorkAssistant.tsx'
       - 'src/lib/productLaunchTracker*.ts'
       - 'src/lib/shoplingCategory*.ts'
@@ -35,3 +36,4 @@ jobs:
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/shoplingCategoryRunStatus.test.mjs
+          tests/shoplingCategoryLocalUpdate.test.mjs

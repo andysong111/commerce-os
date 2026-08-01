@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 import { OpsAiHelpDesk } from "@/components/OpsAiHelpDesk";
 import { OpsCategoryUpdateCancelControl } from "@/components/OpsCategoryUpdateCancelControl";
+import { OpsLocalCategoryStatusBridge } from "@/components/OpsLocalCategoryStatusBridge";
 import { OpsRetryPrefill } from "@/components/OpsRetryPrefill";
 import { OpsWorkAssistant } from "@/components/OpsWorkAssistant";
 import { Sidebar } from "@/components/Sidebar";
@@ -27,6 +28,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       <OpsAiHelpDesk />
       {loginDisabled || user ? (
         <>
+          <OpsLocalCategoryStatusBridge />
           <OpsWorkAssistant />
           <OpsCategoryUpdateCancelControl />
         </>
