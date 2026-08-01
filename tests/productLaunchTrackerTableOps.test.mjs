@@ -76,6 +76,13 @@ test("진행관리 표 UI는 직접입력·열 드래그·열 고정·선택 일
     ),
     "utf8",
   );
+  const loader = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/table-inline-ops-loader.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   const app = await readFile(
     new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
     "utf8",
@@ -87,5 +94,7 @@ test("진행관리 표 UI는 직접입력·열 드래그·열 고정·선택 일
   assert.match(source, /bulk-china-order-sync-button/);
   assert.match(source, /china-order-options\?/);
   assert.match(source, /TRACKER_STATE_ENDPOINT/);
-  assert.match(app, /table-inline-ops\.js/);
+  assert.match(loader, /safeObserver\.disconnect/);
+  assert.match(loader, /dispatchEvent\(new Event\("resize"\)\)/);
+  assert.match(app, /table-inline-ops-loader\.js/);
 });
