@@ -126,3 +126,26 @@ test("로컬 결과는 운영자 인증 후 Supabase 서버 저장 경로로 전
   assert.match(store, /product_launch_tracker_states/);
   assert.match(store, /resolution=merge-duplicates/);
 });
+
+test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 저장을 재시도한다", async () => {
+  const app = await readFile(
+    new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
+    "utf8",
+  );
+  const recovery = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-local-result-recovery.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.ok(
+    app.indexOf("category-local-result-recovery.js") >
+      app.indexOf("category-local-update.js"),
+  );
+  assert.match(recovery, /resultReady/);
+  assert.match(recovery, /category-update\/result/);
+  assert.match(recovery, /shopling-categories\/local-result/);
+  assert.match(recovery, /재수집 없이 결과 저장 중/);
+  assert.match(recovery, /targetAddressSpace: "loopback"/);
+});
