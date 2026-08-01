@@ -1,6 +1,6 @@
-type UnknownRecord = Record<string, unknown>;
+type R = Record<string, unknown>;
 
-type ProductMasterProduct = {
+type Product = {
   id: string;
   modelNo: string;
   productNameKo: string;
@@ -15,7 +15,7 @@ type ProductMasterProduct = {
   memo?: string | null;
 };
 
-type ProductMasterSku = {
+type Sku = {
   id: string;
   productId: string;
   barcode: string;
@@ -33,7 +33,7 @@ type ProductMasterSku = {
   active: boolean;
 };
 
-type ProductMasterListing = {
+type Listing = {
   id: string;
   skuId: string;
   goodsKey?: string | null;
@@ -46,7 +46,7 @@ type ProductMasterListing = {
   syncedAt?: string | null;
 };
 
-type ProductMasterReceiptCost = {
+type ReceiptCost = {
   id: string;
   skuId: string;
   quantity: number;
@@ -57,12 +57,12 @@ type ProductMasterReceiptCost = {
 };
 
 export type ProductMasterSnapshotPayload = {
-  products: ProductMasterProduct[];
-  skus: ProductMasterSku[];
-  listingMappings: ProductMasterListing[];
+  products: Product[];
+  skus: Sku[];
+  listingMappings: Listing[];
   inventoryMovements: never[];
   salesMonthly: never[];
-  receiptCosts: ProductMasterReceiptCost[];
+  receiptCosts: ReceiptCost[];
   decisions: never[];
 };
 
@@ -75,9 +75,8 @@ export type ProductMasterSyncBuildResult = {
   };
 };
 
-const DEFAULT_PRODUCT_MASTER_URL =
-  "https://commerce-os-product-master.vercel.app";
-const CHANNEL_LABELS: Record<string, string> = {
+const PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
+const CHANNELS: Record<string, string> = {
   wholesale1: "도매1",
   wholesale2: "도매2",
   wholesale3: "도매3",
@@ -85,134 +84,127 @@ const CHANNEL_LABELS: Record<string, string> = {
   retail1: "소매1",
   retail2: "소매2",
 };
-const COMPLETED_STAGE_STATUSES = new Set(["완료", "제외"]);
-const MAX_BATCH_SIZE = 500;
+const COMPLETED = new Set(["완료", "제외"]);
+const BATCH_SIZE = 500;
 
 export function buildProductMasterSnapshotFromTrackerState(
   input: unknown,
 ): ProductMasterSyncBuildResult {
-  const state = record(input);
-  const items = array(state.items).map(record);
-  const products = new Map<string, ProductMasterProduct>();
-  const skus = new Map<string, ProductMasterSku>();
-  const listingMappings = new Map<string, ProductMasterListing>();
+  const state = object(input);
+  const products = new Map<string, Product>();
+  const skus = new Map<string, Sku>();
+  const listings = new Map<string, Listing>();
   const skipped = {
     missingModelNumber: 0,
     missingBarcode: 0,
     receiptWithoutSku: 0,
   };
 
-  for (const item of items) {
-    const modelNo = normalizeModelNumber(item.modelNumber);
+  for (const rawItem of list(state.items)) {
+    const item = object(rawItem);
+    const modelNo = normalized(item.modelNumber);
     const productName = text(item.productName);
     if (!modelNo) {
       skipped.missingModelNumber += 1;
       continue;
     }
 
-    const productId = stableId("product", modelNo);
+    const productId = id("product", modelNo);
     const archived = Boolean(item.archivedAt);
-    const status = productStatus(item, archived);
-    const image = record(item.detailPageAsset);
-    const supplierUrl = primarySupplierUrl(item);
+    const asset = object(item.detailPageAsset);
     products.set(productId, {
       id: productId,
       modelNo,
       productNameKo: productName || modelNo,
-      productNameCn: nullableText(item.productNameCn),
-      category: nullableText(item.shoplingCategory),
-      status,
-      mainImageUrl: nullableText(image.mainImageUrl),
+      productNameCn: optional(item.productNameCn),
+      category: optional(item.shoplingCategory),
+      status: productStatus(item, archived),
+      mainImageUrl: optional(asset.mainImageUrl),
       origin: "MADE IN CHINA",
-      hsCode: nullableText(item.hsCode),
+      hsCode: optional(item.hsCode),
       isSeasonal: Boolean(item.isSeasonal),
       isStrategic: Boolean(item.isStrategic),
-      memo: nullableText(item.notes),
+      memo: optional(item.notes),
     });
 
-    const orderOptions = normalizedOrderOptions(item);
-    const rowBarcode = normalizeBarcode(item.barcode || item.warehouseLocation);
-    for (let index = 0; index < orderOptions.length; index += 1) {
-      const option = orderOptions[index];
+    const options = orderOptions(item);
+    const rowBarcode = normalized(item.barcode || item.warehouseLocation);
+    for (const [index, rawOption] of options.entries()) {
+      const option = object(rawOption);
       const barcode =
-        normalizeBarcode(option.barcode) ||
-        (orderOptions.length === 1 ? rowBarcode : "");
+        normalized(option.barcode) || (options.length === 1 ? rowBarcode : "");
       if (!barcode) {
         skipped.missingBarcode += 1;
         continue;
       }
-      const skuId = stableId("sku", barcode);
-      const optionName = text(option.saleOption) || text(option.optionName) || "단품";
+
+      const skuId = id("sku", barcode);
+      const optionName =
+        text(option.saleOption) || text(option.optionName) || `옵션 ${index + 1}`;
       skus.set(skuId, {
         id: skuId,
         productId,
         barcode,
         optionName,
-        chinaOptionName: nullableText(option.chinaOption),
-        optionImageUrl: nullableText(option.optionImageUrl),
-        labelText: nullableText(item.labelText),
-        packagingGrade: boundedInteger(item.packagingGrade, 1, 5, 3),
-        moq: positiveInteger(option.moq ?? item.moq, 1),
-        cartonQuantity: positiveInteger(
+        chinaOptionName: optional(option.chinaOption),
+        optionImageUrl: optional(option.optionImageUrl),
+        labelText: optional(item.labelText),
+        packagingGrade: bounded(item.packagingGrade, 1, 5, 3),
+        moq: positive(option.moq ?? item.moq, 1),
+        cartonQuantity: positive(
           option.cartonQuantity ?? item.cartonQuantity,
           1,
         ),
-        supplierUrl: supplierUrl || null,
-        leadTimeDays: nonNegativeInteger(item.leadTimeDays, 14),
-        targetStockDays: nonNegativeInteger(item.targetStockDays, 30),
-        memo: nullableText(item.notes),
+        supplierUrl: supplierUrl(item),
+        leadTimeDays: nonNegative(item.leadTimeDays, 14),
+        targetStockDays: nonNegative(item.targetStockDays, 30),
+        memo: optional(item.notes),
         active: !archived,
       });
 
-      const shoplingProducts = record(item.shoplingProducts);
-      for (const [channelKey, channelLabel] of Object.entries(CHANNEL_LABELS)) {
-        const channel = record(shoplingProducts[channelKey]);
+      const shopling = object(item.shoplingProducts);
+      for (const [channelKey, channelName] of Object.entries(CHANNELS)) {
+        const channel = object(shopling[channelKey]);
         const goodsKey = text(channel.goodsKey);
         if (!goodsKey) continue;
-        const mappingId = stableId(
-          "listing",
-          `${barcode}:${channelKey}:${goodsKey}`,
-        );
-        listingMappings.set(mappingId, {
+        const mappingId = id("listing", `${barcode}:${channelKey}:${goodsKey}`);
+        listings.set(mappingId, {
           id: mappingId,
           skuId,
           goodsKey,
-          optionId: nullableText(option.optionId),
-          channel: channelLabel,
+          optionId: optional(option.optionId),
+          channel: channelName,
           listingName: productName || modelNo,
           listingOptionName: optionName,
           unitsPerOrder: inferUnitsPerOrder(optionName),
           active: !archived,
           syncedAt:
-            validIso(channel.registeredAt) ||
-            validIso(item.updatedAt) ||
-            new Date().toISOString(),
+            iso(channel.registeredAt) || iso(item.updatedAt) || new Date().toISOString(),
         });
       }
     }
   }
 
-  const receiptCosts: ProductMasterReceiptCost[] = [];
-  const receiptCache = record(state.priceAdjustmentReceiptCache);
-  const receiptsByBarcode = record(receiptCache.receiptsByBarcode);
+  const receiptCosts: ReceiptCost[] = [];
+  const cache = object(state.priceAdjustmentReceiptCache);
+  const byBarcode = object(cache.receiptsByBarcode);
   const skuByBarcode = new Map(
-    [...skus.values()].map((sku) => [normalizeBarcode(sku.barcode), sku]),
+    [...skus.values()].map((sku) => [normalized(sku.barcode), sku]),
   );
-  for (const [rawBarcode, rawRows] of Object.entries(receiptsByBarcode)) {
-    const barcode = normalizeBarcode(rawBarcode);
-    const sku = skuByBarcode.get(barcode);
+  for (const [rawBarcode, rawRows] of Object.entries(byBarcode)) {
+    const sku = skuByBarcode.get(normalized(rawBarcode));
     if (!sku) {
-      skipped.receiptWithoutSku += array(rawRows).length;
+      skipped.receiptWithoutSku += list(rawRows).length;
       continue;
     }
-    for (const rawRow of array(rawRows)) {
-      const row = record(rawRow);
+    for (const rawRow of list(rawRows)) {
+      const row = object(rawRow);
       const sourceId = text(row.id) || text(row.externalId);
-      const receivedAt = validIso(row.receivedAt);
-      const unitCostKrw = nonNegativeInteger(row.unitCostKrw, 0);
+      const receivedAt = iso(row.receivedAt);
+      const unitCostKrw = nonNegative(row.unitCostKrw, 0);
       if (!sourceId || !receivedAt || unitCostKrw <= 0) continue;
       receiptCosts.push({
-        id: stableId("receipt", sourceId),
+        id: id("receipt", sourceId),
         skuId: sku.id,
         quantity: nonNegativeNumber(row.quantity, 0),
         unitCostKrw,
@@ -227,7 +219,7 @@ export function buildProductMasterSnapshotFromTrackerState(
     payload: {
       products: [...products.values()],
       skus: [...skus.values()],
-      listingMappings: [...listingMappings.values()],
+      listingMappings: [...listings.values()],
       inventoryMovements: [],
       salesMonthly: [],
       receiptCosts,
@@ -240,26 +232,22 @@ export function buildProductMasterSnapshotFromTrackerState(
 export async function pushProductMasterSnapshotFromTrackerState(input: unknown) {
   const secret = process.env.PRODUCT_MASTER_INTEGRATION_SECRET?.trim();
   if (!secret) throw new Error("PRODUCT_MASTER_INTEGRATION_SECRET_MISSING");
-  const baseUrl = (
-    process.env.PRODUCT_MASTER_BASE_URL || DEFAULT_PRODUCT_MASTER_URL
-  )
+  const baseUrl = (process.env.PRODUCT_MASTER_BASE_URL || PRODUCT_MASTER_URL)
     .trim()
     .replace(/\/$/, "");
   const built = buildProductMasterSnapshotFromTrackerState(input);
   const counts: Record<string, number> = {};
-  const orderedEntries: Array<
-    [keyof ProductMasterSnapshotPayload, unknown[]]
-  > = [
+  const groups: Array<[keyof ProductMasterSnapshotPayload, unknown[]]> = [
     ["products", built.payload.products],
     ["skus", built.payload.skus],
     ["listingMappings", built.payload.listingMappings],
     ["receiptCosts", built.payload.receiptCosts],
   ];
 
-  for (const [key, rows] of orderedEntries) {
+  for (const [key, rows] of groups) {
     counts[key] = 0;
-    for (let index = 0; index < rows.length; index += MAX_BATCH_SIZE) {
-      const batch = rows.slice(index, index + MAX_BATCH_SIZE);
+    for (let index = 0; index < rows.length; index += BATCH_SIZE) {
+      const batch = rows.slice(index, index + BATCH_SIZE);
       const response = await fetch(`${baseUrl}/api/integrations/snapshots`, {
         method: "POST",
         headers: {
@@ -270,10 +258,10 @@ export async function pushProductMasterSnapshotFromTrackerState(input: unknown) 
         cache: "no-store",
         signal: AbortSignal.timeout(30_000),
       });
-      const body = await readResponse(response);
+      const responseBody = await read(response);
       if (!response.ok) {
         throw new Error(
-          `PRODUCT_MASTER_SYNC_FAILED:${key}:${response.status}:${errorText(body)}`,
+          `PRODUCT_MASTER_SYNC_FAILED:${key}:${response.status}:${message(responseBody)}`,
         );
       }
       counts[key] += batch.length;
@@ -284,38 +272,32 @@ export async function pushProductMasterSnapshotFromTrackerState(input: unknown) 
     baseUrl,
     counts,
     skipped: built.skipped,
-    total:
-      built.payload.products.length +
-      built.payload.skus.length +
-      built.payload.listingMappings.length +
-      built.payload.receiptCosts.length,
+    total: groups.reduce((sum, [, rows]) => sum + rows.length, 0),
   };
 }
 
 export function inferUnitsPerOrder(value: unknown) {
-  const optionName = text(value).normalize("NFKC");
-  if (!optionName) return 1;
-  if (/(^|[\s,/+_-])(단품|낱개|1\s*개)(?=$|[\s,/+_-])/i.test(optionName)) {
+  const name = text(value).normalize("NFKC");
+  if (!name) return 1;
+  if (/(^|[\s,/+_-])(단품|낱개|1\s*개)(?=$|[\s,/+_-])/i.test(name)) {
     return 1;
   }
-  const direct = optionName.match(
-    /(?:^|[\s,/+_-])(\d{1,4})\s*(개|매|입|P|PCS|EA)\s*(?:세트|SET|묶음|팩|PACK|포장|구성|들이)?(?=$|[\s,/+_-])/i,
-  );
-  if (direct) return boundedInteger(direct[1], 1, 10_000, 1);
-  const attached = optionName.match(
-    /(\d{1,4})\s*(개|매|입|P|PCS|EA)\s*(세트|SET|묶음|팩|PACK|포장|구성|들이)/i,
-  );
-  if (attached) return boundedInteger(attached[1], 1, 10_000, 1);
-  const prefixed = optionName.match(
+  const patterns = [
+    /(?:^|[\s,/+_-])(\d{1,4})\s*(?:개|매|입|P|PCS|EA)\s*(?:세트|SET|묶음|팩|PACK|포장|구성|들이)?(?=$|[\s,/+_-])/i,
+    /(\d{1,4})\s*(?:개|매|입|P|PCS|EA)\s*(?:세트|SET|묶음|팩|PACK|포장|구성|들이)/i,
     /(?:세트|SET|묶음|팩|PACK|포장|구성)\s*(\d{1,4})\s*(?:개|매|입|P|PCS|EA)?/i,
-  );
-  return prefixed ? boundedInteger(prefixed[1], 1, 10_000, 1) : 1;
+  ];
+  for (const pattern of patterns) {
+    const matched = name.match(pattern);
+    if (matched) return bounded(matched[1], 1, 10_000, 1);
+  }
+  return 1;
 }
 
-function normalizedOrderOptions(item: UnknownRecord) {
-  const options = array(item.orderOptions).map(record);
-  if (options.length) return options;
-  const legacy = array(item.options).map((value, index) => ({
+function orderOptions(item: R): R[] {
+  const current = list(item.orderOptions).map(object);
+  if (current.length) return current;
+  const legacy = list(item.options).map((value, index) => ({
     id: `legacy-${index + 1}`,
     saleOption: text(value),
   }));
@@ -329,106 +311,81 @@ function normalizedOrderOptions(item: UnknownRecord) {
   ];
 }
 
-function productStatus(
-  item: UnknownRecord,
-  archived: boolean,
-): ProductMasterProduct["status"] {
+function productStatus(item: R, archived: boolean): Product["status"] {
   if (archived) return "PAUSED";
-  const stages = record(item.stages);
-  const values = Object.values(stages).map((value) =>
-    text(record(value).status),
+  const statuses = Object.values(object(item.stages)).map((value) =>
+    text(object(value).status),
   );
-  return values.length > 0 && values.every((value) => COMPLETED_STAGE_STATUSES.has(value))
+  return statuses.length && statuses.every((status) => COMPLETED.has(status))
     ? "ACTIVE"
     : "LAUNCHING";
 }
 
-function primarySupplierUrl(item: UnknownRecord) {
+function supplierUrl(item: R) {
   const primary = text(item.primaryChinaProductLink);
   if (primary) return primary;
-  const links = array(item.chinaProductLinks).map(text).filter(Boolean);
-  if (links[0]) return links[0];
-  const source = record(item.detailPageSource);
-  return text(source.primaryUrl) || null;
+  const candidate = list(item.chinaProductLinks).map(text).find(Boolean);
+  if (candidate) return candidate;
+  return optional(object(item.detailPageSource).primaryUrl);
 }
 
-function normalizeModelNumber(value: unknown) {
-  return text(value).normalize("NFKC").replace(/\s+/g, "").toUpperCase();
-}
-
-function normalizeBarcode(value: unknown) {
-  return text(value).normalize("NFKC").toUpperCase();
-}
-
-function stableId(prefix: string, value: string) {
-  return `${prefix}:${encodeURIComponent(value.normalize("NFKC").trim().toUpperCase())}`;
-}
-
-function record(value: unknown): UnknownRecord {
+function object(value: unknown): R {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as UnknownRecord)
+    ? (value as R)
     : {};
 }
-
-function array(value: unknown): unknown[] {
+function list(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
-
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
-
-function nullableText(value: unknown) {
-  const result = text(value);
-  return result || null;
+function optional(value: unknown) {
+  return text(value) || null;
 }
-
-function positiveInteger(value: unknown, fallback: number) {
-  const result = Math.round(Number(value));
-  return Number.isFinite(result) && result >= 1 ? result : fallback;
+function normalized(value: unknown) {
+  return text(value).normalize("NFKC").replace(/\s+/g, "").toUpperCase();
 }
-
-function nonNegativeInteger(value: unknown, fallback: number) {
-  const result = Math.round(Number(value));
-  return Number.isFinite(result) && result >= 0 ? result : fallback;
+function id(prefix: string, value: string) {
+  return `${prefix}:${encodeURIComponent(normalized(value))}`;
 }
-
+function positive(value: unknown, fallback: number) {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
+}
+function nonNegative(value: unknown, fallback: number) {
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
 function nonNegativeNumber(value: unknown, fallback: number) {
-  const result = Number(value);
-  return Number.isFinite(result) && result >= 0 ? result : fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
-
-function boundedInteger(
+function bounded(
   value: unknown,
   minimum: number,
   maximum: number,
   fallback: number,
 ) {
-  const result = Math.round(Number(value));
-  return Number.isFinite(result) && result >= minimum && result <= maximum
-    ? result
+  const parsed = Math.round(Number(value));
+  return Number.isFinite(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
     : fallback;
 }
-
-function validIso(value: unknown) {
-  const result = text(value);
-  return result && Number.isFinite(Date.parse(result)) ? result : null;
+function iso(value: unknown) {
+  const candidate = text(value);
+  return candidate && Number.isFinite(Date.parse(candidate)) ? candidate : null;
 }
-
-async function readResponse(response: Response) {
-  const textBody = await response.text();
-  if (!textBody) return null;
+async function read(response: Response) {
+  const body = await response.text();
+  if (!body) return null;
   try {
-    return JSON.parse(textBody) as unknown;
+    return JSON.parse(body) as unknown;
   } catch {
-    return textBody;
+    return body;
   }
 }
-
-function errorText(value: unknown) {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const candidate = value as { message?: unknown; error?: unknown };
-    return text(candidate.message) || text(candidate.error) || "unknown error";
-  }
-  return text(value) || "unknown error";
+function message(value: unknown) {
+  const row = object(value);
+  return text(row.message) || text(row.error) || text(value) || "unknown error";
 }
