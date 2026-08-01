@@ -15,13 +15,16 @@ test("stores purchase drafts in the existing tracker state with idempotent run k
   assert.match(queue, /writeProductLaunchState/);
 });
 
-test("separates producer and consumer integration secrets", async () => {
+test("separates producer and consumer integration secrets with deployed fallbacks", async () => {
   const [push, pending, ack] = await Promise.all([
     source("../src/app/api/integrations/purchase-plan-draft-queue/push/route.ts"),
     source("../src/app/api/integrations/purchase-plan-draft-queue/pending/route.ts"),
     source("../src/app/api/integrations/purchase-plan-draft-queue/ack/route.ts"),
   ]);
+  assert.match(push, /PRODUCT_DECISION_TO_CHINA_ORDER_SECRET/);
   assert.match(push, /PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET/);
+  assert.match(push, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
+  assert.match(push, /SYNC_JOB_SECRET/);
   assert.match(pending, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
   assert.match(ack, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
   assert.match(push, /x-commerce-os-integration-secret/);
