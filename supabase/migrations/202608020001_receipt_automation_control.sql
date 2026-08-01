@@ -66,6 +66,16 @@ create table if not exists public.commerce_data_source_health (
   updated_at timestamptz not null default now()
 );
 
+insert into public.commerce_data_source_health(
+  source_key,status,generated_at,received_at,max_age_minutes,details,updated_at
+) values
+  ('sales_orders','MISSING',null,now(),1440,'{"requiredFor":["purchase_plan","price_decrease","discontinue_review"]}'::jsonb,now()),
+  ('confirmed_receipts','MISSING',null,now(),5,'{"requiredFor":["price_analysis"]}'::jsonb,now()),
+  ('product_mappings','MISSING',null,now(),1440,'{"requiredFor":["shopling_price_execution"]}'::jsonb,now()),
+  ('estimated_inventory','MISSING',null,now(),1440,'{"requiredFor":["purchase_plan"]}'::jsonb,now()),
+  ('price_recommendations','MISSING',null,now(),1440,'{"requiredFor":["shopling_price_execution"]}'::jsonb,now())
+on conflict (source_key) do nothing;
+
 create or replace function public.set_commerce_operation_updated_at()
 returns trigger
 language plpgsql
@@ -82,6 +92,63 @@ create trigger commerce_operation_runs_set_updated_at
 before update on public.commerce_operation_runs
 for each row execute function public.set_commerce_operation_updated_at();
 
+create or replace function public.audit_shopling_price_adjustment_job_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.status is distinct from new.status then
+    insert into public.commerce_audit_logs(
+      operation_run_id,
+      correlation_id,
+      actor_type,
+      actor_id,
+      action,
+      entity_type,
+      entity_id,
+      before_snapshot,
+      after_snapshot,
+      metadata,
+      occurred_at
+    ) values (
+      null,
+      new.id::text,
+      'OPS_OPERATOR',
+      new.owner_id::text,
+      'shopling_price_adjustment.status_changed',
+      'shopling_price_adjustment_bulk_job',
+      new.id::text,
+      jsonb_build_object(
+        'status', old.status,
+        'lastError', old.last_error,
+        'updatedAt', old.updated_at
+      ),
+      jsonb_build_object(
+        'status', new.status,
+        'lastError', new.last_error,
+        'updatedAt', new.updated_at,
+        'completedAt', new.completed_at
+      ),
+      jsonb_build_object(
+        'validCount', new.valid_count,
+        'canarySize', new.canary_size,
+        'chunkSize', new.chunk_size
+      ),
+      now()
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists audit_shopling_price_adjustment_job_status
+  on public.shopling_price_adjustment_bulk_jobs;
+create trigger audit_shopling_price_adjustment_job_status
+after update of status on public.shopling_price_adjustment_bulk_jobs
+for each row execute function public.audit_shopling_price_adjustment_job_status();
+
 alter table public.commerce_operation_runs enable row level security;
 alter table public.commerce_processed_events enable row level security;
 alter table public.commerce_audit_logs enable row level security;
@@ -92,7 +159,7 @@ comment on table public.commerce_operation_runs is
 comment on table public.commerce_processed_events is
   'Idempotency ledger for integration events.';
 comment on table public.commerce_audit_logs is
-  'Immutable audit trail for critical Commerce OS actions.';
+  'Immutable audit trail for critical Commerce OS actions and price job transitions.';
 comment on table public.commerce_data_source_health is
   'Freshness and failure status for sales, receipts, products, inventory and recommendations.';
 
