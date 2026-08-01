@@ -3,8 +3,11 @@
 import { useEffect } from "react";
 
 const CATEGORY_CANCEL_API = "/api/shopling-categories/cancel";
+const DEFAULT_LOCAL_CATEGORY_BASE = "http://127.0.0.1:8776";
 const CATEGORY_SESSION_KEY = "commerce-os:shopling-category-update:v1";
 const CATEGORY_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
+const CATEGORY_CANCEL_GUARD_KEY =
+  "commerce-os:shopling-category-update-cancel-guard:v1";
 const CATEGORY_EVENT_SOURCE = "commerce-os-category-update";
 const BUTTON_ID = "shopling-category-global-cancel-button";
 
@@ -14,6 +17,8 @@ type CategoryTask = {
   startedAt?: string;
   tone?: string;
   status?: string;
+  mode?: string;
+  localBase?: string;
 };
 
 function readJson<T>(key: string): T | null {
@@ -25,9 +30,10 @@ function readJson<T>(key: string): T | null {
   }
 }
 
-function clearCategoryProgress() {
+function clearCategoryProgress(localMode = false) {
   window.localStorage.removeItem(CATEGORY_SESSION_KEY);
   window.localStorage.removeItem(CATEGORY_TASK_KEY);
+  window.localStorage.removeItem(CATEGORY_CANCEL_GUARD_KEY);
   window.postMessage(
     {
       source: CATEGORY_EVENT_SOURCE,
@@ -41,7 +47,9 @@ function clearCategoryProgress() {
       frame.contentWindow?.postMessage(
         {
           source: "commerce-os-work-assistant",
-          type: "category-update-cancelled",
+          type: localMode
+            ? "category-local-update-cancel"
+            : "category-update-cancelled",
           message: "사용자가 샵플링 카테고리 업데이트를 취소했습니다.",
         },
         window.location.origin,
@@ -50,6 +58,38 @@ function clearCategoryProgress() {
       // A cross-origin iframe cannot receive the local OPS message.
     }
   }
+}
+
+async function cancelLocalCategory(
+  task: CategoryTask,
+  session: CategoryTask,
+) {
+  const localBase =
+    session.localBase || task.localBase || DEFAULT_LOCAL_CATEGORY_BASE;
+  const init = {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      requestId: session.requestId || task.requestId || "",
+    }),
+    cache: "no-store",
+    targetAddressSpace: "loopback",
+  } as RequestInit & { targetAddressSpace: "loopback" };
+  const response = await fetch(`${localBase}/category-update/cancel`, init);
+  const body = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    message?: string;
+  };
+  if (!response.ok || body.ok !== true) {
+    throw new Error(
+      body.message ||
+        "로컬 카테고리 실행기에 취소 요청을 전달하지 못했습니다.",
+    );
+  }
+  return body.message || "로컬 샵플링 카테고리 업데이트를 취소했습니다.";
 }
 
 export function OpsCategoryUpdateCancelControl() {
@@ -67,11 +107,19 @@ export function OpsCategoryUpdateCancelControl() {
       }
       const task = readJson<CategoryTask>(CATEGORY_TASK_KEY) ?? {};
       const session = readJson<CategoryTask>(CATEGORY_SESSION_KEY) ?? {};
+      const localMode = task.mode === "local" || session.mode === "local";
       busy = true;
       const previous = button.textContent;
       button.disabled = true;
       button.textContent = "취소 중...";
       try {
+        if (localMode) {
+          const message = await cancelLocalCategory(task, session);
+          clearCategoryProgress(true);
+          window.alert(message);
+          return;
+        }
+
         const response = await fetch(CATEGORY_CANCEL_API, {
           method: "POST",
           headers: {
@@ -92,7 +140,7 @@ export function OpsCategoryUpdateCancelControl() {
         if (!response.ok || body.ok !== true) {
           throw new Error(body.message || "카테고리 업데이트를 취소하지 못했습니다.");
         }
-        clearCategoryProgress();
+        clearCategoryProgress(false);
         window.alert(body.message || "샵플링 카테고리 업데이트를 취소했습니다.");
       } catch (error) {
         button.disabled = false;
@@ -110,7 +158,7 @@ export function OpsCategoryUpdateCancelControl() {
     const decorate = () => {
       const task = readJson<CategoryTask>(CATEGORY_TASK_KEY);
       if (task?.tone === "cancelled" || task?.status === "cancelled") {
-        clearCategoryProgress();
+        clearCategoryProgress(task.mode === "local");
         return;
       }
       const active = task?.active === true;
