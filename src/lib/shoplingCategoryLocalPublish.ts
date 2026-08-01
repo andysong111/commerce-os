@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeShoplingCategoryCatalogToSupabase } from "@/lib/shoplingCategorySupabaseStore";
 
 export type LocalShoplingCategoryEntry = {
   depth: number;
@@ -22,81 +23,10 @@ export type LocalShoplingCategorySnapshot = {
   diagnostics?: Record<string, unknown>;
 };
 
-type GitHubRef = { object?: { sha?: unknown } };
-type GitHubCommit = { tree?: { sha?: unknown } };
-type GitHubObject = { sha?: unknown; message?: unknown };
-
-const DEFAULT_REPO = "andysong111/shopling-product-upload-auto";
-const LATEST_PATH = "data/shopling_categories/latest.json";
-const STATUS_PATH = "data/shopling_categories/status.json";
 const MAX_CATEGORY_COUNT = 50_000;
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function config() {
-  const repo = text(
-    process.env.SHOPLING_CATEGORY_REPO ||
-      process.env.SHOPLING_UPLOAD_REPO ||
-      DEFAULT_REPO,
-  );
-  const ref = text(
-    process.env.SHOPLING_CATEGORY_REF || process.env.SHOPLING_UPLOAD_REF || "main",
-  );
-  const token = text(
-    process.env.GITHUB_ACTIONS_TOKEN || process.env.GITHUB_ENGINE_DISPATCH_TOKEN,
-  );
-  if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
-    throw new Error("SHOPLING_CATEGORY_REPO는 owner/repo 형식이어야 합니다.");
-  }
-  if (!/^[A-Za-z0-9._/-]+$/.test(ref)) {
-    throw new Error("SHOPLING_CATEGORY_REF 형식이 올바르지 않습니다.");
-  }
-  if (!token) {
-    throw new Error(
-      "GITHUB_ACTIONS_TOKEN 또는 GITHUB_ENGINE_DISPATCH_TOKEN이 필요합니다.",
-    );
-  }
-  const [owner, repoName] = repo.split("/");
-  return { repo, owner, repoName, ref, token };
-}
-
-function headers(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-    "Content-Type": "application/json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-}
-
-async function githubJson<T>(
-  url: string,
-  init: RequestInit,
-  token: string,
-): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: { ...headers(token), ...(init.headers ?? {}) },
-    cache: "no-store",
-  });
-  const raw = await response.text();
-  let payload: unknown = {};
-  try {
-    payload = raw ? JSON.parse(raw) : {};
-  } catch {
-    payload = {};
-  }
-  if (!response.ok) {
-    const message = text((payload as { message?: unknown }).message) || text(raw);
-    const error = new Error(
-      message || `GitHub API 요청이 실패했습니다. HTTP ${response.status}`,
-    ) as Error & { status?: number };
-    error.status = response.status;
-    throw error;
-  }
-  return payload as T;
 }
 
 function normalizeStringArray(value: unknown, maxItems: number) {
@@ -198,29 +128,8 @@ export function validateLocalShoplingCategorySnapshot(
   };
 }
 
-async function createBlob(
-  apiBase: string,
-  token: string,
-  content: string,
-) {
-  const result = await githubJson<GitHubObject>(
-    `${apiBase}/git/blobs`,
-    {
-      method: "POST",
-      body: JSON.stringify({ content, encoding: "utf-8" }),
-    },
-    token,
-  );
-  const sha = text(result.sha);
-  if (!sha) throw new Error("GitHub blob SHA를 받지 못했습니다.");
-  return sha;
-}
-
 export async function publishLocalShoplingCategorySnapshot(value: unknown) {
   const snapshot = validateLocalShoplingCategorySnapshot(value);
-  const cfg = config();
-  const apiBase = `https://api.github.com/repos/${cfg.owner}/${cfg.repoName}`;
-  const latestContent = `${JSON.stringify(snapshot, null, 2)}\n`;
   const status = {
     schemaVersion: 1,
     source: snapshot.source,
@@ -231,94 +140,16 @@ export async function publishLocalShoplingCategorySnapshot(value: unknown) {
     categoryCount: snapshot.categoryCount,
     hash: snapshot.hash,
     message: `샵플링 표준카테고리 ${snapshot.categoryCount.toLocaleString("ko-KR")}개를 로컬 PC에서 업데이트했습니다.`,
+  } as const;
+
+  await writeShoplingCategoryCatalogToSupabase({ snapshot, status });
+
+  return {
+    snapshot,
+    status,
+    storage: "supabase" as const,
+    commitSha: "",
+    repository: "",
+    ref: "",
   };
-  const statusContent = `${JSON.stringify(status, null, 2)}\n`;
-
-  let lastError: unknown = null;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      const refResult = await githubJson<GitHubRef>(
-        `${apiBase}/git/ref/heads/${encodeURIComponent(cfg.ref)}`,
-        { method: "GET" },
-        cfg.token,
-      );
-      const parentSha = text(refResult.object?.sha);
-      if (!parentSha) throw new Error("GitHub main SHA를 확인하지 못했습니다.");
-      const commitResult = await githubJson<GitHubCommit>(
-        `${apiBase}/git/commits/${parentSha}`,
-        { method: "GET" },
-        cfg.token,
-      );
-      const baseTree = text(commitResult.tree?.sha);
-      if (!baseTree) throw new Error("GitHub base tree SHA를 확인하지 못했습니다.");
-
-      const [latestBlob, statusBlob] = await Promise.all([
-        createBlob(apiBase, cfg.token, latestContent),
-        createBlob(apiBase, cfg.token, statusContent),
-      ]);
-      const treeResult = await githubJson<GitHubObject>(
-        `${apiBase}/git/trees`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            base_tree: baseTree,
-            tree: [
-              {
-                path: LATEST_PATH,
-                mode: "100644",
-                type: "blob",
-                sha: latestBlob,
-              },
-              {
-                path: STATUS_PATH,
-                mode: "100644",
-                type: "blob",
-                sha: statusBlob,
-              },
-            ],
-          }),
-        },
-        cfg.token,
-      );
-      const treeSha = text(treeResult.sha);
-      if (!treeSha) throw new Error("GitHub category tree SHA를 받지 못했습니다.");
-      const newCommit = await githubJson<GitHubObject>(
-        `${apiBase}/git/commits`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            message: `Update Shopling category snapshot from local runner [skip ci]`,
-            tree: treeSha,
-            parents: [parentSha],
-          }),
-        },
-        cfg.token,
-      );
-      const commitSha = text(newCommit.sha);
-      if (!commitSha) throw new Error("GitHub category commit SHA를 받지 못했습니다.");
-      await githubJson<GitHubObject>(
-        `${apiBase}/git/refs/heads/${encodeURIComponent(cfg.ref)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ sha: commitSha, force: false }),
-        },
-        cfg.token,
-      );
-      return {
-        snapshot,
-        status,
-        commitSha,
-        repository: cfg.repo,
-        ref: cfg.ref,
-      };
-    } catch (error) {
-      lastError = error;
-      const statusCode = (error as { status?: number }).status;
-      if (statusCode !== 409 && statusCode !== 422) break;
-      await new Promise((resolve) => setTimeout(resolve, attempt * 350));
-    }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("샵플링 카테고리 결과를 GitHub에 저장하지 못했습니다.");
 }
