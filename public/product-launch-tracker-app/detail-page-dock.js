@@ -8,7 +8,9 @@ const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
 const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
 const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
+const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
 const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
+const LOCAL_BRIDGE_RELAY_BODY_LIMIT = 16 * 1024;
 const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
@@ -462,6 +464,11 @@ async function handleEngineMessage(event) {
 
   markFrameConnected();
 
+  if (payload.type === "ops-dock-local-bridge-request" && active.mode === "collect") {
+    await relayLocalBridgeRequest(payload);
+    return;
+  }
+
   if (payload.type === "ops-dock-ready") {
     updateAutomation(active.itemId, {
       status: active.mode === "finalize" ? "uploading" : "running",
@@ -544,6 +551,83 @@ async function handleEngineMessage(event) {
       message: "최종 조립 대기 · 화면을 새로 열면 자동 재시도됩니다.",
       error: cleanText(payload.message, 800),
     });
+  }
+}
+
+function allowedLocalBridgeRelay(path, method) {
+  if (method === "POST") return path === "/runs/evidence-link";
+  if (method !== "GET") return false;
+  return path === "/health" ||
+    /^\/runs\/[A-Za-z0-9_-]+(?:\/result)?$/.test(path) ||
+    /^\/runs\/[A-Za-z0-9_-]+\/evidence-images\/[A-Za-z0-9_-]+$/.test(path);
+}
+
+function postLocalBridgeRelayResponse(frame, targetOrigin, payload, body) {
+  if (!frame?.contentWindow) return;
+  const message = {
+    source: DOCK_EVENT_SOURCE,
+    type: "ops-dock-local-bridge-response",
+    ...payload,
+  };
+  if (body instanceof ArrayBuffer) {
+    message.body = body;
+    frame.contentWindow.postMessage(message, targetOrigin, [body]);
+    return;
+  }
+  frame.contentWindow.postMessage(message, targetOrigin);
+}
+
+async function relayLocalBridgeRequest(payload) {
+  const frame = activeFrame;
+  const jobId = active?.jobId || "";
+  const targetOrigin = engineConfig?.engineOrigin || "";
+  const requestId = cleanText(payload.requestId, 100);
+  const path = cleanText(payload.path, 500);
+  const method = cleanText(payload.method, 10).toUpperCase() || "GET";
+  const body = typeof payload.body === "string" ? payload.body : "";
+  const contentType = cleanText(payload.contentType, 100);
+  const respond = (response, responseBody) => {
+    if (activeFrame !== frame || active?.jobId !== jobId) return;
+    postLocalBridgeRelayResponse(
+      frame,
+      targetOrigin,
+      { jobId, requestId, ...response },
+      responseBody,
+    );
+  };
+
+  if (
+    !requestId ||
+    !targetOrigin ||
+    !allowedLocalBridgeRelay(path, method) ||
+    body.length > LOCAL_BRIDGE_RELAY_BODY_LIMIT ||
+    (method === "POST" && contentType !== "application/json") ||
+    (method === "GET" && body)
+  ) {
+    respond({ error: "허용되지 않은 OPS 로컬 수집기 중계 요청입니다." });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${LOCAL_BRIDGE_BASE_URL}${path}`, {
+      method,
+      cache: "no-store",
+      credentials: "omit",
+      headers: method === "POST" ? { "Content-Type": "application/json" } : {},
+      body: method === "POST" ? body : undefined,
+      targetAddressSpace: "loopback",
+    });
+    const responseBody = await response.arrayBuffer();
+    respond(
+      {
+        status: response.status,
+        contentType:
+          response.headers.get("Content-Type") || "application/octet-stream",
+      },
+      responseBody,
+    );
+  } catch {
+    respond({ error: "OPS가 로컬 수집기에 연결하지 못했습니다." });
   }
 }
 

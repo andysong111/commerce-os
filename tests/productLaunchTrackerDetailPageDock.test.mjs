@@ -152,6 +152,17 @@ test("Chrome local network permission is delegated through both nested detail-pa
   assert.match(nextConfig, /commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa/);
 });
 
+test("OPS origin relays only the evidence collector routes for the hidden Studio frame", () => {
+  assert.match(dockSource, /payload\.type === "ops-dock-local-bridge-request"/);
+  assert.match(dockSource, /path === "\/runs\/evidence-link"/);
+  assert.match(dockSource, /evidence-images/);
+  assert.match(dockSource, /ops-dock-local-bridge-response/);
+  assert.match(dockSource, /postMessage\(message, targetOrigin, \[body\]\)/);
+  assert.match(dockSource, /body\.length > LOCAL_BRIDGE_RELAY_BODY_LIMIT/);
+  assert.match(dockSource, /targetAddressSpace: "loopback"/);
+  assert.doesNotMatch(dockSource, /LOCAL_BRIDGE_BASE_URL\}\$\{path\}`[\s\S]*credentials: "include"/);
+});
+
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
   assert.match(dockSource, /byRole\.get\("main_catalog"\)/);
   assert.match(dockSource, /byRole\.get\("alternate_whole"\)/);
