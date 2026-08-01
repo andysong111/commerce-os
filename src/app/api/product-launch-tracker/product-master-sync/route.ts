@@ -4,7 +4,7 @@ import {
   readProductLaunchState,
   resolveProductLaunchIdentity,
 } from "@/lib/productLaunchTrackerServer";
-import { pushProductMasterSnapshotFromTrackerState } from "@/lib/productMasterSync";
+import { pushCanonicalProductMasterSnapshotFromTrackerState } from "@/lib/productMasterCanonicalSync";
 
 export async function POST(request: NextRequest) {
   const identity = await resolveProductLaunchIdentity(request);
@@ -34,12 +34,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await pushProductMasterSnapshotFromTrackerState(state);
+    const result = await pushCanonicalProductMasterSnapshotFromTrackerState(state);
     return Response.json({
       ok: true,
       ...result,
       message:
         `상품 ${result.counts.products ?? 0}개, SKU ${result.counts.skus ?? 0}개, ` +
+        `위치코드 변경 ${result.counts.skuBarcodeChanges ?? 0}개, ` +
         `샵플링 연결 ${result.counts.listingMappings ?? 0}개, ` +
         `확정 입고원가 ${result.counts.receiptCosts ?? 0}개를 상품마스터에 저장했습니다.`,
     });
@@ -47,17 +48,29 @@ export async function POST(request: NextRequest) {
     const detail =
       error instanceof Error ? error.message : "UNKNOWN_PRODUCT_MASTER_SYNC_ERROR";
     const missingSecret = detail === "PRODUCT_MASTER_INTEGRATION_SECRET_MISSING";
+    const migrationRequired = detail.includes("STABLE_SKU_MIGRATION_REQUIRED");
+    const conflict =
+      detail.includes("SKU_IDENTITY_CONFLICT") ||
+      detail.includes("TRACKER_BARCODE_CONFLICT");
     return Response.json(
       {
         ok: false,
         code: missingSecret
           ? "PRODUCT_MASTER_INTEGRATION_NOT_CONFIGURED"
-          : "PRODUCT_MASTER_SYNC_FAILED",
+          : migrationRequired
+            ? "PRODUCT_MASTER_STABLE_SKU_MIGRATION_REQUIRED"
+            : conflict
+              ? "PRODUCT_MASTER_SKU_CONFLICT"
+              : "PRODUCT_MASTER_SYNC_FAILED",
         message: missingSecret
           ? "OPS Center에 PRODUCT_MASTER_INTEGRATION_SECRET 환경변수를 설정해 주세요."
-          : `상품마스터 동기화에 실패했습니다: ${detail}`,
+          : migrationRequired
+            ? "상품마스터 Supabase에 불변 SKU 마이그레이션 SQL을 먼저 적용해 주세요."
+            : conflict
+              ? `동일 위치코드가 서로 다른 SKU에 연결되어 동기화를 중단했습니다: ${detail}`
+              : `상품마스터 동기화에 실패했습니다: ${detail}`,
       },
-      { status: missingSecret ? 503 : 502 },
+      { status: missingSecret ? 503 : conflict ? 409 : 502 },
     );
   }
 }
