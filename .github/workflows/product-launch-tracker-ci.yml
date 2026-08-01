@@ -5,7 +5,12 @@ on:
     paths:
       - 'public/product-launch-tracker-app/**'
       - 'src/app/api/product-launch-tracker/**'
+      - 'src/app/api/shopling-categories/**'
+      - 'src/components/AppShell.tsx'
+      - 'src/components/OpsCategoryUpdateCancelControl.tsx'
+      - 'src/components/OpsWorkAssistant.tsx'
       - 'src/lib/productLaunchTracker*.ts'
+      - 'src/lib/shoplingCategory*.ts'
       - 'supabase/migrations/20260731000*_product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - '.github/workflows/product-launch-tracker-ci.yml'
@@ -27,3 +32,4 @@ jobs:
           tests/productLaunchTrackerEntry.test.mjs
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
+          tests/productLaunchTrackerCategoryCancel.test.mjs
