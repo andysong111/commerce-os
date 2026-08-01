@@ -102,6 +102,17 @@ test("진행창과 실시간 작업 도우미 모두 취소 기능을 제공한�
     ),
     "utf8",
   );
+  const guard = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-update-cancel-guard.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const app = await readFile(
+    new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
+    "utf8",
+  );
   const globalControl = await readFile(
     new URL("../src/components/OpsCategoryUpdateCancelControl.tsx", import.meta.url),
     "utf8",
@@ -113,6 +124,15 @@ test("진행창과 실시간 작업 도우미 모두 취소 기능을 제공한�
   assert.match(bridge, /업데이트 취소/);
   assert.match(bridge, /stopImmediatePropagation/);
   assert.match(bridge, /shopling-categories\/cancel/);
+  assert.match(guard, /CATEGORY_CANCEL_GUARD_KEY/);
+  assert.match(guard, /stopImmediatePropagation/);
+  assert.match(guard, /removeItem\(CATEGORY_SESSION_KEY\)/);
+  assert.match(guard, /removeItem\(CATEGORY_TASK_KEY\)/);
+  assert.doesNotMatch(guard, /location\.reload/);
+  assert.ok(
+    app.indexOf("category-update-cancel-guard.js") <
+      app.indexOf("category-update-work-assistant-bridge.js"),
+  );
   assert.match(globalControl, /shopling-category-global-cancel-button/);
   assert.match(globalControl, /샵플링 기준정보 동기화/);
   assert.match(globalControl, /clearCategoryProgress/);
