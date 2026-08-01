@@ -53,4 +53,17 @@ test("control tables include audit logs and data source freshness", () => {
   assert.match(migration, /commerce_data_source_health/);
   assert.match(migration, /'FRESH', 'STALE', 'MISSING', 'FAILED'/);
   assert.match(migration, /enable row level security/);
+  assert.match(migration, /'sales_orders','MISSING'/);
+  assert.match(migration, /'confirmed_receipts','MISSING'/);
+  assert.match(migration, /'product_mappings','MISSING'/);
+  assert.match(migration, /'estimated_inventory','MISSING'/);
+  assert.match(migration, /'price_recommendations','MISSING'/);
+});
+
+test("Shopling price job state changes are audited without changing execution logic", () => {
+  assert.match(migration, /audit_shopling_price_adjustment_job_status/);
+  assert.match(migration, /after update of status on public\.shopling_price_adjustment_bulk_jobs/);
+  assert.match(migration, /shopling_price_adjustment\.status_changed/);
+  assert.match(migration, /before_snapshot/);
+  assert.match(migration, /after_snapshot/);
 });
