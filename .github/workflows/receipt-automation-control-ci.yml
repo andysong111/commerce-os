@@ -1,0 +1,26 @@
+name: Receipt Automation Control CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/api/integrations/receipt-automation/**'
+      - 'src/lib/receiptAutomationControl.ts'
+      - 'supabase/migrations/202608020001_receipt_automation_control.sql'
+      - 'tests/receiptAutomationControl.test.mjs'
+      - '.github/workflows/receipt-automation-control-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run receipt automation contract tests
+        run: node --experimental-strip-types --test tests/receiptAutomationControl.test.mjs
+      - name: Build Ops Center
+        run: npm run build
