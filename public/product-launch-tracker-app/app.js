@@ -7,3 +7,4 @@ await import("./china-product-links.js");
 await import("./table-inline-ops-loader.js");
 await import("./category-ai.js");
 await import("./category-toolbar-layout.js");
+await import("./category-update-progress.js");
