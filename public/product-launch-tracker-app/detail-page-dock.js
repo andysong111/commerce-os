@@ -1106,7 +1106,7 @@ async function ensureLocalCollectorReady() {
       cache: "no-store",
       credentials: "omit",
       signal: controller.signal,
-      targetAddressSpace: "local",
+      targetAddressSpace: "loopback",
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`status=${response.status}`);
