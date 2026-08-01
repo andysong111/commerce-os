@@ -1,7 +1,7 @@
 import {
   buildProductMasterSnapshotFromTrackerState,
   type ProductMasterSnapshotPayload,
-} from "@/lib/productMasterSync";
+} from "./productMasterSync";
 
 type R = Record<string, unknown>;
 type StableSku = ProductMasterSnapshotPayload["skus"][number] & {
