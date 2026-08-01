@@ -28,6 +28,8 @@ let activeHandshakeTimer = null;
 let engineConfig = null;
 let syncing = false;
 let enqueueing = false;
+let enqueuePhase = "idle";
+let messageTimer = null;
 const jobsById = new Map();
 const workerResumeAt = new Map();
 const finalizerRetryAt = new Map();
@@ -96,6 +98,12 @@ function syncRunButton() {
   if (!runButton) return;
   const count = selectedRowIds().length;
   runButton.disabled = count === 0 || enqueueing;
+  if (enqueueing) {
+    runButton.textContent = enqueuePhase === "registering"
+      ? `작업 등록 중… (${count}건)`
+      : `연결 확인 중… (${count}건)`;
+    return;
+  }
   runButton.textContent = count
     ? `선택 상세페이지 생성 (${count}건)`
     : "선택 상세페이지 생성";
@@ -113,73 +121,77 @@ async function enqueueSelected() {
     );
     return;
   }
-  try {
-    await ensureDetailPageDependencies();
-  } catch (error) {
-    showMessage(
-      error instanceof Error
-        ? error.message
-        : "상세페이지 생성 연결을 확인하지 못했습니다.",
-    );
-    return;
-  }
-  if (!window.confirm(
-    `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
-  )) return;
-
   enqueueing = true;
+  enqueuePhase = "checking";
   syncRunButton();
   try {
-  if (SHOW_LOCAL_MONITOR) ensureMonitor();
-  const existingItems = new Set(
-    [...jobsById.values()]
-      .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
-      .map((job) => job.itemId),
-  );
-  for (const item of selected) {
-    const itemId = String(item.id);
-    if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) continue;
-    const job = {
-      itemId,
-      jobId: crypto.randomUUID(),
-      sourceUrl: readPrimaryChinaLink(item),
-      productName: String(item.productName || item.modelNumber || "상품"),
-      salesOptions: readSalesOptions(item),
-      attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
-      sourceRunId: "",
-    };
     try {
-      const created = await createServerJob(job);
-      jobsById.set(job.jobId, created);
-      queue.push(job);
-      patchItem(itemId, {
-        detailPageAutomation: {
-          jobId: job.jobId,
-          status: "queued",
-          stage: "source_collection",
-          message: "1688 상품정보·이미지 수집 대기 중",
-          progress: 1,
-          qaStatus: "pending",
-          sourceUrl: job.sourceUrl,
-          sourceRunId: "",
-          attempt: job.attempt,
-          queuedAt: new Date().toISOString(),
-          startedAt: null,
-          completedAt: null,
-          error: "",
-          executionMode: "server-v1",
-        },
-      });
-      existingItems.add(itemId);
+      await ensureDetailPageDependencies();
     } catch (error) {
-      showMessage(error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.");
-      break;
+      showMessage(
+        error instanceof Error
+          ? error.message
+          : "상세페이지 생성 연결을 확인하지 못했습니다.",
+      );
+      return;
     }
-  }
-  renderMonitor();
-  if (CAN_EXECUTE_JOBS) void processNext();
+    if (!window.confirm(
+      `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
+    )) return;
+
+    enqueuePhase = "registering";
+    syncRunButton();
+    if (SHOW_LOCAL_MONITOR) ensureMonitor();
+    const existingItems = new Set(
+      [...jobsById.values()]
+        .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
+        .map((job) => job.itemId),
+    );
+    for (const item of selected) {
+      const itemId = String(item.id);
+      if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) continue;
+      const job = {
+        itemId,
+        jobId: crypto.randomUUID(),
+        sourceUrl: readPrimaryChinaLink(item),
+        productName: String(item.productName || item.modelNumber || "상품"),
+        salesOptions: readSalesOptions(item),
+        attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
+        sourceRunId: "",
+      };
+      try {
+        const created = await createServerJob(job);
+        jobsById.set(job.jobId, created);
+        queue.push(job);
+        patchItem(itemId, {
+          detailPageAutomation: {
+            jobId: job.jobId,
+            status: "queued",
+            stage: "source_collection",
+            message: "1688 상품정보·이미지 수집 대기 중",
+            progress: 1,
+            qaStatus: "pending",
+            sourceUrl: job.sourceUrl,
+            sourceRunId: "",
+            attempt: job.attempt,
+            queuedAt: new Date().toISOString(),
+            startedAt: null,
+            completedAt: null,
+            error: "",
+            executionMode: "server-v1",
+          },
+        });
+        existingItems.add(itemId);
+      } catch (error) {
+        showMessage(error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.");
+        break;
+      }
+    }
+    renderMonitor();
+    if (CAN_EXECUTE_JOBS) void processNext();
   } finally {
     enqueueing = false;
+    enqueuePhase = "idle";
     syncRunButton();
   }
 }
@@ -1113,8 +1125,12 @@ function showMessage(message) {
   const toast = document.querySelector("#toast");
   if (toast) {
     toast.textContent = message;
-    toast.classList.add("show");
-    window.setTimeout(() => toast.classList.remove("show"), 3200);
+    toast.hidden = false;
+    window.clearTimeout(messageTimer);
+    messageTimer = window.setTimeout(() => {
+      toast.hidden = true;
+      messageTimer = null;
+    }, 4200);
   } else window.alert(message);
 }
 

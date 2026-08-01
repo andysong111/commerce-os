@@ -107,6 +107,23 @@ test("selected launch rows run from China primary link and expose background pro
   assert.match(dockSource, /studio_connection/);
 });
 
+test("detail page dependency checks stay visible and always restore the selection button", () => {
+  assert.match(dockSource, /enqueueing = true;\s+enqueuePhase = "checking";\s+syncRunButton\(\);/);
+  assert.match(dockSource, /연결 확인 중…/);
+  assert.match(dockSource, /enqueuePhase = "registering";\s+syncRunButton\(\);/);
+  assert.match(dockSource, /작업 등록 중…/);
+  assert.match(
+    dockSource,
+    /finally \{\s+enqueueing = false;\s+enqueuePhase = "idle";\s+syncRunButton\(\);\s+\}/,
+  );
+  assert.match(dockSource, /toast\.hidden = false/);
+  assert.match(dockSource, /toast\.hidden = true/);
+  assert.match(
+    dockSource,
+    /!\["success", "failed", "cancelled"\]\.includes\(job\.status\)/,
+  );
+});
+
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
   assert.match(dockSource, /byRole\.get\("main_catalog"\)/);
   assert.match(dockSource, /byRole\.get\("alternate_whole"\)/);
@@ -160,7 +177,7 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(workAssistant, /실시간 작업 도우미/);
   assert.match(workAssistant, /현재 진행 중인 작업/);
   assert.match(workAssistant, /detail_page_mode=worker/);
-  assert.match(workAssistant, /POLL_INTERVAL_MS = 2_500/);
+  assert.match(workAssistant, /POLL_MS = 2_500/);
   assert.match(workAssistant, /visibleJobs\.map/);
   assert.match(workAssistant, /retry-detail-page-job/);
   assert.match(workAssistant, /detailPageItem=/);
