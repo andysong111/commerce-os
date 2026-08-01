@@ -103,7 +103,7 @@ test("실시간 작업 도우미 취소는 로컬 실행기 취소 API를 사용
   assert.match(cancelControl, /category-local-update-cancel/);
 });
 
-test("로컬 결과는 운영자 인증 후 서버 저장 경로로 전달된다", async () => {
+test("로컬 결과는 운영자 인증 후 Supabase 서버 저장 경로로 전달된다", async () => {
   const route = await readFile(
     new URL(
       "../src/app/api/shopling-categories/local-result/route.ts",
@@ -115,9 +115,14 @@ test("로컬 결과는 운영자 인증 후 서버 저장 경로로 전달된다
     new URL("../src/lib/shoplingCategoryLocalPublish.ts", import.meta.url),
     "utf8",
   );
+  const store = await readFile(
+    new URL("../src/lib/shoplingCategorySupabaseStore.ts", import.meta.url),
+    "utf8",
+  );
   assert.match(route, /resolveProductLaunchIdentity/);
   assert.match(route, /publishLocalShoplingCategorySnapshot/);
-  assert.match(publisher, /data\/shopling_categories\/latest\.json/);
-  assert.match(publisher, /data\/shopling_categories\/status\.json/);
-  assert.match(publisher, /force: false/);
+  assert.match(publisher, /writeShoplingCategoryCatalogToSupabase/);
+  assert.doesNotMatch(publisher, /git\/blobs/);
+  assert.match(store, /product_launch_tracker_states/);
+  assert.match(store, /resolution=merge-duplicates/);
 });
