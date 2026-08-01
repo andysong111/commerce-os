@@ -13,6 +13,7 @@ on:
       - 'src/lib/shoplingCategory*.ts'
       - 'supabase/migrations/20260731000*_product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
+      - 'tests/shoplingCategory*.test.mjs'
       - '.github/workflows/product-launch-tracker-ci.yml'
 
 jobs:
@@ -33,3 +34,4 @@ jobs:
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
+          tests/shoplingCategoryRunStatus.test.mjs
