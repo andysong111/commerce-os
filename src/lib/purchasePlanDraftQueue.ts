@@ -98,8 +98,12 @@ export async function enqueuePurchasePlanDraft(value: unknown) {
   const input = normalizePurchasePlanDraftInput(value);
   const { config, identity, state, queue } = await readQueueContext();
   const now = new Date().toISOString();
-  const fingerprint = JSON.stringify(input.items);
   const existing = queue.entries[input.sourceRunId];
+  const items = mergeItems(existing?.items ?? [], input.items);
+  if (items.length > MAX_ITEMS_PER_ENTRY) {
+    throw new Error(`한 발주안에는 최대 ${MAX_ITEMS_PER_ENTRY}개 상품까지 저장할 수 있습니다.`);
+  }
+  const fingerprint = JSON.stringify(items);
 
   if (existing?.status === "IMPORTED" && existing.fingerprint === fingerprint) {
     return { entry: existing, alreadyImported: true, alreadyQueued: false };
@@ -111,13 +115,13 @@ export async function enqueuePurchasePlanDraft(value: unknown) {
   const entry: PurchasePlanDraftQueueEntry = {
     sourceRunId: input.sourceRunId,
     periodLabel: input.periodLabel,
-    items: input.items,
+    items,
     fingerprint,
     status: "PENDING",
     queuedAt: existing?.queuedAt ?? now,
     updatedAt: now,
     importedAt: null,
-    batchId: null,
+    batchId: existing?.batchId ?? null,
   };
   queue.entries[input.sourceRunId] = entry;
   pruneQueue(queue);
@@ -157,6 +161,18 @@ export async function acknowledgePurchasePlanDraft(input: {
   queue.entries[sourceRunId] = next;
   await writeQueue(config, identity, state, queue);
   return next;
+}
+
+function mergeItems(
+  existing: PurchasePlanDraftQueueItem[],
+  incoming: PurchasePlanDraftQueueItem[],
+) {
+  const byBarcode = new Map<string, PurchasePlanDraftQueueItem>();
+  existing.forEach((item) => byBarcode.set(item.barcode, item));
+  incoming.forEach((item) => byBarcode.set(item.barcode, item));
+  return [...byBarcode.values()].sort((left, right) =>
+    left.barcode.localeCompare(right.barcode),
+  );
 }
 
 async function readQueueContext() {

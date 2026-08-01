@@ -15,6 +15,14 @@ test("stores purchase drafts in the existing tracker state with idempotent run k
   assert.match(queue, /writeProductLaunchState/);
 });
 
+test("merges separate row retries into the same monthly draft instead of replacing prior rows", async () => {
+  const queue = await source("../src/lib/purchasePlanDraftQueue.ts");
+  assert.match(queue, /mergeItems\(existing\?\.items \?\? \[\], input\.items\)/);
+  assert.match(queue, /existing\.forEach\(\(item\) => byBarcode\.set\(item\.barcode, item\)\)/);
+  assert.match(queue, /incoming\.forEach\(\(item\) => byBarcode\.set\(item\.barcode, item\)\)/);
+  assert.match(queue, /batchId: existing\?\.batchId \?\? null/);
+});
+
 test("separates producer and consumer integration secrets with deployed fallbacks", async () => {
   const [push, pending, ack] = await Promise.all([
     source("../src/app/api/integrations/purchase-plan-draft-queue/push/route.ts"),
