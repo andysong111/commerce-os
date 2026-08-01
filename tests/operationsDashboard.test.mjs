@@ -14,6 +14,14 @@ const registry = await readFile(
   new URL("../src/lib/extendedModuleRegistry.ts", import.meta.url),
   "utf8",
 );
+const salesCache = await readFile(
+  new URL("../src/lib/priceAdjustmentSalesCache.ts", import.meta.url),
+  "utf8",
+);
+const healthWriter = await readFile(
+  new URL("../src/lib/commerceDataSourceHealth.ts", import.meta.url),
+  "utf8",
+);
 
 test("operations dashboard combines automation, freshness and price job status", () => {
   assert.match(loader, /commerce_operation_runs/);
@@ -29,6 +37,15 @@ test("freshness is recalculated from generated time and allowed age", () => {
   assert.match(loader, /source\.max_age_minutes/);
   assert.match(loader, /expired/);
   assert.match(loader, /effectiveStatus/);
+});
+
+test("complete sales cache snapshots update the 24 hour health record", () => {
+  assert.match(salesCache, /recordCommerceDataSourceHealth/);
+  assert.match(salesCache, /sourceKey: "sales_orders"/);
+  assert.match(salesCache, /maxAgeMinutes: 24 \* 60/);
+  assert.match(salesCache, /salesCacheFresh/);
+  assert.match(healthWriter, /on_conflict=source_key/);
+  assert.match(healthWriter, /resolution=merge-duplicates/);
 });
 
 test("dashboard shows operational status without actor email or input snapshots", () => {
