@@ -148,4 +148,5 @@ test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 �
   assert.match(recovery, /shopling-categories\/local-result/);
   assert.match(recovery, /재수집 없이 결과 저장 중/);
   assert.match(recovery, /targetAddressSpace: "loopback"/);
+  assert.match(recovery, /category-update-task-changed/);
 });
