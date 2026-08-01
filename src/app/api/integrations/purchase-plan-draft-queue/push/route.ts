@@ -9,6 +9,8 @@ export async function POST(request: Request) {
   const auth = authorize(request, [
     process.env.PRODUCT_DECISION_TO_CHINA_ORDER_SECRET,
     process.env.PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET,
+    process.env.CHINA_ORDER_MANAGER_INTEGRATION_SECRET,
+    process.env.SYNC_JOB_SECRET,
   ]);
   if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
 
