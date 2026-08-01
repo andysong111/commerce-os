@@ -4,6 +4,9 @@ const ASSET_UPLOAD_API = "/api/product-launch-tracker/detail-page-assets";
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const MESSAGE_SOURCE = "commerce-os-detail-page-studio";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
+const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
+const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
+const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
 const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
@@ -21,6 +24,7 @@ let queue = [];
 let active = null;
 let activeFrame = null;
 let activeTimer = null;
+let activeHandshakeTimer = null;
 let engineConfig = null;
 let syncing = false;
 let enqueueing = false;
@@ -106,6 +110,16 @@ async function enqueueSelected() {
   if (invalid.length) {
     showMessage(
       `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다.`,
+    );
+    return;
+  }
+  try {
+    await ensureDetailPageDependencies();
+  } catch (error) {
+    showMessage(
+      error instanceof Error
+        ? error.message
+        : "상세페이지 생성 연결을 확인하지 못했습니다.",
     );
     return;
   }
@@ -283,9 +297,30 @@ function mountFrame(url, title) {
   activeFrame.src = url.toString();
   activeFrame.setAttribute("aria-hidden", "true");
   document.body.append(activeFrame);
-  activeTimer = window.setTimeout(() => {
-    void handleFrameTimeout();
-  }, FRAME_TIMEOUT_MS);
+  activeHandshakeTimer = window.setTimeout(() => {
+    void handleFrameHandshakeTimeout();
+  }, FRAME_HANDSHAKE_TIMEOUT_MS);
+}
+
+async function handleFrameHandshakeTimeout() {
+  if (!active) return;
+  if (active.mode === "collect") {
+    await failActive(
+      "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 주소 또는 보호 인증을 확인하세요.",
+      "studio_connection",
+    );
+    return;
+  }
+  const itemId = active.itemId;
+  const jobId = active.jobId;
+  finishActive();
+  finalizerRetryAt.set(jobId, Date.now() + 30_000);
+  updateAutomation(itemId, {
+    status: "uploading",
+    stage: "render_pending",
+    message: "최종 조립기 연결 대기 · 보호 인증 확인 필요",
+    error: "상세페이지 Studio가 20초 안에 응답하지 않았습니다.",
+  });
 }
 
 async function handleFrameTimeout() {
@@ -311,6 +346,23 @@ async function handleEngineMessage(event) {
   if (!engineConfig || event.origin !== engineConfig.engineOrigin) return;
   const payload = event.data;
   if (!payload || payload.source !== MESSAGE_SOURCE || payload.jobId !== active.jobId) return;
+
+  markFrameConnected();
+
+  if (payload.type === "ops-dock-ready") {
+    updateAutomation(active.itemId, {
+      status: active.mode === "finalize" ? "uploading" : "running",
+      stage: active.mode === "finalize" ? "render_pending" : "source_collection",
+      message:
+        active.mode === "finalize"
+          ? "최종 조립기 연결 완료 · 생성 결과 불러오는 중"
+          : "Studio 연결 완료 · 로컬 수집기 확인 중",
+      progress: active.mode === "finalize" ? 96 : 5,
+      error: "",
+    });
+    renderMonitor();
+    return;
+  }
 
   if (payload.type === "ops-dock-progress") {
     updateAutomation(active.itemId, {
@@ -551,7 +603,9 @@ async function failActive(message, stage = "failed") {
 
 function finishActive() {
   window.clearTimeout(activeTimer);
+  window.clearTimeout(activeHandshakeTimer);
   activeTimer = null;
+  activeHandshakeTimer = null;
   activeFrame?.remove();
   activeFrame = null;
   active = null;
@@ -581,6 +635,7 @@ async function retryItem(itemId) {
     sourceRunId: "",
   };
   try {
+    await ensureDetailPageDependencies();
     const created = await createServerJob(job);
     jobsById.set(job.jobId, created);
     queue.push(job);
@@ -924,6 +979,44 @@ async function getEngineConfig() {
   }
   engineConfig = payload;
   return payload;
+}
+
+async function ensureDetailPageDependencies() {
+  await Promise.all([getEngineConfig(), ensureLocalCollectorReady()]);
+}
+
+async function ensureLocalCollectorReady() {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), LOCAL_BRIDGE_TIMEOUT_MS);
+  try {
+    const response = await fetch(LOCAL_BRIDGE_HEALTH_URL, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`status=${response.status}`);
+    if (payload.evidence_import_supported !== true) {
+      throw new Error(
+        "로컬 수집기 업데이트가 필요합니다. 최신 수집기를 실행한 뒤 다시 시도하세요.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("업데이트")) throw error;
+    throw new Error(
+      "로컬 1688 수집기가 꺼져 있습니다. 수집기를 실행한 뒤 다시 시도하세요.",
+    );
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function markFrameConnected() {
+  window.clearTimeout(activeHandshakeTimer);
+  activeHandshakeTimer = null;
+  if (activeTimer) return;
+  activeTimer = window.setTimeout(() => {
+    void handleFrameTimeout();
+  }, FRAME_TIMEOUT_MS);
 }
 
 function selectedRowIds() {

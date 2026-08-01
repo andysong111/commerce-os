@@ -52,6 +52,10 @@ const startRoute = await readFile(
   new URL("../src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts", import.meta.url),
   "utf8",
 );
+const studioConnection = await readFile(
+  new URL("../src/lib/detailPageStudioConnection.ts", import.meta.url),
+  "utf8",
+);
 const jobServer = await readFile(
   new URL("../src/lib/detailPageJobServer.ts", import.meta.url),
   "utf8",
@@ -96,6 +100,11 @@ test("selected launch rows run from China primary link and expose background pro
   assert.match(dockSource, /data-retry-item/);
   assert.match(dockSource, /event\.source !== activeFrame\.contentWindow/);
   assert.match(dockSource, /event\.origin !== engineConfig\.engineOrigin/);
+  assert.match(dockSource, /LOCAL_BRIDGE_HEALTH_URL/);
+  assert.match(dockSource, /ensureDetailPageDependencies/);
+  assert.match(dockSource, /FRAME_HANDSHAKE_TIMEOUT_MS = 20 \* 1000/);
+  assert.match(dockSource, /payload\.type === "ops-dock-ready"/);
+  assert.match(dockSource, /studio_connection/);
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
@@ -120,9 +129,20 @@ test("asset docking APIs enforce same-origin, roles, JPG, size, and public stabl
   assert.match(assetRoute, /MAX_FILE_BYTES = 4_000_000/);
   assert.match(assetRoute, /product-launch-assets/);
   assert.match(assetRoute, /storage\/v1\/object\/public/);
-  assert.match(configRoute, /DETAIL_PAGE_STUDIO_INTERNAL_URL/);
-  assert.match(configRoute, /commerce-os-detail-page-studio\.vercel\.app/);
+  assert.match(studioConnection, /DETAIL_PAGE_STUDIO_INTERNAL_URL/);
+  assert.match(studioConnection, /commerce-os-detail-page-studio\.vercel\.app/);
   assert.match(configRoute, /isSameOriginOpsRequest/);
+  assert.match(configRoute, /probeDetailPageStudio/);
+  assert.match(configRoute, /probeProtectedOpsCallback/);
+  assert.match(studioConnection, /detail-page-callback-health/);
+  assert.match(studioConnection, /OPS_PREVIEW_CALLBACK_PROTECTED/);
+  assert.match(
+    studioConnection,
+    /commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa\.vercel\.app/,
+  );
+  assert.match(studioConnection, /DETAIL_PAGE_STUDIO_AUTOMATION_BYPASS_SECRET/);
+  assert.match(studioConnection, /x-vercel-set-bypass-cookie", "samesitenone"/);
+  assert.match(studioConnection, /opsDockVersion !== "server-v1"/);
 });
 
 test("interrupted generation is recoverable instead of remaining permanently active", () => {
@@ -168,7 +188,10 @@ test("durable jobs reuse the deployed job ledger and require a signed per-job wo
   assert.match(jobRoute, /action === "final_complete"/);
   assert.match(jobRoute, /const releasesLease = action !== "progress"/);
   assert.doesNotMatch(jobRoute, /workerToken:/);
-  assert.match(startRoute, /\/api\/internal\/ops-detail-page-job/);
+  assert.match(studioConnection, /\/api\/internal\/ops-detail-page-job/);
+  assert.match(startRoute, /resolveDetailPageStudioConnection/);
+  assert.match(startRoute, /buildProtectedOpsCallbackUrl/);
+  assert.match(startRoute, /redirect: "manual"/);
   const config = { supabaseUrl: "https://example.supabase.co", secretKey: "test-secret" };
   const token = createDetailPageJobToken(
     config,

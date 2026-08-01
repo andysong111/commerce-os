@@ -6,9 +6,10 @@ import {
   readDetailPageJob,
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
-
-const DEFAULT_DETAIL_PAGE_STUDIO_URL =
-  "https://commerce-os-detail-page-studio.vercel.app/";
+import {
+  buildProtectedOpsCallbackUrl,
+  resolveDetailPageStudioConnection,
+} from "@/lib/detailPageStudioConnection";
 
 export async function POST(
   request: NextRequest,
@@ -42,24 +43,23 @@ export async function POST(
         { status: 409 },
       );
     }
-    const configured =
-      process.env.DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-      process.env.NEXT_PUBLIC_DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-      DEFAULT_DETAIL_PAGE_STUDIO_URL;
-    const studio = new URL(configured);
-    const workerUrl = new URL("/api/internal/ops-detail-page-job", studio).toString();
-    const callbackUrl = new URL(
-      `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
+    const connection = resolveDetailPageStudioConnection();
+    const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
-    ).toString();
-    const response = await fetch(workerUrl, {
+      `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
+    );
+    const response = await fetch(connection.workerUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...connection.requestHeaders,
+      },
       body: JSON.stringify({
-        callbackUrl,
-        workerUrl,
+        callbackUrl: callbackUrl.toString(),
+        workerUrl: connection.workerUrl.toString(),
         token: createDetailPageJobToken(config.value, job.owner_id, job.id),
       }),
+      redirect: "manual",
       cache: "no-store",
     });
     const body = await response.json().catch(() => ({}));
@@ -68,7 +68,11 @@ export async function POST(
         {
           ok: false,
           code: "DETAIL_PAGE_WORKER_START_FAILED",
-          message: body?.message || `Studio 서버 작업 시작에 실패했습니다. status=${response.status}`,
+          message:
+            body?.message ||
+            (response.status >= 300 && response.status < 400
+              ? "Studio Preview 보호 인증이 서버 작업을 차단했습니다."
+              : `Studio 서버 작업 시작에 실패했습니다. status=${response.status}`),
         },
         { status: 502 },
       );
