@@ -212,6 +212,32 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
+    if (action === "dismiss_failed_from_assistant") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면에서 본인의 실패 작업만 삭제할 수 있습니다.");
+      }
+      if (job.status !== "failed") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_NOT_FAILED",
+            message: "실패한 상세페이지 작업만 도우미에서 삭제할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const hiddenAt = new Date().toISOString();
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        payload: { assistant_hidden_at: hiddenAt },
+      });
+      if (!changed) return notFound();
+      return Response.json({
+        ok: true,
+        hiddenAt,
+        job: publicDetailPageJob(changed),
+      });
+    }
+
     return invalid("지원하지 않는 작업 변경입니다.");
   } catch (error) {
     return failed("DETAIL_PAGE_JOB_UPDATE_FAILED", error, "상세페이지 작업 상태를 저장하지 못했습니다.");

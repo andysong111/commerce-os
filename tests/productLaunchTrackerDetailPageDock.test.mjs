@@ -194,6 +194,19 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(dockSource, /event\.key !== STORAGE_KEY/);
 });
 
+test("failed detail-page jobs can be removed from the shared assistant without deleting audit history", () => {
+  assert.match(workAssistant, /payload\?\.assistant_hidden_at/);
+  assert.match(workAssistant, /job\.status !== "failed"/);
+  assert.match(workAssistant, /window\.confirm/);
+  assert.match(workAssistant, /action: "dismiss_failed_from_assistant"/);
+  assert.match(workAssistant, /상품과 생성 이력은 삭제되지 않습니다/);
+  assert.match(workAssistant, /removing \? "삭제 중…" : "삭제"/);
+  assert.match(jobRoute, /action === "dismiss_failed_from_assistant"/);
+  assert.match(jobRoute, /job\.status !== "failed"/);
+  assert.match(jobRoute, /assistant_hidden_at: hiddenAt/);
+  assert.match(jobRoute, /본인의 실패 작업만 삭제/);
+});
+
 test("durable jobs reuse the deployed job ledger and require a signed per-job worker token", () => {
   assert.match(jobServer, /product_launch_upload_jobs/);
   assert.match(jobServer, /payload\.kind/);

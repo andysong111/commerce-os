@@ -236,6 +236,8 @@ export function OpsWorkAssistant() {
   const [jobs, setJobs] = useState<DetailJob[]>([]);
   const [categoryTask, setCategoryTask] = useState<CategoryTask | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [removingJobs, setRemovingJobs] = useState<Set<string>>(new Set());
+  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
   const [collapsed, setCollapsed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [workerReady, setWorkerReady] = useState(false);
@@ -409,6 +411,7 @@ export function OpsWorkAssistant() {
     () =>
       jobs
         .filter((job) => {
+          if (txt(job.payload?.assistant_hidden_at)) return false;
           if (ACTIVE_DETAIL.has(job.status)) return true;
           if (dismissed.has(job.jobId)) return false;
           return isRecent(job.completedAt || job.updatedAt || "", now);
@@ -464,6 +467,49 @@ export function OpsWorkAssistant() {
     );
   }
 
+  async function removeFailedDetail(job: DetailJob) {
+    if (job.status !== "failed" || removingJobs.has(job.jobId)) return;
+    const confirmed = window.confirm(
+      `\"${detailName(job)}\" 실패 기록을 작업 도우미에서 삭제할까요?\n상품과 생성 이력은 삭제되지 않습니다.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingJobs((current) => new Set(current).add(job.jobId));
+    setRemoveErrors((current) => {
+      const next = { ...current };
+      delete next[job.jobId];
+      return next;
+    });
+    try {
+      const response = await fetch(`${JOBS_API}/${encodeURIComponent(job.jobId)}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "dismiss_failed_from_assistant" }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true) {
+        throw new Error(txt(body.message) || "실패 기록을 삭제하지 못했습니다.");
+      }
+      setJobs((current) => current.filter((item) => item.jobId !== job.jobId));
+    } catch (error) {
+      setRemoveErrors((current) => ({
+        ...current,
+        [job.jobId]:
+          error instanceof Error ? error.message : "실패 기록을 삭제하지 못했습니다.",
+      }));
+    } finally {
+      setRemovingJobs((current) => {
+        const next = new Set(current);
+        next.delete(job.jobId);
+        return next;
+      });
+    }
+  }
+
   return (
     <>
       <iframe
@@ -516,6 +562,9 @@ export function OpsWorkAssistant() {
                   workerReady={workerReady}
                   onRetry={() => retryDetail(job.itemId)}
                   onDismiss={() => dismiss(job.jobId)}
+                  onRemove={() => void removeFailedDetail(job)}
+                  removing={removingJobs.has(job.jobId)}
+                  removeError={removeErrors[job.jobId] || ""}
                 />
               ))}
               <p className="px-1 pb-0.5 text-[10px] font-bold text-blue-600">
@@ -604,11 +653,17 @@ function DetailCard({
   workerReady,
   onRetry,
   onDismiss,
+  onRemove,
+  removing,
+  removeError,
 }: {
   job: DetailJob;
   workerReady: boolean;
   onRetry: () => void;
   onDismiss: () => void;
+  onRemove: () => void;
+  removing: boolean;
+  removeError: string;
 }) {
   const status = detailPresentation(job);
   const classes = toneClasses(status.tone);
@@ -644,6 +699,9 @@ function DetailCard({
       {job.error ? (
         <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-rose-700">{job.error}</p>
       ) : null}
+      {removeError ? (
+        <p className="mt-2 text-[11px] font-bold leading-4 text-rose-700">{removeError}</p>
+      ) : null}
       <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
         <p className="text-[10px] font-bold text-slate-400">
           {active ? "화면 이동·새로고침 가능" : `시도 ${job.attempt || 1}회`}
@@ -665,13 +723,24 @@ function DetailCard({
               >
                 다시 생성
               </button>
-              <button
-                type="button"
-                onClick={onDismiss}
-                className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              >
-                닫기
-              </button>
+              {job.status === "failed" ? (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  disabled={removing}
+                  className="rounded-lg px-2 py-1.5 text-[11px] font-black text-rose-600 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {removing ? "삭제 중…" : "삭제"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  닫기
+                </button>
+              )}
             </>
           ) : null}
         </div>
