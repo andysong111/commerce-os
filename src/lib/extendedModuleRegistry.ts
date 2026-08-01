@@ -1,5 +1,24 @@
 import { moduleRegistry, type CommerceModule } from "@/lib/moduleRegistry";
 
+export const commerceOperationsModule: CommerceModule = {
+  id: "commerce-operations-safety",
+  title: "운영 안전센터",
+  navigationLabel: "운영 안전센터",
+  description:
+    "입고확정 이후 자동화, 데이터 최신도, 최종 승인 대기, 실패·반영 불확실 작업을 한곳에서 확인합니다.",
+  status: "available",
+  route: "/operations",
+  category: "시스템 관리",
+  inputType: "Commerce OS 실행원장, 데이터 최신도, 가격 Bulk 작업 상태",
+  outputType: "실행 중·승인 대기·실패·오래된 데이터 통합 현황",
+  historySupport: true,
+  externalProject: false,
+  note: "민감한 입력값은 표시하지 않고 상태·연관번호·실패 원인만 보여줍니다.",
+  helperNote: "실행·데이터 상태 통합",
+  actionLabel: "운영 안전상태 보기",
+  safetyBadge: "실패·승인 대기 추적",
+};
+
 export const shoplingPriceAdjustmentModule: CommerceModule = {
   id: "shopling-price-adjustment-runner",
   title: "샵플링 판매가 인상·인하 실행기",
@@ -72,6 +91,7 @@ const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((mod
 );
 
 export const extendedModuleRegistry: readonly CommerceModule[] = [
+  commerceOperationsModule,
   ...renamedModuleRegistry,
   productDecisionAgentModule,
   priceAdjustmentEngineModule,
