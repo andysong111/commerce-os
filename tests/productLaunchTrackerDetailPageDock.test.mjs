@@ -24,6 +24,10 @@ const trackerPage = await readFile(
   new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
   "utf8",
 );
+const nextConfig = await readFile(
+  new URL("../next.config.ts", import.meta.url),
+  "utf8",
+);
 const trackerEntry = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
@@ -123,9 +127,29 @@ test("detail page dependency checks stay visible and always restore the selectio
     /!\["success", "failed", "cancelled"\]\.includes\(job\.status\)/,
   );
   assert.match(dockSource, /announceServerJob\(created\)/);
-  assert.match(dockSource, /상세페이지 작업 \$\{createdCount\}건을 작업도우미에 등록했습니다/);
+  assert.match(dockSource, /상세페이지 작업 \$\{createdCount\}건 등록 완료/);
   assert.match(dockSource, /이미 진행 중입니다\. 작업도우미에서 현재 상태를 확인하세요/);
   assert.match(dockSource, /showMessage\([\s\S]*15_000/);
+  assert.match(dockSource, /detail-page-dock-run-status/);
+  assert.match(dockSource, /클릭 확인 · 선택 상품과 연결 상태를 확인하고 있습니다/);
+  assert.match(dockSource, /상품 목록 상태를 읽지 못했습니다/);
+  assert.match(dockSource, /선택 상태와 상품 데이터가 일치하지 않습니다/);
+  assert.match(dockSource, /작업이 등록되지 않았습니다/);
+  assert.match(dockSource, /showRunStatus\(message, "error"\)/);
+});
+
+test("Chrome local network permission is delegated through both nested detail-page frames", () => {
+  assert.match(trackerPage, /allow="local-network; loopback-network; local-network-access"/);
+  assert.match(
+    dockSource,
+    /activeFrame\.allow = "local-network; loopback-network; local-network-access"/,
+  );
+  assert.match(dockSource, /targetAddressSpace: "local"/);
+  assert.match(dockSource, /Chrome 주소창 왼쪽 사이트 설정/);
+  assert.match(nextConfig, /Permissions-Policy/);
+  assert.match(nextConfig, /local-network=/);
+  assert.match(nextConfig, /loopback-network=/);
+  assert.match(nextConfig, /commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa/);
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {

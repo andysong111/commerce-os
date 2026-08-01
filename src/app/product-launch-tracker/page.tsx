@@ -15,6 +15,7 @@ export default async function ProductLaunchTrackerPage({
       <iframe
         title="신규 상품 출시 진행관리"
         src={`/product-launch-tracker-app/index.html?${iframeParams.toString()}`}
+        allow="local-network; loopback-network; local-network-access"
         className="h-[calc(100vh-5rem)] min-h-[760px] w-full border-0"
       />
     </section>

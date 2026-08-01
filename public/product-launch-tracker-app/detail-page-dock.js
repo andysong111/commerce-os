@@ -21,6 +21,7 @@ const REQUESTED_ITEM_ID = cleanText(PAGE_PARAMS.get("open_item"), 160);
 const bulkControls = document.querySelector(".bulk-controls");
 const tableBody = document.querySelector("#launch-table-body");
 let runButton = null;
+let runStatus = null;
 let monitor = null;
 let queue = [];
 let active = null;
@@ -32,6 +33,7 @@ let syncing = false;
 let enqueueing = false;
 let enqueuePhase = "idle";
 let messageTimer = null;
+let runStatusTimer = null;
 const jobsById = new Map();
 const workerResumeAt = new Map();
 const finalizerRetryAt = new Map();
@@ -96,10 +98,26 @@ function installControls() {
   runButton.type = "button";
   runButton.className = "button button-primary";
   runButton.title = "체크한 상품을 서버 작업으로 등록합니다. 화면을 닫아도 AI 생성은 계속됩니다.";
-  runButton.addEventListener("click", () => void enqueueSelected());
+  runButton.addEventListener("click", () => {
+    void enqueueSelected().catch((error) => {
+      const message = error instanceof Error
+        ? error.message
+        : "상세페이지 생성 요청을 처리하지 못했습니다.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+    });
+  });
+  runStatus = document.createElement("p");
+  runStatus.id = "detail-page-dock-run-status";
+  runStatus.className = "detail-page-dock-run-status";
+  runStatus.setAttribute("role", "status");
+  runStatus.setAttribute("aria-live", "polite");
+  runStatus.hidden = true;
   const clear = bulkControls.querySelector("#clear-selection-button");
-  if (clear) clear.before(runButton);
-  else bulkControls.append(runButton);
+  if (clear) {
+    clear.before(runButton);
+    runButton.after(runStatus);
+  } else bulkControls.append(runButton, runStatus);
   syncRunButton();
 }
 
@@ -119,37 +137,68 @@ function syncRunButton() {
 }
 
 async function enqueueSelected() {
-  const selectedIds = selectedRowIds();
-  const state = readState();
-  if (!selectedIds.length || !state?.items) return;
-  const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
-  const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
-  if (invalid.length) {
-    showMessage(
-      `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다.`,
-    );
-    return;
-  }
+  if (enqueueing) return;
   enqueueing = true;
   enqueuePhase = "checking";
   syncRunButton();
+  showRunStatus("클릭 확인 · 선택 상품과 연결 상태를 확인하고 있습니다.", "progress");
+
+  const selectedIds = selectedRowIds();
   try {
+    if (!selectedIds.length) {
+      const message = "선택된 상품이 없습니다. 상품 왼쪽 체크박스를 다시 선택하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 10_000);
+      return;
+    }
+
+    const state = readState();
+    if (!Array.isArray(state?.items)) {
+      const message = "상품 목록 상태를 읽지 못했습니다. Ctrl+F5 후 다시 시도하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+    const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
+    if (selected.length !== selectedIds.length) {
+      const message = "선택 상태와 상품 데이터가 일치하지 않습니다. Ctrl+F5 후 다시 선택하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+    const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
+    if (invalid.length) {
+      const message = `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다. 상품 상세에서 링크를 입력한 뒤 다시 실행하세요.`;
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+
+    showRunStatus(
+      "Chrome 로컬 네트워크 권한·로컬 수집기·Studio 연결을 확인하고 있습니다.",
+      "progress",
+    );
     try {
       await ensureDetailPageDependencies();
     } catch (error) {
-      showMessage(
-        error instanceof Error
-          ? error.message
-          : "상세페이지 생성 연결을 확인하지 못했습니다.",
-      );
+      const message = error instanceof Error
+        ? error.message
+        : "상세페이지 생성 연결을 확인하지 못했습니다.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
       return;
     }
+    showRunStatus("연결 확인 완료 · 생성 여부 확인창을 열었습니다.", "success");
     if (!window.confirm(
       `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
-    )) return;
+    )) {
+      showRunStatus("사용자가 생성을 취소했습니다. 비용은 발생하지 않았습니다.", "neutral", 8_000);
+      return;
+    }
 
     enqueuePhase = "registering";
     syncRunButton();
+    showRunStatus("확인 완료 · 서버 작업을 등록하고 작업도우미에 연결하고 있습니다.", "progress");
     if (SHOW_LOCAL_MONITOR) ensureMonitor();
     let createdCount = 0;
     let existingCount = 0;
@@ -199,26 +248,35 @@ async function enqueueSelected() {
         createdCount += 1;
         announceServerJob(created);
       } catch (error) {
-        showMessage(
-          error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.",
-          15_000,
-        );
+        const message = error instanceof Error
+          ? error.message
+          : "상세페이지 서버 작업을 등록하지 못했습니다.";
+        showRunStatus(message, "error");
+        showMessage(message, 15_000);
         break;
       }
     }
     renderMonitor();
     if (CAN_EXECUTE_JOBS) void processNext();
     if (createdCount) {
-      showMessage(
-        `상세페이지 작업 ${createdCount}건을 작업도우미에 등록했습니다.${existingCount ? ` 이미 진행 중 ${existingCount}건은 중복 등록하지 않았습니다.` : ""}`,
-        8_000,
-      );
+      const message = `상세페이지 작업 ${createdCount}건 등록 완료 · 작업도우미에서 진행 상태를 확인하세요.${existingCount ? ` 이미 진행 중 ${existingCount}건은 중복 등록하지 않았습니다.` : ""}`;
+      showRunStatus(message, "success", 15_000);
+      showMessage(message, 8_000);
     } else if (existingCount) {
-      showMessage(
-        `선택한 ${existingCount}건은 이미 진행 중입니다. 작업도우미에서 현재 상태를 확인하세요.`,
-        10_000,
-      );
+      const message = `선택한 ${existingCount}건은 이미 진행 중입니다. 작업도우미에서 현재 상태를 확인하세요.`;
+      showRunStatus(message, "neutral", 15_000);
+      showMessage(message, 10_000);
+    } else {
+      const message = "작업이 등록되지 않았습니다. 표시된 오류를 확인한 뒤 다시 시도하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
     }
+  } catch (error) {
+    const message = error instanceof Error
+      ? `상세페이지 생성 요청 오류: ${error.message}`
+      : "상세페이지 생성 요청 중 알 수 없는 오류가 발생했습니다.";
+    showRunStatus(message, "error");
+    showMessage(message, 15_000);
   } finally {
     enqueueing = false;
     enqueuePhase = "idle";
@@ -349,6 +407,7 @@ function mountFrame(url, title) {
   activeFrame.id = "detail-page-dock-engine-frame";
   activeFrame.title = title;
   activeFrame.src = url.toString();
+  activeFrame.allow = "local-network; loopback-network; local-network-access";
   activeFrame.setAttribute("aria-hidden", "true");
   document.body.append(activeFrame);
   activeHandshakeTimer = window.setTimeout(() => {
@@ -1045,10 +1104,18 @@ async function ensureLocalCollectorReady() {
   try {
     const response = await fetch(LOCAL_BRIDGE_HEALTH_URL, {
       cache: "no-store",
+      credentials: "omit",
       signal: controller.signal,
+      targetAddressSpace: "local",
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`status=${response.status}`);
+    if (
+      payload.ok !== true ||
+      payload.service !== "product-detail-page-auto-local-ops-bridge"
+    ) {
+      throw new Error("unexpected-local-bridge");
+    }
     if (payload.evidence_import_supported !== true) {
       throw new Error(
         "로컬 수집기 업데이트가 필요합니다. 최신 수집기를 실행한 뒤 다시 시도하세요.",
@@ -1057,7 +1124,7 @@ async function ensureLocalCollectorReady() {
   } catch (error) {
     if (error instanceof Error && error.message.includes("업데이트")) throw error;
     throw new Error(
-      "로컬 1688 수집기가 꺼져 있습니다. 수집기를 실행한 뒤 다시 시도하세요.",
+      "로컬 수집기에 연결하지 못했습니다. Chrome 주소창 왼쪽 사이트 설정에서 ‘로컬 네트워크 액세스’를 허용하고, 수집기 PowerShell 창을 켠 뒤 다시 누르세요.",
     );
   } finally {
     window.clearTimeout(timer);
@@ -1182,11 +1249,30 @@ function showMessage(message, duration = 4200) {
   } else window.alert(message);
 }
 
+function showRunStatus(message, tone = "neutral", duration = 0) {
+  if (!runStatus) return;
+  window.clearTimeout(runStatusTimer);
+  runStatusTimer = null;
+  runStatus.textContent = String(message || "");
+  runStatus.dataset.tone = tone;
+  runStatus.hidden = !runStatus.textContent;
+  if (duration > 0) {
+    runStatusTimer = window.setTimeout(() => {
+      runStatus.hidden = true;
+      runStatusTimer = null;
+    }, duration);
+  }
+}
+
 function installStyles() {
   const style = document.createElement("style");
   style.id = "detail-page-dock-styles";
   style.textContent = `
     #detail-page-dock-engine-frame{position:fixed!important;left:-20px!important;bottom:-20px!important;width:1px!important;height:1px!important;opacity:.01!important;border:0!important;pointer-events:none!important}
+    #detail-page-dock-run-status{flex:1 0 100%;margin:2px 0 0;padding:7px 9px;border-radius:7px;background:#f8fafc;color:#475569;font-size:11px;font-weight:800;line-height:1.4}
+    #detail-page-dock-run-status[data-tone="progress"]{background:#eff6ff;color:#1d4ed8}
+    #detail-page-dock-run-status[data-tone="success"]{background:#ecfdf5;color:#047857}
+    #detail-page-dock-run-status[data-tone="error"]{background:#fff1f2;color:#be123c}
     #detail-page-dock-monitor{position:fixed;right:18px;bottom:18px;z-index:70;width:min(390px,calc(100vw - 36px));max-height:min(620px,calc(100vh - 36px));overflow:hidden;border:1px solid #cbd5e1;border-radius:16px;background:#fff;box-shadow:0 18px 48px rgba(15,23,42,.24);font-size:13px;color:#0f172a}
     .dock-monitor-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;background:#0f172a;color:#fff}.dock-monitor-header div{display:flex;flex-direction:column;gap:2px}.dock-monitor-header span{font-size:11px;color:#cbd5e1}.dock-monitor-header button{width:28px;height:28px;border:0;border-radius:8px;background:#334155;color:#fff;font-weight:900;cursor:pointer}
     #dock-monitor-body{max-height:540px;overflow:auto;padding:10px;background:#f8fafc}.is-collapsed #dock-monitor-body{display:none}.dock-job{margin-bottom:9px;padding:11px;border:1px solid #e2e8f0;border-left:4px solid #2563eb;border-radius:10px;background:#fff}.dock-status-completed{border-left-color:#059669}.dock-status-failed{border-left-color:#dc2626}.dock-job-title{display:flex;justify-content:space-between;gap:10px}.dock-job-title span{font-size:11px;font-weight:800}.dock-job p{margin:6px 0 0;line-height:1.45;color:#475569}.dock-progress{height:6px;margin-top:8px;overflow:hidden;border-radius:999px;background:#e2e8f0}.dock-progress i{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.dock-status-completed .dock-progress i{background:#059669}.dock-status-failed .dock-progress i{background:#dc2626}.dock-error{color:#b91c1c!important}.dock-job-meta{margin-top:7px;font-size:11px;color:#64748b}.dock-job-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.dock-job-actions button,.dock-monitor-footer button{min-height:30px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 9px;font:inherit;font-weight:800;cursor:pointer}.dock-monitor-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:2px}.dock-monitor-footer span{font-size:11px;color:#2563eb}.dock-monitor-footer button:disabled{opacity:.45;cursor:not-allowed}.dock-empty{padding:18px;text-align:center;color:#64748b}
