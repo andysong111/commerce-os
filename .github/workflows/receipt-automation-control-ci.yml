@@ -10,7 +10,7 @@ on:
       - 'src/lib/commerceDataSourceHealth.ts'
       - 'src/lib/priceAdjustmentSalesCache.ts'
       - 'src/lib/extendedModuleRegistry.ts'
-      - 'supabase/migrations/202608020001_receipt_automation_control.sql'
+      - 'supabase/migrations/20260802000*_receipt_automation*.sql'
       - 'tests/receiptAutomationControl.test.mjs'
       - 'tests/operationsDashboard.test.mjs'
       - '.github/workflows/receipt-automation-control-ci.yml'
