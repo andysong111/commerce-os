@@ -110,7 +110,10 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, and bound
   assert.doesNotMatch(route, /user-agent/i);
   assert.doesNotMatch(route, /createSupabaseServerClient|auth\.getUser/);
   const config = JSON.parse(vercel);
-  assert.deepEqual(config.crons, [{ path: "/api/cron/shopling-price-bulk-auto", schedule: "* * * * *" }]);
+  assert.deepEqual(config.crons, [
+    { path: "/api/cron/shopling-price-bulk-auto", schedule: "* * * * *" },
+    { path: "/api/cron/detail-page-jobs", schedule: "* * * * *" },
+  ]);
 });
 
 test("orchestrator reconciles same request IDs, honors pause, and never auto-approves failed-item retry", async () => {
