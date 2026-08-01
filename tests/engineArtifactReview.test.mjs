@@ -77,8 +77,16 @@ test("dashboard descriptions and module labels are Korean-first", async () => {
     "https://commerce-os-detail-page-studio.vercel.app/",
   );
   assert.equal(
-    moduleRegistry.filter((module) => module.category === "detail-page").length,
-    1,
+    moduleRegistry.filter((module) => module.id.startsWith("detail-page-studio")).length,
+    2,
+  );
+  assert.equal(
+    moduleRegistry.find((module) => module.id === "detail-page-studio")?.title,
+    "Commerce OS Detail Page Studio · SaaS 전용",
+  );
+  assert.equal(
+    moduleRegistry.find((module) => module.id === "detail-page-studio-launch-connector")?.title,
+    "Commerce OS Detail Page Studio · 내부 상품출시진행관리 연결본",
   );
   assert.match(moduleRegistry.find((module) => module.id === "keyword-review-queue")?.description ?? "", /키워드 엔진 결과물/);
   assert.match(moduleRegistry.find((module) => module.id === "detail-page-studio")?.description ?? "", /AI 검수/);

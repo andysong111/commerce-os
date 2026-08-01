@@ -157,8 +157,8 @@ export const moduleRegistry: readonly CommerceModule[] = [
   },
   {
     id: "detail-page-studio",
-    title: "상세페이지 스튜디오",
-    navigationLabel: "상세페이지 스튜디오",
+    title: "Commerce OS Detail Page Studio · SaaS 전용",
+    navigationLabel: "상세페이지 스튜디오 · SaaS 전용",
     description:
       "상품 이미지와 정보를 입력하면 표준 생성 프로필에 따라 8개 섹션을 만들고, AI 검수·문제 패널 자동보정 후 최종 상세페이지를 제공합니다.",
     status: "available",
@@ -167,12 +167,32 @@ export const moduleRegistry: readonly CommerceModule[] = [
     inputType:
       "상품 이미지 최대 3장, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
     outputType:
-      "AI 검수된 8개 섹션 상세페이지, 1000×12000 JPG, 실행·사용량 원장",
+      "AI 검수된 8개 섹션 상세페이지, 1000×14000 JPG, 대표 1장·부가 4장, 실행·사용량 원장",
     historySupport: false,
     externalProject: true,
     note: "commerce-os-detail-page-studio Production을 최신 운영 기준으로 사용합니다. 기본 Standard 프로필, 다국어 로케일, 실행·사용량 원장이 포함됩니다.",
     helperNote: "최신 운영 버전 · 사용 가능",
-    actionLabel: "상세페이지 스튜디오 열기",
+    actionLabel: "SaaS 상세페이지 스튜디오 열기",
+  },
+  {
+    id: "detail-page-studio-launch-connector",
+    title: "Commerce OS Detail Page Studio · 내부 상품출시진행관리 연결본",
+    navigationLabel: "상세페이지 스튜디오 · 내부 연결본",
+    description:
+      "상품출시진행관리에서 선택한 제품의 중국링크 고정1번을 사용해 상세페이지와 대표·부가 이미지를 만들고, 승인 결과를 해당 상품의 이미지 필드에 자동 연결합니다.",
+    status: "available",
+    route: "/product-launch-tracker?detailPageDock=1",
+    category: "detail-page",
+    inputType:
+      "상품출시진행관리 선택 행, 중국링크 고정1번, 판매 옵션, 문구 언어",
+    outputType:
+      "검수 통과 상세페이지 HTML, 대표이미지 URL, 추가이미지 URL, 생성 진행·재생성 이력",
+    historySupport: true,
+    externalProject: false,
+    note: "기존 Commerce OS Detail Page Studio의 생성·AI 검수 규칙을 사용하고 결과 파일을 OPS 영구 저장소에 올린 뒤 상품출시진행관리 필드에 자동 도킹합니다.",
+    helperNote: "상품출시진행관리 자동 도킹",
+    actionLabel: "내부 연결본 열기",
+    safetyBadge: "검수 통과 후 도킹",
   },
   {
     id: "detail-page-cost-admin",

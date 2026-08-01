@@ -82,6 +82,18 @@ const elements = {
 
 await bootstrap();
 
+window.addEventListener("product-launch-tracker:external-state", () => {
+  const stored = safeJsonParse(localStorage.getItem(STORAGE_KEY));
+  if (!stored?.items || !Array.isArray(stored.items)) return;
+  state.items = stored.items.map(hydrateLaunchItem);
+  state.policy = normalizePolicy(stored.policy ?? state.policy);
+  const validIds = new Set(state.items.map((item) => item.id));
+  state.selectedIds = new Set(
+    [...state.selectedIds].filter((id) => validIds.has(id)),
+  );
+  render();
+});
+
 async function bootstrap() {
   try {
     const response = await fetch("./data/launch-items.json", { cache: "no-store" });
