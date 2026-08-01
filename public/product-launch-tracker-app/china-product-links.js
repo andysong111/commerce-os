@@ -253,11 +253,16 @@ function validateBeforeSave(event) {
 }
 
 function persistAfterMainSave(event) {
-  if (event.defaultPrevented || event.submitter?.value !== "save" || !pendingSave) {
+  if (event.submitter?.value !== "save" || !pendingSave) {
     return;
   }
   const draft = pendingSave;
   pendingSave = null;
+  // main-app.js intentionally prevents the native dialog submit and closes the
+  // dialog itself after a successful product save.  Treat an open dialog as a
+  // rejected/unfinished main save, rather than treating defaultPrevented as a
+  // failure (defaultPrevented is also true for every successful main save).
+  if (detailDialog?.open) return;
   window.setTimeout(() => void persistDraft(draft), 0);
 }
 
