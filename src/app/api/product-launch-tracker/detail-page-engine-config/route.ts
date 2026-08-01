@@ -36,5 +36,6 @@ export async function GET(request: NextRequest) {
     ok: true,
     engineUrl: engineUrl.toString(),
     engineOrigin: engineUrl.origin,
+    workerUrl: new URL("/api/internal/ops-detail-page-job", engineUrl).toString(),
   });
 }

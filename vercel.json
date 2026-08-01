@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/shopling-price-bulk-auto",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/detail-page-jobs",
+      "schedule": "* * * * *"
     }
   ]
 }

@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
 import { OPS_WORKSPACE_GROUPS } from "../src/lib/opsWorkspace.ts";
+import {
+  createDetailPageJobToken,
+  verifyDetailPageJobToken,
+} from "../src/lib/detailPageJobToken.ts";
 
 const dockSource = await readFile(
   new URL("../public/product-launch-tracker-app/detail-page-dock.js", import.meta.url),
@@ -22,6 +26,30 @@ const assetRoute = await readFile(
 );
 const configRoute = await readFile(
   new URL("../src/app/api/product-launch-tracker/detail-page-engine-config/route.ts", import.meta.url),
+  "utf8",
+);
+const jobsRoute = await readFile(
+  new URL("../src/app/api/product-launch-tracker/detail-page-jobs/route.ts", import.meta.url),
+  "utf8",
+);
+const jobRoute = await readFile(
+  new URL("../src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts", import.meta.url),
+  "utf8",
+);
+const startRoute = await readFile(
+  new URL("../src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts", import.meta.url),
+  "utf8",
+);
+const jobServer = await readFile(
+  new URL("../src/lib/detailPageJobServer.ts", import.meta.url),
+  "utf8",
+);
+const jobToken = await readFile(
+  new URL("../src/lib/detailPageJobToken.ts", import.meta.url),
+  "utf8",
+);
+const recoveryCron = await readFile(
+  new URL("../src/app/api/cron/detail-page-jobs/route.ts", import.meta.url),
   "utf8",
 );
 
@@ -59,17 +87,16 @@ test("selected launch rows run from China primary link and expose background pro
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
-  assert.match(dockSource, /main_catalog: "main"/);
-  assert.match(dockSource, /alternate_whole: "additional-1"/);
-  assert.match(dockSource, /evidence_detail: "additional-2"/);
-  assert.match(dockSource, /lifestyle_usage: "additional-3"/);
-  assert.match(dockSource, /adaptive_support: "additional-4"/);
-  assert.match(dockSource, /payload\.qa\?\.detailPassed !== true/);
-  assert.match(dockSource, /representativeIndividualsPassed !== true/);
+  assert.match(dockSource, /byRole\.get\("main_catalog"\)/);
+  assert.match(dockSource, /byRole\.get\("alternate_whole"\)/);
+  assert.match(dockSource, /byRole\.get\("evidence_detail"\)/);
+  assert.match(dockSource, /byRole\.get\("lifestyle_usage"\)/);
+  assert.match(dockSource, /byRole\.get\("adaptive_support"\)/);
+  assert.match(dockSource, /action: "final_complete"/);
   assert.match(dockSource, /html: buildDetailHtml/);
-  assert.match(dockSource, /detailImageUrl: docked\.detailImageUrl/);
-  assert.match(dockSource, /mainImageUrl: docked\.mainImageUrl/);
-  assert.match(dockSource, /additionalImageUrls: docked\.additionalImageUrls/);
+  assert.match(dockSource, /detailImageUrl,/);
+  assert.match(dockSource, /mainImageUrl,/);
+  assert.match(dockSource, /additionalImageUrls,/);
   assert.match(trackerCore, /detailPageAutomation/);
   assert.match(trackerCore, /detailImageUrl/);
 });
@@ -87,7 +114,57 @@ test("asset docking APIs enforce same-origin, roles, JPG, size, and public stabl
 });
 
 test("interrupted generation is recoverable instead of remaining permanently active", () => {
-  assert.match(dockSource, /browser_interrupted/);
-  assert.match(dockSource, /브라우저 새로고침 또는 화면 이동으로 생성이 중단되었습니다/);
-  assert.match(dockSource, /‘다시 생성’을 누르면 이어서 만들 수 있습니다/);
+  assert.match(dockSource, /executionMode: "server-v1"/);
+  assert.match(dockSource, /await syncJobs\(\)/);
+  assert.match(dockSource, /sourceRunId: job\.sourceRunId/);
+  assert.match(dockSource, /job\.status === "render_pending"/);
+  assert.match(dockSource, /화면 종료 가능/);
+  assert.match(dockSource, /finalizerRetryAt\.set\(jobId, Date\.now\(\) \+ 30_000\)/);
+  assert.doesNotMatch(dockSource, /browser_interrupted/);
+});
+
+test("durable jobs reuse the deployed job ledger and require a signed per-job worker token", () => {
+  assert.match(jobServer, /product_launch_upload_jobs/);
+  assert.match(jobServer, /payload\.kind/);
+  assert.match(jobToken, /createHmac\("sha256"/);
+  assert.match(jobsRoute, /request_id: `detail-page:/);
+  assert.match(jobRoute, /verifyDetailPageJobToken/);
+  assert.match(jobRoute, /action === "claim"/);
+  assert.match(jobRoute, /action === "evidence_ready"/);
+  assert.match(jobRoute, /action === "final_complete"/);
+  assert.match(jobRoute, /const releasesLease = action !== "progress"/);
+  assert.doesNotMatch(jobRoute, /workerToken:/);
+  assert.match(startRoute, /\/api\/internal\/ops-detail-page-job/);
+  const config = { supabaseUrl: "https://example.supabase.co", secretKey: "test-secret" };
+  const token = createDetailPageJobToken(
+    config,
+    "0c23a96b-1cda-44b6-9c08-1fa1c1b45a36",
+    "00112233-4455-4677-8899-aabbccddeeff",
+  );
+  assert.equal(token.length, 64);
+  assert.equal(
+    verifyDetailPageJobToken(
+      config,
+      "0c23a96b-1cda-44b6-9c08-1fa1c1b45a36",
+      "00112233-4455-4677-8899-aabbccddeeff",
+      token,
+    ),
+    true,
+  );
+  assert.equal(
+    verifyDetailPageJobToken(
+      config,
+      "0c23a96b-1cda-44b6-9c08-1fa1c1b45a36",
+      "00112233-4455-4677-8899-aabbccddeeff",
+      "0".repeat(64),
+    ),
+    false,
+  );
+});
+
+test("stalled server generation is restarted by the production watchdog", () => {
+  assert.match(recoveryCron, /RECOVERY_AFTER_MS = 8 \* 60 \* 1000/);
+  assert.match(recoveryCron, /listRecoverableDetailPageJobs/);
+  assert.match(recoveryCron, /CRON_SECRET/);
+  assert.match(recoveryCron, /createDetailPageJobToken/);
 });

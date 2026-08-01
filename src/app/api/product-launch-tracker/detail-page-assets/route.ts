@@ -6,29 +6,22 @@ import {
   isSameOriginOpsRequest,
   temporaryOpsIdentity,
 } from "@/lib/opsLoginBypass";
+import {
+  bearerToken,
+  getDetailPageJobConfig,
+  readDetailPageJob,
+  verifyDetailPageJobToken,
+} from "@/lib/detailPageJobServer";
 
 const BUCKET_NAME = "product-launch-assets";
 // Vercel 함수 요청 본문 한도보다 여유를 두고, 상세페이지 엔진도 같은
 // 상한에 맞춰 JPEG 품질을 단계적으로 조정합니다.
 const MAX_FILE_BYTES = 4_000_000;
-const ROLE_PATTERN = /^(detail-page|main|additional-[1-4])$/;
+const ROLE_PATTERN = /^(detail-page|main|additional-[1-4]|evidence-(?:[1-9]|[1-5][0-9]|60)|panel-[1-8])$/;
 
 type TrackerIdentity = { userId: string; email: string };
 
 export async function POST(request: NextRequest) {
-  if (!isSameOriginOpsRequest(request)) {
-    return Response.json(
-      {
-        ok: false,
-        code: "SAME_ORIGIN_REQUIRED",
-        message: "OPS Center 화면에서만 상세페이지 결과를 저장할 수 있습니다.",
-      },
-      { status: 403 },
-    );
-  }
-
-  const identity = await resolveIdentity(request);
-  if (!identity.ok) return Response.json(identity.body, { status: identity.status });
   const config = getAdminConfig();
   if (!config.ok) return Response.json(config.body, { status: 503 });
 
@@ -45,6 +38,8 @@ export async function POST(request: NextRequest) {
   if (!(file instanceof File) || !itemId || !jobId || !ROLE_PATTERN.test(role)) {
     return invalid("상품·작업·이미지 역할 또는 파일 값이 올바르지 않습니다.");
   }
+  const identity = await resolveUploadIdentity(request, jobId, itemId);
+  if (!identity.ok) return Response.json(identity.body, { status: identity.status });
   if (!/^image\/jpe?g$/i.test(file.type)) {
     return invalid("상세페이지 결과 이미지는 JPG 형식이어야 합니다.");
   }
@@ -89,6 +84,65 @@ export async function POST(request: NextRequest) {
     path: objectPath,
     publicUrl: `${config.supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${encodePath(objectPath)}`,
   });
+}
+
+async function resolveUploadIdentity(
+  request: NextRequest,
+  jobId: string,
+  itemId: string,
+): Promise<
+  | { ok: true; value: TrackerIdentity }
+  | { ok: false; status: number; body: { ok: false; code: string; message: string } }
+> {
+  const token = bearerToken(request);
+  if (token) {
+    const config = getDetailPageJobConfig();
+    if (!config.ok) return config;
+    try {
+      const job = await readDetailPageJob(config.value, jobId);
+      if (
+        !job ||
+        job.launch_item_id !== itemId ||
+        !verifyDetailPageJobToken(config.value, job.owner_id, job.id, token)
+      ) {
+        return {
+          ok: false,
+          status: 401,
+          body: {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_AUTH_FAILED",
+            message: "상세페이지 서버 작업 인증에 실패했습니다.",
+          },
+        };
+      }
+      return {
+        ok: true,
+        value: { userId: job.owner_id, email: job.owner_email },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 500,
+        body: {
+          ok: false,
+          code: "DETAIL_PAGE_JOB_AUTH_LOOKUP_FAILED",
+          message: error instanceof Error ? error.message : "상세페이지 작업을 확인하지 못했습니다.",
+        },
+      };
+    }
+  }
+  if (!isSameOriginOpsRequest(request)) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        ok: false,
+        code: "SAME_ORIGIN_REQUIRED",
+        message: "OPS Center 화면에서만 상세페이지 결과를 저장할 수 있습니다.",
+      },
+    };
+  }
+  return resolveIdentity();
 }
 
 function invalid(message: string) {
@@ -141,9 +195,7 @@ async function ensurePublicBucket(supabaseUrl: string, secretKey: string) {
   };
 }
 
-async function resolveIdentity(
-  request: NextRequest,
-): Promise<
+async function resolveIdentity(): Promise<
   | { ok: true; value: TrackerIdentity }
   | { ok: false; status: number; body: { ok: false; code: string; message: string } }
 > {
