@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type DetailPageJobStatus =
+type DetailStatus =
   | "collecting"
   | "queued"
   | "running"
@@ -12,10 +12,10 @@ type DetailPageJobStatus =
   | "failed"
   | "cancelled";
 
-type DetailPageJob = {
+type DetailJob = {
   jobId: string;
   itemId: string;
-  status: DetailPageJobStatus;
+  status: DetailStatus;
   stage: string;
   message: string;
   progress: number;
@@ -27,15 +27,15 @@ type DetailPageJob = {
   completedAt: string | null;
 };
 
-type CategoryTaskTone = "running" | "success" | "warning" | "failed";
+type CategoryTone = "running" | "success" | "warning" | "failed";
 
-type CategoryUpdateTask = {
+type CategoryTask = {
   id: string;
   kind: "shopling_category_update";
   label: string;
   active: boolean;
   status: string;
-  tone: CategoryTaskTone;
+  tone: CategoryTone;
   requestId: string;
   actionsUrl: string;
   startedAt: string;
@@ -47,7 +47,7 @@ type CategoryUpdateTask = {
   detail: string;
 };
 
-type CategoryStatusResponse = {
+type CategoryStatusBody = {
   ok?: boolean;
   status?: {
     status?: string;
@@ -61,38 +61,41 @@ type CategoryStatusResponse = {
   } | null;
 };
 
+type Tone = "blue" | "green" | "amber" | "red" | "slate";
+
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const CATEGORY_STATUS_API = "/api/shopling-categories/status";
 const CATEGORY_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
 const CATEGORY_EVENT_SOURCE = "commerce-os-category-update";
 const DISMISSED_KEY = "commerce-os-work-assistant:dismissed-jobs:v1";
 const COLLAPSED_KEY = "commerce-os-work-assistant:collapsed:v1";
-const POLL_INTERVAL_MS = 2_500;
-const RECENT_TERMINAL_MS = 12 * 60 * 60 * 1_000;
-const ACTIVE_STATUSES = new Set<DetailPageJobStatus>([
+const POLL_MS = 2_500;
+const RECENT_MS = 12 * 60 * 60 * 1_000;
+const ACTIVE_DETAIL = new Set<DetailStatus>([
   "collecting",
   "queued",
   "running",
   "render_pending",
 ]);
 
-function safeProgress(value: number) {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function text(value: unknown) {
+function txt(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function jobProductName(job: DetailPageJob) {
-  const payload = job.payload ?? {};
-  return String(
-    payload.product_name || payload.product_name_hint || job.itemId || "상품",
-  );
+function safeProgress(value: number) {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? Math.round(value) : 0));
 }
 
-function jobStatus(job: DetailPageJob) {
+function detailName(job: DetailJob) {
+  const payload = job.payload ?? {};
+  return txt(payload.product_name || payload.product_name_hint || job.itemId || "상품");
+}
+
+function detailPresentation(job: DetailJob): {
+  label: string;
+  detail: string;
+  tone: Tone;
+} {
   switch (job.status) {
     case "collecting":
       return { label: "현재 진행 중", detail: "1688 수집 중", tone: "blue" };
@@ -111,13 +114,13 @@ function jobStatus(job: DetailPageJob) {
   }
 }
 
-function categoryPresentation(task: CategoryUpdateTask) {
+function categoryPresentation(task: CategoryTask): {
+  label: string;
+  detail: string;
+  tone: Tone;
+} {
   if (task.active || task.tone === "running") {
-    return {
-      label: "현재 진행 중",
-      detail: task.detail || "완료 여부 자동 확인 중",
-      tone: "blue",
-    };
+    return { label: "현재 진행 중", detail: task.detail, tone: "blue" };
   }
   if (task.tone === "success") {
     return { label: "완료", detail: "카테고리 업데이트 완료", tone: "green" };
@@ -128,74 +131,110 @@ function categoryPresentation(task: CategoryUpdateTask) {
   return { label: "확인 필요", detail: "카테고리 업데이트 실패", tone: "red" };
 }
 
-function readDismissedJobs() {
+function toneClasses(tone: Tone) {
+  switch (tone) {
+    case "green":
+      return {
+        border: "border-l-emerald-500",
+        badge: "bg-emerald-50 text-emerald-700",
+        bar: "bg-emerald-500",
+      };
+    case "amber":
+      return {
+        border: "border-l-amber-500",
+        badge: "bg-amber-50 text-amber-700",
+        bar: "bg-amber-500",
+      };
+    case "red":
+      return {
+        border: "border-l-rose-500",
+        badge: "bg-rose-50 text-rose-700",
+        bar: "bg-rose-500",
+      };
+    case "slate":
+      return {
+        border: "border-l-slate-400",
+        badge: "bg-slate-100 text-slate-600",
+        bar: "bg-slate-400",
+      };
+    default:
+      return {
+        border: "border-l-blue-600",
+        badge: "bg-blue-50 text-blue-700",
+        bar: "bg-blue-600",
+      };
+  }
+}
+
+function readDismissed() {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || "[]");
-    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+    return new Set<string>(Array.isArray(parsed) ? parsed.map(String) : []);
   } catch {
     return new Set<string>();
   }
 }
 
-function readCategoryTask() {
+function readCategoryTask(): CategoryTask | null {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(CATEGORY_TASK_KEY) || "null");
     if (!parsed || typeof parsed !== "object") return null;
-    const source = parsed as Partial<CategoryUpdateTask>;
-    const startedAt = text(source.startedAt);
-    const requestId = text(source.requestId);
+    const source = parsed as Partial<CategoryTask>;
+    const requestId = txt(source.requestId);
+    const startedAt = txt(source.startedAt);
+    const tone: CategoryTone =
+      source.tone === "success" ||
+      source.tone === "warning" ||
+      source.tone === "failed"
+        ? source.tone
+        : "running";
     return {
-      id: text(source.id) || `shopling-category:${requestId || startedAt || "current"}`,
-      kind: "shopling_category_update" as const,
-      label: text(source.label) || "샵플링 카테고리 업데이트",
+      id: txt(source.id) || `shopling-category:${requestId || startedAt || "current"}`,
+      kind: "shopling_category_update",
+      label: txt(source.label) || "샵플링 카테고리 업데이트",
       active: source.active !== false,
-      status: text(source.status) || "running",
-      tone: (["success", "warning", "failed"] as const).includes(
-        source.tone as "success" | "warning" | "failed",
-      )
-        ? (source.tone as "success" | "warning" | "failed")
-        : "running",
+      status: txt(source.status) || "running",
+      tone,
       requestId,
-      actionsUrl: text(source.actionsUrl),
+      actionsUrl: txt(source.actionsUrl),
       startedAt,
-      finishedAt: text(source.finishedAt),
-      updatedAt: text(source.updatedAt),
+      finishedAt: txt(source.finishedAt),
+      updatedAt: txt(source.updatedAt),
       backgrounded: Boolean(source.backgrounded),
-      title: text(source.title) || "샵플링 카테고리 업데이트 진행 중",
-      message:
-        text(source.message) || "샵플링 표준카테고리 목록을 읽고 있습니다.",
-      detail: text(source.detail) || "완료 여부 자동 확인 중",
+      title: txt(source.title) || "샵플링 카테고리 업데이트 진행 중",
+      message: txt(source.message) || "샵플링 표준카테고리 목록을 읽고 있습니다.",
+      detail: txt(source.detail) || "완료 여부 자동 확인 중",
     };
   } catch {
     return null;
   }
 }
 
-function writeCategoryTask(task: CategoryUpdateTask) {
+function writeCategoryTask(task: CategoryTask) {
   try {
     window.localStorage.setItem(CATEGORY_TASK_KEY, JSON.stringify(task));
   } catch {
-    // Browser storage failure must not interrupt remote work.
+    // Remote work must continue even if browser storage is temporarily unavailable.
   }
 }
 
-function elapsedCopy(startedAt: string, now: number) {
-  const started = Date.parse(startedAt);
-  if (!Number.isFinite(started) || !now) return "진행 시간 확인 중";
-  const seconds = Math.max(0, Math.floor((now - started) / 1_000));
-  const minutes = Math.floor(seconds / 60);
-  return minutes ? `경과 ${minutes}분 ${seconds % 60}초` : `경과 ${seconds}초`;
+function isRecent(dateValue: string, now: number) {
+  const timestamp = Date.parse(dateValue);
+  return Number.isFinite(timestamp) && now - timestamp <= RECENT_MS;
 }
 
-function terminalTaskIsRecent(task: CategoryUpdateTask, now: number) {
-  const terminalTime = Date.parse(task.finishedAt || task.updatedAt || "");
-  return Number.isFinite(terminalTime) && now - terminalTime <= RECENT_TERMINAL_MS;
+function elapsed(startedAt: string, now: number) {
+  const start = Date.parse(startedAt);
+  if (!Number.isFinite(start) || !now) return "진행 시간 확인 중";
+  const total = Math.max(0, Math.floor((now - start) / 1_000));
+  const minutes = Math.floor(total / 60);
+  return minutes ? `경과 ${minutes}분 ${total % 60}초` : `경과 ${total}초`;
 }
 
 export function OpsWorkAssistant() {
   const workerRef = useRef<HTMLIFrameElement>(null);
-  const [jobs, setJobs] = useState<DetailPageJob[]>([]);
-  const [categoryTask, setCategoryTask] = useState<CategoryUpdateTask | null>(null);
+  const [jobs, setJobs] = useState<DetailJob[]>([]);
+  const [categoryTask, setCategoryTask] = useState<CategoryTask | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -210,17 +249,18 @@ export function OpsWorkAssistant() {
       });
       const body = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
-        jobs?: DetailPageJob[];
+        jobs?: DetailJob[];
       };
-      if (!response.ok || body.ok !== true || !Array.isArray(body.jobs)) return;
-      setJobs(body.jobs);
+      if (response.ok && body.ok === true && Array.isArray(body.jobs)) {
+        setJobs(body.jobs);
+      }
     } catch {
-      // A transient polling failure must not hide the last known task state.
+      // Keep the last known jobs visible during transient failures.
     }
   }, []);
 
-  const refreshCategoryTask = useCallback(async () => {
-    let task = readCategoryTask();
+  const refreshCategory = useCallback(async () => {
+    let task: CategoryTask | null = readCategoryTask();
     if (!task) {
       setCategoryTask(null);
       return;
@@ -233,18 +273,18 @@ export function OpsWorkAssistant() {
           credentials: "same-origin",
           headers: { Accept: "application/json" },
         });
-        const body = (await response.json().catch(() => ({}))) as CategoryStatusResponse;
+        const body = (await response.json().catch(() => ({}))) as CategoryStatusBody;
         if (response.ok && body.ok === true) {
           const status = body.status ?? {};
-          const runStatus = text(status.status);
+          const runStatus = txt(status.status);
           const sameRequest =
-            Boolean(task.requestId) && text(status.requestId) === task.requestId;
-          const snapshotTime = Date.parse(body.snapshot?.collectedAt || "");
-          const startedTime = Date.parse(task.startedAt || "");
+            Boolean(task.requestId) && txt(status.requestId) === task.requestId;
+          const snapshotAt = Date.parse(body.snapshot?.collectedAt || "");
+          const startedAt = Date.parse(task.startedAt || "");
           const newSnapshot =
-            Number.isFinite(snapshotTime) &&
-            Number.isFinite(startedTime) &&
-            snapshotTime >= startedTime - 2_000;
+            Number.isFinite(snapshotAt) &&
+            Number.isFinite(startedAt) &&
+            snapshotAt >= startedAt - 2_000;
           const finishedAt = new Date().toISOString();
 
           if ((sameRequest || newSnapshot) && runStatus === "success") {
@@ -259,7 +299,7 @@ export function OpsWorkAssistant() {
               title: "샵플링 카테고리 업데이트 완료",
               message: count
                 ? `샵플링 표준카테고리 ${count.toLocaleString("ko-KR")}개를 업데이트했습니다.`
-                : text(status.message) || "카테고리 업데이트가 완료됐습니다.",
+                : txt(status.message) || "카테고리 업데이트가 완료됐습니다.",
               detail: "업데이트 완료",
               finishedAt,
               updatedAt: finishedAt,
@@ -273,7 +313,7 @@ export function OpsWorkAssistant() {
               tone: "warning",
               title: "샵플링 수동 로그인 필요",
               message:
-                text(status.message) ||
+                txt(status.message) ||
                 "로그인 세션이 만료됐거나 보안문자 입력이 필요합니다.",
               detail: "로그인 세션 갱신 필요",
               finishedAt,
@@ -288,8 +328,7 @@ export function OpsWorkAssistant() {
               tone: "failed",
               title: "샵플링 카테고리 업데이트 실패",
               message:
-                text(status.message) ||
-                "카테고리 업데이트 중 오류가 발생했습니다.",
+                txt(status.message) || "카테고리 업데이트 중 오류가 발생했습니다.",
               detail: "실행 결과 확인 필요",
               finishedAt,
               updatedAt: finishedAt,
@@ -306,41 +345,41 @@ export function OpsWorkAssistant() {
           }
         }
       } catch {
-        // Keep the last known task visible while the status endpoint recovers.
+        // Keep the last known task visible while polling recovers.
       }
     }
 
     setCategoryTask(task);
   }, []);
 
-  const refresh = useCallback(async () => {
-    await Promise.all([refreshDetailJobs(), refreshCategoryTask()]);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([refreshDetailJobs(), refreshCategory()]);
     setNow(Date.now());
-  }, [refreshCategoryTask, refreshDetailJobs]);
+  }, [refreshCategory, refreshDetailJobs]);
 
   useEffect(() => {
-    const hydrationTimer = window.setTimeout(() => {
-      setDismissed(readDismissedJobs());
+    const timer = window.setTimeout(() => {
+      setDismissed(readDismissed());
       setCollapsed(window.localStorage.getItem(COLLAPSED_KEY) === "1");
       setCategoryTask(readCategoryTask());
       setNow(Date.now());
       setLoaded(true);
     }, 0);
-    return () => window.clearTimeout(hydrationTimer);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    const syncCategoryTask = () => {
+    const syncCategory = () => {
       setCategoryTask(readCategoryTask());
       setNow(Date.now());
     };
     const onStorage = (event: StorageEvent) => {
-      if (event.key === CATEGORY_TASK_KEY) syncCategoryTask();
+      if (event.key === CATEGORY_TASK_KEY) syncCategory();
     };
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.source !== CATEGORY_EVENT_SOURCE) return;
-      syncCategoryTask();
+      if (event.origin === window.location.origin && event.data?.source === CATEGORY_EVENT_SOURCE) {
+        syncCategory();
+      }
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener("message", onMessage);
@@ -351,52 +390,60 @@ export function OpsWorkAssistant() {
   }, []);
 
   useEffect(() => {
-    const initialTimer = window.setTimeout(() => void refresh(), 0);
-    const timer = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
+    const initial = window.setTimeout(() => void refreshAll(), 0);
+    const interval = window.setInterval(() => void refreshAll(), POLL_MS);
+    const whenVisible = () => {
+      if (document.visibilityState === "visible") void refreshAll();
     };
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", whenVisible);
+    document.addEventListener("visibilitychange", whenVisible);
     return () => {
-      window.clearTimeout(initialTimer);
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", whenVisible);
+      document.removeEventListener("visibilitychange", whenVisible);
     };
-  }, [refresh]);
+  }, [refreshAll]);
 
   const visibleJobs = useMemo(
     () =>
       jobs
         .filter((job) => {
-          if (ACTIVE_STATUSES.has(job.status)) return true;
+          if (ACTIVE_DETAIL.has(job.status)) return true;
           if (dismissed.has(job.jobId)) return false;
-          const terminalTime = Date.parse(job.completedAt || job.updatedAt || "");
-          return Number.isFinite(terminalTime) && now - terminalTime <= RECENT_TERMINAL_MS;
+          return isRecent(job.completedAt || job.updatedAt || "", now);
         })
         .sort((left, right) => {
-          const activeDifference =
-            Number(ACTIVE_STATUSES.has(right.status)) -
-            Number(ACTIVE_STATUSES.has(left.status));
-          if (activeDifference) return activeDifference;
-          return Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || "");
+          const activeOrder =
+            Number(ACTIVE_DETAIL.has(right.status)) - Number(ACTIVE_DETAIL.has(left.status));
+          return activeOrder || Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || "");
         })
         .slice(0, 12),
     [dismissed, jobs, now],
   );
 
-  const visibleCategoryTask = useMemo(() => {
+  const visibleCategory = useMemo(() => {
     if (!categoryTask) return null;
     if (categoryTask.active) return categoryTask;
     if (dismissed.has(categoryTask.id)) return null;
-    return terminalTaskIsRecent(categoryTask, now) ? categoryTask : null;
+    return isRecent(categoryTask.finishedAt || categoryTask.updatedAt || "", now)
+      ? categoryTask
+      : null;
   }, [categoryTask, dismissed, now]);
 
   const activeCount =
-    visibleJobs.filter((job) => ACTIVE_STATUSES.has(job.status)).length +
-    (visibleCategoryTask?.active ? 1 : 0);
-  const visibleCount = visibleJobs.length + (visibleCategoryTask ? 1 : 0);
+    visibleJobs.filter((job) => ACTIVE_DETAIL.has(job.status)).length +
+    (visibleCategory?.active ? 1 : 0);
+  const visibleCount = visibleJobs.length + (visibleCategory ? 1 : 0);
+
+  function dismiss(id: string) {
+    setDismissed((current) => {
+      const next = new Set(current);
+      next.add(id);
+      window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next].slice(-100)));
+      return next;
+    });
+  }
 
   function toggleCollapsed() {
     setCollapsed((current) => {
@@ -406,16 +453,7 @@ export function OpsWorkAssistant() {
     });
   }
 
-  function dismissJob(jobId: string) {
-    setDismissed((current) => {
-      const next = new Set(current);
-      next.add(jobId);
-      window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next].slice(-100)));
-      return next;
-    });
-  }
-
-  function retryJob(itemId: string) {
+  function retryDetail(itemId: string) {
     workerRef.current?.contentWindow?.postMessage(
       {
         source: "commerce-os-work-assistant",
@@ -464,118 +502,22 @@ export function OpsWorkAssistant() {
 
           {!collapsed ? (
             <div className="max-h-[min(560px,calc(100vh-10rem))] space-y-2 overflow-y-auto bg-slate-50 p-2.5">
-              {visibleCategoryTask ? (
-                <CategoryUpdateCard
-                  task={visibleCategoryTask}
+              {visibleCategory ? (
+                <CategoryCard
+                  task={visibleCategory}
                   now={now}
-                  onDismiss={() => dismissJob(visibleCategoryTask.id)}
+                  onDismiss={() => dismiss(visibleCategory.id)}
                 />
               ) : null}
-
-              {visibleJobs.map((job) => {
-                const status = jobStatus(job);
-                const active = ACTIVE_STATUSES.has(job.status);
-                const progress = safeProgress(job.progress);
-                const border =
-                  status.tone === "green"
-                    ? "border-l-emerald-500"
-                    : status.tone === "red"
-                      ? "border-l-rose-500"
-                      : status.tone === "slate"
-                        ? "border-l-slate-400"
-                        : "border-l-blue-600";
-                const badge =
-                  status.tone === "green"
-                    ? "bg-emerald-50 text-emerald-700"
-                    : status.tone === "red"
-                      ? "bg-rose-50 text-rose-700"
-                      : status.tone === "slate"
-                        ? "bg-slate-100 text-slate-600"
-                        : "bg-blue-50 text-blue-700";
-                const bar =
-                  status.tone === "green"
-                    ? "bg-emerald-500"
-                    : status.tone === "red"
-                      ? "bg-rose-500"
-                      : status.tone === "slate"
-                        ? "bg-slate-400"
-                        : "bg-blue-600";
-
-                return (
-                  <article
-                    key={job.jobId}
-                    className={`rounded-xl border border-slate-200 border-l-4 ${border} bg-white p-3 shadow-sm`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black tracking-[0.12em] text-slate-400">
-                          상세페이지 자동 생성
-                        </p>
-                        <h3 className="mt-1 truncate text-sm font-black">
-                          {jobProductName(job)}
-                        </h3>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${badge}`}
-                      >
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-3 text-xs">
-                      <p className="min-w-0 truncate font-bold text-slate-600">
-                        {job.message || status.detail}
-                      </p>
-                      <span className="shrink-0 font-black text-slate-500">
-                        {progress}%
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-300 ${bar}`}
-                        style={{ width: `${progress}%` }}
-                      />
-                    </div>
-                    {job.error ? (
-                      <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-rose-700">
-                        {job.error}
-                      </p>
-                    ) : null}
-                    <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
-                      <p className="text-[10px] font-bold text-slate-400">
-                        {active ? "화면 이동·새로고침 가능" : `시도 ${job.attempt || 1}회`}
-                      </p>
-                      <div className="flex items-center gap-1.5">
-                        <Link
-                          href={`/product-launch-tracker?detailPageItem=${encodeURIComponent(job.itemId)}`}
-                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100"
-                        >
-                          상품 상세
-                        </Link>
-                        {!active ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => retryJob(job.itemId)}
-                              disabled={!workerReady}
-                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-40"
-                            >
-                              다시 생성
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => dismissJob(job.jobId)}
-                              className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                              aria-label={`${jobProductName(job)} 작업 알림 닫기`}
-                            >
-                              닫기
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+              {visibleJobs.map((job) => (
+                <DetailCard
+                  key={job.jobId}
+                  job={job}
+                  workerReady={workerReady}
+                  onRetry={() => retryDetail(job.itemId)}
+                  onDismiss={() => dismiss(job.jobId)}
+                />
+              ))}
               <p className="px-1 pb-0.5 text-[10px] font-bold text-blue-600">
                 작업은 서버와 공통 실행기에서 계속되며 다른 OPS 기능을 사용할 수 있습니다.
               </p>
@@ -587,57 +529,29 @@ export function OpsWorkAssistant() {
   );
 }
 
-function CategoryUpdateCard({
+function CategoryCard({
   task,
   now,
   onDismiss,
 }: {
-  task: CategoryUpdateTask;
+  task: CategoryTask;
   now: number;
   onDismiss: () => void;
 }) {
   const status = categoryPresentation(task);
-  const border =
-    status.tone === "green"
-      ? "border-l-emerald-500"
-      : status.tone === "red"
-        ? "border-l-rose-500"
-        : status.tone === "amber"
-          ? "border-l-amber-500"
-          : "border-l-blue-600";
-  const badge =
-    status.tone === "green"
-      ? "bg-emerald-50 text-emerald-700"
-      : status.tone === "red"
-        ? "bg-rose-50 text-rose-700"
-        : status.tone === "amber"
-          ? "bg-amber-50 text-amber-700"
-          : "bg-blue-50 text-blue-700";
-  const bar =
-    status.tone === "green"
-      ? "bg-emerald-500"
-      : status.tone === "red"
-        ? "bg-rose-500"
-        : status.tone === "amber"
-          ? "bg-amber-500"
-          : "bg-blue-600";
-
+  const classes = toneClasses(status.tone);
   return (
     <article
-      className={`rounded-xl border border-slate-200 border-l-4 ${border} bg-white p-3 shadow-sm`}
+      className={`rounded-xl border border-slate-200 border-l-4 ${classes.border} bg-white p-3 shadow-sm`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[10px] font-black tracking-[0.12em] text-slate-400">
             샵플링 기준정보 동기화
           </p>
-          <h3 className="mt-1 truncate text-sm font-black">
-            {task.title || task.label}
-          </h3>
+          <h3 className="mt-1 truncate text-sm font-black">{task.title || task.label}</h3>
         </div>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${badge}`}
-        >
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${classes.badge}`}>
           {status.label}
         </span>
       </div>
@@ -646,14 +560,12 @@ function CategoryUpdateCard({
       </p>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
         <div
-          className={`h-full rounded-full ${bar} ${
-            task.active ? "w-2/5 animate-pulse" : "w-full"
-          }`}
+          className={`h-full rounded-full ${classes.bar} ${task.active ? "w-2/5 animate-pulse" : "w-full"}`}
         />
       </div>
       <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
         <p className="text-[10px] font-bold text-slate-400">
-          {task.active ? elapsedCopy(task.startedAt, now) : status.detail}
+          {task.active ? elapsed(task.startedAt, now) : status.detail}
         </p>
         <div className="flex items-center gap-1.5">
           {task.actionsUrl ? (
@@ -677,10 +589,90 @@ function CategoryUpdateCard({
               type="button"
               onClick={onDismiss}
               className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              aria-label="샵플링 카테고리 업데이트 알림 닫기"
             >
               닫기
             </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DetailCard({
+  job,
+  workerReady,
+  onRetry,
+  onDismiss,
+}: {
+  job: DetailJob;
+  workerReady: boolean;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  const status = detailPresentation(job);
+  const classes = toneClasses(status.tone);
+  const active = ACTIVE_DETAIL.has(job.status);
+  const progress = safeProgress(job.progress);
+  return (
+    <article
+      className={`rounded-xl border border-slate-200 border-l-4 ${classes.border} bg-white p-3 shadow-sm`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black tracking-[0.12em] text-slate-400">
+            상세페이지 자동 생성
+          </p>
+          <h3 className="mt-1 truncate text-sm font-black">{detailName(job)}</h3>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${classes.badge}`}>
+          {status.label}
+        </span>
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+        <p className="min-w-0 truncate font-bold text-slate-600">
+          {job.message || status.detail}
+        </p>
+        <span className="shrink-0 font-black text-slate-500">{progress}%</span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className={`h-full rounded-full transition-[width] duration-300 ${classes.bar}`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      {job.error ? (
+        <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-rose-700">{job.error}</p>
+      ) : null}
+      <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+        <p className="text-[10px] font-bold text-slate-400">
+          {active ? "화면 이동·새로고침 가능" : `시도 ${job.attempt || 1}회`}
+        </p>
+        <div className="flex items-center gap-1.5">
+          <Link
+            href={`/product-launch-tracker?detailPageItem=${encodeURIComponent(job.itemId)}`}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100"
+          >
+            상품 상세
+          </Link>
+          {!active ? (
+            <>
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={!workerReady}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-40"
+              >
+                다시 생성
+              </button>
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                닫기
+              </button>
+            </>
           ) : null}
         </div>
       </div>
