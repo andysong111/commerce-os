@@ -1,3 +1,4 @@
+import { recordCommerceDataSourceHealth } from "@/lib/commerceDataSourceHealth";
 import { temporaryOpsIdentity } from "@/lib/opsLoginBypass";
 import {
   getProductLaunchAdminConfig,
@@ -87,6 +88,22 @@ export async function mergePriceAdjustmentSalesCachePage(input: {
     [PRICE_ADJUSTMENT_SALES_CACHE_KEY]: cache,
   };
   await writeProductLaunchState(config.value, identity, nextState);
+
+  if (cache.complete) {
+    await recordCommerceDataSourceHealth({
+      sourceKey: "sales_orders",
+      status: salesCacheFresh(cache.generatedAt) ? "FRESH" : "STALE",
+      generatedAt: cache.generatedAt,
+      maxAgeMinutes: 24 * 60,
+      details: {
+        snapshotId: cache.snapshotId,
+        productCount: cache.productCount,
+        coverageStart: cache.coverageStart,
+        coverageEnd: cache.coverageEnd,
+      },
+    }).catch(() => undefined);
+  }
+
   return cache;
 }
 
@@ -151,6 +168,13 @@ function normalizeCache(value: unknown): PriceAdjustmentSalesCache | null {
     updatedAt: validIso(raw.updatedAt) || generatedAt,
     productsByBarcode,
   };
+}
+
+function salesCacheFresh(generatedAt: string, now = new Date()) {
+  const parsed = Date.parse(generatedAt);
+  if (!Number.isFinite(parsed)) return false;
+  const age = now.valueOf() - parsed;
+  return age >= -5 * 60 * 1000 && age <= 24 * 60 * 60 * 1000;
 }
 
 function earlier(current: string | null, candidate: string | null) {
