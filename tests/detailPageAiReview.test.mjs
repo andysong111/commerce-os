@@ -249,6 +249,20 @@ test("a new source-upload failure falls back to the latest resumable checkpoint 
   );
 });
 
+test("an overwritten evidence-upload stage resumes the checkpoint preserved in the same durable job", () => {
+  const preserved = job({
+    stage: "evidence_upload",
+    progress: 5,
+    error: "The resource already exists",
+  });
+
+  assert.equal(canResumeDetailPageCheckpoint(preserved), true);
+  assert.equal(
+    findDetailPageResumeCandidate([preserved], preserved)?.jobId,
+    preserved.jobId,
+  );
+});
+
 test("review requests target an exact checkpoint or explicitly force a full regeneration", () => {
   assert.match(dockSource, /requestedJobId/);
   assert.match(dockSource, /options\.mode === "full" \? null/);
@@ -259,7 +273,7 @@ test("review requests target an exact checkpoint or explicitly force a full rege
   assert.match(workspaceSource, /if \(partial\) \{/);
   assert.match(workspaceSource, /method: "POST"/);
   assert.match(workspaceSource, /credentials: "same-origin"/);
-  assert.match(jobRouteSource, /\["server_generation", "standard_quality_gate"\]/);
+  assert.match(jobRouteSource, /canResumeDetailPageCheckpoint\(job\)/);
   assert.match(jobRouteSource, /panelRetrySlots: standardGateFailure \? standardRetry\.slots : \[\]/);
   assert.match(jobRouteSource, /standardRetryUsed: standardGateFailure/);
 });
