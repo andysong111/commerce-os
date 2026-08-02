@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  inferShoplingCategoryIntent,
   parseProductCategoryInputs,
   scoreShoplingCategoryCandidate,
   shortlistShoplingCategories,
@@ -42,6 +43,49 @@ test("미니짐볼 상품은 가구·도서보다 헬스 짐볼 카테고리가 
     scoreShoplingCategoryCandidate("미니짐볼", categories[0].path) >
       scoreShoplingCategoryCandidate("미니짐볼", categories[1].path),
   );
+});
+
+test("투구골무는 핵심명사 골무를 우선하고 의류·타이즈 후보를 차단한다", () => {
+  const categories = [
+    {
+      depth: 4,
+      path: "의류>언더웨어/잠옷>여성 내의>여성 타이즈",
+      names: ["의류", "언더웨어/잠옷", "여성 내의", "여성 타이즈"],
+      codes: ["1", "11", "111", "1111"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>수예>재봉용품>골무",
+      names: ["생활/건강", "수예", "재봉용품", "골무"],
+      codes: ["2", "22", "222", "2222"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>수예>바느질용품>기타수예용품",
+      names: ["생활/건강", "수예", "바느질용품", "기타수예용품"],
+      codes: ["3", "33", "333", "3333"],
+    },
+    {
+      depth: 4,
+      path: "스포츠/레저>축구>보호용품>축구 골키퍼장갑",
+      names: ["스포츠/레저", "축구", "보호용품", "축구 골키퍼장갑"],
+      codes: ["4", "44", "444", "4444"],
+    },
+  ];
+  const input = {
+    itemId: "item-15",
+    modelNumber: "AAA015",
+    productName: "투구골무",
+    optionLabels: ["투구 골무 S사이즈", "투구 골무 M사이즈"],
+    currentCategory: "",
+    chinaProductLinks: [],
+  };
+  const intent = inferShoplingCategoryIntent(input);
+  assert.equal(intent?.coreTerm, "골무");
+  const shortlist = shortlistShoplingCategories(input, categories, 10);
+  assert.equal(shortlist[0].path, "생활/건강>수예>재봉용품>골무");
+  assert.ok(shortlist.every((candidate) => !/타이즈|의류|축구/.test(candidate.path)));
+  assert.ok(shortlist.every((candidate) => candidate.intentMatched === true));
 });
 
 test("AI 카테고리 입력은 상품 ID·모델명과 최대 처리 수를 검증한다", () => {
