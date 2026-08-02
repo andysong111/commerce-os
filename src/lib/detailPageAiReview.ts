@@ -75,6 +75,17 @@ const ACTIVE = new Set<DetailPageJobStatus>([
   "render_pending",
 ]);
 
+// A checkpointed job can be accidentally pushed back into a source stage by an
+// older cached retry worker. The durable payload/result are merge-preserved, so
+// use their contents as the authority instead of discarding a valid checkpoint
+// solely because the mutable stage was overwritten.
+const RESUMABLE_CHECKPOINT_STAGES = new Set([
+  "server_generation",
+  "standard_quality_gate",
+  "source_collection",
+  "evidence_upload",
+]);
+
 const ROLE_LABELS: Record<string, string> = {
   main: "대표 이미지",
   main_hero: "대표 이미지",
@@ -110,12 +121,14 @@ export function isActiveDetailPageJob(job: DetailPageReviewJob) {
   return ACTIVE.has(job.status);
 }
 
-export function canResumeDetailPageCheckpoint(job: DetailPageReviewJob) {
+export function canResumeDetailPageCheckpoint(
+  job: Pick<DetailPageReviewJob, "status" | "stage" | "payload" | "result">,
+) {
   const evidence = record(job.payload).evidence_urls;
   const analysis = record(record(job.result).analysis);
   return Boolean(
     job.status === "failed" &&
-      ["server_generation", "standard_quality_gate"].includes(job.stage) &&
+      RESUMABLE_CHECKPOINT_STAGES.has(job.stage) &&
       Array.isArray(evidence) &&
       evidence.length > 0 &&
       analysis.product,
