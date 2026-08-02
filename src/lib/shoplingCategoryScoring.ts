@@ -17,10 +17,59 @@ export type ProductCategoryInput = {
 export type CategoryCandidate = {
   path: string;
   score: number;
+  intentMatched?: boolean;
+  evidence?: string[];
+};
+
+export type ShoplingCategoryIntent = {
+  key: string;
+  coreTerm: string;
+  relatedTerms: string[];
+  blockedTerms: string[];
+  rationale: string;
 };
 
 const MAX_PRODUCTS = 25;
 const MAX_CANDIDATES = 18;
+
+const INTENT_RULES: readonly ShoplingCategoryIntent[] = [
+  {
+    key: "thimble",
+    coreTerm: "골무",
+    relatedTerms: [
+      "골무",
+      "바느질",
+      "재봉",
+      "수예",
+      "봉제",
+      "재봉용품",
+      "수예용품",
+      "바느질용품",
+      "손가락보호",
+      "손가락 보호",
+      "손가락보호대",
+      "보호대",
+      "공예",
+    ],
+    blockedTerms: [
+      "타이즈",
+      "스타킹",
+      "내의",
+      "레깅스",
+      "양말",
+      "속옷",
+      "수영복",
+      "의류",
+      "축구",
+      "야구",
+      "골프",
+      "헬멧",
+      "투구",
+    ],
+    rationale:
+      "결합 모델명에 다른 단어가 붙어 있어도 제품 핵심명사 '골무'를 우선하고 수예·재봉·손가락 보호 계열만 후보로 사용합니다.",
+  },
+] as const;
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -56,6 +105,16 @@ function jaccard(left: Set<string>, right: Set<string>) {
   return intersection / (left.size + right.size - intersection);
 }
 
+export function inferShoplingCategoryIntent(
+  input: Pick<ProductCategoryInput, "productName" | "optionLabels">,
+): ShoplingCategoryIntent | null {
+  const source = compact([input.productName, ...input.optionLabels].join(" "));
+  if (!source) return null;
+  return (
+    INTENT_RULES.find((rule) => source.includes(compact(rule.coreTerm))) ?? null
+  );
+}
+
 export function scoreShoplingCategoryCandidate(
   productText: string,
   categoryPath: string,
@@ -82,6 +141,48 @@ export function scoreShoplingCategoryCandidate(
   return Number(score.toFixed(4));
 }
 
+function scoreIntent(
+  categoryPath: string,
+  intent: ShoplingCategoryIntent | null,
+) {
+  if (!intent) {
+    return { score: 0, matched: false, blocked: false, evidence: [] as string[] };
+  }
+  const pathCompact = compact(categoryPath);
+  const leafCompact = compact(categoryPath.split(">").at(-1));
+  const evidence: string[] = [];
+  let intentScore = 0;
+
+  for (const blockedTerm of intent.blockedTerms) {
+    const key = compact(blockedTerm);
+    if (key && pathCompact.includes(key)) {
+      return {
+        score: -1_000,
+        matched: false,
+        blocked: true,
+        evidence: [`차단:${blockedTerm}`],
+      };
+    }
+  }
+
+  for (const [index, relatedTerm] of intent.relatedTerms.entries()) {
+    const key = compact(relatedTerm);
+    if (!key || !pathCompact.includes(key)) continue;
+    const isCore = key === compact(intent.coreTerm);
+    const leafMatch = leafCompact.includes(key);
+    const weight = isCore ? 260 : index <= 3 ? 150 : index <= 7 ? 110 : 70;
+    intentScore += weight + (leafMatch ? 45 : 0);
+    evidence.push(relatedTerm);
+  }
+
+  return {
+    score: intentScore,
+    matched: evidence.length > 0,
+    blocked: false,
+    evidence,
+  };
+}
+
 export function shortlistShoplingCategories(
   input: ProductCategoryInput,
   categories: ShoplingCategoryEntryLike[],
@@ -89,21 +190,50 @@ export function shortlistShoplingCategories(
 ): CategoryCandidate[] {
   const productText = [
     input.productName,
-    input.modelNumber,
     ...input.optionLabels,
+    input.modelNumber,
   ]
     .filter(Boolean)
     .join(" ");
-  return categories
-    .map((entry) => ({
-      path: entry.path,
-      score: scoreShoplingCategoryCandidate(productText, entry.path),
-    }))
+  const intent = inferShoplingCategoryIntent(input);
+  const ranked = categories
+    .map((entry) => {
+      const baseScore = scoreShoplingCategoryCandidate(productText, entry.path);
+      const intentResult = scoreIntent(entry.path, intent);
+      return {
+        path: entry.path,
+        score: Number((baseScore + intentResult.score).toFixed(4)),
+        baseScore,
+        intentMatched: intentResult.matched,
+        blocked: intentResult.blocked,
+        evidence: intentResult.evidence,
+      };
+    })
+    .filter((candidate) => !candidate.blocked)
     .sort(
       (left, right) =>
         right.score - left.score || left.path.localeCompare(right.path, "ko-KR"),
-    )
-    .slice(0, Math.max(5, Math.min(30, limit)));
+    );
+
+  const requestedLimit = Math.max(5, Math.min(30, limit));
+  if (intent) {
+    const relevant = ranked.filter((candidate) => candidate.intentMatched);
+    if (relevant.length) {
+      return relevant.slice(0, requestedLimit).map(({ path, score, intentMatched, evidence }) => ({
+        path,
+        score,
+        intentMatched,
+        evidence,
+      }));
+    }
+  }
+
+  return ranked.slice(0, requestedLimit).map(({ path, score, intentMatched, evidence }) => ({
+    path,
+    score,
+    intentMatched,
+    evidence,
+  }));
 }
 
 export function parseProductCategoryInputs(value: unknown): ProductCategoryInput[] {

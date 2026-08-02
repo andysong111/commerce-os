@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { applyShoplingCategoryReviewDecisions } from "@/lib/shoplingCategoryReview";
 
 const STATE_ENDPOINT = "/api/product-launch-tracker/state";
+const AI_ENDPOINT = "/api/product-launch-tracker/ai-category";
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
 
 type TrackerItem = Record<string, unknown> & {
@@ -11,6 +12,9 @@ type TrackerItem = Record<string, unknown> & {
   modelNumber?: unknown;
   productName?: unknown;
   archivedAt?: unknown;
+  orderOptions?: unknown;
+  shoplingCategory?: unknown;
+  chinaProductLinks?: unknown;
   categoryAiStatus?: unknown;
   categoryAiSuggestion?: unknown;
   categoryAiAlternatives?: unknown;
@@ -31,9 +35,21 @@ type CandidateReview = {
   candidates: string[];
 };
 
+type AiResult = {
+  itemId?: unknown;
+  selectedPath?: unknown;
+  confidence?: unknown;
+  reason?: unknown;
+  alternatives?: unknown;
+  candidateChoices?: unknown;
+  candidatePaths?: unknown;
+  autoApply?: unknown;
+  skippedExisting?: unknown;
+};
+
 export function ShoplingCategoryCandidateQuickApprove() {
   const [state, setState] = useState<TrackerState | null>(null);
-  const [busyItemId, setBusyItemId] = useState("");
+  const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -42,9 +58,7 @@ export function ShoplingCategoryCandidateQuickApprove() {
       for (const element of document.querySelectorAll("table p, table span")) {
         if (!(element instanceof HTMLElement)) continue;
         const value = element.textContent ?? "";
-        if (value.includes("상품명")) {
-          element.textContent = normalizeReason(value);
-        }
+        if (value.includes("상품명")) element.textContent = normalizeReason(value);
       }
     };
     normalizeVisibleTerminology();
@@ -62,8 +76,8 @@ export function ShoplingCategoryCandidateQuickApprove() {
   }
 
   async function approve(item: CandidateReview, category: string) {
-    if (busyItemId) return;
-    setBusyItemId(item.itemId);
+    if (busyKey) return;
+    setBusyKey(`approve:${item.itemId}`);
     setNotice("");
     try {
       const latest = await readServerState();
@@ -73,29 +87,132 @@ export function ShoplingCategoryCandidateQuickApprove() {
         [{ itemId: item.itemId, action: "approve", category }],
         { reviewer: "AI 카테고리 검토함" },
       );
-      const response = await fetch(STATE_ENDPOINT, {
-        method: "PUT",
+      await persistState(result.state as TrackerState);
+      setNotice(`${item.modelNumber || item.productName} · 선택한 후보로 승인했습니다.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "후보 승인에 실패했습니다.");
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function reanalyze(item: CandidateReview) {
+    if (busyKey) return;
+    setBusyKey(`reanalyze:${item.itemId}`);
+    setNotice("");
+    try {
+      const latest = await readServerState();
+      if (!latest) throw new Error("최신 진행관리 데이터를 불러오지 못했습니다.");
+      const source = latest.items.find(
+        (candidate) => text(candidate?.id) === item.itemId,
+      );
+      if (!source) throw new Error("재분석할 상품을 찾지 못했습니다.");
+
+      const response = await fetch(AI_ENDPOINT, {
+        method: "POST",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
         credentials: "same-origin",
-        body: JSON.stringify({ state: result.state }),
+        body: JSON.stringify({
+          items: [
+            {
+              itemId: source.id,
+              modelNumber: source.modelNumber,
+              productName: source.productName,
+              optionLabels: Array.isArray(source.orderOptions)
+                ? source.orderOptions
+                    .map((option) =>
+                      option && typeof option === "object"
+                        ? text((option as { saleOption?: unknown }).saleOption)
+                        : "",
+                    )
+                    .filter(Boolean)
+                : [],
+              currentCategory: text(source.shoplingCategory),
+              chinaProductLinks: Array.isArray(source.chinaProductLinks)
+                ? source.chinaProductLinks
+                : [],
+            },
+          ],
+        }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok || body?.ok !== true) {
-        throw new Error(body?.message || "후보 카테고리를 저장하지 못했습니다.");
+      const ai = Array.isArray(body?.results) ? (body.results[0] as AiResult) : null;
+      if (!response.ok || body?.ok !== true || !ai) {
+        throw new Error(body?.message || "새 카테고리 후보를 생성하지 못했습니다.");
       }
-      const saved = result.state as TrackerState;
-      setState(saved);
-      window.localStorage.setItem(TRACKER_STORAGE_KEY, JSON.stringify(saved));
-      setNotice(`${item.modelNumber || item.productName} · 선택한 후보로 승인했습니다.`);
-      window.setTimeout(() => window.location.reload(), 500);
+
+      const now = new Date().toISOString();
+      const selectedPath = text(ai.selectedPath);
+      const autoApply = ai.autoApply === true;
+      const skippedExisting = ai.skippedExisting === true;
+      const next: TrackerState = {
+        ...latest,
+        savedAt: now,
+        items: latest.items.map((candidate) =>
+          text(candidate?.id) === item.itemId
+            ? {
+                ...candidate,
+                shoplingCategory: autoApply
+                  ? selectedPath
+                  : candidate.shoplingCategory,
+                categoryAiSuggestion: selectedPath,
+                categoryAiConfidence: Math.max(
+                  0,
+                  Math.min(100, Number(ai.confidence) || 0),
+                ),
+                categoryAiReason: normalizeReason(text(ai.reason)),
+                categoryAiAlternatives: stringArray(ai.alternatives).slice(0, 3),
+                categoryAiCandidateChoices: stringArray(
+                  ai.candidateChoices,
+                ).slice(0, 3),
+                categoryAiCandidatePaths: stringArray(ai.candidatePaths),
+                categoryAiStatus: autoApply
+                  ? "auto_applied"
+                  : skippedExisting
+                    ? "existing_preserved"
+                    : "review_required",
+                categoryAiSnapshotHash: text(body?.snapshot?.hash),
+                categoryAiUpdatedAt: now,
+                updatedAt: now,
+                updatedBy: autoApply
+                  ? "AI 카테고리 자동설정"
+                  : candidate.updatedBy,
+              }
+            : candidate,
+        ),
+      };
+      await persistState(next);
+      setNotice(
+        autoApply
+          ? `${item.modelNumber} · 고신뢰도 후보가 자동입력됐습니다.`
+          : `${item.modelNumber} · 핵심명사 기준 후보를 다시 생성했습니다.`,
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "후보 승인에 실패했습니다.");
+      setNotice(error instanceof Error ? error.message : "후보 재생성에 실패했습니다.");
     } finally {
-      setBusyItemId("");
+      setBusyKey("");
     }
+  }
+
+  async function persistState(next: TrackerState) {
+    const response = await fetch(STATE_ENDPOINT, {
+      method: "PUT",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({ state: next }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok !== true) {
+      throw new Error(body?.message || "카테고리 결과를 저장하지 못했습니다.");
+    }
+    setState(next);
+    window.localStorage.setItem(TRACKER_STORAGE_KEY, JSON.stringify(next));
   }
 
   return (
@@ -106,10 +223,10 @@ export function ShoplingCategoryCandidateQuickApprove() {
             빠른 후보 승인
           </p>
           <h2 className="mt-1 text-lg font-black text-slate-950">
-            검토 필요 상품마다 서로 다른 후보를 약 3개 표시합니다
+            관련성이 검증된 후보 안에서만 선택합니다
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            경로를 확인한 뒤 원하는 후보의 ‘이 후보 승인’을 누르면 진행관리 카테고리에 즉시 저장됩니다.
+            모델명의 핵심 제품명사를 먼저 고정하고, 관련 제품군 후보만 표시합니다.
           </p>
         </div>
         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
@@ -124,51 +241,72 @@ export function ShoplingCategoryCandidateQuickApprove() {
       ) : null}
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        {reviews.map((item) => (
-          <article key={item.itemId} className="rounded-xl border border-slate-200 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="font-black text-slate-950">
-                  {item.modelNumber || "모델번호 없음"} · {item.productName || "모델명 없음"}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-600">{item.reason}</p>
-              </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-black ${
-                item.confidence >= 70
-                  ? "bg-amber-50 text-amber-700"
-                  : "bg-rose-50 text-rose-700"
-              }`}>
-                신뢰도 {item.confidence}%
-              </span>
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {item.candidates.map((candidate, index) => (
-                <div
-                  key={candidate}
-                  className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black text-slate-400">
-                      후보 {index + 1}{index === 0 ? " · AI 1순위" : ""}
-                    </p>
-                    <p className="mt-0.5 break-words text-xs font-bold leading-5 text-slate-800">
-                      {candidate}
-                    </p>
-                  </div>
+        {reviews.map((item) => {
+          const reanalyzing = busyKey === `reanalyze:${item.itemId}`;
+          return (
+            <article key={item.itemId} className="rounded-xl border border-slate-200 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-black text-slate-950">
+                    {item.modelNumber || "모델번호 없음"} · {item.productName || "모델명 없음"}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">{item.reason}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-black ${
+                    item.confidence >= 70
+                      ? "bg-amber-50 text-amber-700"
+                      : "bg-rose-50 text-rose-700"
+                  }`}>
+                    신뢰도 {item.confidence}%
+                  </span>
                   <button
                     type="button"
-                    onClick={() => void approve(item, candidate)}
-                    disabled={Boolean(busyItemId)}
-                    className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:bg-slate-300"
+                    onClick={() => void reanalyze(item)}
+                    disabled={Boolean(busyKey)}
+                    className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-black text-blue-700 disabled:opacity-40"
                   >
-                    {busyItemId === item.itemId ? "저장 중…" : "이 후보 승인"}
+                    {reanalyzing ? "재분석 중…" : "후보 다시 생성"}
                   </button>
                 </div>
-              ))}
-            </div>
-          </article>
-        ))}
+              </div>
+
+              {item.candidates.length ? (
+                <div className="mt-3 space-y-2">
+                  {item.candidates.map((candidate, index) => (
+                    <div
+                      key={candidate}
+                      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-slate-400">
+                          후보 {index + 1}{index === 0 ? " · AI 1순위" : ""}
+                        </p>
+                        <p className="mt-0.5 break-words text-xs font-bold leading-5 text-slate-800">
+                          {candidate}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void approve(item, candidate)}
+                        disabled={Boolean(busyKey)}
+                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white hover:bg-blue-700 disabled:bg-slate-300"
+                      >
+                        {busyKey === `approve:${item.itemId}`
+                          ? "저장 중…"
+                          : "이 후보 승인"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">
+                  저장된 후보가 모델명의 핵심 제품명사와 맞지 않아 숨겼습니다. ‘후보 다시 생성’을 눌러 새 후보를 만드세요.
+                </div>
+              )}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
@@ -187,28 +325,77 @@ function buildReviews(state: TrackerState | null): CandidateReview[] {
       modelNumber: text(item.modelNumber),
       productName: text(item.productName),
       confidence: Math.max(0, Math.min(100, Number(item.categoryAiConfidence) || 0)),
-      reason: normalizeReason(text(item.categoryAiReason) || "모델명과 옵션정보 기준으로 검토가 필요합니다."),
+      reason: normalizeReason(
+        text(item.categoryAiReason) ||
+          "모델명과 옵션정보 기준으로 검토가 필요합니다.",
+      ),
       candidates: candidateChoices(item),
     }))
-    .filter((item) => item.itemId && item.candidates.length)
-    .sort((left, right) => left.confidence - right.confidence || left.modelNumber.localeCompare(right.modelNumber, "ko-KR"));
+    .filter((item) => item.itemId)
+    .sort(
+      (left, right) =>
+        left.confidence - right.confidence ||
+        left.modelNumber.localeCompare(right.modelNumber, "ko-KR"),
+    );
 }
 
 function candidateChoices(item: TrackerItem) {
   const sources = [
-    ...(Array.isArray(item.categoryAiCandidateChoices) ? item.categoryAiCandidateChoices : []),
+    ...(Array.isArray(item.categoryAiCandidateChoices)
+      ? item.categoryAiCandidateChoices
+      : []),
     item.categoryAiSuggestion,
-    ...(Array.isArray(item.categoryAiAlternatives) ? item.categoryAiAlternatives : []),
-    ...(Array.isArray(item.categoryAiCandidatePaths) ? item.categoryAiCandidatePaths : []),
+    ...(Array.isArray(item.categoryAiAlternatives)
+      ? item.categoryAiAlternatives
+      : []),
+    ...(Array.isArray(item.categoryAiCandidatePaths)
+      ? item.categoryAiCandidatePaths
+      : []),
   ];
   const unique: string[] = [];
   for (const source of sources) {
     const value = text(source);
     if (!value || unique.includes(value)) continue;
     unique.push(value);
-    if (unique.length >= 3) break;
   }
-  return unique;
+
+  if (compact(item.productName).includes("골무")) {
+    const positive = [
+      "골무",
+      "바느질",
+      "재봉",
+      "수예",
+      "봉제",
+      "손가락보호",
+      "보호대",
+      "공예",
+    ];
+    const blocked = [
+      "타이즈",
+      "스타킹",
+      "내의",
+      "레깅스",
+      "양말",
+      "속옷",
+      "의류",
+      "축구",
+      "야구",
+      "골프",
+      "헬멧",
+      "투구",
+    ];
+    return unique
+      .filter((candidate) => {
+        const value = compact(candidate);
+        return (
+          positive.some((term) => value.includes(compact(term))) &&
+          !blocked.some((term) => value.includes(compact(term)))
+        );
+      })
+      .slice(0, 3);
+  }
+
+  return unique.slice(0, 3);
 }
 
 function normalizeReason(value: string) {
@@ -219,8 +406,18 @@ function normalizeReason(value: string) {
     .replaceAll("상품명", "모델명");
 }
 
+function compact(value: unknown) {
+  return text(value)
+    .toLocaleLowerCase("ko-KR")
+    .replace(/[^0-9a-z가-힣]/g, "");
+}
+
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
 
 async function readServerState(): Promise<TrackerState | null> {

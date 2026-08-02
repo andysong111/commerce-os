@@ -73,7 +73,7 @@ async function runReliableAiCategoryAssignment(button) {
   analysisActive = true;
   activeController = new AbortController();
   setBusyUi(button, selected.length, true);
-  setRunStatus("running", `1/3 · ${selected.length}건의 상품명·옵션을 AI가 분석하고 있습니다.`);
+  setRunStatus("running", `1/3 · ${selected.length}건의 모델명·옵션을 AI가 분석하고 있습니다.`);
 
   try {
     const aiResponse = await fetchJsonWithTimeout(
@@ -138,6 +138,12 @@ async function runReliableAiCategoryAssignment(button) {
           categoryAiConfidence: result.confidence,
           categoryAiReason: result.reason,
           categoryAiAlternatives: result.alternatives,
+          categoryAiCandidateChoices: Array.isArray(result.candidateChoices)
+            ? result.candidateChoices
+            : [],
+          categoryAiCandidatePaths: Array.isArray(result.candidatePaths)
+            ? result.candidatePaths
+            : [],
           categoryAiStatus: result.autoApply
             ? "auto_applied"
             : result.skippedExisting
