@@ -101,6 +101,24 @@ export function hasFullAssetDetailPageAssessment(job: DetailPageReviewJob) {
   return assessment.assessment_version === "full_generated_asset_identity_v1";
 }
 
+export function findDetailPageResumeCandidate(
+  jobs: DetailPageReviewJob[],
+  selected: DetailPageReviewJob,
+) {
+  if (canResumeDetailPageCheckpoint(selected)) return selected;
+  return (
+    jobs
+      .filter(
+        (candidate) =>
+          candidate.itemId === selected.itemId &&
+          candidate.jobId !== selected.jobId &&
+          canResumeDetailPageCheckpoint(candidate),
+      )
+      .sort((left, right) => resumeCandidateTime(right) - resumeCandidateTime(left))[0] ??
+    null
+  );
+}
+
 export function detailPageStageLabel(job: DetailPageReviewJob) {
   const labels: Record<string, string> = {
     source_collection: "1688 원본 수집",
@@ -337,6 +355,12 @@ function collectStructuredProblemRoles(
       collectStructuredProblemRoles(nested, found, depth + 1);
     }
   }
+}
+
+function resumeCandidateTime(job: DetailPageReviewJob) {
+  const updatedAt = Date.parse(job.updatedAt);
+  if (Number.isFinite(updatedAt)) return updatedAt;
+  return Number.isFinite(job.attempt) ? job.attempt : 0;
 }
 
 function roleLabel(roleId: string, index: number) {
