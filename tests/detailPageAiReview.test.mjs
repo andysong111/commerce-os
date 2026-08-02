@@ -99,6 +99,13 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /Standard-v2 차단 상세 섹션/);
   assert.match(workspaceSource, /실제 점수 \/ 하한/);
   assert.match(workspaceSource, /차단된 상세 섹션 \$\{standardDiagnostics\.length\}장만 재생성/);
+  assert.match(workspaceSource, /onRetry=\{onResume\}/);
+  assert.match(workspaceSource, /onClick=\{onRetry\}/);
+  assert.match(workspaceSource, /aria-label=\{`\$\{item\.label\}만 재생성`\}/);
+  assert.doesNotMatch(
+    workspaceSource,
+    /\{item\.retryable \? "이 섹션만 재생성" : "사용자 검토"\}/,
+  );
 });
 
 test("Standard-v2 failure keeps exact section scores, defects, screenshot diagnostics, and retry scope", () => {
