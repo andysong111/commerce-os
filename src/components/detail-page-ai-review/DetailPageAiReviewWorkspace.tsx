@@ -269,6 +269,31 @@ export function DetailPageAiReviewWorkspace() {
     );
   }
 
+  function reconnectFinalAssembly(job: DetailPageReviewJob) {
+    if (actionJobId || !workerReady || job.status !== "render_pending") return;
+    setActionJobId(job.jobId);
+    setActionState({
+      tone: "progress",
+      message: "저장된 검수 통과 결과로 최종 14,000px 조립기만 다시 연결하고 있습니다.",
+    });
+    workerRef.current?.contentWindow?.postMessage(
+      {
+        source: WORK_ASSISTANT_SOURCE,
+        type: "activate-detail-page-job",
+        job,
+      },
+      window.location.origin,
+    );
+    window.setTimeout(() => {
+      setActionJobId((current) => (current === job.jobId ? "" : current));
+      setActionState({
+        tone: "success",
+        message: "최종 조립기 재연결 요청을 전달했습니다. 현황판의 heartbeat와 상태를 확인하세요.",
+      });
+      void refresh(true);
+    }, 1_500);
+  }
+
   return (
     <>
       <iframe
@@ -386,6 +411,7 @@ export function DetailPageAiReviewWorkspace() {
                 onResume={() => {
                   if (resumeTarget) void requestRegeneration(resumeTarget, "resume");
                 }}
+                onReconnectFinalizer={() => reconnectFinalAssembly(selected)}
                 onFullRetry={() => void requestRegeneration(selected, "full")}
               />
             ) : (
@@ -450,6 +476,7 @@ function JobReviewDetail({
   currentBusy,
   onPreview,
   onResume,
+  onReconnectFinalizer,
   onFullRetry,
 }: {
   job: DetailPageReviewJob;
@@ -459,6 +486,7 @@ function JobReviewDetail({
   currentBusy: boolean;
   onPreview: (asset: DetailPageReviewAsset) => void;
   onResume: () => void;
+  onReconnectFinalizer: () => void;
   onFullRetry: () => void;
 }) {
   const bucket = detailPageReviewBucket(job);
@@ -519,15 +547,14 @@ function JobReviewDetail({
         </div>
       </div>
 
-      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-black text-slate-800">{job.message || presentation.detail}</p>
-          <span className="shrink-0 text-sm font-black text-slate-500">{safeProgress(job.progress)}%</span>
-        </div>
-        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
-          <div className={`h-full rounded-full ${presentation.bar}`} style={{ width: `${safeProgress(job.progress)}%` }} />
-        </div>
-      </div>
+      <JobProgressMonitor
+        job={job}
+        presentation={presentation}
+        workerReady={workerReady}
+        busy={busy}
+        currentBusy={currentBusy}
+        onReconnectFinalizer={onReconnectFinalizer}
+      />
 
       {bucket === "needs_review" ? (
         <section className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4">
@@ -654,6 +681,91 @@ function JobReviewDetail({
           </a>
         ) : null}
       </details>
+    </div>
+  );
+}
+
+function JobProgressMonitor({
+  job,
+  presentation,
+  workerReady,
+  busy,
+  currentBusy,
+  onReconnectFinalizer,
+}: {
+  job: DetailPageReviewJob;
+  presentation: ReturnType<typeof bucketPresentation>;
+  workerReady: boolean;
+  busy: boolean;
+  currentBusy: boolean;
+  onReconnectFinalizer: () => void;
+}) {
+  const progress = safeProgress(job.progress);
+  const startedAt = job.startedAt || job.createdAt;
+  const heartbeatAge = elapsedMilliseconds(job.updatedAt);
+  const stalledFinalizer =
+    job.status === "render_pending" && heartbeatAge >= 30_000;
+
+  return (
+    <section className="mt-5 rounded-2xl border border-blue-300 bg-blue-50 p-4 shadow-sm" aria-label="상세페이지 작업 현황">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-black text-blue-700">상세페이지 작업 현황</p>
+          <h3 className="mt-1 text-lg font-black text-blue-950">{detailPageStageLabel(job)}</h3>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-black ${presentation.badge}`}>
+          {presentation.label}
+        </span>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+        <div className={`h-full rounded-full ${presentation.bar}`} style={{ width: `${progress}%` }} />
+      </div>
+
+      <dl className="mt-4 grid gap-x-8 gap-y-2 text-xs font-bold text-blue-900 sm:grid-cols-2 xl:grid-cols-3">
+        <ProgressMetric label="진행" value={`${progress}%`} />
+        <ProgressMetric label="현재 단계" value={detailPageStageLabel(job)} />
+        <ProgressMetric label="경과" value={formatElapsed(startedAt, job.completedAt)} />
+        <ProgressMetric label="최근 heartbeat" value={formatRelativeAge(job.updatedAt)} />
+        <ProgressMetric label="시도 횟수" value={`${job.attempt || 1}회`} />
+        <ProgressMetric label="상태" value={job.status.toUpperCase()} mono />
+      </dl>
+
+      <p className="mt-4 text-sm font-bold leading-6 text-blue-900">
+        {job.message || presentation.detail}
+      </p>
+
+      {stalledFinalizer ? (
+        <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <p className="text-xs font-black text-amber-900">
+            최종 조립 heartbeat가 30초 이상 갱신되지 않았습니다. 단순 대기가 아니라 조립기 연결이 멈춘 상태일 수 있습니다.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[11px] font-bold leading-5 text-amber-800">
+              1688 재수집·AI 재생성 없이 저장된 검수 통과 결과로 최종 조립기만 다시 연결합니다.
+            </p>
+            <button
+              type="button"
+              onClick={onReconnectFinalizer}
+              disabled={!workerReady || busy}
+              className="rounded-lg bg-blue-700 px-3.5 py-2 text-xs font-black text-white hover:bg-blue-800 disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600"
+            >
+              {currentBusy ? "조립 재연결 중…" : workerReady ? "최종 조립 다시 연결" : "조립기 준비 중…"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <p className="mt-4 break-all font-mono text-[10px] font-bold text-blue-600">job_id: {job.jobId}</p>
+    </section>
+  );
+}
+
+function ProgressMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex min-w-0 gap-2">
+      <dt className="shrink-0 text-blue-700">{label}:</dt>
+      <dd className={`min-w-0 break-words text-blue-950 ${mono ? "font-mono" : ""}`}>{value}</dd>
     </div>
   );
 }
@@ -940,6 +1052,34 @@ function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "시간 미상";
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+}
+
+function elapsedMilliseconds(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, Date.now() - timestamp) : 0;
+}
+
+function formatRelativeAge(value: string) {
+  const elapsed = elapsedMilliseconds(value);
+  if (elapsed < 1_000) return "방금 전";
+  return `${formatDuration(elapsed)} 전`;
+}
+
+function formatElapsed(startedAt: string, completedAt: string | null) {
+  const start = Date.parse(startedAt);
+  const end = completedAt ? Date.parse(completedAt) : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return "시간 미상";
+  return formatDuration(Math.max(0, end - start));
+}
+
+function formatDuration(milliseconds: number) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const hours = Math.floor(seconds / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const remainder = seconds % 60;
+  if (hours) return `${hours}시간 ${minutes}분 ${remainder}초`;
+  if (minutes) return `${minutes}분 ${remainder}초`;
+  return `${remainder}초`;
 }
 
 function isReviewJob(value: unknown): value is DetailPageReviewJob {
