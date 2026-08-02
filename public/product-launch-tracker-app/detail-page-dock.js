@@ -371,14 +371,16 @@ async function openEvidenceCollector(job) {
 async function openFinalizer(job) {
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
-  if (!item) return;
+  const payload = job?.payload && typeof job.payload === "object" ? job.payload : {};
   active = {
     itemId: String(job.itemId),
     jobId: String(job.jobId),
     sourceUrl: job.sourceUrl,
-    productName: String(item.productName || item.modelNumber || "상품"),
-    salesOptions: readSalesOptions(item),
-    attempt: Number(job.attempt || item.detailPageAutomation?.attempt || 1),
+    productName: String(item?.productName || item?.modelNumber || payload.product_name || "상품"),
+    salesOptions: item
+      ? readSalesOptions(item)
+      : String(job.salesOptions || payload.sales_options || "").slice(0, 2000),
+    attempt: Number(job.attempt || item?.detailPageAutomation?.attempt || 1),
     mode: "finalize",
   };
   updateAutomation(active.itemId, {
