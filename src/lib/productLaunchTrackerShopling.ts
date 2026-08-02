@@ -24,9 +24,9 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
 ] as const;
 
 const DEFAULT_MULTIPLIERS = {
-  wholesale1: 1.1,
+  wholesale1: 1,
   wholesale2: 1.15,
-  wholesale3: 1,
+  wholesale3: 1.1,
   wholesale4: 1.3,
   retail1: 1.3,
   retail2: 1.4,
