@@ -16,6 +16,7 @@ on:
       - 'src/lib/opsWorkspace.ts'
       - 'src/lib/productLaunchTracker*.ts'
       - 'src/lib/shoplingCategory*.ts'
+      - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/20260731000*_product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -47,3 +48,4 @@ jobs:
           tests/shoplingCategoryAiDelivery.test.mjs
           tests/shoplingCategoryCandidateChoices.test.mjs
           tests/shoplingCategoryCoreNounReview.test.mjs
+          tests/shoplingCategoryJsonRecovery.test.mjs

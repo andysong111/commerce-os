@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
+import { fetchShoplingCategorySnapshot } from "@/lib/shoplingCategoryCatalog";
 import {
-  fetchShoplingCategorySnapshot,
-  generateShoplingCategoryRecommendations,
-} from "@/lib/shoplingCategoryCatalog";
+  generateReliableShoplingCategoryRecommendations,
+  isRetryableCategoryOutputError,
+} from "@/lib/shoplingCategoryRecommendationRunner";
 import {
   parseProductCategoryInputs,
   shortlistShoplingCategories,
@@ -47,10 +48,9 @@ export async function POST(request: NextRequest) {
     );
 
     const generated = supportedInputs.length
-      ? await generateShoplingCategoryRecommendations(
-          { items: supportedInputs },
-          { timeoutMs: 45_000 },
-        )
+      ? await generateReliableShoplingCategoryRecommendations(supportedInputs, {
+          timeoutMs: 45_000,
+        })
       : {
           status: "success" as const,
           snapshot: {
@@ -109,7 +109,9 @@ export async function POST(request: NextRequest) {
     const message =
       error instanceof DOMException && error.name === "AbortError"
         ? "AI 카테고리 분석 시간이 45초를 초과했습니다. 선택 상품 수를 줄여 다시 실행하세요."
-        : rawMessage;
+        : isRetryableCategoryOutputError(error)
+          ? "AI 응답이 중간에서 잘렸습니다. 실패한 상품만 자동 재시도했지만 완료되지 않았습니다. 해당 상품 수를 줄여 다시 실행하세요."
+          : rawMessage;
     const status = /OPENAI_API_KEY|카테고리 스냅샷|GITHUB_/.test(message)
       ? 503
       : /시간을 .*초과|AbortError|aborted/i.test(message)
