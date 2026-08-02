@@ -23,8 +23,21 @@ export async function POST(request: NextRequest) {
     const result = await generateShoplingCategoryRecommendations(body, {
       timeoutMs: 45_000,
     });
+    const results = result.results.map((row) => {
+      const candidateChoices = buildCandidateChoices(
+        row.selectedPath,
+        row.alternatives,
+        row.candidatePaths,
+      );
+      return {
+        ...row,
+        reason: normalizeModelNameTerminology(row.reason),
+        alternatives: candidateChoices.slice(1, 3),
+        candidateChoices,
+      };
+    });
     return Response.json(
-      { ok: true, ...result },
+      { ok: true, ...result, results },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -44,4 +57,46 @@ export async function POST(request: NextRequest) {
       { status, headers: { "Cache-Control": "no-store" } },
     );
   }
+}
+
+function buildCandidateChoices(
+  selectedPath: string,
+  alternatives: string[],
+  candidatePaths: string[],
+) {
+  const unique = [selectedPath, ...alternatives, ...candidatePaths]
+    .map((value) => String(value ?? "").trim())
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+  if (!unique.length) return [];
+
+  const choices = [unique[0]];
+  const remaining = unique.slice(1);
+  const usedBranches = new Set([branchKey(unique[0])]);
+  while (choices.length < 3 && remaining.length) {
+    const diverseIndex = remaining.findIndex(
+      (candidate) => !usedBranches.has(branchKey(candidate)),
+    );
+    const index = diverseIndex >= 0 ? diverseIndex : 0;
+    const [picked] = remaining.splice(index, 1);
+    choices.push(picked);
+    usedBranches.add(branchKey(picked));
+  }
+  return choices;
+}
+
+function branchKey(path: string) {
+  return path
+    .split(">")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(">");
+}
+
+function normalizeModelNameTerminology(value: string) {
+  return String(value ?? "")
+    .replaceAll("상품명이", "모델명이")
+    .replaceAll("상품명은", "모델명은")
+    .replaceAll("상품명에", "모델명에")
+    .replaceAll("상품명", "모델명");
 }
