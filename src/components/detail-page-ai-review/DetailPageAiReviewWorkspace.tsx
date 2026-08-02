@@ -10,6 +10,7 @@ import {
   detailPageReviewBucket,
   detailPageRoleLabel,
   detailPageStageLabel,
+  hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   type DetailPageReviewAsset,
   type DetailPageReviewBucket,
@@ -146,9 +147,12 @@ export function DetailPageAiReviewWorkspace() {
       ...reviewAssets.representatives,
       ...reviewAssets.panels,
     ].filter((asset) => asset.problem).length;
+    const problemCountConfirmed = hasFullAssetDetailPageAssessment(job);
     const confirmed = window.confirm(
       partial
-        ? `\"${detailPageJobName(job)}\"의 정상 자산은 모두 유지하고, 검수에서 지목된 문제 이미지${problemCount ? ` ${problemCount}장` : ""}만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
+        ? problemCountConfirmed && problemCount
+          ? `\"${detailPageJobName(job)}\"의 정상 자산은 모두 유지하고, 전체 결과 검수에서 지목된 문제 이미지 ${problemCount}장만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
+          : `\"${detailPageJobName(job)}\"의 기존 생성 결과 전체를 1688 원본과 먼저 재검수하고, 새 검수에서 지목된 문제 이미지만 다시 생성합니다.\n정상 자산은 유지되며 AI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
         : `\"${detailPageJobName(job)}\"을 1688 수집부터 전체 다시 생성합니다.\n기존 결과는 보존되지만 AI 생성 비용과 처리시간이 다시 발생합니다. 계속할까요?`,
     );
     if (!confirmed) return;
@@ -157,7 +161,9 @@ export function DetailPageAiReviewWorkspace() {
     setActionState({
       tone: "progress",
       message: partial
-        ? `기존 체크포인트를 확인하고 문제 이미지${problemCount ? ` ${problemCount}장` : ""}만 재생성합니다.`
+        ? problemCountConfirmed && problemCount
+          ? `기존 체크포인트에서 문제 이미지 ${problemCount}장만 재생성합니다.`
+          : "기존 결과 전체를 원본과 재검수한 뒤 지목된 문제 이미지만 재생성합니다."
         : "전체 재생성 연결과 1688 수집기를 확인하고 있습니다.",
     });
     workerRef.current?.contentWindow?.postMessage(
@@ -366,6 +372,7 @@ function JobReviewDetail({
   const problemAssets = [...assets.representatives, ...assets.panels].filter(
     (asset) => asset.problem,
   );
+  const problemCountConfirmed = hasFullAssetDetailPageAssessment(job);
 
   return (
     <div>
@@ -430,6 +437,11 @@ function JobReviewDetail({
               <p className="mt-2 text-xs font-bold text-rose-600">
                 정상 자산은 삭제하지 않으며, 부분 재생성은 저장된 체크포인트를 사용합니다.
               </p>
+              {!problemCountConfirmed ? (
+                <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-black leading-5 text-rose-700">
+                  이 과거 판정은 상세 섹션 전체 검수 이전 기록입니다. 부분 재생성 시 전체 결과를 원본과 먼저 재검수합니다.
+                </p>
+              ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               {resumable ? (
@@ -441,9 +453,9 @@ function JobReviewDetail({
                 >
                   {currentBusy
                     ? "재생성 요청 중…"
-                    : problemAssets.length
+                    : problemCountConfirmed && problemAssets.length
                       ? `문제 이미지 ${problemAssets.length}장만 재생성`
-                      : "문제 이미지만 재생성"}
+                      : "전체 재검수 후 문제 이미지만 재생성"}
                 </button>
               ) : null}
               <button

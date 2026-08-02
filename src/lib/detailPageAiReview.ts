@@ -96,6 +96,11 @@ export function canResumeDetailPageCheckpoint(job: DetailPageReviewJob) {
   );
 }
 
+export function hasFullAssetDetailPageAssessment(job: DetailPageReviewJob) {
+  const assessment = record(record(job.result).setAssessment);
+  return assessment.assessment_version === "full_generated_asset_identity_v1";
+}
+
 export function detailPageStageLabel(job: DetailPageReviewJob) {
   const labels: Record<string, string> = {
     source_collection: "1688 원본 수집",

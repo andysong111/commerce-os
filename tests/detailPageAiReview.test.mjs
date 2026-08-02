@@ -5,6 +5,7 @@ import {
   canResumeDetailPageCheckpoint,
   detailPageReviewAssets,
   detailPageReviewBucket,
+  hasFullAssetDetailPageAssessment,
 } from "../src/lib/detailPageAiReview.ts";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
 
@@ -82,6 +83,8 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /AI 생성 비용과 처리시간이 다시 발생/);
   assert.match(workspaceSource, /\.\.\.assets\.representatives, \.\.\.assets\.panels/);
   assert.match(workspaceSource, /문제 이미지 \$\{problemAssets\.length\}장만 재생성/);
+  assert.match(workspaceSource, /상세 섹션 전체 검수 이전 기록/);
+  assert.match(workspaceSource, /전체 재검수 후 문제 이미지만 재생성/);
 });
 
 test("failed final-set jobs identify the exact generated problem asset and preserve checkpoint eligibility", () => {
@@ -99,6 +102,20 @@ test("failed final-set jobs identify the exact generated problem asset and prese
   assert.equal(assets.panels[1].roleId, "panel-3");
   assert.equal(assets.panels[1].problem, false);
   assert.equal(assets.evidence.length, 1);
+  assert.equal(hasFullAssetDetailPageAssessment(failed), false);
+  assert.equal(
+    hasFullAssetDetailPageAssessment({
+      ...failed,
+      result: {
+        ...failed.result,
+        setAssessment: {
+          ...failed.result.setAssessment,
+          assessment_version: "full_generated_asset_identity_v1",
+        },
+      },
+    }),
+    true,
+  );
 });
 
 test("review requests target an exact checkpoint or explicitly force a full regeneration", () => {
