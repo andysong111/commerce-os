@@ -3,10 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   canResumeDetailPageCheckpoint,
+  detailPageCheckpointId,
+  detailPageFailureCode,
   detailPageReviewAssets,
   detailPageReviewBucket,
+  detailPageStandardDiagnostics,
   findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
+  standardQualityRetryPlan,
 } from "../src/lib/detailPageAiReview.ts";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
 
@@ -91,6 +95,85 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /mode === "full" && !workerReady/);
   assert.match(workspaceSource, /1688 재수집 없이 기존 체크포인트/);
   assert.match(workspaceSource, /직전 검수 체크포인트/);
+  assert.match(workspaceSource, /캡처용 오류 진단/);
+  assert.match(workspaceSource, /Standard-v2 차단 상세 섹션/);
+  assert.match(workspaceSource, /실제 점수 \/ 하한/);
+  assert.match(workspaceSource, /차단된 상세 섹션 \$\{standardDiagnostics\.length\}장만 재생성/);
+});
+
+test("Standard-v2 failure keeps exact section scores, defects, screenshot diagnostics, and retry scope", () => {
+  const failed = job({
+    stage: "standard_quality_gate",
+    progress: 94,
+    attempt: 14,
+    error: "STANDARD_QUALITY_BLOCKED",
+    result: {
+      ...job().result,
+      runId: "run-mini-gymball-14",
+      standardFailure: {
+        code: "STANDARD_QUALITY_BLOCKED",
+        summary_ko: "상세 섹션 1, 상세 섹션 3이 Standard-v2 품질 하한선을 통과하지 못했습니다.",
+        retryable_panel_slots: [1, 3],
+        panel_retry_instructions: {
+          1: "Preserve the round product shape.",
+          3: "Remove the unrelated electronic product.",
+        },
+        panel_diagnostics: [
+          {
+            role_id: "panel-1",
+            slot: 1,
+            label_ko: "상세 섹션 1",
+            status: "review_required",
+            policy_label_ko: "히어로",
+            scores: { shape: 79, identity: 81, size: -1, scene_context: -1 },
+            score_floors: { shape: 84, identity: 86, size: null, scene_context: null },
+            blocker_codes: ["quality_review_required", "quality_score_below_floor"],
+            blocker_labels_ko: ["검토 필요 패널 존재", "Standard 점수 하한 미달"],
+            issue_labels_ko: ["제품 형태 불일치"],
+            retry_instruction: "Preserve the round product shape.",
+            retryable: true,
+            is_problem: true,
+          },
+          {
+            role_id: "panel-3",
+            slot: 3,
+            label_ko: "상세 섹션 3",
+            status: "review_required",
+            scores: { shape: 90, identity: 60, size: 80, scene_context: 90 },
+            score_floors: { shape: 82, identity: 84, size: 72, scene_context: 86 },
+            blocker_codes: ["quality_issue_present"],
+            blocker_labels_ko: ["품질 결함 감지"],
+            issue_labels_ko: ["다른 제품"],
+            retry_instruction: "Remove the unrelated electronic product.",
+            retryable: true,
+            is_problem: true,
+          },
+        ],
+      },
+    },
+  });
+
+  const diagnostics = detailPageStandardDiagnostics(failed);
+  assert.equal(canResumeDetailPageCheckpoint(failed), true);
+  assert.equal(detailPageFailureCode(failed), "STANDARD_QUALITY_BLOCKED");
+  assert.equal(detailPageCheckpointId(failed), "run-mini-gymball-14");
+  assert.deepEqual(diagnostics.map((item) => item.slot), [1, 3]);
+  assert.deepEqual(diagnostics[0].scores, {
+    shape: 79,
+    identity: 81,
+    size: -1,
+    sceneContext: -1,
+  });
+  assert.deepEqual(standardQualityRetryPlan(failed.result), {
+    slots: [1, 3],
+    instructions: {
+      1: "Preserve the round product shape.",
+      3: "Remove the unrelated electronic product.",
+    },
+  });
+  const assets = detailPageReviewAssets(failed);
+  assert.equal(assets.panels[0].problem, true);
+  assert.equal(assets.panels[1].problem, true);
 });
 
 test("failed final-set jobs identify the exact generated problem asset and preserve checkpoint eligibility", () => {
@@ -176,6 +259,7 @@ test("review requests target an exact checkpoint or explicitly force a full rege
   assert.match(workspaceSource, /if \(partial\) \{/);
   assert.match(workspaceSource, /method: "POST"/);
   assert.match(workspaceSource, /credentials: "same-origin"/);
-  assert.match(jobRouteSource, /panelRetrySlots: \[\]/);
-  assert.match(jobRouteSource, /panelRetryInstructions: \{\}/);
+  assert.match(jobRouteSource, /\["server_generation", "standard_quality_gate"\]/);
+  assert.match(jobRouteSource, /panelRetrySlots: standardGateFailure \? standardRetry\.slots : \[\]/);
+  assert.match(jobRouteSource, /standardRetryUsed: standardGateFailure/);
 });

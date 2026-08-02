@@ -4,18 +4,22 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   canResumeDetailPageCheckpoint,
+  detailPageCheckpointId,
+  detailPageFailureCode,
   detailPageJobName,
   detailPageProblemReason,
   detailPageReviewAssets,
   detailPageReviewBucket,
   detailPageRoleLabel,
   detailPageStageLabel,
+  detailPageStandardDiagnostics,
   findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   type DetailPageReviewAsset,
   type DetailPageReviewBucket,
   type DetailPageReviewJob,
+  type DetailPageStandardPanelDiagnostic,
 } from "@/lib/detailPageAiReview";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
@@ -151,10 +155,14 @@ export function DetailPageAiReviewWorkspace() {
       ...reviewAssets.representatives,
       ...reviewAssets.panels,
     ].filter((asset) => asset.problem).length;
-    const problemCountConfirmed = hasFullAssetDetailPageAssessment(job);
+    const standardDiagnostics = detailPageStandardDiagnostics(job);
+    const problemCountConfirmed =
+      hasFullAssetDetailPageAssessment(job) || standardDiagnostics.length > 0;
     const confirmed = window.confirm(
       partial
-        ? problemCountConfirmed && problemCount
+        ? standardDiagnostics.length
+          ? `\"${detailPageJobName(job)}\"의 정상 자산은 모두 유지하고, Standard-v2에서 차단된 상세 섹션 ${standardDiagnostics.length}장만 다시 생성합니다.\n재생성 후 전체 상품 일치 검수와 Standard-v2를 다시 실행하며 AI 비용이 일부 발생할 수 있습니다. 계속할까요?`
+          : problemCountConfirmed && problemCount
           ? `\"${detailPageJobName(job)}\"의 정상 자산은 모두 유지하고, 전체 결과 검수에서 지목된 문제 이미지 ${problemCount}장만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
           : `\"${detailPageJobName(job)}\"의 기존 생성 결과 전체를 1688 원본과 먼저 재검수하고, 새 검수에서 지목된 문제 이미지만 다시 생성합니다.\n정상 자산은 유지되며 AI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
         : `\"${detailPageJobName(job)}\"을 1688 수집부터 전체 다시 생성합니다.\n기존 결과는 보존되지만 AI 생성 비용과 처리시간이 다시 발생합니다. 계속할까요?`,
@@ -165,7 +173,9 @@ export function DetailPageAiReviewWorkspace() {
     setActionState({
       tone: "progress",
       message: partial
-        ? problemCountConfirmed && problemCount
+        ? standardDiagnostics.length
+          ? `기존 체크포인트에서 Standard-v2 차단 상세 섹션 ${standardDiagnostics.length}장만 재생성합니다.`
+          : problemCountConfirmed && problemCount
           ? `기존 체크포인트에서 문제 이미지 ${problemCount}장만 재생성합니다.`
           : "기존 결과 전체를 원본과 재검수한 뒤 지목된 문제 이미지만 재생성합니다."
         : "전체 재생성 연결과 1688 수집기를 확인하고 있습니다.",
@@ -465,6 +475,9 @@ function JobReviewDetail({
   );
   const problemCountConfirmed =
     hasFullAssetDetailPageAssessment(recoveryJob);
+  const standardDiagnostics = detailPageStandardDiagnostics(recoveryJob);
+  const exactProblemCountConfirmed =
+    problemCountConfirmed || standardDiagnostics.length > 0;
 
   return (
     <div>
@@ -535,7 +548,7 @@ function JobReviewDetail({
                   (시도 {resumeTarget?.attempt || 1}회)를 복구하며 1688 재수집은 실행하지 않습니다.
                 </p>
               ) : null}
-              {!problemCountConfirmed ? (
+              {!exactProblemCountConfirmed ? (
                 <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-black leading-5 text-rose-700">
                   이 과거 판정은 상세 섹션 전체 검수 이전 기록입니다. 부분 재생성 시 전체 결과를 원본과 먼저 재검수합니다.
                 </p>
@@ -551,7 +564,9 @@ function JobReviewDetail({
                 >
                   {currentBusy
                     ? "재생성 요청 중…"
-                    : problemCountConfirmed && problemAssets.length
+                    : standardDiagnostics.length
+                      ? `차단된 상세 섹션 ${standardDiagnostics.length}장만 재생성`
+                      : problemCountConfirmed && problemAssets.length
                       ? `문제 이미지 ${problemAssets.length}장만 재생성`
                       : "전체 재검수 후 문제 이미지만 재생성"}
                 </button>
@@ -579,6 +594,17 @@ function JobReviewDetail({
             {currentBusy ? "재생성 요청 중…" : "전체 다시 생성"}
           </button>
         </div>
+      ) : null}
+
+      {bucket === "needs_review" ? (
+        <FailureDiagnosticSnapshot
+          job={recoveryJob}
+          diagnostics={standardDiagnostics}
+        />
+      ) : null}
+
+      {standardDiagnostics.length ? (
+        <StandardQualityDiagnostics diagnostics={standardDiagnostics} />
       ) : null}
 
       <AssetSection
@@ -622,6 +648,114 @@ function JobReviewDetail({
       </details>
     </div>
   );
+}
+
+function FailureDiagnosticSnapshot({
+  job,
+  diagnostics,
+}: {
+  job: DetailPageReviewJob;
+  diagnostics: DetailPageStandardPanelDiagnostic[];
+}) {
+  const checkpointId = detailPageCheckpointId(job);
+  return (
+    <section className="mt-5 rounded-xl border border-slate-300 bg-slate-950 p-4 text-white">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-black tracking-[0.12em] text-slate-400">캡처용 오류 진단</p>
+          <h3 className="mt-1 text-base font-black">이 영역이 보이게 캡처하면 작업 이력을 바로 추적할 수 있습니다.</h3>
+        </div>
+        <span className="rounded-full bg-rose-500/20 px-3 py-1 text-xs font-black text-rose-200">
+          {detailPageFailureCode(job)}
+        </span>
+      </div>
+      <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
+        <DiagnosticCell label="작업 ID" value={job.jobId} mono />
+        <DiagnosticCell label="실제 단계 코드" value={job.stage || "unknown"} mono />
+        <DiagnosticCell label="진행·시도" value={`${safeProgress(job.progress)}% · 시도 ${job.attempt || 1}회`} />
+        <DiagnosticCell label="체크포인트 run_id" value={checkpointId || "기록 없음"} mono />
+        <DiagnosticCell label="차단 자산" value={diagnostics.length ? `상세 섹션 ${diagnostics.map((item) => item.slot).join(", ")}` : "구형 기록 · 재검수 필요"} />
+        <DiagnosticCell label="마지막 갱신" value={formatDateTime(job.updatedAt)} />
+      </dl>
+    </section>
+  );
+}
+
+function StandardQualityDiagnostics({
+  diagnostics,
+}: {
+  diagnostics: DetailPageStandardPanelDiagnostic[];
+}) {
+  return (
+    <section className="mt-5 overflow-hidden rounded-xl border border-rose-200 bg-white">
+      <div className="border-b border-rose-100 bg-rose-50 px-4 py-3">
+        <h3 className="font-black text-rose-950">Standard-v2 차단 상세 섹션</h3>
+        <p className="mt-1 text-xs font-bold text-rose-700">섹션별 실제 점수/하한, 결함, 재생성 범위를 한 번에 확인합니다.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[880px] w-full text-left text-xs">
+          <thead className="bg-slate-50 text-slate-500">
+            <tr>
+              <th className="px-4 py-3 font-black">문제 섹션</th>
+              <th className="px-4 py-3 font-black">검수 상태</th>
+              <th className="px-4 py-3 font-black">실제 점수 / 하한</th>
+              <th className="px-4 py-3 font-black">차단 사유·결함</th>
+              <th className="px-4 py-3 font-black">재시도</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {diagnostics.map((item) => (
+              <tr key={item.roleId} className="align-top">
+                <td className="px-4 py-3">
+                  <p className="font-black text-rose-700">{item.label}</p>
+                  <p className="mt-1 font-mono text-[10px] text-slate-400">{item.roleId}</p>
+                </td>
+                <td className="px-4 py-3 font-bold text-slate-700">
+                  {qualityStatusLabel(item.status)}
+                  {item.policyLabel ? <p className="mt-1 text-[10px] text-slate-400">{item.policyLabel}</p> : null}
+                </td>
+                <td className="px-4 py-3 font-mono font-bold leading-5 text-slate-700">
+                  <p>형태 {scorePair(item.scores.shape, item.scoreFloors.shape)}</p>
+                  <p>정체성 {scorePair(item.scores.identity, item.scoreFloors.identity)}</p>
+                  <p>장면 {scorePair(item.scores.sceneContext, item.scoreFloors.sceneContext)}</p>
+                  <p>크기 {scorePair(item.scores.size, item.scoreFloors.size)}</p>
+                </td>
+                <td className="max-w-md px-4 py-3 font-semibold leading-5 text-slate-700">
+                  <p>{item.blockerLabels.join(" · ") || "상세 판정 확인 필요"}</p>
+                  {item.issueLabels.length ? <p className="mt-1 font-black text-rose-700">결함: {item.issueLabels.join(", ")}</p> : null}
+                  {item.reason ? <p className="mt-1 text-[11px] text-slate-500">{item.reason}</p> : null}
+                </td>
+                <td className="px-4 py-3 font-black text-slate-700">
+                  {item.retryable ? "이 섹션만 재생성" : "사용자 검토"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DiagnosticCell({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-lg bg-white/10 p-3">
+      <dt className="font-black text-slate-400">{label}</dt>
+      <dd className={`mt-1 break-all font-bold text-white ${mono ? "font-mono text-[11px]" : ""}`}>{value}</dd>
+    </div>
+  );
+}
+
+function qualityStatusLabel(status: string) {
+  if (status === "review_required") return "검토 필요";
+  if (status === "unavailable") return "검수 정보 없음";
+  if (status === "passed") return "점수 하한 재확인";
+  return status || "상태 미상";
+}
+
+function scorePair(score: number | null, floor: number | null) {
+  if (score === null || score < 0) return "해당 없음";
+  return floor === null ? String(score) : `${score} / ${floor}`;
 }
 
 function AssetSection({

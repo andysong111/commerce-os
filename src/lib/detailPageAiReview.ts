@@ -36,6 +36,32 @@ export type DetailPageReviewAsset = {
   problem: boolean;
 };
 
+export type DetailPageStandardPanelDiagnostic = {
+  roleId: string;
+  slot: number;
+  label: string;
+  status: string;
+  policyLabel: string;
+  scores: {
+    shape: number | null;
+    identity: number | null;
+    size: number | null;
+    sceneContext: number | null;
+  };
+  scoreFloors: {
+    shape: number | null;
+    identity: number | null;
+    size: number | null;
+    sceneContext: number | null;
+  };
+  blockerCodes: string[];
+  blockerLabels: string[];
+  issueLabels: string[];
+  reason: string;
+  retryInstruction: string;
+  retryable: boolean;
+};
+
 export type DetailPageReviewBucket =
   | "needs_review"
   | "active"
@@ -89,7 +115,7 @@ export function canResumeDetailPageCheckpoint(job: DetailPageReviewJob) {
   const analysis = record(record(job.result).analysis);
   return Boolean(
     job.status === "failed" &&
-      job.stage === "server_generation" &&
+      ["server_generation", "standard_quality_gate"].includes(job.stage) &&
       Array.isArray(evidence) &&
       evidence.length > 0 &&
       analysis.product,
@@ -125,6 +151,8 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
     queued: "서버 생성 대기",
     checkpoint_resume: "문제 자산 복구 대기",
     server_generation: "AI 생성·검수",
+    standard_quality_retry: "Standard-v2 차단 섹션 부분 재생성",
+    standard_quality_gate: "Standard-v2 품질 하한선",
     render_pending: "최종 14,000px 조립",
     docked: "상품출시진행관리 도킹",
     cancelled: "사용자 취소",
@@ -135,7 +163,10 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
 export function detailPageProblemReason(job: DetailPageReviewJob) {
   const result = record(job.result);
   const assessment = record(result.setAssessment);
+  const standardFailure = record(result.standardFailure || result.standard_failure);
   const candidates = [
+    standardFailure.summary_ko,
+    standardFailure.summaryKo,
     job.error,
     assessment.summary,
     assessment.reason,
@@ -145,6 +176,66 @@ export function detailPageProblemReason(job: DetailPageReviewJob) {
     job.message,
   ];
   return candidates.map(text).find(Boolean) || "AI 검수에서 확인이 필요한 항목이 발견됐습니다.";
+}
+
+export function detailPageStandardDiagnostics(
+  job: DetailPageReviewJob,
+): DetailPageStandardPanelDiagnostic[] {
+  return standardPanelDiagnostics(record(job.result));
+}
+
+export function standardQualityRetryPlan(resultValue: unknown) {
+  const result = record(resultValue);
+  const failure = record(result.standardFailure || result.standard_failure);
+  const diagnostics = standardPanelDiagnostics(result);
+  const explicitSlots = array(
+    failure.retryable_panel_slots || failure.retryablePanelSlots,
+  )
+    .map(Number)
+    .filter((slot) => Number.isInteger(slot) && slot > 0);
+  const slots = [
+    ...new Set(
+      explicitSlots.length
+        ? explicitSlots
+        : diagnostics.filter((item) => item.retryable).map((item) => item.slot),
+    ),
+  ].sort((left, right) => left - right);
+  const storedInstructions = record(
+    failure.panel_retry_instructions || failure.panelRetryInstructions,
+  );
+  const instructions = Object.fromEntries(
+    slots.map((slot) => {
+      const diagnostic = diagnostics.find((item) => item.slot === slot);
+      return [
+        String(slot),
+        text(storedInstructions[String(slot)]) ||
+          diagnostic?.retryInstruction ||
+          "Regenerate only this Standard-blocked detail panel from the authoritative seller-source identity image.",
+      ];
+    }),
+  );
+  return { slots, instructions };
+}
+
+export function detailPageFailureCode(job: DetailPageReviewJob) {
+  const result = record(job.result);
+  const failure = record(result.standardFailure || result.standard_failure);
+  return text(failure.code) ||
+    (job.stage === "standard_quality_gate"
+      ? "STANDARD_QUALITY_BLOCKED"
+      : "DETAIL_PAGE_GENERATION_FAILED");
+}
+
+export function detailPageCheckpointId(job: DetailPageReviewJob) {
+  const result = record(job.result);
+  const failure = record(result.standardFailure || result.standard_failure);
+  return text(
+    failure.source_run_id ||
+      failure.sourceRunId ||
+      result.runId ||
+      result.run_id ||
+      job.sourceRunId,
+  );
 }
 
 export function detailPageReviewAssets(job: DetailPageReviewJob): {
@@ -292,6 +383,9 @@ function findProblemRoleIds(job: DetailPageReviewJob) {
     .join(" ")
     .toLowerCase();
   const found = new Set<string>();
+  for (const diagnostic of detailPageStandardDiagnostics(job)) {
+    found.add(diagnostic.roleId.toLowerCase());
+  }
   for (const roleId of representatives) {
     if (haystack.includes(roleId.toLowerCase())) found.add(roleId.toLowerCase());
   }
@@ -305,6 +399,49 @@ function findProblemRoleIds(job: DetailPageReviewJob) {
   }
   collectStructuredProblemRoles(assessment, found, 0);
   return found;
+}
+
+function standardPanelDiagnostics(
+  result: Record<string, unknown>,
+): DetailPageStandardPanelDiagnostic[] {
+  const failure = record(result.standardFailure || result.standard_failure);
+  return array(failure.panel_diagnostics || failure.panelDiagnostics)
+    .map((value): DetailPageStandardPanelDiagnostic | null => {
+      const item = record(value);
+      const slot = Number(item.slot || item.panel_slot || item.panelSlot);
+      if (!Number.isInteger(slot) || slot < 1) return null;
+      const scores = record(item.scores);
+      const floors = record(item.score_floors || item.scoreFloors);
+      return {
+        roleId: text(item.role_id || item.roleId) || `panel-${slot}`,
+        slot,
+        label: text(item.label_ko || item.label) || `상세 섹션 ${slot}`,
+        status: text(item.status) || "unknown",
+        policyLabel: text(item.policy_label_ko || item.policyLabel),
+        scores: {
+          shape: numeric(scores.shape),
+          identity: numeric(scores.identity),
+          size: numeric(scores.size),
+          sceneContext: numeric(scores.scene_context ?? scores.sceneContext),
+        },
+        scoreFloors: {
+          shape: numeric(floors.shape),
+          identity: numeric(floors.identity),
+          size: numeric(floors.size),
+          sceneContext: numeric(
+            floors.scene_context ?? floors.sceneContext,
+          ),
+        },
+        blockerCodes: array(item.blocker_codes || item.blockerCodes).map(text).filter(Boolean),
+        blockerLabels: array(item.blocker_labels_ko || item.blockerLabels).map(text).filter(Boolean),
+        issueLabels: array(item.issue_labels_ko || item.issueLabels || item.issues).map(text).filter(Boolean),
+        reason: text(item.reason),
+        retryInstruction: text(item.retry_instruction || item.retryInstruction),
+        retryable: item.retryable !== false,
+      };
+    })
+    .filter(notNull)
+    .sort((left, right) => left.slot - right.slot);
 }
 
 function collectStructuredProblemRoles(
@@ -374,6 +511,12 @@ function humanize(value: unknown) {
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function numeric(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function record(value: unknown): Record<string, unknown> {

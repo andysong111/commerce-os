@@ -9,6 +9,7 @@ import {
   resolveDetailPageJobIdentity,
   verifyDetailPageJobToken,
 } from "@/lib/detailPageJobServer";
+import { standardQualityRetryPlan } from "@/lib/detailPageAiReview";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 const TERMINAL = new Set(["success", "failed", "cancelled"]);
@@ -131,11 +132,14 @@ export async function POST(
       }
       const evidenceUrls = stringList(job.payload.evidence_urls, 60);
       const hasAnalysis = Boolean(asRecord(job.result.analysis).product);
+      const standardRetry = standardQualityRetryPlan(job.result);
+      const standardGateFailure = job.stage === "standard_quality_gate";
       if (
         job.status !== "failed" ||
-        job.stage !== "server_generation" ||
+        !["server_generation", "standard_quality_gate"].includes(job.stage) ||
         !evidenceUrls.length ||
-        !hasAnalysis
+        !hasAnalysis ||
+        (standardGateFailure && !standardRetry.slots.length)
       ) {
         return Response.json(
           {
@@ -149,20 +153,25 @@ export async function POST(
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "checkpoint_resume",
-        message: "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 대기 중",
-        progress: clamp(job.progress, 10, 92),
+        message: standardGateFailure
+          ? `기존 승인 자산 유지 · Standard-v2 차단 상세 섹션 ${standardRetry.slots.length}장만 재생성 대기 중`
+          : "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 대기 중",
+        progress: clamp(job.progress, 10, 94),
         qa_status: "pending",
         payload: {
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
         },
         result: {
-          setAssessment: null,
+          setAssessment: standardGateFailure ? job.result.setAssessment : null,
           representativeRetryRole: "",
           representativeRetryInstruction: "",
-          panelRetrySlots: [],
-          panelRetryInstructions: {},
-          setRetryUsed: false,
+          panelRetrySlots: standardGateFailure ? standardRetry.slots : [],
+          panelRetryInstructions: standardGateFailure
+            ? standardRetry.instructions
+            : {},
+          setRetryUsed: standardGateFailure,
+          standardRetryUsed: standardGateFailure,
         },
         lease_owner: "",
         lease_until: null,
