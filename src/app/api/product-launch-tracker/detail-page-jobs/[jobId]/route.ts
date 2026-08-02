@@ -9,7 +9,10 @@ import {
   resolveDetailPageJobIdentity,
   verifyDetailPageJobToken,
 } from "@/lib/detailPageJobServer";
-import { standardQualityRetryPlan } from "@/lib/detailPageAiReview";
+import {
+  canResumeDetailPageCheckpoint,
+  standardQualityRetryPlan,
+} from "@/lib/detailPageAiReview";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 const TERMINAL = new Set(["success", "failed", "cancelled"]);
@@ -130,15 +133,10 @@ export async function POST(
       if (!ownerAuthorized) {
         return forbidden("OPS 화면만 실패한 서버 생성을 이어서 실행할 수 있습니다.");
       }
-      const evidenceUrls = stringList(job.payload.evidence_urls, 60);
-      const hasAnalysis = Boolean(asRecord(job.result.analysis).product);
       const standardRetry = standardQualityRetryPlan(job.result);
       const standardGateFailure = job.stage === "standard_quality_gate";
       if (
-        job.status !== "failed" ||
-        !["server_generation", "standard_quality_gate"].includes(job.stage) ||
-        !evidenceUrls.length ||
-        !hasAnalysis ||
+        !canResumeDetailPageCheckpoint(job) ||
         (standardGateFailure && !standardRetry.slots.length)
       ) {
         return Response.json(
