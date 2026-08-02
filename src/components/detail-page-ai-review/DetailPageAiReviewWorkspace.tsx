@@ -604,7 +604,12 @@ function JobReviewDetail({
       ) : null}
 
       {standardDiagnostics.length ? (
-        <StandardQualityDiagnostics diagnostics={standardDiagnostics} />
+        <StandardQualityDiagnostics
+          diagnostics={standardDiagnostics}
+          onRetry={onResume}
+          disabled={!resumable || busy}
+          pending={currentBusy}
+        />
       ) : null}
 
       <AssetSection
@@ -683,8 +688,14 @@ function FailureDiagnosticSnapshot({
 
 function StandardQualityDiagnostics({
   diagnostics,
+  onRetry,
+  disabled,
+  pending,
 }: {
   diagnostics: DetailPageStandardPanelDiagnostic[];
+  onRetry: () => void;
+  disabled: boolean;
+  pending: boolean;
 }) {
   return (
     <section className="mt-5 overflow-hidden rounded-xl border border-rose-200 bg-white">
@@ -725,8 +736,20 @@ function StandardQualityDiagnostics({
                   {item.issueLabels.length ? <p className="mt-1 font-black text-rose-700">결함: {item.issueLabels.join(", ")}</p> : null}
                   {item.reason ? <p className="mt-1 text-[11px] text-slate-500">{item.reason}</p> : null}
                 </td>
-                <td className="px-4 py-3 font-black text-slate-700">
-                  {item.retryable ? "이 섹션만 재생성" : "사용자 검토"}
+                <td className="px-4 py-3">
+                  {item.retryable ? (
+                    <button
+                      type="button"
+                      onClick={onRetry}
+                      disabled={disabled}
+                      aria-label={`${item.label}만 재생성`}
+                      className="inline-flex whitespace-nowrap rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2 disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none"
+                    >
+                      {pending ? "재생성 요청 중…" : "이 섹션만 재생성"}
+                    </button>
+                  ) : (
+                    <span className="font-black text-slate-700">사용자 검토</span>
+                  )}
                 </td>
               </tr>
             ))}
