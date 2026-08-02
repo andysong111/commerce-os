@@ -141,9 +141,14 @@ export function DetailPageAiReviewWorkspace() {
     if (!workerReady || actionJobId) return;
     const resumable = canResumeDetailPageCheckpoint(job);
     const partial = mode === "resume" && resumable;
+    const reviewAssets = detailPageReviewAssets(job);
+    const problemCount = [
+      ...reviewAssets.representatives,
+      ...reviewAssets.panels,
+    ].filter((asset) => asset.problem).length;
     const confirmed = window.confirm(
       partial
-        ? `\"${detailPageJobName(job)}\"의 정상 상세 섹션과 승인 이미지 4장은 유지하고, 검수에서 지목된 문제 자산만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
+        ? `\"${detailPageJobName(job)}\"의 정상 자산은 모두 유지하고, 검수에서 지목된 문제 이미지${problemCount ? ` ${problemCount}장` : ""}만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
         : `\"${detailPageJobName(job)}\"을 1688 수집부터 전체 다시 생성합니다.\n기존 결과는 보존되지만 AI 생성 비용과 처리시간이 다시 발생합니다. 계속할까요?`,
     );
     if (!confirmed) return;
@@ -152,7 +157,7 @@ export function DetailPageAiReviewWorkspace() {
     setActionState({
       tone: "progress",
       message: partial
-        ? "기존 체크포인트를 확인하고 문제 이미지만 재생성합니다."
+        ? `기존 체크포인트를 확인하고 문제 이미지${problemCount ? ` ${problemCount}장` : ""}만 재생성합니다.`
         : "전체 재생성 연결과 1688 수집기를 확인하고 있습니다.",
     });
     workerRef.current?.contentWindow?.postMessage(
@@ -358,7 +363,9 @@ function JobReviewDetail({
   const resumable = canResumeDetailPageCheckpoint(job);
   const active = isActiveDetailPageJob(job);
   const finalDetail = assets.detail[0];
-  const problemAssets = assets.representatives.filter((asset) => asset.problem);
+  const problemAssets = [...assets.representatives, ...assets.panels].filter(
+    (asset) => asset.problem,
+  );
 
   return (
     <div>
@@ -432,7 +439,11 @@ function JobReviewDetail({
                   disabled={!workerReady || busy}
                   className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-black text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-40"
                 >
-                  {currentBusy ? "재생성 요청 중…" : "문제 이미지만 재생성"}
+                  {currentBusy
+                    ? "재생성 요청 중…"
+                    : problemAssets.length
+                      ? `문제 이미지 ${problemAssets.length}장만 재생성`
+                      : "문제 이미지만 재생성"}
                 </button>
               ) : null}
               <button
@@ -469,7 +480,7 @@ function JobReviewDetail({
       />
       <AssetSection
         title="상세페이지 섹션 이미지"
-        description="체크포인트에 저장된 상세 섹션을 확인합니다. 문제 이미지 재생성 시 정상 섹션은 유지됩니다."
+        description="상세 섹션도 원본 상품과 대조합니다. 빨간 표시된 섹션만 재생성하고 정상 섹션은 유지합니다."
         assets={assets.panels}
         empty="아직 저장된 상세 섹션 이미지가 없습니다."
         onPreview={onPreview}

@@ -17,6 +17,10 @@ const dockSource = await readFile(
   "public/product-launch-tracker-app/detail-page-dock.js",
   "utf8",
 );
+const jobRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
+  "utf8",
+);
 
 function job(overrides = {}) {
   return {
@@ -40,7 +44,18 @@ function job(overrides = {}) {
         { roleId: "main_hero", assetUrl: "https://assets.example.com/main.jpg" },
         { roleId: "alternate_whole", assetUrl: "https://assets.example.com/wrong.jpg" },
       ],
-      setAssessment: { reason: "alternate_whole is a different electronic product" },
+      panels: [
+        { slot: 1, assetUrl: "https://assets.example.com/wrong-panel.jpg" },
+        { slot: 3, assetUrl: "https://assets.example.com/good-panel.jpg" },
+      ],
+      setAssessment: {
+        reason: "alternate_whole and panel 1 are a different electronic product",
+        mismatched_panel_slots: [1],
+        panel_identity_assessments: [
+          { panel_slot: 1, identity_match: false },
+          { panel_slot: 3, identity_match: true },
+        ],
+      },
     },
     createdAt: "2026-08-02T00:00:00.000Z",
     updatedAt: "2026-08-02T01:00:00.000Z",
@@ -65,6 +80,8 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /1688 원본 참고 이미지/);
   assert.match(workspaceSource, /원본 새 탭 열기/);
   assert.match(workspaceSource, /AI 생성 비용과 처리시간이 다시 발생/);
+  assert.match(workspaceSource, /\.\.\.assets\.representatives, \.\.\.assets\.panels/);
+  assert.match(workspaceSource, /문제 이미지 \$\{problemAssets\.length\}장만 재생성/);
 });
 
 test("failed final-set jobs identify the exact generated problem asset and preserve checkpoint eligibility", () => {
@@ -76,6 +93,11 @@ test("failed final-set jobs identify the exact generated problem asset and prese
   assert.equal(assets.representatives[0].problem, false);
   assert.equal(assets.representatives[1].roleId, "alternate_whole");
   assert.equal(assets.representatives[1].problem, true);
+  assert.equal(assets.panels.length, 2);
+  assert.equal(assets.panels[0].roleId, "panel-1");
+  assert.equal(assets.panels[0].problem, true);
+  assert.equal(assets.panels[1].roleId, "panel-3");
+  assert.equal(assets.panels[1].problem, false);
   assert.equal(assets.evidence.length, 1);
 });
 
@@ -86,4 +108,6 @@ test("review requests target an exact checkpoint or explicitly force a full rege
   assert.match(dockSource, /전체 재생성을 별도로 선택하세요/);
   assert.match(dockSource, /commerce-os-detail-page-ai-review/);
   assert.match(dockSource, /문제 자산만 이어서 생성합니다/);
+  assert.match(jobRouteSource, /panelRetrySlots: \[\]/);
+  assert.match(jobRouteSource, /panelRetryInstructions: \{\}/);
 });

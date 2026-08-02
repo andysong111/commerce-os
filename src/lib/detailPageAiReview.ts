@@ -181,9 +181,16 @@ export function detailPageReviewAssets(job: DetailPageReviewJob): {
   const panels = array(result.panels || result.detailPanels || result.detail_panels)
     .map((value, index): DetailPageReviewAsset | null => {
       const item = record(value);
-      const roleId = text(
-        item.sectionId || item.section_id || item.panelId || item.panel_id || `panel-${index + 1}`,
-      );
+      const slot = Number(item.slot ?? item.sectionSlot ?? item.section_slot);
+      const roleId = Number.isInteger(slot) && slot > 0
+        ? `panel-${slot}`
+        : text(
+            item.sectionId ||
+              item.section_id ||
+              item.panelId ||
+              item.panel_id ||
+              `panel-${index + 1}`,
+          );
       const url = firstUrl(
         item.assetUrl,
         item.asset_url,
@@ -197,7 +204,9 @@ export function detailPageReviewAssets(job: DetailPageReviewJob): {
       return {
         id: `panel:${roleId}:${index}`,
         url,
-        label: text(item.title || item.label) || `상세 섹션 ${index + 1}`,
+        label:
+          text(item.title || item.label) ||
+          `상세 섹션 ${Number.isInteger(slot) && slot > 0 ? slot : index + 1}`,
         roleId,
         kind: "panel" as const,
         problem: problemRoleIds.has(roleId.toLowerCase()),
@@ -265,6 +274,12 @@ function findProblemRoleIds(job: DetailPageReviewJob) {
   }
   const explicit = text(result.representativeRetryRole).toLowerCase();
   if (explicit) found.add(explicit);
+  for (const slot of array(assessment.mismatched_panel_slots)) {
+    const normalized = Number(slot);
+    if (Number.isInteger(normalized) && normalized > 0) {
+      found.add(`panel-${normalized}`);
+    }
+  }
   collectStructuredProblemRoles(assessment, found, 0);
   return found;
 }
@@ -290,11 +305,14 @@ function collectStructuredProblemRoles(
     "selected_role",
     "mismatchRole",
     "mismatch_role",
+    "recommendedRetryRoleId",
+    "recommended_retry_role_id",
   ]) {
     const explicit = text(item[key]).toLowerCase();
     if (explicit) found.add(explicit);
   }
   const role = text(item.roleId || item.role_id || item.role).toLowerCase();
+  const panelSlot = Number(item.panelSlot ?? item.panel_slot);
   const status = text(item.status || item.verdict || item.result).toLowerCase();
   const failed =
     item.identityMatch === false ||
@@ -306,6 +324,9 @@ function collectStructuredProblemRoles(
     item.is_problem === true ||
     ["fail", "failed", "mismatch", "different_product", "reject", "rejected"].includes(status);
   if (role && failed) found.add(role);
+  if (Number.isInteger(panelSlot) && panelSlot > 0 && failed) {
+    found.add(`panel-${panelSlot}`);
+  }
   for (const nested of Object.values(item)) {
     if (nested && typeof nested === "object") {
       collectStructuredProblemRoles(nested, found, depth + 1);

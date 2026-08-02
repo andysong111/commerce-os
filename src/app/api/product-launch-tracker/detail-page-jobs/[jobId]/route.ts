@@ -160,6 +160,8 @@ export async function POST(
           setAssessment: null,
           representativeRetryRole: "",
           representativeRetryInstruction: "",
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
           setRetryUsed: false,
         },
         lease_owner: "",
