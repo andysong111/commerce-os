@@ -10,6 +10,7 @@ import {
   detailPageReviewBucket,
   detailPageRoleLabel,
   detailPageStageLabel,
+  findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   type DetailPageReviewAsset,
@@ -137,9 +138,12 @@ export function DetailPageAiReviewWorkspace() {
     });
   }, [filter, jobs, query]);
   const selected = visibleJobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
+  const resumeTarget = selected
+    ? findDetailPageResumeCandidate(jobs, selected)
+    : null;
 
-  function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
-    if (!workerReady || actionJobId) return;
+  async function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
+    if (actionJobId || (mode === "full" && !workerReady)) return;
     const resumable = canResumeDetailPageCheckpoint(job);
     const partial = mode === "resume" && resumable;
     const reviewAssets = detailPageReviewAssets(job);
@@ -166,6 +170,82 @@ export function DetailPageAiReviewWorkspace() {
           : "기존 결과 전체를 원본과 재검수한 뒤 지목된 문제 이미지만 재생성합니다."
         : "전체 재생성 연결과 1688 수집기를 확인하고 있습니다.",
     });
+    if (partial) {
+      try {
+        const resumeResponse = await fetch(
+          `${JOBS_API}/${encodeURIComponent(job.jobId)}`,
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "resume_checkpointed_generation" }),
+          },
+        );
+        const resumeBody = (await resumeResponse.json().catch(() => ({}))) as {
+          ok?: boolean;
+          job?: DetailPageReviewJob;
+          message?: string;
+        };
+        if (!resumeResponse.ok || resumeBody.ok !== true || !isReviewJob(resumeBody.job)) {
+          throw new Error(
+            resumeBody.message ||
+              "기존 상세페이지 체크포인트를 재개하지 못했습니다.",
+          );
+        }
+
+        setJobs((current) => [
+          resumeBody.job!,
+          ...current.filter((candidate) => candidate.jobId !== resumeBody.job!.jobId),
+        ]);
+        setFilter("active");
+        setSelectedJobId(resumeBody.job.jobId);
+
+        const startResponse = await fetch(
+          `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+          },
+        );
+        const startBody = (await startResponse.json().catch(() => ({}))) as {
+          ok?: boolean;
+          accepted?: boolean;
+          message?: string;
+        };
+        if (!startResponse.ok || startBody.ok !== true) {
+          throw new Error(
+            startBody.message ||
+              "체크포인트는 복구됐지만 Studio 서버 작업을 시작하지 못했습니다.",
+          );
+        }
+
+        setActionState({
+          tone: "success",
+          message:
+            "1688 재수집 없이 기존 체크포인트에서 전체 재검수와 문제 이미지 복구를 시작했습니다.",
+        });
+        await refresh(true);
+      } catch (error) {
+        setActionState({
+          tone: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "체크포인트 부분 복구를 시작하지 못했습니다.",
+        });
+        await refresh(true);
+      } finally {
+        setActionJobId("");
+      }
+      return;
+    }
+
     workerRef.current?.contentWindow?.postMessage(
       {
         source: WORK_ASSISTANT_SOURCE,
@@ -285,12 +365,18 @@ export function DetailPageAiReviewWorkspace() {
             {selected ? (
               <JobReviewDetail
                 job={selected}
+                resumeTarget={resumeTarget}
                 workerReady={workerReady}
                 busy={Boolean(actionJobId)}
-                currentBusy={actionJobId === selected.jobId}
+                currentBusy={
+                  actionJobId === selected.jobId ||
+                  actionJobId === resumeTarget?.jobId
+                }
                 onPreview={setPreview}
-                onResume={() => requestRegeneration(selected, "resume")}
-                onFullRetry={() => requestRegeneration(selected, "full")}
+                onResume={() => {
+                  if (resumeTarget) void requestRegeneration(resumeTarget, "resume");
+                }}
+                onFullRetry={() => void requestRegeneration(selected, "full")}
               />
             ) : (
               <div className="grid min-h-[420px] place-items-center text-center">
@@ -348,6 +434,7 @@ function JobListButton({
 
 function JobReviewDetail({
   job,
+  resumeTarget,
   workerReady,
   busy,
   currentBusy,
@@ -356,6 +443,7 @@ function JobReviewDetail({
   onFullRetry,
 }: {
   job: DetailPageReviewJob;
+  resumeTarget: DetailPageReviewJob | null;
   workerReady: boolean;
   busy: boolean;
   currentBusy: boolean;
@@ -365,14 +453,18 @@ function JobReviewDetail({
 }) {
   const bucket = detailPageReviewBucket(job);
   const presentation = bucketPresentation(bucket);
-  const assets = detailPageReviewAssets(job);
-  const resumable = canResumeDetailPageCheckpoint(job);
+  const recoveryJob = resumeTarget ?? job;
+  const assets = detailPageReviewAssets(recoveryJob);
+  const resumable = Boolean(resumeTarget);
+  const recoveringPriorCheckpoint =
+    Boolean(resumeTarget) && resumeTarget?.jobId !== job.jobId;
   const active = isActiveDetailPageJob(job);
   const finalDetail = assets.detail[0];
   const problemAssets = [...assets.representatives, ...assets.panels].filter(
     (asset) => asset.problem,
   );
-  const problemCountConfirmed = hasFullAssetDetailPageAssessment(job);
+  const problemCountConfirmed =
+    hasFullAssetDetailPageAssessment(recoveryJob);
 
   return (
     <div>
@@ -432,11 +524,17 @@ function JobReviewDetail({
                   : "생성 결과 확인 필요"}
               </h3>
               <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-rose-800">
-                {detailPageProblemReason(job)}
+                {detailPageProblemReason(recoveryJob)}
               </p>
               <p className="mt-2 text-xs font-bold text-rose-600">
                 정상 자산은 삭제하지 않으며, 부분 재생성은 저장된 체크포인트를 사용합니다.
               </p>
+              {recoveringPriorCheckpoint ? (
+                <p className="mt-2 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-black leading-5 text-rose-700">
+                  방금 생긴 5% 수집 실패 기록은 재사용하지 않습니다. 같은 상품의 직전 검수 체크포인트
+                  (시도 {resumeTarget?.attempt || 1}회)를 복구하며 1688 재수집은 실행하지 않습니다.
+                </p>
+              ) : null}
               {!problemCountConfirmed ? (
                 <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 text-xs font-black leading-5 text-rose-700">
                   이 과거 판정은 상세 섹션 전체 검수 이전 기록입니다. 부분 재생성 시 전체 결과를 원본과 먼저 재검수합니다.
@@ -448,7 +546,7 @@ function JobReviewDetail({
                 <button
                   type="button"
                   onClick={onResume}
-                  disabled={!workerReady || busy}
+                  disabled={busy}
                   className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-black text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-40"
                 >
                   {currentBusy
