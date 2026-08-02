@@ -142,43 +142,42 @@ export function inferShoplingCoreProductTerms(
   input: Pick<ProductCategoryInput, "productName" | "optionLabels">,
   categories: ShoplingCategoryEntryLike[],
 ): string[] {
-  const sourceTokens = [
-    ...tokens(input.productName),
-    ...input.optionLabels.flatMap((value) => tokens(value)),
-  ].filter((value) => isMeaningfulProductToken(value));
-  if (!sourceTokens.length) return [];
-
+  const modelTokens = tokens(input.productName).filter(isMeaningfulProductToken);
+  const optionTokens = input.optionLabels
+    .flatMap((value) => tokens(value))
+    .filter(isMeaningfulProductToken);
+  const tokenGroups = [modelTokens, optionTokens];
   const pathCompacts = categories.map((entry) => ({
     path: compact(entry.path),
     leaf: compact(entry.path.split(">").at(-1)),
   }));
 
-  // The last meaningful noun in a Korean product model name usually identifies the
-  // physical item. Search it first, then walk backwards only if the catalog has no match.
-  for (let tokenIndex = sourceTokens.length - 1; tokenIndex >= 0; tokenIndex -= 1) {
-    const token = compact(sourceTokens[tokenIndex]);
-    const supported = suffixTerms(token)
-      .map((term) => {
-        let pathCount = 0;
-        let leafCount = 0;
-        for (const category of pathCompacts) {
-          if (!category.path.includes(term)) continue;
-          pathCount += 1;
-          if (category.leaf.includes(term)) leafCount += 1;
-        }
-        return { term, pathCount, leafCount };
-      })
-      .filter((candidate) => candidate.pathCount > 0)
-      .sort(
-        (left, right) =>
-          right.term.length - left.term.length ||
-          right.leafCount - left.leafCount ||
-          left.pathCount - right.pathCount ||
-          left.term.localeCompare(right.term, "ko-KR"),
-      );
+  // The model name is the authoritative product identity. Options are consulted
+  // only when the model name has no catalog-supported product noun.
+  for (const sourceTokens of tokenGroups) {
+    for (let tokenIndex = sourceTokens.length - 1; tokenIndex >= 0; tokenIndex -= 1) {
+      const token = compact(sourceTokens[tokenIndex]);
+      const supported = suffixTerms(token)
+        .map((term) => {
+          let pathCount = 0;
+          let leafCount = 0;
+          for (const category of pathCompacts) {
+            if (!category.path.includes(term)) continue;
+            pathCount += 1;
+            if (category.leaf.includes(term)) leafCount += 1;
+          }
+          return { term, pathCount, leafCount };
+        })
+        .filter((candidate) => candidate.pathCount > 0)
+        .sort(
+          (left, right) =>
+            right.term.length - left.term.length ||
+            right.leafCount - left.leafCount ||
+            left.pathCount - right.pathCount ||
+            left.term.localeCompare(right.term, "ko-KR"),
+        );
 
-    if (supported.length) {
-      return [supported[0].term];
+      if (supported.length) return [supported[0].term];
     }
   }
 
@@ -189,6 +188,8 @@ function isMeaningfulProductToken(value: string) {
   const normalized = compact(value);
   if (normalized.length < 2) return false;
   if (PRODUCT_TOKEN_STOPWORDS.has(normalized)) return false;
+  if (normalized.endsWith("사이즈")) return false;
+  if (/^[smlx]{1,4}$/.test(normalized)) return false;
   if (/^\d+(?:g|kg|ml|l|cm|mm|m|개|p|pcs?)?$/.test(normalized)) return false;
   if (/^[a-z]{0,3}\d+[a-z0-9-]*$/.test(normalized)) return false;
   return true;
@@ -201,6 +202,7 @@ function suffixTerms(value: string) {
   for (let length = maximum; length >= 2; length -= 1) {
     const candidate = normalized.slice(-length);
     if (!candidate || PRODUCT_TOKEN_STOPWORDS.has(candidate)) continue;
+    if (candidate.endsWith("사이즈")) continue;
     if (/^\d+$/.test(candidate)) continue;
     result.push(candidate);
   }
