@@ -64,11 +64,11 @@ function stateFixture() {
 test("검토 대기열은 상품별 추천·상태·회차를 한 행으로 정규화한다", () => {
   const rows = buildShoplingCategoryReviewRows(stateFixture());
   assert.equal(rows.length, 4);
-  assert.equal(rows[0].itemId, "item-2");
-  assert.equal(rows[1].itemId, "item-1");
-  assert.equal(rows[1].suggestion, "스포츠/레저>헬스기구>스트레칭용품>짐볼");
-  assert.equal(rows[1].batchId, "2026-08-02T01:00:00.000Z");
-  assert.equal(isShoplingCategoryReviewStale(rows[1], "new-hash"), true);
+  assert.equal(rows[0].itemId, "item-1");
+  assert.equal(rows[1].itemId, "item-2");
+  assert.equal(rows[0].suggestion, "스포츠/레저>헬스기구>스트레칭용품>짐볼");
+  assert.equal(rows[0].batchId, "2026-08-02T01:00:00.000Z");
+  assert.equal(isShoplingCategoryReviewStale(rows[0], "new-hash"), true);
 });
 
 test("검토 상태 집계는 검토 필요·보류·승인·제외를 분리한다", () => {
@@ -130,6 +130,10 @@ test("검토함 화면은 다건 승인·수정·보류·제외와 진행관리 
     ),
     "utf8",
   );
+  const domain = await readFile(
+    new URL("../src/lib/shoplingCategoryReview.ts", import.meta.url),
+    "utf8",
+  );
   const modules = await readFile(
     new URL("../src/lib/extendedModuleRegistry.ts", import.meta.url),
     "utf8",
@@ -157,8 +161,9 @@ test("검토함 화면은 다건 승인·수정·보류·제외와 진행관리 
   assert.match(workspace, /재검토로 복원/);
   assert.match(workspace, /AI 작업 회차/);
   assert.match(workspace, /신뢰도 낮은 순/);
-  assert.match(workspace, /categoryAiSuggestion/);
   assert.match(workspace, /STATE_ENDPOINT/);
+  assert.match(domain, /categoryAiSuggestion/);
+  assert.match(domain, /review_approved/);
   assert.match(modules, /shopling-category-review-queue/);
   assert.match(groups, /shopling-category-review-queue/);
   assert.match(trackerApp, /category-review-queue-link\.js/);
