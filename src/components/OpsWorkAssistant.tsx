@@ -25,6 +25,7 @@ type DetailJob = {
   sourceRunId?: string;
   error: string;
   payload?: Record<string, unknown>;
+  result?: Record<string, unknown>;
   updatedAt: string;
   completedAt: string | null;
 };
@@ -93,6 +94,21 @@ function safeProgress(value: number) {
 function detailName(job: DetailJob) {
   const payload = job.payload ?? {};
   return txt(payload.product_name || payload.product_name_hint || job.itemId || "상품");
+}
+
+function canResumeCheckpoint(job: DetailJob) {
+  const evidence = job.payload?.evidence_urls;
+  const analysis = job.result?.analysis;
+  return Boolean(
+    job.status === "failed" &&
+      job.stage === "server_generation" &&
+      Array.isArray(evidence) &&
+      evidence.length > 0 &&
+      analysis &&
+      typeof analysis === "object" &&
+      !Array.isArray(analysis) &&
+      (analysis as Record<string, unknown>).product,
+  );
 }
 
 function isDetailJob(value: unknown): value is DetailJob {
@@ -712,6 +728,7 @@ function DetailCard({
   const status = detailPresentation(job);
   const classes = toneClasses(status.tone);
   const active = ACTIVE_DETAIL.has(job.status);
+  const resumable = canResumeCheckpoint(job);
   const progress = safeProgress(job.progress);
   return (
     <article
@@ -765,7 +782,7 @@ function DetailCard({
                 disabled={!workerReady}
                 className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-40"
               >
-                다시 생성
+                {resumable ? "이어서 생성" : "다시 생성"}
               </button>
               {job.status === "failed" ? (
                 <button

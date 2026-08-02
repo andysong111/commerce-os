@@ -815,13 +815,54 @@ async function retryItem(itemId) {
   if (retryingItems.has(normalizedItemId)) return;
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === normalizedItemId);
-  const sourceUrl = readPrimaryChinaLink(item);
-  if (!item || !sourceUrl) {
-    showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
+  if (!item) {
+    showMessage("상품 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.");
     return;
   }
   if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) return;
   retryingItems.add(normalizedItemId);
+  const checkpointed = [...jobsById.values()]
+    .filter((candidate) => isCheckpointedGenerationFailure(candidate, normalizedItemId))
+    .sort((left, right) => Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""))[0];
+  if (checkpointed) {
+    try {
+      const resumed = await updateServerJob(checkpointed.jobId, {
+        action: "resume_checkpointed_generation",
+      });
+      if (!resumed) throw new Error("이어 실행할 상세페이지 작업을 찾지 못했습니다.");
+      patchItem(normalizedItemId, {
+        detailPageAutomation: {
+          ...item.detailPageAutomation,
+          jobId: resumed.jobId,
+          status: "queued",
+          stage: "checkpoint_resume",
+          message: "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 중",
+          progress: Number(resumed.progress || checkpointed.progress || 10),
+          qaStatus: "pending",
+          attempt: Number(resumed.attempt || checkpointed.attempt || 1),
+          completedAt: null,
+          error: "",
+          executionMode: "server-v1",
+        },
+      });
+      announceServerJob(resumed);
+      renderMonitor();
+      await startWorker(resumed.jobId);
+      showMessage("기존 상세 섹션과 승인 이미지를 유지하고 실패 지점부터 이어서 생성합니다.", 10_000);
+      return;
+    } catch (error) {
+      showMessage(error instanceof Error ? error.message : "체크포인트 이어 생성을 시작하지 못했습니다.");
+      return;
+    } finally {
+      retryingItems.delete(normalizedItemId);
+    }
+  }
+  const sourceUrl = readPrimaryChinaLink(item);
+  if (!sourceUrl) {
+    retryingItems.delete(normalizedItemId);
+    showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
+    return;
+  }
   const job = {
     itemId: normalizedItemId,
     jobId: crypto.randomUUID(),
@@ -863,6 +904,18 @@ async function retryItem(itemId) {
   } finally {
     retryingItems.delete(normalizedItemId);
   }
+}
+
+function isCheckpointedGenerationFailure(job, itemId) {
+  return Boolean(
+    job &&
+      job.status === "failed" &&
+      job.stage === "server_generation" &&
+      String(job.itemId) === String(itemId) &&
+      Array.isArray(job.payload?.evidence_urls) &&
+      job.payload.evidence_urls.length > 0 &&
+      job.result?.analysis?.product,
+  );
 }
 
 async function restoreMonitor() {

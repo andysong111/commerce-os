@@ -251,6 +251,25 @@ test("failed detail-page jobs can be removed from the shared assistant without d
   assert.match(jobRoute, /본인의 실패 작업만 삭제/);
 });
 
+test("checkpointed server-generation failures resume without recollecting or discarding approved assets", () => {
+  assert.match(dockSource, /isCheckpointedGenerationFailure/);
+  assert.match(dockSource, /action: "resume_checkpointed_generation"/);
+  assert.match(dockSource, /기존 승인 자산 유지/);
+  assert.match(dockSource, /await startWorker\(resumed\.jobId\)/);
+  assert.ok(
+    dockSource.indexOf("if (checkpointed)") <
+      dockSource.indexOf("const sourceUrl = readPrimaryChinaLink(item);", dockSource.indexOf("async function retryItem")),
+  );
+  assert.match(workAssistant, /canResumeCheckpoint/);
+  assert.match(workAssistant, /"이어서 생성"/);
+  assert.match(jobRoute, /action === "resume_checkpointed_generation"/);
+  assert.match(jobRoute, /job\.stage !== "server_generation"/);
+  assert.match(jobRoute, /setAssessment: null/);
+  assert.match(jobRoute, /setRetryUsed: false/);
+  assert.match(jobRoute, /completed_at: null/);
+  assert.match(jobServer, /completedAtProvided/);
+});
+
 test("durable jobs reuse the deployed job ledger and require a signed per-job worker token", () => {
   assert.match(jobServer, /product_launch_upload_jobs/);
   assert.match(jobServer, /payload\.kind/);

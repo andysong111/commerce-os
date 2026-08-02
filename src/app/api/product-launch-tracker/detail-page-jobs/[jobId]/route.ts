@@ -125,6 +125,51 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
+    if (action === "resume_checkpointed_generation") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 실패한 서버 생성을 이어서 실행할 수 있습니다.");
+      }
+      const evidenceUrls = stringList(job.payload.evidence_urls, 60);
+      const hasAnalysis = Boolean(asRecord(job.result.analysis).product);
+      if (
+        job.status !== "failed" ||
+        job.stage !== "server_generation" ||
+        !evidenceUrls.length ||
+        !hasAnalysis
+      ) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_CHECKPOINT_NOT_RESUMABLE",
+            message: "재사용할 수 있는 상세페이지 생성 체크포인트가 없습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "queued",
+        stage: "checkpoint_resume",
+        message: "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 대기 중",
+        progress: clamp(job.progress, 10, 92),
+        qa_status: "pending",
+        payload: {
+          attempt: job.attempt + 1,
+          assistant_hidden_at: "",
+        },
+        result: {
+          setAssessment: null,
+          representativeRetryRole: "",
+          representativeRetryInstruction: "",
+          setRetryUsed: false,
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
     if (action === "evidence_ready") {
       if (!ownerAuthorized) return forbidden("OPS 화면만 수집 근거를 등록할 수 있습니다.");
       const evidenceUrls = stringList(body.evidenceUrls, 60);
