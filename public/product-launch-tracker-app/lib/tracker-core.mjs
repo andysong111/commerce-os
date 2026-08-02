@@ -39,9 +39,9 @@ export const DEFAULT_SHIPPING_NOTICE_HTML =
 export const DEFAULT_POLICY = Object.freeze({
   version: 1,
   channelMultipliers: {
-    wholesale1: 1.1,
+    wholesale1: 1,
     wholesale2: 1.15,
-    wholesale3: 1,
+    wholesale3: 1.1,
     wholesale4: 1.3,
     retail1: 1.3,
     retail2: 1.4,
