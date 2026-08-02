@@ -1,9 +1,9 @@
 name: Apply product group price policy
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/product-group-price-policy-20260803
+      - main
 
 permissions:
   contents: write
@@ -94,10 +94,7 @@ jobs:
           test_path = Path('tests/productGroupPricePolicy.test.mjs')
           test_path.write_text('''import assert from "node:assert/strict";\nimport test from "node:test";\nimport { readFile } from "node:fs/promises";\n\ntest("상품그룹 기본 가격정책은 도매1 1.00, 도매3 1.10을 사용한다", async () => {\n  const core = await readFile("public/product-launch-tracker-app/lib/tracker-core.mjs", "utf8");\n  const builder = await readFile("src/lib/productLaunchTrackerShopling.ts", "utf8");\n  for (const source of [core, builder]) {\n    assert.match(source, /wholesale1:\\s*1,/);\n    assert.match(source, /wholesale2:\\s*1\\.15,/);\n    assert.match(source, /wholesale3:\\s*1\\.1,/);\n    assert.match(source, /wholesale4:\\s*1\\.3,/);\n    assert.match(source, /retail1:\\s*1\\.3,/);\n    assert.match(source, /retail2:\\s*1\\.4,/);\n    assert.doesNotMatch(source, /wholesale1:\\s*1\\.1,/);\n  }\n  assert.match(core, /version:\\s*2,/);\n  assert.match(core, /candidateVersion < DEFAULT_POLICY\\.version/);\n  assert.match(builder, /policyVersion < PRODUCT_GROUP_PRICE_POLICY_VERSION/);\n});\n''', encoding='utf-8')
 
-          tracked_text = []
-          for path in [core_path, builder_path, test_path]:
-              tracked_text.append(path.read_text(encoding='utf-8'))
-          combined = '\n'.join(tracked_text)
+          combined = '\n'.join(path.read_text(encoding='utf-8') for path in [core_path, builder_path, test_path])
           if 'wholesale1: 1.1,' in combined or 'wholesale3: 1,\n' in combined:
               raise SystemExit('legacy product-group multiplier remains in changed policy files')
           PY
