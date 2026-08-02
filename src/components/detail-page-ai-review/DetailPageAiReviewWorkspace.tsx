@@ -475,7 +475,10 @@ function JobReviewDetail({
   );
   const problemCountConfirmed =
     hasFullAssetDetailPageAssessment(recoveryJob);
-  const standardDiagnostics = detailPageStandardDiagnostics(recoveryJob);
+  const standardDiagnostics =
+    bucket === "needs_review"
+      ? detailPageStandardDiagnostics(recoveryJob)
+      : [];
   const exactProblemCountConfirmed =
     problemCountConfirmed || standardDiagnostics.length > 0;
 
