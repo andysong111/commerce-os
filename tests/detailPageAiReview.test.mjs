@@ -27,6 +27,9 @@ const jobRouteSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
   "utf8",
 );
+const openFinalizerStart = dockSource.indexOf("async function openFinalizer(job)");
+const openFinalizerEnd = dockSource.indexOf("\nfunction mountFrame", openFinalizerStart);
+const openFinalizerSource = dockSource.slice(openFinalizerStart, openFinalizerEnd);
 
 function job(overrides = {}) {
   return {
@@ -106,6 +109,17 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
     workspaceSource,
     /\{item\.retryable \? "이 섹션만 재생성" : "사용자 검토"\}/,
   );
+  assert.match(
+    workspaceSource,
+    /bucket === "needs_review"\s*\?\s*detailPageStandardDiagnostics\(recoveryJob\)/,
+  );
+  assert.match(
+    jobRouteSource,
+    /action === "render_pending"[\s\S]*standardFailure: null/,
+  );
+  assert.doesNotMatch(openFinalizerSource, /if \(!item\) return;/);
+  assert.match(openFinalizerSource, /payload\.product_name/);
+  assert.match(openFinalizerSource, /payload\.sales_options/);
 });
 
 test("Standard-v2 failure keeps exact section scores, defects, screenshot diagnostics, and retry scope", () => {
