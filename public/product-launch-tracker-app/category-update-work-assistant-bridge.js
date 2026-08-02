@@ -50,6 +50,8 @@ function handleCaptureClick(event) {
   const backdrop = document.querySelector("#category-update-progress-backdrop");
   const card = document.querySelector("#category-update-progress-card");
   const session = readJson(CATEGORY_UPDATE_SESSION_KEY) ?? {};
+  const existing = readJson(CATEGORY_WORK_TASK_KEY) ?? {};
+  if (isLocalCategoryState(session, existing)) return;
   writeGlobalTask({
     ...taskFromPage(session, card),
     active: session.active !== false,
@@ -79,6 +81,9 @@ function handleParentMessage(event) {
 }
 
 function observeProgressUi() {
+  const session = readJson(CATEGORY_UPDATE_SESSION_KEY);
+  const existing = readJson(CATEGORY_WORK_TASK_KEY);
+  if (isLocalCategoryState(session, existing)) return;
   const card = document.querySelector("#category-update-progress-card");
   if (!(card instanceof HTMLElement)) return;
   ensureCancelButton(card);
@@ -122,6 +127,7 @@ async function cancelCategoryUpdate(button) {
   }
   const session = readJson(CATEGORY_UPDATE_SESSION_KEY) ?? {};
   const task = readJson(CATEGORY_WORK_TASK_KEY) ?? {};
+  if (isLocalCategoryState(session, task)) return;
   cancelBusy = true;
   const previousText = button.textContent;
   button.disabled = true;
@@ -164,6 +170,7 @@ function finalizeLocalCancellation(message, actionsUrl) {
   const now = new Date().toISOString();
   const session = readJson(CATEGORY_UPDATE_SESSION_KEY) ?? {};
   const existing = readJson(CATEGORY_WORK_TASK_KEY) ?? {};
+  if (isLocalCategoryState(session, existing)) return;
   try {
     localStorage.removeItem(CATEGORY_UPDATE_SESSION_KEY);
   } catch {
@@ -197,6 +204,7 @@ function syncGlobalTaskFromPage(options = {}) {
   const session = readJson(CATEGORY_UPDATE_SESSION_KEY);
   const card = document.querySelector("#category-update-progress-card");
   const existing = readJson(CATEGORY_WORK_TASK_KEY);
+  if (isLocalCategoryState(session, existing)) return;
   if (!session && !existing && !options.forceActive) return;
 
   const next = taskFromPage(session ?? {}, card, existing ?? {});
@@ -207,6 +215,10 @@ function syncGlobalTaskFromPage(options = {}) {
     next.finishedAt = next.updatedAt;
   }
   writeGlobalTask(next);
+}
+
+function isLocalCategoryState(session, task) {
+  return session?.mode === "local" || task?.mode === "local";
 }
 
 function taskFromPage(session, card, existing = {}) {

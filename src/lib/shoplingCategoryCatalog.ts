@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { dispatchGitHubActionsWorkflow } from "./githubActionsDispatch";
+import { readShoplingCategoryCatalogFromSupabase } from "./shoplingCategorySupabaseStore";
 import {
   parseProductCategoryInputs,
   shortlistShoplingCategories,
@@ -79,7 +80,7 @@ function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-function getConfig() {
+function getRepoConfig() {
   const repo = text(
     process.env.SHOPLING_CATEGORY_REPO ||
       process.env.SHOPLING_UPLOAD_REPO ||
@@ -91,19 +92,24 @@ function getConfig() {
   const ref = text(
     process.env.SHOPLING_CATEGORY_REF || process.env.SHOPLING_UPLOAD_REF || "main",
   );
-  const token = text(
-    process.env.GITHUB_ACTIONS_TOKEN || process.env.GITHUB_ENGINE_DISPATCH_TOKEN,
-  );
   if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) {
     throw new Error("SHOPLING_CATEGORY_REPO는 owner/repo 형식이어야 합니다.");
   }
+  const [owner, repoName] = repo.split("/");
+  return { repo, owner, repoName, workflow, ref };
+}
+
+function getDispatchConfig() {
+  const config = getRepoConfig();
+  const token = text(
+    process.env.GITHUB_ACTIONS_TOKEN || process.env.GITHUB_ENGINE_DISPATCH_TOKEN,
+  );
   if (!token) {
     throw new Error(
       "GITHUB_ACTIONS_TOKEN 또는 GITHUB_ENGINE_DISPATCH_TOKEN이 필요합니다.",
     );
   }
-  const [owner, repoName] = repo.split("/");
-  return { repo, owner, repoName, workflow, ref, token };
+  return { ...config, token };
 }
 
 function githubHeaders(token: string) {
@@ -115,11 +121,15 @@ function githubHeaders(token: string) {
 }
 
 async function readGithubContent(path: string, optional = false) {
-  const config = getConfig();
+  const config = getRepoConfig();
+  const token = text(
+    process.env.GITHUB_ACTIONS_TOKEN || process.env.GITHUB_ENGINE_DISPATCH_TOKEN,
+  );
+  if (!token) return optional ? null : Promise.reject(new Error("GitHub 읽기 토큰이 없습니다."));
   const url = `https://api.github.com/repos/${config.owner}/${config.repoName}/contents/${path}?ref=${encodeURIComponent(config.ref)}`;
   const response = await fetch(url, {
     headers: {
-      ...githubHeaders(config.token),
+      ...githubHeaders(token),
       Accept: "application/vnd.github.raw+json",
     },
     cache: "no-store",
@@ -144,10 +154,7 @@ async function readGithubContent(path: string, optional = false) {
   }
 }
 
-export async function fetchShoplingCategorySnapshot() {
-  const payload = (await readGithubContent(SNAPSHOT_PATH, true)) as
-    | ShoplingCategorySnapshot
-    | null;
+function normalizeSnapshot(payload: ShoplingCategorySnapshot | null) {
   if (!payload) return null;
   if (
     payload.status !== "success" ||
@@ -169,26 +176,75 @@ export async function fetchShoplingCategorySnapshot() {
   };
 }
 
-export async function fetchShoplingCategoryRefreshStatus() {
-  const status = (await readGithubContent(STATUS_PATH, true)) as
-    | ShoplingCategoryRefreshStatus
+export async function fetchShoplingCategorySnapshot() {
+  const supabaseCatalog = await readShoplingCategoryCatalogFromSupabase().catch(
+    () => null,
+  );
+  if (supabaseCatalog?.snapshot) {
+    return normalizeSnapshot(supabaseCatalog.snapshot);
+  }
+
+  const fallback = (await readGithubContent(SNAPSHOT_PATH, true).catch(() => null)) as
+    | ShoplingCategorySnapshot
     | null;
-  const snapshot = await fetchShoplingCategorySnapshot().catch(() => null);
-  const config = getConfig();
+  return normalizeSnapshot(fallback);
+}
+
+export async function fetchShoplingCategoryRefreshStatus() {
+  const config = getRepoConfig();
+  const supabaseCatalog = await readShoplingCategoryCatalogFromSupabase().catch(
+    () => null,
+  );
+  if (supabaseCatalog?.status || supabaseCatalog?.snapshot) {
+    const snapshot = normalizeSnapshot(supabaseCatalog.snapshot);
+    return {
+      status: supabaseCatalog.status ?? {
+        status: snapshot ? "success" : "not_initialized",
+        message: snapshot
+          ? "샵플링 카테고리 업데이트가 완료됐습니다."
+          : "샵플링 카테고리 최초 수집 전입니다.",
+        categoryCount: snapshot?.categoryCount ?? 0,
+      },
+      snapshot: snapshot
+        ? {
+            collectedAt: snapshot.collectedAt,
+            categoryCount: snapshot.categoryCount,
+            hash: snapshot.hash,
+          }
+        : null,
+      actionsUrl: `https://github.com/${config.repo}/actions/workflows/${config.workflow}`,
+      storage: "supabase" as const,
+    };
+  }
+
+  const fallbackStatus = (await readGithubContent(STATUS_PATH, true).catch(
+    () => null,
+  )) as ShoplingCategoryRefreshStatus | null;
+  const fallbackSnapshot = await (async () => {
+    try {
+      const payload = (await readGithubContent(SNAPSHOT_PATH, true)) as
+        | ShoplingCategorySnapshot
+        | null;
+      return normalizeSnapshot(payload);
+    } catch {
+      return null;
+    }
+  })();
   return {
-    status: status ?? {
+    status: fallbackStatus ?? {
       status: "not_initialized",
       message: "샵플링 카테고리 최초 수집 전입니다.",
       categoryCount: 0,
     },
-    snapshot: snapshot
+    snapshot: fallbackSnapshot
       ? {
-          collectedAt: snapshot.collectedAt,
-          categoryCount: snapshot.categoryCount,
-          hash: snapshot.hash,
+          collectedAt: fallbackSnapshot.collectedAt,
+          categoryCount: fallbackSnapshot.categoryCount,
+          hash: fallbackSnapshot.hash,
         }
       : null,
     actionsUrl: `https://github.com/${config.repo}/actions/workflows/${config.workflow}`,
+    storage: fallbackSnapshot || fallbackStatus ? ("github_fallback" as const) : ("none" as const),
   };
 }
 
@@ -201,7 +257,7 @@ export function generateShoplingCategoryRequestId(now = new Date()) {
 }
 
 export async function dispatchShoplingCategoryRefresh(requestId: string) {
-  const config = getConfig();
+  const config = getDispatchConfig();
   const categoryPageUrl = text(process.env.SHOPLING_CATEGORY_PAGE_URL);
   return dispatchGitHubActionsWorkflow({
     owner: config.owner,
@@ -274,7 +330,7 @@ export async function generateShoplingCategoryRecommendations(
   const snapshot = await fetchShoplingCategorySnapshot();
   if (!snapshot) {
     throw new Error(
-      "샵플링 카테고리 스냅샷이 없습니다. 먼저 카테고리 최신화를 실행하세요.",
+      "샵플링 카테고리 스냅샷이 없습니다. 먼저 카테고리 업데이트를 실행하세요.",
     );
   }
   const candidatesByItem = new Map(

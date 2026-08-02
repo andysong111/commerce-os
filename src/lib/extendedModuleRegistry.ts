@@ -1,5 +1,24 @@
 import { moduleRegistry, type CommerceModule } from "@/lib/moduleRegistry";
 
+export const commerceOperationsModule: CommerceModule = {
+  id: "commerce-operations-safety",
+  title: "운영 안전센터",
+  navigationLabel: "운영 안전센터",
+  description:
+    "입고확정 이후 자동화, 데이터 최신도, 최종 승인 대기, 실패·반영 불확실 작업을 한곳에서 확인합니다.",
+  status: "available",
+  route: "/operations",
+  category: "시스템 관리",
+  inputType: "Commerce OS 실행원장, 데이터 최신도, 가격 Bulk 작업 상태",
+  outputType: "실행 중·승인 대기·실패·오래된 데이터 통합 현황",
+  historySupport: true,
+  externalProject: false,
+  note: "민감한 입력값은 표시하지 않고 상태·연관번호·실패 원인만 보여줍니다.",
+  helperNote: "실행·데이터 상태 통합",
+  actionLabel: "운영 안전상태 보기",
+  safetyBadge: "실패·승인 대기 추적",
+};
+
 export const shoplingPriceAdjustmentModule: CommerceModule = {
   id: "shopling-price-adjustment-runner",
   title: "샵플링 판매가 인상·인하 실행기",
@@ -58,6 +77,25 @@ export const productDecisionAgentModule: CommerceModule = {
   safetyBadge: "재고 차감 전",
 };
 
+export const shoplingCategoryReviewQueueModule: CommerceModule = {
+  id: "shopling-category-review-queue",
+  title: "AI 카테고리 검토함",
+  navigationLabel: "AI 카테고리 검토함",
+  description:
+    "신규 상품 출시 진행관리에서 AI가 추천한 샵플링 표준카테고리 중 검토 필요 상품을 한곳에서 승인·수정·보류·제외합니다.",
+  status: "available",
+  route: "/shopling-category-review-queue",
+  category: "상품 출시 관리",
+  inputType: "AI 추천 카테고리, 신뢰도, 추천 이유, 대안 카테고리",
+  outputType: "승인된 샵플링 표준카테고리와 검토 이력",
+  historySupport: true,
+  externalProject: false,
+  note: "같은 상품의 미검토 추천은 새 AI 실행 결과로 갱신되고, 승인된 진행관리 카테고리는 AI가 자동으로 덮어쓰지 않습니다.",
+  helperNote: "다건 검토·일괄 승인",
+  actionLabel: "검토함 열기",
+  safetyBadge: "승인 후 진행관리 반영",
+};
+
 const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) =>
   module.id === "shopling-price-modify-runner"
     ? {
@@ -72,7 +110,9 @@ const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((mod
 );
 
 export const extendedModuleRegistry: readonly CommerceModule[] = [
+  commerceOperationsModule,
   ...renamedModuleRegistry,
+  shoplingCategoryReviewQueueModule,
   productDecisionAgentModule,
   priceAdjustmentEngineModule,
   shoplingPriceAdjustmentModule,

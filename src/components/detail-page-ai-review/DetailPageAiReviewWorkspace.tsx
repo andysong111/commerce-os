@@ -135,7 +135,7 @@ export function DetailPageAiReviewWorkspace() {
       return haystack.includes(normalized);
     });
   }, [filter, jobs, query]);
-  const selected = jobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
+  const selected = visibleJobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
 
   function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
     if (!workerReady || actionJobId) return;

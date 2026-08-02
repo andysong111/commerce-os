@@ -1,0 +1,53 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+test("AI 카테고리 실행은 기존 화면 핸들러보다 먼저 가로채고 검토함 저장까지 완료한다", async () => {
+  const app = await readFile(
+    new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
+    "utf8",
+  );
+  const runner = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-ai-reliable.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.ok(
+    app.indexOf("category-ai.js") < app.indexOf("category-ai-reliable.js"),
+  );
+  assert.ok(
+    app.indexOf("category-ai-reliable.js") <
+      app.indexOf("category-review-queue-link.js"),
+  );
+  assert.match(
+    runner,
+    /document\.addEventListener\("click", interceptAiClick, true\)/,
+  );
+  assert.match(runner, /stopImmediatePropagation/);
+  assert.match(runner, /readServerState/);
+  assert.match(runner, /saveServerState\(nextState\)/);
+  assert.match(runner, /categoryAiStatus: result\.autoApply/);
+  assert.match(runner, /"review_required"/);
+  assert.match(runner, /updateReviewLinkCount\(nextState\)/);
+  assert.match(runner, /AI_TIMEOUT_MS = 55_000/);
+  assert.match(runner, /STATE_TIMEOUT_MS = 20_000/);
+  assert.match(runner, /guardReviewNavigation/);
+  assert.doesNotMatch(runner, /고신뢰도 빈 카테고리는 자동입력하고, 나머지는 추천 이력으로 저장할까요/);
+});
+
+test("AI 카테고리 API는 서버 실행시간과 OpenAI 제한시간을 명시한다", async () => {
+  const route = await readFile(
+    new URL(
+      "../src/app/api/product-launch-tracker/ai-category/route.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(route, /export const maxDuration = 60/);
+  assert.match(route, /timeoutMs: 45_000/);
+  assert.match(route, /AI 카테고리 분석 시간이 45초를 초과/);
+  assert.match(route, /status, headers: \{ "Cache-Control": "no-store" \}/);
+});

@@ -6,11 +6,17 @@ on:
       - 'public/product-launch-tracker-app/**'
       - 'src/app/api/product-launch-tracker/**'
       - 'src/app/api/shopling-categories/**'
+      - 'src/app/shopling-category-review-queue/**'
       - 'src/components/AppShell.tsx'
       - 'src/components/OpsCategoryUpdateCancelControl.tsx'
+      - 'src/components/OpsLocalCategoryStatusBridge.tsx'
       - 'src/components/OpsWorkAssistant.tsx'
+      - 'src/components/shopling-category-review/**'
+      - 'src/lib/extendedModuleRegistry.ts'
+      - 'src/lib/opsWorkspace.ts'
       - 'src/lib/productLaunchTracker*.ts'
       - 'src/lib/shoplingCategory*.ts'
+      - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/20260731000*_product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -34,4 +40,12 @@ jobs:
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
+          tests/shoplingCategoryCatalog.test.mjs
           tests/shoplingCategoryRunStatus.test.mjs
+          tests/shoplingCategoryLocalUpdate.test.mjs
+          tests/shoplingCategorySupabaseStore.test.mjs
+          tests/shoplingCategoryReviewQueue.test.mjs
+          tests/shoplingCategoryAiDelivery.test.mjs
+          tests/shoplingCategoryCandidateChoices.test.mjs
+          tests/shoplingCategoryCoreNounReview.test.mjs
+          tests/shoplingCategoryJsonRecovery.test.mjs

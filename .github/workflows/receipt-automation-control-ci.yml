@@ -1,0 +1,32 @@
+name: Receipt Automation Control CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/api/integrations/receipt-automation/**'
+      - 'src/app/operations/**'
+      - 'src/lib/receiptAutomationControl.ts'
+      - 'src/lib/commerceOperationsDashboard.ts'
+      - 'src/lib/commerceDataSourceHealth.ts'
+      - 'src/lib/priceAdjustmentSalesCache.ts'
+      - 'src/lib/extendedModuleRegistry.ts'
+      - 'supabase/migrations/20260802000*_receipt_automation*.sql'
+      - 'tests/receiptAutomationControl.test.mjs'
+      - 'tests/operationsDashboard.test.mjs'
+      - '.github/workflows/receipt-automation-control-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run operations safety contract tests
+        run: node --experimental-strip-types --test tests/receiptAutomationControl.test.mjs tests/operationsDashboard.test.mjs
+      - name: Build Ops Center
+        run: npm run build
