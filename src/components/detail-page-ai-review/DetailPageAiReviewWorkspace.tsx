@@ -1,0 +1,668 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  canResumeDetailPageCheckpoint,
+  detailPageJobName,
+  detailPageProblemReason,
+  detailPageReviewAssets,
+  detailPageReviewBucket,
+  detailPageRoleLabel,
+  detailPageStageLabel,
+  isActiveDetailPageJob,
+  type DetailPageReviewAsset,
+  type DetailPageReviewBucket,
+  type DetailPageReviewJob,
+} from "@/lib/detailPageAiReview";
+
+const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
+const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
+const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
+const REVIEW_EVENT_SOURCE = "commerce-os-detail-page-ai-review";
+const POLL_MS = 2_500;
+
+type Filter = "needs_review" | "active" | "passed" | "all";
+type ActionState = { tone: "progress" | "success" | "error"; message: string } | null;
+
+const FILTERS: Array<{ id: Filter; label: string }> = [
+  { id: "needs_review", label: "검수 필요" },
+  { id: "active", label: "진행 중" },
+  { id: "passed", label: "완료" },
+  { id: "all", label: "전체" },
+];
+
+export function DetailPageAiReviewWorkspace() {
+  const workerRef = useRef<HTMLIFrameElement>(null);
+  const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [filter, setFilter] = useState<Filter>("needs_review");
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [workerReady, setWorkerReady] = useState(false);
+  const [actionJobId, setActionJobId] = useState("");
+  const [actionState, setActionState] = useState<ActionState>(null);
+  const [preview, setPreview] = useState<DetailPageReviewAsset | null>(null);
+
+  const refresh = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    try {
+      const response = await fetch(JOBS_API, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        jobs?: DetailPageReviewJob[];
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true || !Array.isArray(body.jobs)) {
+        throw new Error(body.message || "상세페이지 작업을 불러오지 못했습니다.");
+      }
+      setJobs(body.jobs);
+      setLoadError("");
+      setSelectedJobId((current) => {
+        if (current && body.jobs?.some((job) => job.jobId === current)) return current;
+        return (
+          body.jobs?.find((job) => detailPageReviewBucket(job) === "needs_review")?.jobId ||
+          body.jobs?.[0]?.jobId ||
+          ""
+        );
+      });
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "상세페이지 작업을 불러오지 못했습니다.");
+    } finally {
+      if (!quiet) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void refresh(), 0);
+    const interval = window.setInterval(() => void refresh(true), POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh(true);
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== workerRef.current?.contentWindow) return;
+      const payload = event.data;
+      if (payload?.source === DOCK_EVENT_SOURCE && payload?.type === "detail-page-job-created") {
+        if (isReviewJob(payload.job)) {
+          setJobs((current) => [
+            payload.job,
+            ...current.filter((job) => job.jobId !== payload.job.jobId),
+          ]);
+          setSelectedJobId(payload.job.jobId);
+        }
+        void refresh(true);
+      }
+      if (payload?.source === REVIEW_EVENT_SOURCE && payload?.type === "regeneration-status") {
+        setActionState({
+          tone: payload.tone === "error" ? "error" : payload.tone === "success" ? "success" : "progress",
+          message: String(payload.message || "재생성 요청을 처리하고 있습니다."),
+        });
+        if (payload.tone !== "progress") setActionJobId("");
+        if (isReviewJob(payload.job)) setSelectedJobId(payload.job.jobId);
+        void refresh(true);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [refresh]);
+
+  const counts = useMemo(() => countJobs(jobs), [jobs]);
+  const visibleJobs = useMemo(() => {
+    const normalized = query.replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
+    return jobs.filter((job) => {
+      const bucket = detailPageReviewBucket(job);
+      if (filter !== "all" && bucket !== filter) return false;
+      if (!normalized) return true;
+      const haystack = `${detailPageJobName(job)} ${job.itemId} ${job.message} ${job.error}`
+        .replace(/\s+/g, "")
+        .toLocaleLowerCase("ko-KR");
+      return haystack.includes(normalized);
+    });
+  }, [filter, jobs, query]);
+  const selected = jobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
+
+  function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
+    if (!workerReady || actionJobId) return;
+    const resumable = canResumeDetailPageCheckpoint(job);
+    const partial = mode === "resume" && resumable;
+    const confirmed = window.confirm(
+      partial
+        ? `\"${detailPageJobName(job)}\"의 정상 상세 섹션과 승인 이미지 4장은 유지하고, 검수에서 지목된 문제 자산만 다시 생성합니다.\nAI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`
+        : `\"${detailPageJobName(job)}\"을 1688 수집부터 전체 다시 생성합니다.\n기존 결과는 보존되지만 AI 생성 비용과 처리시간이 다시 발생합니다. 계속할까요?`,
+    );
+    if (!confirmed) return;
+    const requestId = crypto.randomUUID();
+    setActionJobId(job.jobId);
+    setActionState({
+      tone: "progress",
+      message: partial
+        ? "기존 체크포인트를 확인하고 문제 이미지만 재생성합니다."
+        : "전체 재생성 연결과 1688 수집기를 확인하고 있습니다.",
+    });
+    workerRef.current?.contentWindow?.postMessage(
+      {
+        source: WORK_ASSISTANT_SOURCE,
+        type: "retry-detail-page-job",
+        itemId: job.itemId,
+        jobId: job.jobId,
+        mode,
+        requestId,
+      },
+      window.location.origin,
+    );
+  }
+
+  return (
+    <>
+      <iframe
+        ref={workerRef}
+        title="상세페이지 AI 검수 재생성 실행기"
+        src="/product-launch-tracker-app/index.html?detail_page_mode=worker"
+        aria-hidden="true"
+        tabIndex={-1}
+        onLoad={() => setWorkerReady(true)}
+        className="pointer-events-none fixed -left-[2400px] top-0 z-[-1] h-[900px] w-[1280px] border-0 opacity-0"
+      />
+
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="검수 필요" value={counts.needs_review} tone="red" detail="실패·문제 이미지 확인" />
+        <SummaryCard label="진행 중" value={counts.active} tone="blue" detail="수집·생성·최종 조립" />
+        <SummaryCard label="검수 통과" value={counts.passed} tone="green" detail="상품출시진행관리 도킹 완료" />
+        <SummaryCard label="최근 작업" value={jobs.length} tone="slate" detail="최근 50개 작업 기준" />
+      </section>
+
+      {actionState ? (
+        <div
+          role="status"
+          className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
+            actionState.tone === "error"
+              ? "border-rose-200 bg-rose-50 text-rose-800"
+              : actionState.tone === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-blue-200 bg-blue-50 text-blue-800"
+          }`}
+        >
+          {actionState.message}
+        </div>
+      ) : null}
+
+      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 p-4 sm:p-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="상세페이지 작업 상태 필터">
+              {FILTERS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === item.id}
+                  onClick={() => setFilter(item.id)}
+                  className={`rounded-lg px-3.5 py-2 text-sm font-black ${
+                    filter === item.id
+                      ? "bg-slate-950 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {item.label} {filterCount(item.id, counts, jobs.length)}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="상품명·모델번호 검색"
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 xl:w-72"
+              />
+              <button
+                type="button"
+                onClick={() => void refresh()}
+                className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
+              >
+                새로고침
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {loadError ? (
+          <div className="m-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-800">
+            {loadError}
+          </div>
+        ) : null}
+
+        <div className="grid min-h-[640px] lg:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="border-b border-slate-200 bg-slate-50 lg:border-b-0 lg:border-r">
+            {loading && !jobs.length ? (
+              <p className="p-8 text-center text-sm font-bold text-slate-500">작업을 불러오는 중입니다.</p>
+            ) : visibleJobs.length ? (
+              <div className="max-h-[760px] divide-y divide-slate-200 overflow-y-auto">
+                {visibleJobs.map((job) => (
+                  <JobListButton
+                    key={job.jobId}
+                    job={job}
+                    selected={selected?.jobId === job.jobId}
+                    onClick={() => setSelectedJobId(job.jobId)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="p-10 text-center">
+                <p className="font-black text-slate-700">조건에 맞는 작업이 없습니다.</p>
+                <p className="mt-2 text-sm text-slate-500">다른 상태 필터나 검색어를 선택하세요.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="min-w-0 p-4 sm:p-6">
+            {selected ? (
+              <JobReviewDetail
+                job={selected}
+                workerReady={workerReady}
+                busy={Boolean(actionJobId)}
+                currentBusy={actionJobId === selected.jobId}
+                onPreview={setPreview}
+                onResume={() => requestRegeneration(selected, "resume")}
+                onFullRetry={() => requestRegeneration(selected, "full")}
+              />
+            ) : (
+              <div className="grid min-h-[420px] place-items-center text-center">
+                <div>
+                  <p className="font-black text-slate-700">검수할 작업을 선택하세요.</p>
+                  <p className="mt-2 text-sm text-slate-500">왼쪽 목록에서 상품을 누르면 생성 이미지와 판정 사유가 표시됩니다.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {preview ? <ImagePreview asset={preview} onClose={() => setPreview(null)} /> : null}
+    </>
+  );
+}
+
+function JobListButton({
+  job,
+  selected,
+  onClick,
+}: {
+  job: DetailPageReviewJob;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const bucket = detailPageReviewBucket(job);
+  const presentation = bucketPresentation(bucket);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full p-4 text-left transition-colors ${selected ? "bg-white shadow-[inset_4px_0_0_#2563eb]" : "hover:bg-white"}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-black text-slate-950">{detailPageJobName(job)}</p>
+          <p className="mt-1 truncate text-xs font-bold text-slate-400">{job.itemId}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${presentation.badge}`}>
+          {presentation.label}
+        </span>
+      </div>
+      <p className={`mt-3 line-clamp-2 text-xs font-bold leading-5 ${bucket === "needs_review" ? "text-rose-700" : "text-slate-600"}`}>
+        {job.error || job.message || detailPageStageLabel(job)}
+      </p>
+      <div className="mt-3 flex items-center justify-between text-[11px] font-bold text-slate-400">
+        <span>{detailPageStageLabel(job)} · {safeProgress(job.progress)}%</span>
+        <span>{formatDate(job.updatedAt)}</span>
+      </div>
+    </button>
+  );
+}
+
+function JobReviewDetail({
+  job,
+  workerReady,
+  busy,
+  currentBusy,
+  onPreview,
+  onResume,
+  onFullRetry,
+}: {
+  job: DetailPageReviewJob;
+  workerReady: boolean;
+  busy: boolean;
+  currentBusy: boolean;
+  onPreview: (asset: DetailPageReviewAsset) => void;
+  onResume: () => void;
+  onFullRetry: () => void;
+}) {
+  const bucket = detailPageReviewBucket(job);
+  const presentation = bucketPresentation(bucket);
+  const assets = detailPageReviewAssets(job);
+  const resumable = canResumeDetailPageCheckpoint(job);
+  const active = isActiveDetailPageJob(job);
+  const finalDetail = assets.detail[0];
+  const problemAssets = assets.representatives.filter((asset) => asset.problem);
+
+  return (
+    <div>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs font-black ${presentation.badge}`}>
+              {presentation.label}
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+              {detailPageStageLabel(job)}
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+              시도 {job.attempt || 1}회
+            </span>
+          </div>
+          <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-950">{detailPageJobName(job)}</h2>
+          <p className="mt-1 text-xs font-bold text-slate-400">상품 ID {job.itemId} · 최근 갱신 {formatDateTime(job.updatedAt)}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            href={`/product-launch-tracker?detailPageItem=${encodeURIComponent(job.itemId)}`}
+            className="rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50"
+          >
+            상품 상세 열기
+          </Link>
+          {finalDetail ? (
+            <button
+              type="button"
+              onClick={() => onPreview(finalDetail)}
+              className="rounded-lg bg-slate-950 px-3.5 py-2.5 text-sm font-black text-white hover:bg-slate-800"
+            >
+              최종 상세페이지 보기
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-black text-slate-800">{job.message || presentation.detail}</p>
+          <span className="shrink-0 text-sm font-black text-slate-500">{safeProgress(job.progress)}%</span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+          <div className={`h-full rounded-full ${presentation.bar}`} style={{ width: `${safeProgress(job.progress)}%` }} />
+        </div>
+      </div>
+
+      {bucket === "needs_review" ? (
+        <section className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-black tracking-[0.12em] text-rose-500">AI 검수 판정</p>
+              <h3 className="mt-1 text-lg font-black text-rose-950">
+                {problemAssets.length
+                  ? `${problemAssets.map((asset) => detailPageRoleLabel(asset.roleId)).join(", ")} 확인 필요`
+                  : "생성 결과 확인 필요"}
+              </h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-6 text-rose-800">
+                {detailPageProblemReason(job)}
+              </p>
+              <p className="mt-2 text-xs font-bold text-rose-600">
+                정상 자산은 삭제하지 않으며, 부분 재생성은 저장된 체크포인트를 사용합니다.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {resumable ? (
+                <button
+                  type="button"
+                  onClick={onResume}
+                  disabled={!workerReady || busy}
+                  className="rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-black text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-40"
+                >
+                  {currentBusy ? "재생성 요청 중…" : "문제 이미지만 재생성"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onFullRetry}
+                disabled={!workerReady || busy}
+                className="rounded-lg border border-rose-300 bg-white px-4 py-2.5 text-sm font-black text-rose-700 hover:bg-rose-100 disabled:cursor-wait disabled:opacity-40"
+              >
+                전체 다시 생성
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : !active ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
+          <p className="text-sm font-bold text-slate-600">결과를 다시 만들 필요가 있을 때만 전체 재생성을 사용하세요.</p>
+          <button
+            type="button"
+            onClick={onFullRetry}
+            disabled={!workerReady || busy}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-40"
+          >
+            {currentBusy ? "재생성 요청 중…" : "전체 다시 생성"}
+          </button>
+        </div>
+      ) : null}
+
+      <AssetSection
+        title="대표·부가 이미지"
+        description="빨간 표시는 AI 최종 검수에서 지목된 문제 이미지입니다. 이미지를 누르면 원본 크기로 확대합니다."
+        assets={assets.representatives}
+        empty="아직 생성된 대표·부가 이미지가 없습니다."
+        onPreview={onPreview}
+      />
+      <AssetSection
+        title="상세페이지 섹션 이미지"
+        description="체크포인트에 저장된 상세 섹션을 확인합니다. 문제 이미지 재생성 시 정상 섹션은 유지됩니다."
+        assets={assets.panels}
+        empty="아직 저장된 상세 섹션 이미지가 없습니다."
+        onPreview={onPreview}
+      />
+      <AssetSection
+        title="1688 원본 참고 이미지"
+        description={`수집된 원본 ${assets.evidence.length}장을 생성 결과와 비교할 수 있습니다. 광고·연관상품은 보정 재생성 입력에서 제외됩니다.`}
+        assets={assets.evidence}
+        empty="1688 원본 수집 이미지가 없습니다."
+        onPreview={onPreview}
+        collapsed={assets.evidence.length > 8}
+      />
+
+      <details className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+        <summary className="cursor-pointer text-sm font-black text-slate-800">작업 상세 정보</summary>
+        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+          <DetailCell label="작업 ID" value={job.jobId} mono />
+          <DetailCell label="현재 단계" value={detailPageStageLabel(job)} />
+          <DetailCell label="검수 상태" value={job.qaStatus === "passed" ? "통과" : job.qaStatus === "failed" ? "실패" : "진행 중"} />
+          <DetailCell label="시작" value={formatDateTime(job.startedAt || job.createdAt)} />
+          <DetailCell label="완료" value={job.completedAt ? formatDateTime(job.completedAt) : "진행 중"} />
+          <DetailCell label="1688 원본" value={`${assets.evidence.length}장`} />
+        </dl>
+        {job.sourceUrl ? (
+          <a href={job.sourceUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex text-sm font-black text-blue-700 hover:underline">
+            1688 상품 링크 열기
+          </a>
+        ) : null}
+      </details>
+    </div>
+  );
+}
+
+function AssetSection({
+  title,
+  description,
+  assets,
+  empty,
+  onPreview,
+  collapsed = false,
+}: {
+  title: string;
+  description: string;
+  assets: DetailPageReviewAsset[];
+  empty: string;
+  onPreview: (asset: DetailPageReviewAsset) => void;
+  collapsed?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(!collapsed);
+  const visible = expanded ? assets : assets.slice(0, 8);
+  return (
+    <section className="mt-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-black text-slate-950">{title}</h3>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{description}</p>
+        </div>
+        {assets.length > 8 ? (
+          <button type="button" onClick={() => setExpanded((value) => !value)} className="text-xs font-black text-blue-700 hover:underline">
+            {expanded ? "접기" : `전체 ${assets.length}장 보기`}
+          </button>
+        ) : null}
+      </div>
+      {visible.length ? (
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          {visible.map((asset) => (
+            <button
+              key={asset.id}
+              type="button"
+              onClick={() => onPreview(asset)}
+              className={`group overflow-hidden rounded-xl border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${asset.problem ? "border-2 border-rose-500 ring-4 ring-rose-100" : "border-slate-200"}`}
+            >
+              <div className="relative aspect-square overflow-hidden bg-slate-100">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={asset.url} alt={asset.label} className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]" />
+                {asset.problem ? (
+                  <span className="absolute left-2 top-2 rounded-full bg-rose-600 px-2.5 py-1 text-[10px] font-black text-white shadow">문제 이미지</span>
+                ) : null}
+                <span className="absolute bottom-2 right-2 rounded-md bg-slate-950/75 px-2 py-1 text-[10px] font-black text-white">확대</span>
+              </div>
+              <p className={`truncate px-3 py-2 text-xs font-black ${asset.problem ? "text-rose-700" : "text-slate-700"}`}>{asset.label}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+function ImagePreview({ asset, onClose }: { asset: DetailPageReviewAsset; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-slate-950/90 p-4" role="dialog" aria-modal="true" aria-label={`${asset.label} 확대보기`} onClick={onClose}>
+      <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-4 py-3">
+          <div>
+            <p className="font-black text-slate-950">{asset.label}</p>
+            <p className="mt-0.5 text-xs font-bold text-slate-400">{asset.problem ? "AI 검수 문제 이미지" : "클릭한 이미지 원본"}</p>
+          </div>
+          <button type="button" onClick={onClose} className="grid size-9 place-items-center rounded-lg bg-slate-100 text-xl font-black text-slate-700 hover:bg-slate-200" aria-label="확대보기 닫기">×</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-3 text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={asset.url} alt={asset.label} className="mx-auto max-h-[78vh] max-w-full object-contain" />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+          <p className="text-xs font-bold text-slate-500">새 탭에서 실제 저장 크기로도 확인할 수 있습니다.</p>
+          <a href={asset.url} target="_blank" rel="noreferrer" className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white hover:bg-slate-800">원본 새 탭 열기</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, tone, detail }: { label: string; value: number; tone: "red" | "blue" | "green" | "slate"; detail: string }) {
+  const tones = {
+    red: "border-rose-200 bg-rose-50 text-rose-700",
+    blue: "border-blue-200 bg-blue-50 text-blue-700",
+    green: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    slate: "border-slate-200 bg-white text-slate-700",
+  };
+  return (
+    <article className={`rounded-2xl border p-5 shadow-sm ${tones[tone]}`}>
+      <p className="text-xs font-black">{label}</p>
+      <p className="mt-2 text-3xl font-black tracking-tight">{value.toLocaleString("ko-KR")}건</p>
+      <p className="mt-2 text-xs font-bold opacity-70">{detail}</p>
+    </article>
+  );
+}
+
+function DetailCell({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <dt className="text-xs font-black text-slate-400">{label}</dt>
+      <dd className={`mt-1 break-all font-bold text-slate-800 ${mono ? "font-mono text-xs" : "text-sm"}`}>{value}</dd>
+    </div>
+  );
+}
+
+function countJobs(jobs: DetailPageReviewJob[]) {
+  return jobs.reduce(
+    (counts, job) => {
+      counts[detailPageReviewBucket(job)] += 1;
+      return counts;
+    },
+    { needs_review: 0, active: 0, passed: 0, cancelled: 0 } as Record<DetailPageReviewBucket, number>,
+  );
+}
+
+function filterCount(
+  filter: Filter,
+  counts: Record<DetailPageReviewBucket, number>,
+  total: number,
+) {
+  return filter === "all" ? total : counts[filter];
+}
+
+function bucketPresentation(bucket: DetailPageReviewBucket) {
+  const values = {
+    needs_review: { label: "검수 필요", detail: "생성 결과 확인 필요", badge: "bg-rose-100 text-rose-700", bar: "bg-rose-500" },
+    active: { label: "진행 중", detail: "서버에서 계속 처리 중", badge: "bg-blue-100 text-blue-700", bar: "bg-blue-600" },
+    passed: { label: "검수 통과", detail: "최종 도킹 완료", badge: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" },
+    cancelled: { label: "종료", detail: "취소되거나 종료된 작업", badge: "bg-slate-200 text-slate-600", bar: "bg-slate-400" },
+  };
+  return values[bucket];
+}
+
+function safeProgress(value: number) {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? Math.round(value) : 0));
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "시간 미상";
+  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "시간 미상";
+  return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+}
+
+function isReviewJob(value: unknown): value is DetailPageReviewJob {
+  if (!value || typeof value !== "object") return false;
+  const job = value as Partial<DetailPageReviewJob>;
+  return Boolean(job.jobId && job.itemId && job.status);
+}

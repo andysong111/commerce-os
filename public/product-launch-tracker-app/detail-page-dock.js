@@ -56,7 +56,11 @@ if (DETAIL_PAGE_MODE === "worker") {
     if (payload?.source !== WORK_ASSISTANT_SOURCE) return;
     if (payload.type === "retry-detail-page-job") {
       const itemId = cleanText(payload.itemId, 160);
-      if (itemId) void retryItem(itemId);
+      if (itemId) void retryItem(itemId, {
+        requestedJobId: cleanText(payload.jobId, 160),
+        mode: payload.mode === "full" ? "full" : payload.mode === "resume" ? "resume" : "auto",
+        requestId: cleanText(payload.requestId, 160),
+      });
     }
     if (payload.type === "activate-detail-page-job") {
       const job = payload.job;
@@ -810,20 +814,34 @@ function finishActive() {
   window.setTimeout(() => void processNext(), 250);
 }
 
-async function retryItem(itemId) {
+async function retryItem(itemId, options = {}) {
   const normalizedItemId = String(itemId);
   if (retryingItems.has(normalizedItemId)) return;
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === normalizedItemId);
   if (!item) {
-    showMessage("상품 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.");
+    const message = "상품 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
     return;
   }
-  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) return;
+  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) {
+    announceReviewRegeneration(options, "error", "같은 상품의 상세페이지 작업이 이미 진행 중입니다.");
+    return;
+  }
   retryingItems.add(normalizedItemId);
-  const checkpointed = [...jobsById.values()]
+  announceReviewRegeneration(options, "progress", "재생성할 작업과 저장된 체크포인트를 확인하고 있습니다.");
+  const checkpointed = options.mode === "full" ? null : [...jobsById.values()]
     .filter((candidate) => isCheckpointedGenerationFailure(candidate, normalizedItemId))
+    .filter((candidate) => !options.requestedJobId || candidate.jobId === options.requestedJobId)
     .sort((left, right) => Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""))[0];
+  if (options.mode === "resume" && !checkpointed) {
+    const message = "선택한 작업에서 안전하게 재사용할 체크포인트를 찾지 못했습니다. 전체 재생성을 별도로 선택하세요.";
+    retryingItems.delete(normalizedItemId);
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
+    return;
+  }
   if (checkpointed) {
     try {
       const resumed = await updateServerJob(checkpointed.jobId, {
@@ -848,10 +866,14 @@ async function retryItem(itemId) {
       announceServerJob(resumed);
       renderMonitor();
       await startWorker(resumed.jobId);
-      showMessage("기존 상세 섹션과 승인 이미지를 유지하고 실패 지점부터 이어서 생성합니다.", 10_000);
+      const message = "기존 상세 섹션과 승인 이미지를 유지하고 문제 자산만 이어서 생성합니다.";
+      showMessage(message, 10_000);
+      announceReviewRegeneration(options, "success", message, resumed);
       return;
     } catch (error) {
-      showMessage(error instanceof Error ? error.message : "체크포인트 이어 생성을 시작하지 못했습니다.");
+      const message = error instanceof Error ? error.message : "체크포인트 이어 생성을 시작하지 못했습니다.";
+      showMessage(message);
+      announceReviewRegeneration(options, "error", message);
       return;
     } finally {
       retryingItems.delete(normalizedItemId);
@@ -860,7 +882,9 @@ async function retryItem(itemId) {
   const sourceUrl = readPrimaryChinaLink(item);
   if (!sourceUrl) {
     retryingItems.delete(normalizedItemId);
-    showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
+    const message = "중국링크 고정1번을 확인한 뒤 다시 생성하세요.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
     return;
   }
   const job = {
@@ -899,11 +923,26 @@ async function retryItem(itemId) {
     if (SHOW_LOCAL_MONITOR) ensureMonitor();
     renderMonitor();
     if (CAN_EXECUTE_JOBS) void processNext();
+    announceReviewRegeneration(options, "success", "전체 재생성 작업을 등록했습니다. 1688 원본 수집부터 다시 진행합니다.", created);
   } catch (error) {
-    showMessage(error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.");
+    const message = error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
   } finally {
     retryingItems.delete(normalizedItemId);
   }
+}
+
+function announceReviewRegeneration(options, tone, message, job = null) {
+  if (!options?.requestId || DETAIL_PAGE_MODE !== "worker") return;
+  window.parent?.postMessage({
+    source: "commerce-os-detail-page-ai-review",
+    type: "regeneration-status",
+    requestId: options.requestId,
+    tone,
+    message,
+    job,
+  }, window.location.origin);
 }
 
 function isCheckpointedGenerationFailure(job, itemId) {

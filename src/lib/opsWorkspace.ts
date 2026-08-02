@@ -52,6 +52,7 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
       "product-master",
       "product-launch-tracker",
       "detail-page-studio-launch-connector",
+      "detail-page-ai-review",
       "product-launch-flow",
       "shopling-product-upload-runner",
     ],
@@ -149,13 +150,13 @@ const COMMAND_INTENTS: readonly (OpsCommandIntent & { patterns: readonly RegExp[
   {
     label: "상세페이지",
     reason: "상세페이지·상품 이미지 제작 관련 표현을 인식했습니다.",
-    moduleIds: ["detail-page-studio", "detail-page-studio-launch-connector"],
+    moduleIds: ["detail-page-studio", "detail-page-studio-launch-connector", "detail-page-ai-review"],
     patterns: [/상세페이지/, /상세.*이미지/, /이미지.*제작/],
   },
   {
     label: "오류·실패 점검",
     reason: "오류·실패·이력 확인 관련 표현을 인식했습니다.",
-    moduleIds: ["engine-runner-history", "engine-env-setup"],
+    moduleIds: ["detail-page-ai-review", "engine-runner-history", "engine-env-setup"],
     patterns: [/오류/, /실패/, /에러/, /이력/, /환경변수/, /연결.*확인/],
   },
 ] as const;
