@@ -64,33 +64,10 @@ function buildCandidateChoices(
   alternatives: string[],
   candidatePaths: string[],
 ) {
-  const unique = [selectedPath, ...alternatives, ...candidatePaths]
+  return [selectedPath, ...alternatives, ...candidatePaths]
     .map((value) => String(value ?? "").trim())
-    .filter((value, index, array) => value && array.indexOf(value) === index);
-  if (!unique.length) return [];
-
-  const choices = [unique[0]];
-  const remaining = unique.slice(1);
-  const usedBranches = new Set([branchKey(unique[0])]);
-  while (choices.length < 3 && remaining.length) {
-    const diverseIndex = remaining.findIndex(
-      (candidate) => !usedBranches.has(branchKey(candidate)),
-    );
-    const index = diverseIndex >= 0 ? diverseIndex : 0;
-    const [picked] = remaining.splice(index, 1);
-    choices.push(picked);
-    usedBranches.add(branchKey(picked));
-  }
-  return choices;
-}
-
-function branchKey(path: string) {
-  return path
-    .split(">")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 2)
-    .join(">");
+    .filter((value, index, array) => value && array.indexOf(value) === index)
+    .slice(0, 3);
 }
 
 function normalizeModelNameTerminology(value: string) {
