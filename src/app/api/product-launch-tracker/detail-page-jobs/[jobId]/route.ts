@@ -208,7 +208,17 @@ export async function POST(
 
     if (["progress", "checkpoint", "render_pending", "failed"].includes(action)) {
       if (!workerAuthorized) return forbidden("Studio 서버 작업자만 생성 상태를 기록할 수 있습니다.");
-      const result = asRecord(body.result);
+      const callbackResult = asRecord(body.result);
+      const result =
+        action === "render_pending"
+          ? {
+              ...callbackResult,
+              standardFailure: null,
+              standard_failure: null,
+              panelRetrySlots: [],
+              panelRetryInstructions: {},
+            }
+          : callbackResult;
       const nextStatus =
         action === "render_pending" ? "render_pending" : action === "failed" ? "failed" : "running";
       const releasesLease = action !== "progress";
