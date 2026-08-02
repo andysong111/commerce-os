@@ -5,6 +5,7 @@ import {
   canResumeDetailPageCheckpoint,
   detailPageReviewAssets,
   detailPageReviewBucket,
+  findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
 } from "../src/lib/detailPageAiReview.ts";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
@@ -85,6 +86,11 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /문제 이미지 \$\{problemAssets\.length\}장만 재생성/);
   assert.match(workspaceSource, /상세 섹션 전체 검수 이전 기록/);
   assert.match(workspaceSource, /전체 재검수 후 문제 이미지만 재생성/);
+  assert.match(workspaceSource, /resume_checkpointed_generation/);
+  assert.match(workspaceSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
+  assert.match(workspaceSource, /mode === "full" && !workerReady/);
+  assert.match(workspaceSource, /1688 재수집 없이 기존 체크포인트/);
+  assert.match(workspaceSource, /직전 검수 체크포인트/);
 });
 
 test("failed final-set jobs identify the exact generated problem asset and preserve checkpoint eligibility", () => {
@@ -118,6 +124,48 @@ test("failed final-set jobs identify the exact generated problem asset and prese
   );
 });
 
+test("a new source-upload failure falls back to the latest resumable checkpoint for the same product", () => {
+  const checkpoint = job({
+    jobId: "11112233-4455-4677-8899-aabbccddeeff",
+    attempt: 6,
+    updatedAt: "2026-08-02T06:25:00.000Z",
+  });
+  const olderCheckpoint = job({
+    jobId: "22222233-4455-4677-8899-aabbccddeeff",
+    attempt: 5,
+    updatedAt: "2026-08-02T06:24:00.000Z",
+  });
+  const sourceFailure = job({
+    jobId: "33332233-4455-4677-8899-aabbccddeeff",
+    stage: "source_collection",
+    progress: 5,
+    attempt: 7,
+    error: "The resource already exists",
+    payload: { product_name: "미니짐볼 300g 색상랜덤" },
+    result: {},
+    updatedAt: "2026-08-02T06:47:00.000Z",
+  });
+  const otherProduct = job({
+    jobId: "44442233-4455-4677-8899-aabbccddeeff",
+    itemId: "launch-other",
+    attempt: 10,
+    updatedAt: "2026-08-02T06:46:00.000Z",
+  });
+
+  assert.equal(canResumeDetailPageCheckpoint(sourceFailure), false);
+  assert.equal(
+    findDetailPageResumeCandidate(
+      [sourceFailure, olderCheckpoint, otherProduct, checkpoint],
+      sourceFailure,
+    )?.jobId,
+    checkpoint.jobId,
+  );
+  assert.equal(
+    findDetailPageResumeCandidate([sourceFailure, otherProduct], sourceFailure),
+    null,
+  );
+});
+
 test("review requests target an exact checkpoint or explicitly force a full regeneration", () => {
   assert.match(dockSource, /requestedJobId/);
   assert.match(dockSource, /options\.mode === "full" \? null/);
@@ -125,6 +173,9 @@ test("review requests target an exact checkpoint or explicitly force a full rege
   assert.match(dockSource, /전체 재생성을 별도로 선택하세요/);
   assert.match(dockSource, /commerce-os-detail-page-ai-review/);
   assert.match(dockSource, /문제 자산만 이어서 생성합니다/);
+  assert.match(workspaceSource, /if \(partial\) \{/);
+  assert.match(workspaceSource, /method: "POST"/);
+  assert.match(workspaceSource, /credentials: "same-origin"/);
   assert.match(jobRouteSource, /panelRetrySlots: \[\]/);
   assert.match(jobRouteSource, /panelRetryInstructions: \{\}/);
 });
