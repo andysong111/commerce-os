@@ -44,3 +44,4 @@ jobs:
           tests/shoplingCategorySupabaseStore.test.mjs
           tests/shoplingCategoryReviewQueue.test.mjs
           tests/shoplingCategoryAiDelivery.test.mjs
+          tests/shoplingCategoryCandidateChoices.test.mjs
