@@ -2,41 +2,45 @@ name: CI
 
 on:
   pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  quality:
+    name: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
           node-version: 22.13.0
           cache: npm
-      - run: npm ci
-      - name: Lint changed integration files
-        run: >-
-          npx eslint
-          src/lib/priceAdjustmentIntegrationAuth.ts
-          src/app/api/integrations/price-adjustment/jobs/route.ts
-          'src/app/api/integrations/price-adjustment/jobs/[jobId]/route.ts'
-          src/lib/extendedModuleRegistry.ts
-      - name: Test existing bulk safety and new engine integration
-        run: >-
-          node --experimental-strip-types --test
-          tests/opsLoginBypass.test.mjs
-          tests/shoplingPriceAdjustmentAuth.test.mjs
-          tests/shoplingPriceAdjustmentBatchCanary.test.mjs
-          tests/shoplingPriceAdjustmentIdentity.test.mjs
-          tests/shoplingPriceAdjustmentInputModes.test.mjs
-          tests/shoplingPriceAdjustmentPartialPlan.test.mjs
-          tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
-          tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
-          tests/priceAdjustmentEngineIntegration.test.mjs
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint changed source files
+        run: bash scripts/lint-changed.sh
+
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
         env:
@@ -44,3 +48,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+
+      - name: Full lint debt audit
+        if: always()
+        continue-on-error: true
+        run: npm run lint
