@@ -46,8 +46,10 @@ test("서비스 인증은 별도 Bearer secret과 timing-safe 비교를 사용�
   assert.match(authSource, /PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID/);
 });
 
-test("Ops Center에는 인하 수동 선택 기능카드가 노출된다", () => {
-  assert.match(moduleRegistry, /입고원가·판매추이 가격조정/);
-  assert.match(moduleRegistry, /인하는 수동 선택/);
+test("Ops Center에는 상품등급·가격조정 그림자 운영 카드가 노출된다", () => {
+  assert.match(moduleRegistry, /title: "상품등급·가격조정"/);
+  assert.match(moduleRegistry, /\+6~-4 상품등급/);
+  assert.match(moduleRegistry, /숨은 시즌을 자동 구분/);
+  assert.match(moduleRegistry, /그림자 운영 · 실제 미반영/);
   assert.match(moduleRegistry, /priceAdjustmentEngineModule/);
 });
