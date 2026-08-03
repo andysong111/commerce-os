@@ -28,7 +28,8 @@ test("detail-page review shows a live job progress monitor", () => {
 });
 
 test("a stalled final assembly can reconnect without regenerating assets", () => {
-  assert.match(workspaceSource, /job\.status === "render_pending" && heartbeatAge >= 30_000/);
+  assert.match(workspaceSource, /job\.status === "render_pending"/);
+  assert.match(workspaceSource, /finalizerPhase === "failed" \|\| heartbeatAge >= 30_000/);
   assert.match(workspaceSource, /type: "activate-detail-page-job"/);
   assert.match(workspaceSource, /requestId,/);
   assert.match(workspaceSource, /최종 조립 다시 연결/);
@@ -64,9 +65,19 @@ test("final-assembly reconnect is acknowledged by the real worker and persisted"
     /if \(active\?\.jobId === job\.jobId\) finishActive\(\)/,
   );
   assert.match(dockSource, /type: "detail-page-finalizer-status"/);
-  assert.match(dockSource, /action: "finalizer_heartbeat"/);
-  assert.match(dockSource, /recordFinalizerHeartbeat\("engine_ready"/);
-  assert.match(jobRouteSource, /action === "finalizer_heartbeat"/);
+  assert.match(dockSource, /action: "finalizer_progress"/);
+  assert.match(dockSource, /recordFinalizerProgress\("engine_ready"/);
+  assert.match(dockSource, /type === "ops-dock-finalize-progress"/);
+  assert.doesNotMatch(dockSource, /recordFinalizerHeartbeat\("snapshot_loading"/);
+  assert.match(jobRouteSource, /"finalizer_heartbeat", "finalizer_progress"/);
   assert.match(jobRouteSource, /finalizer_heartbeat_at: heartbeatAt/);
+  assert.match(jobRouteSource, /finalizer_started_at: finalizerStartedAt/);
+  assert.match(jobRouteSource, /finalizer_attempt: finalizerAttempt/);
+  assert.match(jobRouteSource, /finalizer_completed_assets: completedAssets/);
+  assert.match(jobRouteSource, /finalizer_error_code: errorCode/);
+  assert.match(workspaceSource, /이번 조립 경과/);
+  assert.match(workspaceSource, /조립 시도 횟수/);
+  assert.match(workspaceSource, /최근 실제 진행/);
+  assert.match(workspaceSource, /finalizerPhase === "failed"/);
   assert.match(dockSource, /Number\.POSITIVE_INFINITY/);
 });
