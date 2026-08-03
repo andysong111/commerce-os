@@ -111,6 +111,7 @@ export function detailPageJobName(job: DetailPageReviewJob) {
 export function detailPageReviewBucket(
   job: DetailPageReviewJob,
 ): DetailPageReviewBucket {
+  if (isRecoverableServerFinalAssemblyJob(job)) return "active";
   if (job.status === "failed" || job.qaStatus === "failed") return "needs_review";
   if (ACTIVE.has(job.status)) return "active";
   if (job.status === "success" && job.qaStatus === "passed") return "passed";
@@ -118,7 +119,30 @@ export function detailPageReviewBucket(
 }
 
 export function isActiveDetailPageJob(job: DetailPageReviewJob) {
-  return ACTIVE.has(job.status);
+  return ACTIVE.has(job.status) || isRecoverableServerFinalAssemblyJob(job);
+}
+
+export function isRecoverableServerFinalAssemblyJob(
+  job: Pick<DetailPageReviewJob, "status" | "stage" | "result">,
+) {
+  const result = record(job.result);
+  const assessment = record(result.setAssessment);
+  const finalizerMode = text(result.finalizerMode || result.finalizer_mode);
+  const finalizerPhase = text(result.finalizerPhase || result.finalizer_phase);
+  const qualityPassed =
+    assessment.status === "passed" ||
+    (result.representativeIndividualsPassed === true &&
+      result.detailSetIdentityPassed === true);
+
+  if (job.status === "render_pending") return true;
+  if (job.stage === "server_final_assembly" && qualityPassed) return true;
+  return Boolean(
+    job.status === "failed" &&
+      finalizerMode === "server-v1" &&
+      finalizerPhase &&
+      finalizerPhase !== "complete" &&
+      qualityPassed,
+  );
 }
 
 export function canResumeDetailPageCheckpoint(
@@ -177,7 +201,7 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
 export function detailPageProblemReason(job: DetailPageReviewJob) {
   const result = record(job.result);
   const assessment = record(result.setAssessment);
-  const standardFailure = record(result.standardFailure || result.standard_failure);
+  const standardFailure = activeStandardFailure(job);
   const candidates = [
     standardFailure.summary_ko,
     standardFailure.summaryKo,
@@ -195,6 +219,12 @@ export function detailPageProblemReason(job: DetailPageReviewJob) {
 export function detailPageStandardDiagnostics(
   job: DetailPageReviewJob,
 ): DetailPageStandardPanelDiagnostic[] {
+  if (
+    job.stage !== "standard_quality_gate" ||
+    isRecoverableServerFinalAssemblyJob(job)
+  ) {
+    return [];
+  }
   return standardPanelDiagnostics(record(job.result));
 }
 
@@ -233,16 +263,28 @@ export function standardQualityRetryPlan(resultValue: unknown) {
 
 export function detailPageFailureCode(job: DetailPageReviewJob) {
   const result = record(job.result);
-  const failure = record(result.standardFailure || result.standard_failure);
-  return text(failure.code) ||
-    (job.stage === "standard_quality_gate"
-      ? "STANDARD_QUALITY_BLOCKED"
-      : "DETAIL_PAGE_GENERATION_FAILED");
+  const failure = activeStandardFailure(job);
+  if (job.stage === "standard_quality_gate") {
+    return text(failure.code) || "STANDARD_QUALITY_BLOCKED";
+  }
+  if (isRecoverableServerFinalAssemblyJob(job)) {
+    const payload = record(job.payload);
+    return (
+      text(
+        payload.finalizer_error_code ||
+          result.finalizerErrorCode ||
+          result.finalizer_error_code,
+      ) ||
+      stableErrorCode(job.error) ||
+      "SERVER_FINALIZER_FAILED"
+    );
+  }
+  return stableErrorCode(job.error) || "DETAIL_PAGE_GENERATION_FAILED";
 }
 
 export function detailPageCheckpointId(job: DetailPageReviewJob) {
   const result = record(job.result);
-  const failure = record(result.standardFailure || result.standard_failure);
+  const failure = activeStandardFailure(job);
   return text(
     failure.source_run_id ||
       failure.sourceRunId ||
@@ -250,6 +292,22 @@ export function detailPageCheckpointId(job: DetailPageReviewJob) {
       result.run_id ||
       job.sourceRunId,
   );
+}
+
+function activeStandardFailure(job: DetailPageReviewJob) {
+  if (
+    job.stage !== "standard_quality_gate" ||
+    isRecoverableServerFinalAssemblyJob(job)
+  ) {
+    return {};
+  }
+  const result = record(job.result);
+  return record(result.standardFailure || result.standard_failure);
+}
+
+function stableErrorCode(value: unknown) {
+  const match = text(value).match(/\b([A-Z][A-Z0-9_]{2,})\s*:/);
+  return match?.[1] || "";
 }
 
 export function detailPageReviewAssets(job: DetailPageReviewJob): {

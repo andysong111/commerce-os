@@ -31,13 +31,13 @@ test("detail-page review shows live server job progress", () => {
     workspaceSource,
     /window\.setInterval\(\(\) => void refresh\(true\), POLL_MS\)/,
   );
-  assert.match(workspaceSource, /job\.stage === "server_final_assembly"/);
+  assert.match(workspaceSource, /isRecoverableServerFinalAssemblyJob\(job\)/);
   assert.match(workspaceSource, /result\.finalizerCompletedAssets/);
   assert.match(workspaceSource, /서버 14,000px 렌더링/);
 });
 
-test("legacy render_pending resumes through the server start API only", () => {
-  assert.match(workspaceSource, /job\.status !== "render_pending"/);
+test("legacy render_pending and failed server finalizers resume through the server start API only", () => {
+  assert.match(workspaceSource, /!isRecoverableServerFinalAssemblyJob\(job\)/);
   assert.match(
     workspaceSource,
     /\$\{JOBS_API\}\/\$\{encodeURIComponent\(job\.jobId\)\}\/start/,
@@ -70,6 +70,19 @@ test("the same-origin worker remains only for collection and full regeneration",
 test("server finalizer progress and completion are worker-authorized", () => {
   assert.match(jobRouteSource, /server_finalizer_progress/);
   assert.match(jobRouteSource, /serverFinalizerProgress \? 99 : 95/);
+  assert.match(jobRouteSource, /const finalAssemblyFailure/);
+  assert.match(
+    jobRouteSource,
+    /finalAssemblyFailure[\s\S]*status: "render_pending"[\s\S]*qa_status: "passed"/,
+  );
+  assert.match(
+    jobRouteSource,
+    /finalAssemblyFailure[\s\S]*Math\.max\([\s\S]*job\.progress[\s\S]*reportedProgress/,
+  );
+  assert.match(
+    jobRouteSource,
+    /clearsStaleStandardFailure[\s\S]*standardFailure: null/,
+  );
   assert.match(
     jobRouteSource,
     /if \(!workerAuthorized && !ownerAuthorized\)/,

@@ -210,8 +210,63 @@ export async function POST(
       if (!workerAuthorized) return forbidden("Studio 서버 작업자만 생성 상태를 기록할 수 있습니다.");
       const callbackResult = asRecord(body.result);
       const serverFinalizerProgress = action === "server_finalizer_progress";
+      const requestedStage = safeText(body.stage, 100) || job.stage;
+      const finalAssemblyFailure =
+        action === "failed" &&
+        (requestedStage === "server_final_assembly" ||
+          job.stage === "server_final_assembly");
+      if (finalAssemblyFailure) {
+        const errorMessage =
+          safeText(body.error, 2_000) ||
+          "저장 자산을 이용한 서버 최종 조립에 실패했습니다.";
+        const errorCode = serverFinalizerErrorCode(errorMessage);
+        const reportedProgress = Number(body.progress);
+        const progress = clamp(
+          Math.max(
+            Number(job.progress) || 0,
+            Number.isFinite(reportedProgress) ? reportedProgress : 0,
+          ),
+          0,
+          99,
+        );
+        const changed = await patchDetailPageJob(config.value, job.id, {
+          status: "render_pending",
+          stage: "server_final_assembly",
+          message:
+            safeText(body.message, 500) ||
+            "서버 최종 조립 오류 · 저장된 검수 통과 자산으로 다시 시작할 수 있습니다.",
+          progress,
+          qa_status: "passed",
+          payload: {
+            finalizer_phase: "failed",
+            finalizer_heartbeat_at: new Date().toISOString(),
+            finalizer_error_code: errorCode,
+          },
+          result: {
+            ...callbackResult,
+            standardFailure: null,
+            standard_failure: null,
+            panelRetrySlots: [],
+            panelRetryInstructions: {},
+            finalizerMode: "server-v1",
+            finalizerPhase: "failed",
+            finalizerErrorCode: errorCode,
+          },
+          step_version: Math.max(
+            job.step_version,
+            Number(body.stepVersion) || job.step_version,
+          ),
+          lease_owner: "",
+          lease_until: null,
+          error_message: errorMessage,
+          completed_at: null,
+        });
+        return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+      }
+      const clearsStaleStandardFailure =
+        action === "render_pending" || serverFinalizerProgress;
       const result =
-        action === "render_pending"
+        clearsStaleStandardFailure
           ? {
               ...callbackResult,
               standardFailure: null,
@@ -225,7 +280,7 @@ export async function POST(
       const releasesLease = !["progress", "server_finalizer_progress"].includes(action);
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: nextStatus,
-        stage: safeText(body.stage, 100) || job.stage,
+        stage: requestedStage,
         message: safeText(body.message, 500) || job.message,
         progress: clamp(
           Number(body.progress ?? job.progress),
@@ -473,6 +528,13 @@ function safeText(value: unknown, max: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+function serverFinalizerErrorCode(value: unknown) {
+  return (
+    safeText(value, 2_000).match(/\b(SERVER_FINALIZER_[A-Z0-9_]+)\b/)?.[1] ||
+    "SERVER_FINALIZER_FAILED"
+  );
 }
 
 function isOwnedAssetUrl(

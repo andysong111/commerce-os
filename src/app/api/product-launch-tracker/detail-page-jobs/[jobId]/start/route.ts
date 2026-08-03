@@ -3,9 +3,11 @@ import {
   createDetailPageJobToken,
   getDetailPageJobConfig,
   isValidDetailPageJobId,
+  patchDetailPageJob,
   readDetailPageJob,
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
+import { isRecoverableServerFinalAssemblyJob } from "@/lib/detailPageAiReview";
 import {
   buildProtectedOpsCallbackUrl,
   resolveDetailPageStudioConnection,
@@ -34,12 +36,70 @@ export async function POST(
         { status: 404 },
       );
     }
-    if (["success", "failed", "cancelled"].includes(job.status)) {
+    const recoverableFinalAssembly = isRecoverableServerFinalAssemblyJob({
+      status: job.status,
+      stage: job.stage,
+      result: job.result,
+    });
+    if (
+      ["success", "failed", "cancelled"].includes(job.status) &&
+      !recoverableFinalAssembly
+    ) {
       return Response.json({ ok: true, accepted: false, terminal: true, status: job.status });
     }
+    let runnableJob = job;
+    if (job.status === "failed" && recoverableFinalAssembly) {
+      const restartedAt = new Date().toISOString();
+      const finalizerAttempt =
+        Math.max(
+          1,
+          Math.floor(Number(job.payload.finalizer_attempt) || 1),
+        ) + 1;
+      const repaired = await patchDetailPageJob(config.value, job.id, {
+        status: "render_pending",
+        stage: "server_final_assembly",
+        message:
+          "기존 검수 통과 자산을 보존하고 서버 최종 조립을 다시 시작합니다.",
+        progress: Math.min(99, Math.max(0, Number(job.progress) || 0)),
+        qa_status: "passed",
+        payload: {
+          finalizer_phase: "connecting",
+          finalizer_heartbeat_at: restartedAt,
+          finalizer_started_at: restartedAt,
+          finalizer_attempt: finalizerAttempt,
+          finalizer_error_code: "",
+        },
+        result: {
+          standardFailure: null,
+          standard_failure: null,
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
+          finalizerMode: "server-v1",
+          finalizerPhase: "connecting",
+          finalizerStartedAt: restartedAt,
+          finalizerErrorCode: "",
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      });
+      if (!repaired) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_NOT_FOUND",
+            message: "복구할 상세페이지 작업을 찾지 못했습니다.",
+          },
+          { status: 404 },
+        );
+      }
+      runnableJob = repaired;
+    }
     if (
-      job.status !== "render_pending" &&
-      (!Array.isArray(job.payload.evidence_urls) || job.payload.evidence_urls.length < 1)
+      runnableJob.status !== "render_pending" &&
+      (!Array.isArray(runnableJob.payload.evidence_urls) ||
+        runnableJob.payload.evidence_urls.length < 1)
     ) {
       return Response.json(
         { ok: false, code: "DETAIL_PAGE_EVIDENCE_NOT_READY", message: "1688 근거 이미지 저장이 완료되지 않았습니다." },
@@ -60,7 +120,11 @@ export async function POST(
       body: JSON.stringify({
         callbackUrl: callbackUrl.toString(),
         workerUrl: connection.workerUrl.toString(),
-        token: createDetailPageJobToken(config.value, job.owner_id, job.id),
+        token: createDetailPageJobToken(
+          config.value,
+          runnableJob.owner_id,
+          runnableJob.id,
+        ),
       }),
       redirect: "manual",
       cache: "no-store",
@@ -92,4 +156,3 @@ export async function POST(
     );
   }
 }
-

@@ -16,6 +16,7 @@ import {
   findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
+  isRecoverableServerFinalAssemblyJob,
   type DetailPageReviewAsset,
   type DetailPageReviewBucket,
   type DetailPageReviewJob,
@@ -293,7 +294,7 @@ export function DetailPageAiReviewWorkspace() {
   }
 
   async function reconnectFinalAssembly(job: DetailPageReviewJob) {
-    if (actionJobId || job.status !== "render_pending") return;
+    if (actionJobId || !isRecoverableServerFinalAssemblyJob(job)) return;
     setActionJobId(job.jobId);
     setActionState({
       tone: "progress",
@@ -796,16 +797,17 @@ function JobProgressMonitor({
     result.finalizerAssetLabel || payload.finalizer_asset_label || "",
   ).trim();
   const errorCode = String(payload.finalizer_error_code || "").trim();
-  const isFinalizer =
-    job.status === "render_pending" || job.stage === "server_final_assembly";
+  const isFinalizer = isRecoverableServerFinalAssemblyJob(job);
   const heartbeatAt = isFinalizer ? finalizerHeartbeatAt : job.updatedAt;
   const phaseStartedAt = isFinalizer
     ? finalizerStartedAt
     : job.startedAt || job.createdAt;
   const heartbeatAge = elapsedMilliseconds(heartbeatAt);
   const stalledFinalizer =
-    job.status === "render_pending" &&
-    (finalizerPhase === "failed" || heartbeatAge >= 30_000);
+    isFinalizer &&
+    (job.status === "failed" ||
+      finalizerPhase === "failed" ||
+      heartbeatAge >= 30_000);
 
   return (
     <section className="mt-5 rounded-2xl border border-blue-300 bg-blue-50 p-4 shadow-sm" aria-label="상세페이지 작업 현황">

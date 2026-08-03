@@ -5,11 +5,14 @@ import {
   canResumeDetailPageCheckpoint,
   detailPageCheckpointId,
   detailPageFailureCode,
+  detailPageProblemReason,
   detailPageReviewAssets,
   detailPageReviewBucket,
   detailPageStandardDiagnostics,
   findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
+  isActiveDetailPageJob,
+  isRecoverableServerFinalAssemblyJob,
   standardQualityRetryPlan,
 } from "../src/lib/detailPageAiReview.ts";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
@@ -25,6 +28,10 @@ const dockSource = await readFile(
 );
 const jobRouteSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
+  "utf8",
+);
+const startRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts",
   "utf8",
 );
 
@@ -71,10 +78,12 @@ function job(overrides = {}) {
 }
 
 test("dashboard exposes a dedicated internal detail-page AI review card", () => {
-  const module = moduleRegistry.find((item) => item.id === "detail-page-ai-review");
-  assert.equal(module?.route, "/detail-page-ai-review");
-  assert.equal(module?.historySupport, true);
-  assert.match(module?.description ?? "", /문제 이미지/);
+  const registryModule = moduleRegistry.find(
+    (item) => item.id === "detail-page-ai-review",
+  );
+  assert.equal(registryModule?.route, "/detail-page-ai-review");
+  assert.equal(registryModule?.historySupport, true);
+  assert.match(registryModule?.description ?? "", /문제 이미지/);
   assert.match(pageSource, /상세페이지 AI 작업 검수/);
 });
 
@@ -228,6 +237,55 @@ test("failed final-set jobs identify the exact generated problem asset and prese
   );
 });
 
+test("server final-assembly failures stay recoverable and ignore stale Standard diagnostics", () => {
+  const staleStandardFailure = {
+    code: "STANDARD_QUALITY_BLOCKED",
+    summary_ko: "과거 상세 섹션 1 품질실패",
+    panel_diagnostics: [
+      {
+        role_id: "panel-1",
+        slot: 1,
+        status: "review_required",
+        retryable: true,
+      },
+    ],
+  };
+  const finalizerFailure = job({
+    status: "failed",
+    stage: "server_generation",
+    progress: 98,
+    qaStatus: "failed",
+    error: 'TypeError: The "path" argument must be of type string. Received type number (27732)',
+    result: {
+      ...job().result,
+      setAssessment: {
+        ...job().result.setAssessment,
+        status: "passed",
+      },
+      standardFailure: staleStandardFailure,
+      representativeIndividualsPassed: true,
+      detailSetIdentityPassed: true,
+      finalizerMode: "server-v1",
+      finalizerPhase: "rendering",
+      finalizerStartedAt: "2026-08-03T04:40:00.000Z",
+    },
+  });
+
+  assert.equal(isRecoverableServerFinalAssemblyJob(finalizerFailure), true);
+  assert.equal(detailPageReviewBucket(finalizerFailure), "active");
+  assert.equal(isActiveDetailPageJob(finalizerFailure), true);
+  assert.deepEqual(detailPageStandardDiagnostics(finalizerFailure), []);
+  assert.equal(detailPageProblemReason(finalizerFailure), finalizerFailure.error);
+  assert.equal(detailPageFailureCode(finalizerFailure), "SERVER_FINALIZER_FAILED");
+  assert.equal(
+    detailPageFailureCode({
+      ...finalizerFailure,
+      error: "SERVER_FINALIZER_FONT_LOAD_FAILED: 서버 한글 폰트를 불러오지 못했습니다.",
+    }),
+    "SERVER_FINALIZER_FONT_LOAD_FAILED",
+  );
+});
+
 test("a new source-upload failure falls back to the latest resumable checkpoint for the same product", () => {
   const checkpoint = job({
     jobId: "11112233-4455-4677-8899-aabbccddeeff",
@@ -297,4 +355,22 @@ test("review requests target an exact checkpoint or explicitly force a full rege
   assert.match(jobRouteSource, /canResumeDetailPageCheckpoint\(job\)/);
   assert.match(jobRouteSource, /panelRetrySlots: standardGateFailure \? standardRetry\.slots : \[\]/);
   assert.match(jobRouteSource, /standardRetryUsed: standardGateFailure/);
+  assert.match(jobRouteSource, /const finalAssemblyFailure/);
+  assert.match(
+    jobRouteSource,
+    /finalAssemblyFailure[\s\S]*status: "render_pending"[\s\S]*stage: "server_final_assembly"/,
+  );
+  assert.match(
+    jobRouteSource,
+    /Math\.max\([\s\S]*Number\(job\.progress\)[\s\S]*reportedProgress/,
+  );
+  assert.match(
+    jobRouteSource,
+    /finalAssemblyFailure[\s\S]*standardFailure: null[\s\S]*completed_at: null/,
+  );
+  assert.match(startRouteSource, /isRecoverableServerFinalAssemblyJob/);
+  assert.match(
+    startRouteSource,
+    /job\.status === "failed" && recoverableFinalAssembly[\s\S]*status: "render_pending"/,
+  );
 });
