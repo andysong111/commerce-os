@@ -183,6 +183,9 @@ export function findDetailPageResumeCandidate(
 }
 
 export function detailPageStageLabel(job: DetailPageReviewJob) {
+  if (isRecoverableServerFinalAssemblyJob(job)) {
+    return "서버 최종 14,000px 조립";
+  }
   const labels: Record<string, string> = {
     source_collection: "1688 원본 수집",
     queued: "서버 생성 대기",

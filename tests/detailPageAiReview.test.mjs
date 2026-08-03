@@ -8,6 +8,7 @@ import {
   detailPageProblemReason,
   detailPageReviewAssets,
   detailPageReviewBucket,
+  detailPageStageLabel,
   detailPageStandardDiagnostics,
   findDetailPageResumeCandidate,
   hasFullAssetDetailPageAssessment,
@@ -274,6 +275,10 @@ test("server final-assembly failures stay recoverable and ignore stale Standard 
   assert.equal(isRecoverableServerFinalAssemblyJob(finalizerFailure), true);
   assert.equal(detailPageReviewBucket(finalizerFailure), "active");
   assert.equal(isActiveDetailPageJob(finalizerFailure), true);
+  assert.equal(
+    detailPageStageLabel(finalizerFailure),
+    "서버 최종 14,000px 조립",
+  );
   assert.deepEqual(detailPageStandardDiagnostics(finalizerFailure), []);
   assert.equal(detailPageProblemReason(finalizerFailure), finalizerFailure.error);
   assert.equal(detailPageFailureCode(finalizerFailure), "SERVER_FINALIZER_FAILED");
