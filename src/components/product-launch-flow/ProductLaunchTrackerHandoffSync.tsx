@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SHOPLING_CANONICAL_PRICE_POLICY_VERSION } from "@/lib/shoplingCanonicalPricePolicy";
 
 const HANDOFF_KEY = "productLaunchFlow.trackerHandoff.v1";
 const SIMPLE_SESSION_KEY = "productLaunchFlow.simpleSession.v1";
@@ -74,19 +75,19 @@ export function ProductLaunchTrackerHandoffSync() {
       const session = readJson<unknown>(SIMPLE_SESSION_KEY);
       if (directApplyFailed(session)) {
         setMessage(
-          "상품명·검색어 반영 결과를 확인하세요. 실패 상태에서는 진행관리를 완료 처리하지 않습니다.",
+          "가격정책 또는 상품명·검색어 반영 결과를 확인하세요. 실패 상태에서는 진행관리를 완료 처리하지 않습니다.",
         );
         return;
       }
       if (!directApplyCompleted(session)) return;
 
       syncing.current = true;
-      void completeTrackerStage(nextHandoff)
+      void completeTrackerStage(nextHandoff, session)
         .then((completed) => {
           if (cancelled) return;
           setHandoff(completed);
           setMessage(
-            "상품명·검색어 반영 완료 · 신규 상품 출시 진행관리에도 자동 반영했습니다.",
+            "중앙 가격정책과 상품명·검색어 반영 완료 · 신규 상품 출시 진행관리에도 자동 반영했습니다.",
           );
         })
         .catch((error) => {
@@ -121,8 +122,7 @@ export function ProductLaunchTrackerHandoffSync() {
             {handoff.modelNumber} · {handoff.productName}
           </p>
           <p className="mt-1 text-sm text-slate-600">
-            기존 가격과 옵션은 유지하고, goods_key {handoff.goodsKeys.length}개의
-            상품명·검색어만 처리합니다.
+            goods_key {handoff.goodsKeys.length}개를 중앙 가격정책 엔진으로 정규화한 뒤 상품명·검색어를 처리합니다.
           </p>
         </div>
         <span className="rounded-full border border-violet-300 bg-white px-3 py-1.5 text-xs font-black text-violet-700">
@@ -138,7 +138,7 @@ export function ProductLaunchTrackerHandoffSync() {
   );
 }
 
-async function completeTrackerStage(handoff: Handoff) {
+async function completeTrackerStage(handoff: Handoff, session: unknown) {
   const trackerState = readJson<Record<string, unknown>>(TRACKER_STORAGE_KEY);
   if (!trackerState) {
     throw new Error("신규 상품 출시 진행관리 저장본을 찾지 못했습니다.");
@@ -153,13 +153,35 @@ async function completeTrackerStage(handoff: Handoff) {
     throw new Error("완료 처리할 진행관리 상품을 찾지 못했습니다.");
   }
 
+  const sessionRoot = record(session);
+  const priceResult = record(sessionRoot.priceResult);
+  const priceSummary = record(priceResult.summary);
+  const priceRequestId = String(sessionRoot.priceRequestId ?? "").trim();
+  if (!priceRequestId || String(priceSummary.status ?? "").toLowerCase() !== "success") {
+    throw new Error("중앙 가격정책 완료 결과를 확인하지 못했습니다.");
+  }
+
   const now = new Date().toISOString();
+  item.pricePolicy = {
+    ...record(item.pricePolicy),
+    required: true,
+    status: "success",
+    requestId: priceRequestId,
+    policyVersion:
+      String(priceSummary.policy_version ?? "").trim() ||
+      SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+    goodsKeyCount: handoff.goodsKeys.length,
+    message: "중앙 가격정책 적용과 검증을 완료했습니다.",
+    completedAt: now,
+    updatedAt: now,
+  };
+
   const stages = record(item.stages);
   stages.priceKeyword = {
     ...record(stages.priceKeyword),
     status: "완료",
     completedAt: now,
-    note: "goods_key 6개의 상품명·검색어 반영을 완료했습니다. 기존 가격은 유지되었습니다.",
+    note: "중앙 가격정책과 goods_key 6개의 상품명·검색어 반영을 완료했습니다.",
   };
   item.stages = stages;
   item.updatedAt = now;
