@@ -779,10 +779,40 @@ function JobProgressMonitor({
   onReconnectFinalizer: () => void;
 }) {
   const progress = safeProgress(job.progress);
-  const startedAt = job.startedAt || job.createdAt;
-  const heartbeatAge = elapsedMilliseconds(job.updatedAt);
+  const payload =
+    job.payload && typeof job.payload === "object" && !Array.isArray(job.payload)
+      ? job.payload
+      : {};
+  const finalizerPhase = String(payload.finalizer_phase || "");
+  const finalizerHeartbeatAt = String(
+    payload.finalizer_heartbeat_at || job.updatedAt,
+  );
+  const finalizerStartedAt = String(
+    payload.finalizer_started_at || job.startedAt || job.createdAt,
+  );
+  const finalizerAttempt = Math.max(
+    1,
+    Math.floor(Number(payload.finalizer_attempt) || 1),
+  );
+  const completedAssets = Math.max(
+    0,
+    Math.floor(Number(payload.finalizer_completed_assets) || 0),
+  );
+  const totalAssets = Math.max(
+    0,
+    Math.floor(Number(payload.finalizer_total_assets) || 0),
+  );
+  const assetLabel = String(payload.finalizer_asset_label || "").trim();
+  const errorCode = String(payload.finalizer_error_code || "").trim();
+  const isFinalizer = job.status === "render_pending";
+  const heartbeatAt = isFinalizer ? finalizerHeartbeatAt : job.updatedAt;
+  const phaseStartedAt = isFinalizer
+    ? finalizerStartedAt
+    : job.startedAt || job.createdAt;
+  const heartbeatAge = elapsedMilliseconds(heartbeatAt);
   const stalledFinalizer =
-    job.status === "render_pending" && heartbeatAge >= 30_000;
+    job.status === "render_pending" &&
+    (finalizerPhase === "failed" || heartbeatAge >= 30_000);
 
   return (
     <section className="mt-5 rounded-2xl border border-blue-300 bg-blue-50 p-4 shadow-sm" aria-label="상세페이지 작업 현황">
@@ -802,11 +832,36 @@ function JobProgressMonitor({
 
       <dl className="mt-4 grid gap-x-8 gap-y-2 text-xs font-bold text-blue-900 sm:grid-cols-2 xl:grid-cols-3">
         <ProgressMetric label="진행" value={`${progress}%`} />
-        <ProgressMetric label="현재 단계" value={detailPageStageLabel(job)} />
-        <ProgressMetric label="경과" value={formatElapsed(startedAt, job.completedAt)} />
-        <ProgressMetric label="최근 heartbeat" value={formatRelativeAge(job.updatedAt)} />
-        <ProgressMetric label="시도 횟수" value={`${job.attempt || 1}회`} />
+        <ProgressMetric
+          label={isFinalizer ? "실제 조립 단계" : "현재 단계"}
+          value={
+            isFinalizer
+              ? finalizerPhaseLabel(finalizerPhase)
+              : detailPageStageLabel(job)
+          }
+        />
+        <ProgressMetric
+          label={isFinalizer ? "이번 조립 경과" : "경과"}
+          value={formatElapsed(phaseStartedAt, job.completedAt)}
+        />
+        <ProgressMetric
+          label={isFinalizer ? "최근 실제 진행" : "최근 heartbeat"}
+          value={formatRelativeAge(heartbeatAt)}
+        />
+        <ProgressMetric
+          label={isFinalizer ? "조립 시도 횟수" : "시도 횟수"}
+          value={`${isFinalizer ? finalizerAttempt : job.attempt || 1}회`}
+        />
         <ProgressMetric label="상태" value={job.status.toUpperCase()} mono />
+        {isFinalizer && totalAssets > 0 ? (
+          <ProgressMetric
+            label="저장 이미지"
+            value={`${completedAssets}/${totalAssets}장${assetLabel ? ` · ${assetLabel}` : ""}`}
+          />
+        ) : null}
+        {isFinalizer && errorCode ? (
+          <ProgressMetric label="오류 코드" value={errorCode} mono />
+        ) : null}
       </dl>
 
       <p className="mt-4 text-sm font-bold leading-6 text-blue-900">
@@ -816,7 +871,9 @@ function JobProgressMonitor({
       {stalledFinalizer ? (
         <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
           <p className="text-xs font-black text-amber-900">
-            최종 조립 heartbeat가 30초 이상 갱신되지 않았습니다. 단순 대기가 아니라 조립기 연결이 멈춘 상태일 수 있습니다.
+            {finalizerPhase === "failed"
+              ? `최종 조립 오류가 확인됐습니다.${job.error ? ` ${job.error}` : ""}`
+              : "최종 조립의 실제 진행이 30초 이상 갱신되지 않았습니다. 단순 대기가 아니라 현재 단계가 멈춘 상태일 수 있습니다."}
           </p>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] font-bold leading-5 text-amber-800">
@@ -846,6 +903,22 @@ function ProgressMetric({ label, value, mono = false }: { label: string; value: 
       <dd className={`min-w-0 break-words text-blue-950 ${mono ? "font-mono" : ""}`}>{value}</dd>
     </div>
   );
+}
+
+function finalizerPhaseLabel(phase: string) {
+  const labels: Record<string, string> = {
+    connecting: "조립기 연결",
+    engine_ready: "저장 결과 전달",
+    snapshot_received: "저장 결과 확인",
+    asset_loading: "저장 이미지 다운로드",
+    asset_loaded: "저장 이미지 다운로드",
+    document_loading: "조립 문서 이미지 배치",
+    rendering: "14,000px 렌더링",
+    render_waiting: "렌더러 응답 대기",
+    encoding: "JPEG 변환",
+    failed: "복구 가능한 조립 실패",
+  };
+  return labels[phase] || "조립 연결 대기";
 }
 
 function FailureDiagnosticSnapshot({
