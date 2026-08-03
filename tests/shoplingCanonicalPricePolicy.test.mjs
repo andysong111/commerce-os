@@ -5,6 +5,7 @@ import {
   extractCanonicalPriceTargetsFromTrackerItem,
   extractCanonicalPriceTargetsFromUploadResult,
   isCanonicalPricePolicyResultSuccess,
+  isCanonicalPricePolicyResultTerminalFailure,
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
 } from "../src/lib/shoplingCanonicalPricePolicy.ts";
 
@@ -97,6 +98,21 @@ test("가격정책 성공은 상품 수와 모든 실패·불일치 수가 0일 
     ),
     false,
   );
+  assert.equal(
+    isCanonicalPricePolicyResultTerminalFailure({
+      status: "success",
+      phase: "artifact_ready",
+      summary: { status: "partial_failure", fail_count: 1 },
+    }),
+    true,
+  );
+  assert.equal(
+    isCanonicalPricePolicyResultTerminalFailure({
+      status: "pending",
+      phase: "running",
+    }),
+    false,
+  );
   assert.equal(SHOPLING_CANONICAL_PRICE_POLICY_VERSION, "2026-08-03-v1");
 });
 
@@ -121,5 +137,7 @@ test("두 상품등록 화면은 중앙 가격정책 브리지를 렌더링한�
   assert.match(standaloneBridge, /\/api\/shopling-price-modify\/run/);
   assert.match(standaloneBridge, /canonical_after_standalone_product_upload/);
   assert.match(standaloneBridge, /goods_key_group_json/);
+  assert.match(standaloneBridge, /MAX_GOODS_KEYS_PER_REQUEST = 50/);
+  assert.match(standaloneBridge, /기존 상품등록 기록은 자동 보정하지 않습니다/);
   assert.match(trackerPage, /ProductLaunchTrackerCanonicalPriceBridge/);
 });
