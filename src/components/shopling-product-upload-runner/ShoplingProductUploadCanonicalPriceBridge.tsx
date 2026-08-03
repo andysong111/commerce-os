@@ -5,6 +5,7 @@ import {
   canonicalPricePolicyResultMessage,
   extractCanonicalPriceTargetsFromUploadResult,
   isCanonicalPricePolicyResultSuccess,
+  isCanonicalPricePolicyResultTerminalFailure,
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
 } from "@/lib/shoplingCanonicalPricePolicy";
 
@@ -163,7 +164,10 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
         });
         return;
       }
-      if (!priceResponse.ok || ["error", "failed", "blocked", "partial_failure"].includes(String(priceResult.status ?? ""))) {
+      if (
+        !priceResponse.ok ||
+        isCanonicalPricePolicyResultTerminalFailure(priceResult)
+      ) {
         setState({
           status: "error",
           message: canonicalPricePolicyResultMessage(priceResult),
