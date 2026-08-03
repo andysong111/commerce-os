@@ -5,6 +5,7 @@ import {
   canonicalPricePolicyResultMessage,
   extractCanonicalPriceTargetsFromTrackerItem,
   isCanonicalPricePolicyResultSuccess,
+  isCanonicalPricePolicyResultTerminalFailure,
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
 } from "@/lib/shoplingCanonicalPricePolicy";
 
@@ -224,7 +225,10 @@ export function ProductLaunchTrackerCanonicalPriceBridge() {
         return;
       }
 
-      if (!priceResponse.ok || priceResult.status === "error") {
+      if (
+        !priceResponse.ok ||
+        isCanonicalPricePolicyResultTerminalFailure(priceResult)
+      ) {
         const message = canonicalPricePolicyResultMessage(priceResult);
         patchItemPricePolicy(trackerState, itemId, {
           status: "failed",
