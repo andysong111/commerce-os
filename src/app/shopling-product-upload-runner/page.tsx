@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/PageHeader";
+import { ShoplingProductUploadCanonicalPriceBridge } from "@/components/shopling-product-upload-runner/ShoplingProductUploadCanonicalPriceBridge";
 import { ShoplingProductUploadRunner } from "@/components/shopling-product-upload-runner/ShoplingProductUploadRunner";
 
 export default function ShoplingProductUploadRunnerPage() {
@@ -6,8 +7,9 @@ export default function ShoplingProductUploadRunnerPage() {
     <>
       <PageHeader
         title="샵플링 상품등록 실행기"
-        description="실재고 시트 행 번호를 입력해 shopling-product-upload-auto 외부 엔진을 실행하며 위치코드를 옵션자체관리코드와 바코드에 동일하게 등록합니다."
+        description="실재고 시트 행 번호를 입력해 상품을 등록한 뒤 동일한 중앙 가격정책 엔진으로 쇼핑몰별 판매가·매입가·소비자가를 자동 정규화합니다."
       />
+      <ShoplingProductUploadCanonicalPriceBridge />
       <ShoplingProductUploadRunner />
     </>
   );
