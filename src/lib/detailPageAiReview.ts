@@ -164,6 +164,7 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
     queued: "서버 생성 대기",
     checkpoint_resume: "문제 자산 복구 대기",
     server_generation: "AI 생성·검수",
+    server_final_assembly: "서버 최종 14,000px 조립",
     standard_quality_retry: "Standard-v2 차단 섹션 부분 재생성",
     standard_quality_gate: "Standard-v2 품질 하한선",
     render_pending: "최종 14,000px 조립",
