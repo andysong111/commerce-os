@@ -7,6 +7,7 @@ import {
   releaseShoplingPriceBulkAutoJob,
   runClaimedShoplingPriceBulkAutoJob,
 } from "@/lib/shoplingPriceModifyBulkAutoOrchestrator";
+import { stopStalledShoplingPriceBulkAutoJob } from "@/lib/shoplingPriceModifyBulkStallGuard";
 
 export const runtime = "nodejs";
 export const maxDuration = 50;
@@ -64,6 +65,30 @@ export async function GET(request: Request) {
       break;
     }
     seen.add(claim.job_id);
+
+    try {
+      const guard = await stopStalledShoplingPriceBulkAutoJob(admin, {
+        jobId: claim.job_id,
+        ownerId: claim.owner_id,
+        workerId,
+      });
+      if (guard.stopped) {
+        results.push({
+          job_id: claim.job_id,
+          outcome: "stalled_auto_stopped",
+          status: "dispatch_uncertain",
+          message: guard.message,
+          health_code: guard.code,
+        });
+        continue;
+      }
+    } catch (error) {
+      results.push({
+        job_id: claim.job_id,
+        outcome: "stall_guard_error",
+        message: error instanceof Error ? error.message : "장시간 정지 보호 상태를 확인하지 못했습니다.",
+      });
+    }
 
     const run = await runClaimedShoplingPriceBulkAutoJob(admin, {
       jobId: claim.job_id,
