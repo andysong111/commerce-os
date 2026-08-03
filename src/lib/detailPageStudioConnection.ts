@@ -4,7 +4,7 @@ const PRODUCTION_STUDIO_URL =
 // Stable Vercel Preview for bounded final assembly recovery in Detail Page Studio PR #55.
 const PREVIEW_STUDIO_URL =
   "https://commerce-os-detail-page-studio-git-agent-final-96809d-a2bsangsa.vercel.app/";
-const FINALIZER_PROTOCOL_VERSION = "snapshot-ack-v2";
+const FINALIZER_PROTOCOL_VERSION = "server-finalizer-v1";
 
 const STUDIO_WORKER_PATH = "/api/internal/ops-detail-page-job";
 const OPS_CALLBACK_HEALTH_PATH =
