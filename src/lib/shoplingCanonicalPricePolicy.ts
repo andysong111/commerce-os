@@ -173,6 +173,21 @@ export function isCanonicalPricePolicyResultSuccess(
   return goodsKeyCount >= expectedGoodsKeyCount;
 }
 
+export function isCanonicalPricePolicyResultTerminalFailure(value: unknown) {
+  const root = record(value);
+  const summary = record(root.summary);
+  const rootStatus = normalized(root.status);
+  const phase = normalized(root.phase);
+  const summaryStatus = normalized(summary.status);
+  if (["error", "failed", "blocked", "partial_failure"].includes(rootStatus)) {
+    return true;
+  }
+  if (["error", "failed", "blocked", "partial_failure"].includes(summaryStatus)) {
+    return true;
+  }
+  return phase === "artifact_ready" && Boolean(summaryStatus) && summaryStatus !== "success";
+}
+
 export function canonicalPricePolicyResultMessage(value: unknown) {
   const root = record(value);
   const summary = record(root.summary);
