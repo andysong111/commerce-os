@@ -372,19 +372,28 @@ async function activateFinalizerJob(job, requestId) {
   await openFinalizer(job, { requestId });
 }
 
-async function recordFinalizerHeartbeat(phase, {
+async function recordFinalizerProgress(phase, {
   message = "",
   error = "",
   announce = false,
+  completedAssets = null,
+  totalAssets = null,
+  assetLabel = "",
+  errorCode = "",
 } = {}) {
   if (!active || active.mode !== "finalize") return null;
   const current = active;
-  const persisted = await updateServerJob(current.jobId, {
-    action: "finalizer_heartbeat",
+  const update = {
+    action: "finalizer_progress",
     phase,
     message,
     error,
-  });
+    assetLabel,
+    errorCode,
+  };
+  if (Number.isFinite(completedAssets)) update.completedAssets = completedAssets;
+  if (Number.isFinite(totalAssets)) update.totalAssets = totalAssets;
+  const persisted = await updateServerJob(current.jobId, update);
   if (announce) {
     announceFinalizerStatus({
       requestId: current.requestId,
@@ -398,15 +407,20 @@ async function recordFinalizerHeartbeat(phase, {
   return persisted;
 }
 
-async function failFinalizer(message, phase = "failed") {
+async function failFinalizer(message, phase = "failed", {
+  errorCode = "FINALIZER_FAILED",
+  assetLabel = "",
+} = {}) {
   if (!active || active.mode !== "finalize") return;
   const current = active;
   finalizerRetryAt.set(current.jobId, Number.POSITIVE_INFINITY);
   let persisted = null;
   try {
-    persisted = await recordFinalizerHeartbeat("failed", {
+    persisted = await recordFinalizerProgress("failed", {
       message: "최종 조립 연결 실패 · 저장 결과는 보존됨",
       error: message,
+      errorCode,
+      assetLabel,
     });
   } catch {
     // The parent still receives the exact browser-side failure below.
@@ -507,7 +521,7 @@ async function openFinalizer(job, { requestId = "" } = {}) {
   });
   renderMonitor();
   try {
-    const persisted = await recordFinalizerHeartbeat("connecting", {
+    const persisted = await recordFinalizerProgress("connecting", {
       announce: Boolean(requestId),
     });
     if (persisted) jobsById.set(active.jobId, persisted);
@@ -625,17 +639,9 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
-    const now = Date.now();
-    if (active.snapshotSent) {
-      if (now - Number(active.finalizerHeartbeatAt || 0) >= 10_000) {
-        active.finalizerHeartbeatAt = now;
-        void recordFinalizerHeartbeat("snapshot_loading").catch(() => undefined);
-      }
-      return;
-    }
-    active.finalizerHeartbeatAt = now;
+    if (active.snapshotSent) return;
     try {
-      await recordFinalizerHeartbeat("engine_ready", { announce: true });
+      await recordFinalizerProgress("engine_ready", { announce: true });
     } catch (error) {
       await failFinalizer(
         error instanceof Error ? error.message : "최종 조립 연결 상태를 서버에 저장하지 못했습니다.",
@@ -664,6 +670,32 @@ async function handleEngineMessage(event) {
     }, 120);
     return;
   }
+  if (payload.type === "ops-dock-finalize-progress" && active.mode === "finalize") {
+    try {
+      const persisted = await recordFinalizerProgress(
+        cleanText(payload.phase, 80) || "snapshot_received",
+        {
+          message: cleanText(payload.message, 500),
+          completedAssets: Object.prototype.hasOwnProperty.call(payload, "completedAssets")
+            ? clamp(Number(payload.completedAssets) || 0, 0, 100)
+            : null,
+          totalAssets: Object.prototype.hasOwnProperty.call(payload, "totalAssets")
+            ? clamp(Number(payload.totalAssets) || 0, 0, 100)
+            : null,
+          assetLabel: cleanText(payload.assetLabel, 240),
+          errorCode: cleanText(payload.errorCode, 120),
+        },
+      );
+      if (persisted && active) jobsById.set(active.jobId, persisted);
+    } catch (error) {
+      await failFinalizer(
+        error instanceof Error ? error.message : "최종 조립 진행 상태를 서버에 저장하지 못했습니다.",
+        "progress_save_failed",
+        { errorCode: "FINALIZER_PROGRESS_SAVE_FAILED" },
+      );
+    }
+    return;
+  }
   if (payload.type === "ops-dock-finalize-complete" && active.mode === "finalize") {
     await completeFinalization(payload);
     return;
@@ -672,6 +704,10 @@ async function handleEngineMessage(event) {
     await failFinalizer(
       cleanText(payload.message, 800) || "최종 조립기에 오류가 발생했습니다.",
       "render_failed",
+      {
+        errorCode: cleanText(payload.errorCode, 120) || "FINALIZER_RENDER_FAILED",
+        assetLabel: cleanText(payload.assetLabel, 240),
+      },
     );
   }
 }
