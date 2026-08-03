@@ -7,10 +7,6 @@ const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
 const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
 const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
-const SNAPSHOT_RETRY_MS = 1000;
-const SNAPSHOT_MAX_ATTEMPTS = 5;
-const SNAPSHOT_PROGRESS_TIMEOUT_MS = 10 * 1000;
-const FINALIZER_PROTOCOL_VERSION = "snapshot-ack-v2";
 const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
 const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
 const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
@@ -34,8 +30,6 @@ let active = null;
 let activeFrame = null;
 let activeTimer = null;
 let activeHandshakeTimer = null;
-let activeSnapshotTimer = null;
-let activeSnapshotProgressTimer = null;
 let engineConfig = null;
 let syncing = false;
 let enqueueing = false;
@@ -354,98 +348,40 @@ function announceFinalizerStatus({
 }
 
 async function activateFinalizerJob(job, requestId) {
-  if (active && active.jobId !== job.jobId) {
-    announceFinalizerStatus({
-      requestId,
-      jobId: job.jobId,
-      tone: "error",
-      phase: "busy",
-      message: "다른 상세페이지 작업의 최종 조립이 진행 중입니다.",
-    });
-    return;
-  }
-  if (active?.jobId === job.jobId) finishActive();
-  finalizerRetryAt.delete(job.jobId);
   jobsById.set(job.jobId, job);
   announceFinalizerStatus({
     requestId,
     jobId: job.jobId,
     tone: "progress",
     phase: "received",
-    message: "조립기가 재연결 요청을 확인했습니다.",
+    message: "서버 최종 조립 재시작 요청을 확인했습니다.",
     job,
   });
-  await openFinalizer(job, { requestId });
-}
-
-async function recordFinalizerProgress(phase, {
-  message = "",
-  error = "",
-  announce = false,
-  completedAssets = null,
-  totalAssets = null,
-  assetLabel = "",
-  errorCode = "",
-} = {}) {
-  if (!active || active.mode !== "finalize") return null;
-  const current = active;
-  const update = {
-    action: "finalizer_progress",
-    phase,
-    message,
-    error,
-    assetLabel,
-    errorCode,
-  };
-  if (Number.isFinite(completedAssets)) update.completedAssets = completedAssets;
-  if (Number.isFinite(totalAssets)) update.totalAssets = totalAssets;
-  const persisted = await updateServerJob(current.jobId, update);
-  if (announce) {
-    announceFinalizerStatus({
-      requestId: current.requestId,
-      jobId: current.jobId,
-      tone: phase === "failed" ? "error" : "progress",
-      phase,
-      message: persisted?.message || message,
-      job: persisted,
-    });
-  }
-  return persisted;
-}
-
-async function failFinalizer(message, phase = "failed", {
-  errorCode = "FINALIZER_FAILED",
-  assetLabel = "",
-} = {}) {
-  if (!active || active.mode !== "finalize") return;
-  const current = active;
-  finalizerRetryAt.set(current.jobId, Number.POSITIVE_INFINITY);
-  let persisted = null;
   try {
-    persisted = await recordFinalizerProgress("failed", {
-      message: "최종 조립 연결 실패 · 저장 결과는 보존됨",
-      error: message,
-      errorCode,
-      assetLabel,
+    finalizerRetryAt.set(job.jobId, Date.now() + 30_000);
+    await startWorker(job.jobId);
+    announceFinalizerStatus({
+      requestId,
+      jobId: job.jobId,
+      tone: "success",
+      phase: "accepted",
+      message: "저장된 검수 통과 자산으로 서버 최종 조립을 시작했습니다.",
+      job,
     });
-  } catch {
-    // The parent still receives the exact browser-side failure below.
+  } catch (error) {
+    finalizerRetryAt.set(job.jobId, Date.now() + 30_000);
+    announceFinalizerStatus({
+      requestId,
+      jobId: job.jobId,
+      tone: "error",
+      phase: "start_failed",
+      message:
+        error instanceof Error
+          ? error.message
+          : "서버 최종 조립을 시작하지 못했습니다.",
+      job,
+    });
   }
-  announceFinalizerStatus({
-    requestId: current.requestId,
-    jobId: current.jobId,
-    tone: "error",
-    phase,
-    message,
-    job: persisted,
-  });
-  updateAutomation(current.itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "최종 조립 연결 실패 · 다시 연결할 수 있습니다.",
-    error: message,
-  });
-  finishActive();
 }
 
 async function processNext() {
@@ -456,7 +392,8 @@ async function processNext() {
       Date.now() >= (finalizerRetryAt.get(job.jobId) || 0),
   );
   if (renderJob) {
-    await openFinalizer(renderJob);
+    finalizerRetryAt.set(renderJob.jobId, Date.now() + 30_000);
+    await startWorker(renderJob.jobId).catch(() => undefined);
     return;
   }
   while (queue.length) {
@@ -500,58 +437,6 @@ async function openEvidenceCollector(job) {
   }
 }
 
-async function openFinalizer(job, { requestId = "" } = {}) {
-  const state = readState();
-  const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
-  const payload = job?.payload && typeof job.payload === "object" ? job.payload : {};
-  active = {
-    itemId: String(job.itemId),
-    jobId: String(job.jobId),
-    sourceUrl: job.sourceUrl,
-    productName: String(item?.productName || item?.modelNumber || payload.product_name || "상품"),
-    salesOptions: item
-      ? readSalesOptions(item)
-      : String(job.salesOptions || payload.sales_options || "").slice(0, 2000),
-    attempt: Number(job.attempt || item?.detailPageAutomation?.attempt || 1),
-    mode: "finalize",
-    requestId,
-    finalizerHeartbeatAt: 0,
-    snapshotDeliveryStarted: false,
-    snapshotRequestId: "",
-    snapshotAcked: false,
-    snapshotSendAttempts: 0,
-  };
-  updateAutomation(active.itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "AI 생성·검수 완료 · 최종 14,000px 조립 중",
-    progress: 96,
-    qaStatus: "passed",
-    error: "",
-  });
-  renderMonitor();
-  try {
-    const persisted = await recordFinalizerProgress("connecting", {
-      announce: Boolean(requestId),
-    });
-    if (persisted) jobsById.set(active.jobId, persisted);
-    const config = await getEngineConfig();
-    const url = new URL(config.engineUrl);
-    url.searchParams.set("ops_finalize", "1");
-    url.searchParams.set("job_id", active.jobId);
-    url.searchParams.set("item_id", active.itemId);
-    url.searchParams.set("target_origin", window.location.origin);
-    url.searchParams.set("finalizer_protocol", FINALIZER_PROTOCOL_VERSION);
-    url.searchParams.set("connection_nonce", crypto.randomUUID());
-    mountFrame(url, "상세페이지 최종 조립기");
-  } catch (error) {
-    await failFinalizer(
-      error instanceof Error ? error.message : "최종 조립기를 열지 못했습니다.",
-      "connection_failed",
-    );
-  }
-}
-
 function mountFrame(url, title) {
   activeFrame = document.createElement("iframe");
   activeFrame.id = "detail-page-dock-engine-frame";
@@ -567,29 +452,15 @@ function mountFrame(url, title) {
 
 async function handleFrameHandshakeTimeout() {
   if (!active) return;
-  if (active.mode === "collect") {
-    await failActive(
-      "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 주소 또는 보호 인증을 확인하세요.",
-      "studio_connection",
-    );
-    return;
-  }
-  await failFinalizer(
-    "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 보호 인증 또는 연결 주소를 확인하세요.",
-    "engine_timeout",
+  await failActive(
+    "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 주소 또는 보호 인증을 확인하세요.",
+    "studio_connection",
   );
 }
 
 async function handleFrameTimeout() {
   if (!active) return;
-  if (active.mode === "collect") {
-    await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
-    return;
-  }
-  await failFinalizer(
-    "최종 14,000px 조립이 15분 안에 완료되지 않았습니다.",
-    "render_timeout",
-  );
+  await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
 }
 
 async function handleEngineMessage(event) {
@@ -607,13 +478,10 @@ async function handleEngineMessage(event) {
 
   if (payload.type === "ops-dock-ready") {
     updateAutomation(active.itemId, {
-      status: active.mode === "finalize" ? "uploading" : "running",
-      stage: active.mode === "finalize" ? "render_pending" : "source_collection",
-      message:
-        active.mode === "finalize"
-          ? "최종 조립기 연결 완료 · 생성 결과 불러오는 중"
-          : "Studio 연결 완료 · 로컬 수집기 확인 중",
-      progress: active.mode === "finalize" ? 96 : 5,
+      status: "running",
+      stage: "source_collection",
+      message: "Studio 연결 완료 · 로컬 수집기 확인 중",
+      progress: 5,
       error: "",
     });
     renderMonitor();
@@ -622,7 +490,7 @@ async function handleEngineMessage(event) {
 
   if (payload.type === "ops-dock-progress") {
     updateAutomation(active.itemId, {
-      status: active.mode === "finalize" ? "uploading" : "running",
+      status: "running",
       stage: cleanText(payload.stage, 80) || "running",
       message: cleanText(payload.message, 240) || "생성 준비 중",
       progress: clamp(Number(payload.progress) || 0, 1, 99),
@@ -650,161 +518,6 @@ async function handleEngineMessage(event) {
     );
     return;
   }
-  if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
-    if (payload.finalizerProtocolVersion !== FINALIZER_PROTOCOL_VERSION) {
-      await failFinalizer(
-        "연결된 Studio 최종 조립기가 이전 버전입니다. 최신 Preview 연결을 다시 열어야 합니다.",
-        "protocol_mismatch",
-        { errorCode: "FINALIZER_PROTOCOL_MISMATCH" },
-      );
-      return;
-    }
-    if (active.snapshotDeliveryStarted) return;
-    active.snapshotDeliveryStarted = true;
-    try {
-      await recordFinalizerProgress("engine_ready", { announce: true });
-    } catch (error) {
-      await failFinalizer(
-        error instanceof Error ? error.message : "최종 조립 연결 상태를 서버에 저장하지 못했습니다.",
-        "heartbeat_failed",
-      );
-      return;
-    }
-    if (!active || active.mode !== "finalize") return;
-    active.snapshotRequestId = crypto.randomUUID();
-    sendFinalizerSnapshot();
-    return;
-  }
-  if (payload.type === "ops-dock-finalize-snapshot-ack" && active.mode === "finalize") {
-    if (payload.finalizerProtocolVersion !== FINALIZER_PROTOCOL_VERSION) {
-      await failFinalizer(
-        "Studio의 작업 수신 확인 규격이 현재 OPS와 일치하지 않습니다.",
-        "protocol_mismatch",
-        { errorCode: "FINALIZER_PROTOCOL_MISMATCH" },
-      );
-      return;
-    }
-    if (
-      cleanText(payload.snapshotRequestId, 160) !== active.snapshotRequestId
-    ) {
-      return;
-    }
-    if (active.snapshotAcked) return;
-    active.snapshotAcked = true;
-    window.clearTimeout(activeSnapshotTimer);
-    activeSnapshotTimer = null;
-    activeSnapshotProgressTimer = window.setTimeout(() => {
-      void failFinalizer(
-        "Studio가 최종 조립 작업 데이터는 받았지만 이미지 처리 단계를 시작하지 못했습니다.",
-        "snapshot_progress_timeout",
-        { errorCode: "FINALIZER_SNAPSHOT_PROGRESS_TIMEOUT" },
-      );
-    }, SNAPSHOT_PROGRESS_TIMEOUT_MS);
-    return;
-  }
-  if (payload.type === "ops-dock-finalize-progress" && active.mode === "finalize") {
-    active.snapshotAcked = true;
-    window.clearTimeout(activeSnapshotTimer);
-    window.clearTimeout(activeSnapshotProgressTimer);
-    activeSnapshotTimer = null;
-    activeSnapshotProgressTimer = null;
-    try {
-      const persisted = await recordFinalizerProgress(
-        cleanText(payload.phase, 80) || "snapshot_received",
-        {
-          message: cleanText(payload.message, 500),
-          completedAssets: Object.prototype.hasOwnProperty.call(payload, "completedAssets")
-            ? clamp(Number(payload.completedAssets) || 0, 0, 100)
-            : null,
-          totalAssets: Object.prototype.hasOwnProperty.call(payload, "totalAssets")
-            ? clamp(Number(payload.totalAssets) || 0, 0, 100)
-            : null,
-          assetLabel: cleanText(payload.assetLabel, 240),
-          errorCode: cleanText(payload.errorCode, 120),
-        },
-      );
-      if (persisted && active) jobsById.set(active.jobId, persisted);
-    } catch (error) {
-      await failFinalizer(
-        error instanceof Error ? error.message : "최종 조립 진행 상태를 서버에 저장하지 못했습니다.",
-        "progress_save_failed",
-        { errorCode: "FINALIZER_PROGRESS_SAVE_FAILED" },
-      );
-    }
-    return;
-  }
-  if (payload.type === "ops-dock-finalize-complete" && active.mode === "finalize") {
-    await completeFinalization(payload);
-    return;
-  }
-  if (payload.type === "ops-dock-finalize-failed" && active.mode === "finalize") {
-    await failFinalizer(
-      cleanText(payload.message, 800) || "최종 조립기에 오류가 발생했습니다.",
-      "render_failed",
-      {
-        errorCode: cleanText(payload.errorCode, 120) || "FINALIZER_RENDER_FAILED",
-        assetLabel: cleanText(payload.assetLabel, 240),
-      },
-    );
-  }
-}
-
-function sendFinalizerSnapshot() {
-  if (
-    !active ||
-    active.mode !== "finalize" ||
-    active.snapshotAcked ||
-    !active.snapshotRequestId
-  ) {
-    return;
-  }
-  const current = active;
-  const frame = activeFrame;
-  const job = jobsById.get(current.jobId);
-  if (!frame?.contentWindow || !job || !engineConfig?.engineOrigin) {
-    void failFinalizer(
-      "최종 조립 작업 데이터를 Studio에 전달할 준비가 되지 않았습니다.",
-      "snapshot_delivery_failed",
-      { errorCode: "FINALIZER_SNAPSHOT_DELIVERY_UNAVAILABLE" },
-    );
-    return;
-  }
-  if (current.snapshotSendAttempts >= SNAPSHOT_MAX_ATTEMPTS) {
-    void failFinalizer(
-      `Studio가 최종 조립 작업 데이터 수신을 ${SNAPSHOT_MAX_ATTEMPTS}회 안에 확인하지 못했습니다.`,
-      "snapshot_ack_timeout",
-      { errorCode: "FINALIZER_SNAPSHOT_ACK_TIMEOUT" },
-    );
-    return;
-  }
-  current.snapshotSendAttempts += 1;
-  try {
-    frame.contentWindow.postMessage(
-      {
-        type: "ops-dock-finalize-snapshot",
-        jobId: current.jobId,
-        itemId: current.itemId,
-        snapshotRequestId: current.snapshotRequestId,
-        finalizerProtocolVersion: FINALIZER_PROTOCOL_VERSION,
-        job,
-      },
-      engineConfig.engineOrigin,
-    );
-  } catch (error) {
-    void failFinalizer(
-      error instanceof Error
-        ? error.message
-        : "최종 조립 작업 데이터를 Studio에 전달하지 못했습니다.",
-      "snapshot_delivery_failed",
-      { errorCode: "FINALIZER_SNAPSHOT_POST_FAILED" },
-    );
-    return;
-  }
-  window.clearTimeout(activeSnapshotTimer);
-  activeSnapshotTimer = window.setTimeout(
-    sendFinalizerSnapshot,
-    SNAPSHOT_RETRY_MS,
-  );
 }
 
 function allowedLocalBridgeRelay(path, method) {
@@ -952,67 +665,6 @@ async function acceptEvidence(payload) {
   }
 }
 
-async function completeFinalization(payload) {
-  if (!active) return;
-  const current = active;
-  try {
-    const job = jobsById.get(current.jobId);
-    const representatives = Array.isArray(job?.result?.representatives)
-      ? job.result.representatives
-      : [];
-    const byRole = new Map(representatives.map((image) => [String(image.roleId), image.assetUrl]));
-    const mainImageUrl = byRole.get("main_catalog") || "";
-    const additionalImageUrls = [
-      byRole.get("alternate_whole"),
-      byRole.get("evidence_detail"),
-      byRole.get("lifestyle_usage"),
-      byRole.get("adaptive_support"),
-    ].filter(Boolean);
-    if (!payload.detail?.base64 || !mainImageUrl || additionalImageUrls.length !== 4) {
-      throw new Error("최종 상세·대표·부가 이미지 구성이 완전하지 않습니다.");
-    }
-    updateAutomation(current.itemId, {
-      status: "uploading",
-      stage: "asset_upload",
-      message: "14,000px 상세페이지 저장·URL 도킹 중",
-      progress: 98,
-      qaStatus: "passed",
-    });
-    const detailImageUrl = await uploadOne(current, "detail-page", payload.detail);
-    const persisted = await updateServerJob(current.jobId, {
-      action: "final_complete",
-      detailImageUrl,
-      mainImageUrl,
-      additionalImageUrls,
-    });
-    const completedJob = {
-      ...job,
-      status: "success",
-      stage: "docked",
-      progress: 100,
-      qaStatus: "passed",
-      result: { ...(job?.result || {}), detailImageUrl, mainImageUrl, additionalImageUrls },
-    };
-    jobsById.set(current.jobId, persisted || completedJob);
-    finalizerRetryAt.delete(current.jobId);
-    applyDockedJob(persisted || completedJob, payload.productName || current.productName);
-    announceFinalizerStatus({
-      requestId: current.requestId,
-      jobId: current.jobId,
-      tone: "success",
-      phase: "complete",
-      message: "최종 14,000px 조립과 저장이 완료됐습니다.",
-      job: persisted || completedJob,
-    });
-    finishActive();
-  } catch (error) {
-    await failFinalizer(
-      error instanceof Error ? error.message : "최종 결과를 저장하지 못했습니다.",
-      "save_failed",
-    );
-  }
-}
-
 async function uploadOne(job, role, image) {
   const body = new FormData();
   body.set("item_id", job.itemId);
@@ -1057,12 +709,8 @@ async function failActive(message, stage = "failed") {
 function finishActive() {
   window.clearTimeout(activeTimer);
   window.clearTimeout(activeHandshakeTimer);
-  window.clearTimeout(activeSnapshotTimer);
-  window.clearTimeout(activeSnapshotProgressTimer);
   activeTimer = null;
   activeHandshakeTimer = null;
-  activeSnapshotTimer = null;
-  activeSnapshotProgressTimer = null;
   activeFrame?.remove();
   activeFrame = null;
   active = null;
