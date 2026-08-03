@@ -1,62 +1,46 @@
 import { NextResponse } from "next/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-type Result = { data: unknown; error: unknown; count?: number | null };
-type Query = PromiseLike<Result> & {
-  select(columns: string, options?: { count: "exact"; head: boolean }): Query;
-  eq(column: string, value: unknown): Query;
-  order(column: string, options: { ascending: boolean }): Query;
-  limit(count: number): Query;
-  maybeSingle(): Promise<Result>;
-};
-type Admin = { from(table: string): Query };
+import { normalSession } from "@/lib/shoplingPriceModifyBulkApi";
 
 const FAILED_PREVIEW_LIMIT = 100;
 const missing = () => NextResponse.json({ error: "작업을 찾을 수 없거나 접근 권한이 없습니다." }, { status: 404 });
 
-export async function GET(_request: Request, { params }: { params: Promise<{ jobId: string }> }) {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase 서버 설정이 필요합니다." }, { status: 503 });
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
-  const rawAdmin = await createSupabaseAdminClient();
-  if (!rawAdmin) return NextResponse.json({ error: "Supabase 서버 설정이 필요합니다." }, { status: 503 });
+export async function GET(request: Request, { params }: { params: Promise<{ jobId: string }> }) {
+  const auth = await normalSession(request);
+  if (auth.response) return auth.response;
 
-  const admin = rawAdmin as Admin;
   const { jobId } = await params;
-  const jobResult = await admin.from("shopling_price_bulk_jobs")
+  const jobResult = await auth.admin!.from("shopling_price_bulk_jobs")
     .select("id,status,input_source,original_count,valid_count,duplicate_count,invalid_count,canary_size,normal_chunk_size,total_chunk_count,policy_overrides,last_error,pause_requested,retry_round,max_retry_rounds,retry_resume_status,retry_scope_known,execution_mode,archived_at,automation_mode,automation_started_at,automation_last_tick_at,automation_finished_at,automation_lease_until,automation_worker_id,automation_stop_reason,created_at,updated_at")
     .eq("id", jobId)
-    .eq("owner_id", auth.user.id)
+    .eq("owner_id", auth.ownerId)
     .maybeSingle();
   if (jobResult.error) return NextResponse.json({ error: "Bulk 작업 조회에 실패했습니다." }, { status: 500 });
   if (!jobResult.data) return missing();
 
   const [chunks, first, last, failedPreview, pendingItems, succeededItems, failedItems] = await Promise.all([
-    admin.from("shopling_price_bulk_chunks")
+    auth.admin!.from("shopling_price_bulk_chunks")
       .select("chunk_index,chunk_type,goods_key_count,status,request_id,actions_url,result_summary,last_error,started_at,completed_at,updated_at,retry_round")
       .eq("job_id", jobId)
       .order("chunk_index", { ascending: true }),
-    admin.from("shopling_price_bulk_items")
+    auth.admin!.from("shopling_price_bulk_items")
       .select("goods_key,ordinal,status,last_error")
       .eq("job_id", jobId)
       .order("ordinal", { ascending: true })
       .limit(20),
-    admin.from("shopling_price_bulk_items")
+    auth.admin!.from("shopling_price_bulk_items")
       .select("goods_key,ordinal,status,last_error")
       .eq("job_id", jobId)
       .order("ordinal", { ascending: false })
       .limit(5),
-    admin.from("shopling_price_bulk_items")
+    auth.admin!.from("shopling_price_bulk_items")
       .select("goods_key,ordinal,last_error,attempt_count")
       .eq("job_id", jobId)
       .eq("status", "failed")
       .order("ordinal", { ascending: true })
       .limit(FAILED_PREVIEW_LIMIT),
-    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "pending"),
-    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "succeeded"),
-    admin.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "failed"),
+    auth.admin!.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "pending"),
+    auth.admin!.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "succeeded"),
+    auth.admin!.from("shopling_price_bulk_items").select("goods_key", { count: "exact", head: true }).eq("job_id", jobId).eq("status", "failed"),
   ]);
   if (chunks.error || first.error || last.error || failedPreview.error || pendingItems.error || succeededItems.error || failedItems.error) {
     return NextResponse.json({ error: "Bulk 작업 조회에 실패했습니다." }, { status: 500 });
