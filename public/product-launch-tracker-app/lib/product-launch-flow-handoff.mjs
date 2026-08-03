@@ -47,6 +47,45 @@ export function hasCompleteShoplingRegistration(item) {
   );
 }
 
+function buildCanonicalPriceSession(source, goodsKeys) {
+  const pricePolicy = record(source.pricePolicy);
+  const requestId = text(pricePolicy.requestId);
+  const status = text(pricePolicy.status).toLowerCase();
+
+  if (requestId && status === "success") {
+    return {
+      priceRequestId: requestId,
+      priceResult: {
+        status: "success",
+        phase: "artifact_ready",
+        runConclusion: "success",
+        message: "중앙 가격정책 엔진 적용과 검증을 완료했습니다.",
+        summary: {
+          status: "success",
+          fail_count: 0,
+          goods_key_count: goodsKeys.length,
+          exit_code: 0,
+          canonical_price_policy: true,
+          policy_version: text(pricePolicy.policyVersion),
+          source: "product_launch_tracker",
+        },
+      },
+    };
+  }
+
+  if (requestId && ["pending", "running"].includes(status)) {
+    return {
+      priceRequestId: requestId,
+      priceResult: null,
+    };
+  }
+
+  return {
+    priceRequestId: "",
+    priceResult: null,
+  };
+}
+
 export function buildProductLaunchFlowHandoff(item, now = new Date()) {
   if (!hasCompleteShoplingRegistration(item)) {
     throw new Error("샵플링 6채널 등록완료 상품만 이어갈 수 있습니다.");
@@ -81,6 +120,7 @@ export function buildProductLaunchFlowHandoff(item, now = new Date()) {
     rows.map((row) => [row.goods_key, row.registered_title]),
   );
   const goodsKeys = rows.map((row) => row.goods_key);
+  const canonicalPrice = buildCanonicalPriceSession(source, goodsKeys);
 
   return {
     session: {
@@ -104,22 +144,8 @@ export function buildProductLaunchFlowHandoff(item, now = new Date()) {
         goodsKeys,
       },
       uploadPolls: 0,
-      priceRequestId: `tracker-price-preserved-${itemId}`,
-      priceResult: {
-        status: "success",
-        phase: "artifact_ready",
-        runConclusion: "success",
-        message:
-          "신규 상품 출시 진행관리에서 확정한 기존 가격을 유지합니다.",
-        summary: {
-          status: "success",
-          fail_count: 0,
-          goods_key_count: goodsKeys.length,
-          exit_code: 0,
-          price_preserved: true,
-          source: "product_launch_tracker",
-        },
-      },
+      priceRequestId: canonicalPrice.priceRequestId,
+      priceResult: canonicalPrice.priceResult,
       pricePolls: 0,
       recommendationRequestId: "",
       recommendationResult: null,
