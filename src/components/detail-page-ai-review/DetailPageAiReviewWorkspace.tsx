@@ -104,6 +104,10 @@ export function DetailPageAiReviewWorkspace() {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== workerRef.current?.contentWindow) return;
       const payload = event.data;
+      if (payload?.source === DOCK_EVENT_SOURCE && payload?.type === "detail-page-worker-ready") {
+        setWorkerReady(true);
+        return;
+      }
       if (payload?.source === DOCK_EVENT_SOURCE && payload?.type === "detail-page-job-created") {
         if (isReviewJob(payload.job)) {
           setJobs((current) => [
@@ -127,6 +131,25 @@ export function DetailPageAiReviewWorkspace() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [refresh]);
+
+  useEffect(() => {
+    if (workerReady) return;
+    const ping = () => {
+      workerRef.current?.contentWindow?.postMessage(
+        {
+          source: WORK_ASSISTANT_SOURCE,
+          type: "detail-page-worker-ping",
+        },
+        window.location.origin,
+      );
+    };
+    const initial = window.setTimeout(ping, 0);
+    const interval = window.setInterval(ping, 1_000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+    };
+  }, [workerReady]);
 
   const counts = useMemo(() => countJobs(jobs), [jobs]);
   const visibleJobs = useMemo(() => {
@@ -302,7 +325,15 @@ export function DetailPageAiReviewWorkspace() {
         src="/product-launch-tracker-app/index.html?detail_page_mode=worker"
         aria-hidden="true"
         tabIndex={-1}
-        onLoad={() => setWorkerReady(true)}
+        onLoad={() => {
+          workerRef.current?.contentWindow?.postMessage(
+            {
+              source: WORK_ASSISTANT_SOURCE,
+              type: "detail-page-worker-ping",
+            },
+            window.location.origin,
+          );
+        }}
         className="pointer-events-none fixed -left-[2400px] top-0 z-[-1] h-[900px] w-[1280px] border-0 opacity-0"
       />
 
