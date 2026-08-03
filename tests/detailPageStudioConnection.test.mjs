@@ -56,6 +56,23 @@ test("preview deployments select the bounded final-assembly Studio Preview", () 
   });
 });
 
+test("preview recovery ignores an older persistent Studio URL override", () => {
+  withEnvironment(
+    {
+      VERCEL_ENV: "preview",
+      DETAIL_PAGE_STUDIO_INTERNAL_URL:
+        "https://commerce-os-detail-page-studio-git-agent-old-preview.vercel.app/",
+    },
+    () => {
+      const connection = resolveDetailPageStudioConnection();
+      assert.equal(
+        connection.engineOrigin,
+        "https://commerce-os-detail-page-studio-git-agent-final-96809d-a2bsangsa.vercel.app",
+      );
+    },
+  );
+});
+
 test("Studio protection bypass is carried through browser and recursive worker requests", () => {
   withEnvironment(
     {
@@ -111,6 +128,25 @@ test("Studio capability probe rejects a Vercel protection redirect before a paid
     );
     assert.equal(result.ok, false);
     assert.equal(result.code, "DETAIL_PAGE_STUDIO_PREVIEW_PROTECTED");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Studio capability probe rejects an outdated finalizer before reconnecting", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json({
+      ok: true,
+      service: "commerce-os-detail-page-studio",
+      opsDockVersion: "server-v1",
+    });
+  try {
+    const result = await withEnvironment({ VERCEL_ENV: "preview" }, () =>
+      probeDetailPageStudio(resolveDetailPageStudioConnection()),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "DETAIL_PAGE_STUDIO_INCOMPATIBLE");
   } finally {
     globalThis.fetch = originalFetch;
   }
