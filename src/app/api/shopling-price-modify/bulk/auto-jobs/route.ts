@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const auth = await normalSession();
+  const auth = await normalSession(request);
   if (auth.response) return auth.response;
   if (!process.env.CRON_SECRET?.trim()) {
     return normalError(
