@@ -1,0 +1,174 @@
+name: Full Regression Audit
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Compare full test suites before and after canonical pricing changes
+        env:
+          BASELINE_SHA: 6ec34bb024c38405c8ad8fce2ffd3bb23d8507e4
+          CURRENT_SHA: 0e117f428b0f20d3bdb5980dac9f53e5c5a6425f
+        shell: bash
+        run: |
+          cat > /tmp/parse_tap.py <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          log_path, output_path, exit_code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+          lines = text.splitlines()
+
+          totals = {"tests": 0, "pass": 0, "fail": 0, "cancelled": 0, "skipped": 0, "todo": 0}
+          for key in totals:
+              matches = re.findall(rf"^# {re.escape(key)}\s+(\d+)\s*$", text, flags=re.MULTILINE)
+              if matches:
+                  totals[key] = int(matches[-1])
+
+          failures = []
+          for index, line in enumerate(lines):
+              match = re.match(r"^(?:#\s*)?not ok\s+\d+\s+-\s+(.+?)\s*$", line)
+              if not match:
+                  continue
+              context_lines = lines[index + 1:index + 45]
+              context = "\n".join(context_lines)
+              location_match = re.search(r"location:\s*['\"]?([^'\"\n]+)", context)
+              code_match = re.search(r"code:\s*['\"]?([^'\"\n]+)", context)
+              type_match = re.search(r"failureType:\s*['\"]?([^'\"\n]+)", context)
+              error_value = ""
+              for offset, candidate in enumerate(context_lines):
+                  stripped = candidate.strip()
+                  if not stripped.startswith("error:"):
+                      continue
+                  value = stripped.split(":", 1)[1].strip().strip("'\"")
+                  if value and value not in {"|-", "|", ">-", ">"}:
+                      error_value = value
+                  else:
+                      for following in context_lines[offset + 1:offset + 8]:
+                          next_value = following.strip().strip("'\"")
+                          if next_value and not next_value.startswith(("code:", "stack:", "operator:", "actual:", "expected:")):
+                              error_value = next_value
+                              break
+                  break
+              failure = {
+                  "name": match.group(1).strip(),
+                  "location": location_match.group(1).strip() if location_match else "",
+                  "code": code_match.group(1).strip() if code_match else "",
+                  "failure_type": type_match.group(1).strip() if type_match else "",
+                  "error": error_value[:500],
+              }
+              failure["signature"] = "|".join(
+                  [failure["name"], failure["location"], failure["code"], failure["error"]]
+              )
+              failures.append(failure)
+
+          result = {
+              "exit_code": exit_code,
+              **totals,
+              "parsed_failure_count": len(failures),
+              "failures": failures,
+          }
+          Path(output_path).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+
+          run_suite() {
+            label="$1"
+            sha="$2"
+            git checkout --force "$sha"
+            rm -rf node_modules
+            npm ci
+            set +e
+            npm test > "${label}-full-test.log" 2>&1
+            test_exit=$?
+            set -e
+            python /tmp/parse_tap.py "${label}-full-test.log" "${label}-summary.json" "$test_exit"
+          }
+
+          run_suite baseline "$BASELINE_SHA"
+          run_suite current "$CURRENT_SHA"
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          baseline = json.loads(Path("baseline-summary.json").read_text(encoding="utf-8"))
+          current = json.loads(Path("current-summary.json").read_text(encoding="utf-8"))
+          baseline_by_signature = {item["signature"]: item for item in baseline["failures"]}
+          current_by_signature = {item["signature"]: item for item in current["failures"]}
+          baseline_by_name = {}
+          current_by_name = {}
+          for item in baseline["failures"]:
+              baseline_by_name.setdefault(item["name"], []).append(item)
+          for item in current["failures"]:
+              current_by_name.setdefault(item["name"], []).append(item)
+
+          new_signatures = sorted(set(current_by_signature) - set(baseline_by_signature))
+          resolved_signatures = sorted(set(baseline_by_signature) - set(current_by_signature))
+          new_names = sorted(set(current_by_name) - set(baseline_by_name))
+          resolved_names = sorted(set(baseline_by_name) - set(current_by_name))
+          common_names = sorted(set(current_by_name) & set(baseline_by_name))
+
+          comparison = {
+              "baseline": {key: baseline[key] for key in ["exit_code", "tests", "pass", "fail", "cancelled", "skipped", "todo", "parsed_failure_count"]},
+              "current": {key: current[key] for key in ["exit_code", "tests", "pass", "fail", "cancelled", "skipped", "todo", "parsed_failure_count"]},
+              "delta": {
+                  "tests": current["tests"] - baseline["tests"],
+                  "pass": current["pass"] - baseline["pass"],
+                  "fail": current["fail"] - baseline["fail"],
+                  "parsed_failure_count": current["parsed_failure_count"] - baseline["parsed_failure_count"],
+              },
+              "new_failure_names": new_names,
+              "resolved_failure_names": resolved_names,
+              "common_failure_name_count": len(common_names),
+              "new_failures_by_signature": [current_by_signature[key] for key in new_signatures],
+              "resolved_failures_by_signature": [baseline_by_signature[key] for key in resolved_signatures],
+          }
+          Path("regression-comparison.json").write_text(
+              json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8"
+          )
+          print(json.dumps(comparison, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Build current production commit
+        env:
+          CURRENT_SHA: 0e117f428b0f20d3bdb5980dac9f53e5c5a6425f
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+        shell: bash
+        run: |
+          git checkout --force "$CURRENT_SHA"
+          rm -rf node_modules
+          npm ci
+          npm run build
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-regression-audit
+          if-no-files-found: warn
+          path: |
+            baseline-full-test.log
+            current-full-test.log
+            baseline-summary.json
+            current-summary.json
+            regression-comparison.json
