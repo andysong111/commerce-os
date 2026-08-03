@@ -164,12 +164,12 @@ test("OPS origin relays only the evidence collector routes for the hidden Studio
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
-  assert.match(dockSource, /byRole\.get\("main_catalog"\)/);
-  assert.match(dockSource, /byRole\.get\("alternate_whole"\)/);
-  assert.match(dockSource, /byRole\.get\("evidence_detail"\)/);
-  assert.match(dockSource, /byRole\.get\("lifestyle_usage"\)/);
-  assert.match(dockSource, /byRole\.get\("adaptive_support"\)/);
-  assert.match(dockSource, /action: "final_complete"/);
+  assert.match(jobRoute, /const detailImageUrl = safeText\(body\.detailImageUrl/);
+  assert.match(jobRoute, /const mainImageUrl = safeText\(body\.mainImageUrl/);
+  assert.match(jobRoute, /stringList\(body\.additionalImageUrls, 4\)/);
+  assert.match(jobRoute, /action === "final_complete"/);
+  assert.match(jobRoute, /!workerAuthorized && !ownerAuthorized/);
+  assert.match(jobRoute, /finalizerMode: workerAuthorized \? "server-v1"/);
   assert.match(dockSource, /html: buildDetailHtml/);
   assert.match(dockSource, /detailImageUrl,/);
   assert.match(dockSource, /mainImageUrl,/);
@@ -207,7 +207,9 @@ test("interrupted generation is recoverable instead of remaining permanently act
   assert.match(dockSource, /sourceRunId: job\.sourceRunId/);
   assert.match(dockSource, /job\.status === "render_pending"/);
   assert.match(dockSource, /화면 종료 가능/);
-  assert.match(dockSource, /finalizerRetryAt\.set\(jobId, Date\.now\(\) \+ 30_000\)/);
+  assert.match(dockSource, /finalizerRetryAt\.set\(renderJob\.jobId, Date\.now\(\) \+ 30_000\)/);
+  assert.match(dockSource, /await startWorker\(renderJob\.jobId\)/);
+  assert.doesNotMatch(dockSource, /openFinalizer/);
   assert.doesNotMatch(dockSource, /browser_interrupted/);
 });
 
@@ -279,7 +281,7 @@ test("durable jobs reuse the deployed job ledger and require a signed per-job wo
   assert.match(jobRoute, /action === "claim"/);
   assert.match(jobRoute, /action === "evidence_ready"/);
   assert.match(jobRoute, /action === "final_complete"/);
-  assert.match(jobRoute, /const releasesLease = action !== "progress"/);
+  assert.match(jobRoute, /\["progress", "server_finalizer_progress"\]\.includes\(action\)/);
   assert.doesNotMatch(jobRoute, /workerToken:/);
   assert.match(studioConnection, /\/api\/internal\/ops-detail-page-job/);
   assert.match(startRoute, /resolveDetailPageStudioConnection/);
