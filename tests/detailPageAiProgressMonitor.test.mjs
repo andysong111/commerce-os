@@ -10,6 +10,14 @@ const trackerEntrySource = await readFile(
   "public/product-launch-tracker-app/app.js",
   "utf8",
 );
+const dockSource = await readFile(
+  "public/product-launch-tracker-app/detail-page-dock.js",
+  "utf8",
+);
+const jobRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
+  "utf8",
+);
 
 test("detail-page review shows a live job progress monitor", () => {
   assert.match(workspaceSource, /상세페이지 작업 현황/);
@@ -22,9 +30,11 @@ test("detail-page review shows a live job progress monitor", () => {
 test("a stalled final assembly can reconnect without regenerating assets", () => {
   assert.match(workspaceSource, /job\.status === "render_pending" && heartbeatAge >= 30_000/);
   assert.match(workspaceSource, /type: "activate-detail-page-job"/);
+  assert.match(workspaceSource, /requestId,/);
   assert.match(workspaceSource, /최종 조립 다시 연결/);
   assert.match(workspaceSource, /1688 재수집·AI 재생성 없이/);
   assert.doesNotMatch(workspaceSource, /reconnectFinalAssembly[\s\S]{0,900}resume_checkpointed_generation/);
+  assert.doesNotMatch(workspaceSource, /최종 조립기 재연결 요청을 전달했습니다/);
 });
 
 test("the final-assembly worker boots directly and reports actual readiness", () => {
@@ -42,4 +52,21 @@ test("the final-assembly worker boots directly and reports actual readiness", ()
   assert.match(workspaceSource, /payload\?\.type === "detail-page-worker-ready"/);
   assert.match(workspaceSource, /type: "detail-page-worker-ping"/);
   assert.doesNotMatch(workspaceSource, /onLoad=\{\(\) => setWorkerReady\(true\)\}/);
+});
+
+test("final-assembly reconnect is acknowledged by the real worker and persisted", () => {
+  assert.match(workspaceSource, /type === "detail-page-finalizer-status"/);
+  assert.match(workspaceSource, /requestId !== finalizerRequestRef\.current/);
+  assert.match(workspaceSource, /최종 조립기가 20초 안에 재연결 요청을 확인하지 못했습니다/);
+  assert.match(dockSource, /async function activateFinalizerJob/);
+  assert.match(
+    dockSource,
+    /if \(active\?\.jobId === job\.jobId\) finishActive\(\)/,
+  );
+  assert.match(dockSource, /type: "detail-page-finalizer-status"/);
+  assert.match(dockSource, /action: "finalizer_heartbeat"/);
+  assert.match(dockSource, /recordFinalizerHeartbeat\("engine_ready"/);
+  assert.match(jobRouteSource, /action === "finalizer_heartbeat"/);
+  assert.match(jobRouteSource, /finalizer_heartbeat_at: heartbeatAt/);
+  assert.match(dockSource, /Number\.POSITIVE_INFINITY/);
 });
