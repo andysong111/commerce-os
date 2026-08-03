@@ -238,7 +238,7 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
-    if (action === "finalizer_heartbeat") {
+    if (["finalizer_heartbeat", "finalizer_progress"].includes(action)) {
       if (!ownerAuthorized) {
         return forbidden("OPS 화면만 최종 조립 연결 상태를 기록할 수 있습니다.");
       }
@@ -256,20 +256,98 @@ export async function POST(
       const phaseMessages: Record<string, string> = {
         connecting: "최종 조립기 연결 중",
         engine_ready: "최종 조립기 연결 완료 · 저장 결과 불러오는 중",
-        snapshot_loading: "저장된 생성 결과를 불러와 최종 14,000px 조립 중",
+        snapshot_received: "저장된 생성 결과 확인 완료 · 이미지 불러오기 준비 중",
+        asset_loading: "저장 이미지 불러오는 중",
+        asset_loaded: "저장 이미지 불러오기 진행 중",
+        document_loading: "14,000px 조립 문서 이미지 배치 확인 중",
+        rendering: "14,000px 상세페이지 렌더링 중",
+        render_waiting: "14,000px 렌더러 응답 대기 중",
+        encoding: "최종 상세페이지 JPEG 변환 중",
         failed: "최종 조립 연결 실패 · 저장 결과는 보존됨",
       };
       if (!phaseMessages[phase]) return invalid("최종 조립 단계가 올바르지 않습니다.");
       const heartbeatAt = new Date().toISOString();
+      const previousAttempt = Math.max(
+        0,
+        Math.floor(Number(job.payload.finalizer_attempt) || 0),
+      );
+      const finalizerAttempt =
+        phase === "connecting" ? previousAttempt + 1 : Math.max(1, previousAttempt);
+      const finalizerStartedAt =
+        phase === "connecting"
+          ? heartbeatAt
+          : safeText(job.payload.finalizer_started_at, 80) || heartbeatAt;
+      const previousTotalAssets = Math.floor(
+        clamp(Number(job.payload.finalizer_total_assets) || 0, 0, 100),
+      );
+      const hasTotalAssets = Object.prototype.hasOwnProperty.call(
+        body,
+        "totalAssets",
+      );
+      const totalAssets =
+        phase === "connecting"
+          ? 0
+          : hasTotalAssets
+            ? Math.floor(clamp(Number(body.totalAssets) || 0, 0, 100))
+            : previousTotalAssets;
+      const previousCompletedAssets = Math.floor(
+        clamp(
+          Number(job.payload.finalizer_completed_assets) || 0,
+          0,
+          previousTotalAssets || 100,
+        ),
+      );
+      const hasCompletedAssets = Object.prototype.hasOwnProperty.call(
+        body,
+        "completedAssets",
+      );
+      const completedAssets = Math.floor(
+        clamp(
+          phase === "connecting"
+            ? 0
+            : hasCompletedAssets
+              ? Number(body.completedAssets) || 0
+              : previousCompletedAssets,
+          0,
+          totalAssets || 100,
+        ),
+      );
+      const assetLabel =
+        phase === "connecting"
+          ? ""
+          : Object.prototype.hasOwnProperty.call(body, "assetLabel")
+            ? safeText(body.assetLabel, 240)
+            : safeText(job.payload.finalizer_asset_label, 240);
+      const errorCode =
+        phase === "failed"
+          ? safeText(body.errorCode, 120) || "FINALIZER_FAILED"
+          : "";
+      const ratio = totalAssets > 0 ? completedAssets / totalAssets : 0;
+      const progressByPhase =
+        phase === "encoding"
+          ? 99
+          : ["document_loading", "rendering", "render_waiting"].includes(phase)
+            ? 98
+            : ["asset_loading", "asset_loaded"].includes(phase)
+              ? 96 + ratio * 2
+              : phase === "failed"
+                ? Number(job.progress || 96)
+                : 96;
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "render_pending",
         stage: "render_pending",
         message: safeText(body.message, 500) || phaseMessages[phase],
-        progress: clamp(Number(job.progress || 96), 96, 99),
+        progress: clamp(progressByPhase, 96, 99),
         qa_status: "passed",
         payload: {
           finalizer_phase: phase,
           finalizer_heartbeat_at: heartbeatAt,
+          finalizer_started_at: finalizerStartedAt,
+          finalizer_attempt: finalizerAttempt,
+          finalizer_completed_assets: completedAssets,
+          finalizer_total_assets: totalAssets,
+          finalizer_asset_label: assetLabel,
+          finalizer_error_code: errorCode,
         },
         error_message:
           phase === "failed" ? safeText(body.error, 2_000) || phaseMessages.failed : "",
