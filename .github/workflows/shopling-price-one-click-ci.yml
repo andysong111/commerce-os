@@ -35,6 +35,7 @@ jobs:
           node --test tests/shoplingPriceModifyBulkOneClickSafety.test.mjs
           node --test tests/shoplingPriceModifyBulkOneClickSafetyPatch.test.mjs
           node --test tests/shoplingPriceModifyBulkAutoManualGuard.test.mjs
+          node --test tests/shoplingPriceModifyBulkDetailAuth.test.mjs
           node --test tests/shoplingPriceModifyBulkRetryPauseRecovery.test.mjs
           node --test tests/shoplingPriceModifyBulkAuditPagination.test.mjs
           node --test tests/shoplingPriceModifyBulkOpsObservability.test.mjs
