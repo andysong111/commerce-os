@@ -210,7 +210,9 @@ export async function listRecoverableDetailPageJobs(
       Boolean(row && typeof row === "object" && row.payload?.kind === "detail_page"),
     )
     .map(normalizeJobRow)
-    .filter((job) => ["queued", "running"].includes(job.status));
+    .filter((job) =>
+      ["queued", "running", "render_pending"].includes(job.status),
+    );
 }
 
 export async function insertDetailPageJob(
