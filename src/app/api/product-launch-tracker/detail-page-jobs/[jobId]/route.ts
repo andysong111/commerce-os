@@ -80,7 +80,7 @@ export async function POST(
 
     if (action === "claim") {
       if (!workerAuthorized) return forbidden("서버 작업자만 작업을 인계받을 수 있습니다.");
-      if (TERMINAL.has(job.status) || job.status === "render_pending") {
+      if (TERMINAL.has(job.status)) {
         return Response.json({ ok: true, terminal: true, job: publicDetailPageJob(job) });
       }
       const now = Date.now();
@@ -206,9 +206,10 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
-    if (["progress", "checkpoint", "render_pending", "failed"].includes(action)) {
+    if (["progress", "checkpoint", "render_pending", "server_finalizer_progress", "failed"].includes(action)) {
       if (!workerAuthorized) return forbidden("Studio 서버 작업자만 생성 상태를 기록할 수 있습니다.");
       const callbackResult = asRecord(body.result);
+      const serverFinalizerProgress = action === "server_finalizer_progress";
       const result =
         action === "render_pending"
           ? {
@@ -221,13 +222,22 @@ export async function POST(
           : callbackResult;
       const nextStatus =
         action === "render_pending" ? "render_pending" : action === "failed" ? "failed" : "running";
-      const releasesLease = action !== "progress";
+      const releasesLease = !["progress", "server_finalizer_progress"].includes(action);
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: nextStatus,
         stage: safeText(body.stage, 100) || job.stage,
         message: safeText(body.message, 500) || job.message,
-        progress: clamp(Number(body.progress ?? job.progress), 0, action === "render_pending" ? 99 : 95),
-        qa_status: action === "render_pending" ? "passed" : action === "failed" ? "failed" : job.qa_status,
+        progress: clamp(
+          Number(body.progress ?? job.progress),
+          0,
+          action === "render_pending" || serverFinalizerProgress ? 99 : 95,
+        ),
+        qa_status:
+          action === "render_pending" || serverFinalizerProgress
+            ? "passed"
+            : action === "failed"
+              ? "failed"
+              : job.qa_status,
         result,
         step_version: Math.max(job.step_version, Number(body.stepVersion) || job.step_version),
         lease_owner: releasesLease ? "" : job.lease_owner,
@@ -357,7 +367,9 @@ export async function POST(
     }
 
     if (action === "final_complete") {
-      if (!ownerAuthorized) return forbidden("OPS 화면만 최종 도킹을 완료할 수 있습니다.");
+      if (!workerAuthorized && !ownerAuthorized) {
+        return forbidden("Studio 서버 작업자 또는 OPS 화면만 최종 도킹을 완료할 수 있습니다.");
+      }
       const detailImageUrl = safeText(body.detailImageUrl, 2_000);
       const mainImageUrl = safeText(body.mainImageUrl, 2_000);
       const additionalImageUrls = stringList(body.additionalImageUrls, 4);
@@ -366,13 +378,29 @@ export async function POST(
         return invalid("최종 상세·대표·부가 이미지 URL 구성이 올바르지 않습니다.");
       }
       const completedAt = new Date().toISOString();
+      const callbackResult = asRecord(body.result);
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "success",
         stage: "docked",
-        message: "검수 통과 · 상세 HTML과 이미지 URL 자동 도킹 완료",
+        message: "검수 통과 · 서버 조립 상세 HTML과 이미지 URL 자동 도킹 완료",
         progress: 100,
         qa_status: "passed",
-        result: { detailImageUrl, mainImageUrl, additionalImageUrls },
+        result: {
+          ...callbackResult,
+          detailImageUrl,
+          mainImageUrl,
+          additionalImageUrls,
+          finalizerMode: workerAuthorized ? "server-v1" : callbackResult.finalizerMode,
+          finalizerPhase: "complete",
+          standardFailure: null,
+          standard_failure: null,
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
+        },
+        step_version: Math.max(
+          job.step_version,
+          Number(body.stepVersion) || job.step_version,
+        ),
         lease_owner: "",
         lease_until: null,
         error_message: "",
