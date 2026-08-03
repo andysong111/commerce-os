@@ -18,80 +18,65 @@ const jobRouteSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
   "utf8",
 );
+const startRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts",
+  "utf8",
+);
 
-test("detail-page review shows a live job progress monitor", () => {
+test("detail-page review shows live server job progress", () => {
   assert.match(workspaceSource, /상세페이지 작업 현황/);
-  assert.match(workspaceSource, /최근 heartbeat/);
-  assert.match(workspaceSource, /시도 횟수/);
+  assert.match(workspaceSource, /최근 실제 진행/);
   assert.match(workspaceSource, /job_id: \{job\.jobId\}/);
-  assert.match(workspaceSource, /window\.setInterval\(\(\) => void refresh\(true\), POLL_MS\)/);
+  assert.match(
+    workspaceSource,
+    /window\.setInterval\(\(\) => void refresh\(true\), POLL_MS\)/,
+  );
+  assert.match(workspaceSource, /job\.stage === "server_final_assembly"/);
+  assert.match(workspaceSource, /result\.finalizerCompletedAssets/);
+  assert.match(workspaceSource, /서버 14,000px 렌더링/);
 });
 
-test("a stalled final assembly can reconnect without regenerating assets", () => {
-  assert.match(workspaceSource, /job\.status === "render_pending"/);
-  assert.match(workspaceSource, /finalizerPhase === "failed" \|\| heartbeatAge >= 30_000/);
-  assert.match(workspaceSource, /type: "activate-detail-page-job"/);
-  assert.match(workspaceSource, /requestId,/);
-  assert.match(workspaceSource, /최종 조립 다시 연결/);
+test("legacy render_pending resumes through the server start API only", () => {
+  assert.match(workspaceSource, /job\.status !== "render_pending"/);
+  assert.match(
+    workspaceSource,
+    /\$\{JOBS_API\}\/\$\{encodeURIComponent\(job\.jobId\)\}\/start/,
+  );
+  assert.match(workspaceSource, /서버 최종 조립 다시 시작/);
   assert.match(workspaceSource, /1688 재수집·AI 재생성 없이/);
-  assert.doesNotMatch(workspaceSource, /reconnectFinalAssembly[\s\S]{0,900}resume_checkpointed_generation/);
-  assert.doesNotMatch(workspaceSource, /최종 조립기 재연결 요청을 전달했습니다/);
+  assert.match(dockSource, /await startWorker\(renderJob\.jobId\)/);
+  assert.doesNotMatch(dockSource, /ops_finalize/);
+  assert.doesNotMatch(dockSource, /ops-dock-finalize-snapshot/);
+  assert.doesNotMatch(dockSource, /openFinalizer/);
+  assert.doesNotMatch(workspaceSource, /detail-page-finalizer-status/);
+  assert.match(
+    startRouteSource,
+    /\["success", "failed", "cancelled"\]\.includes\(job\.status\)/,
+  );
 });
 
-test("the final-assembly worker boots directly and reports actual readiness", () => {
+test("the same-origin worker remains only for collection and full regeneration", () => {
   assert.match(trackerEntrySource, /detailPageMode === "worker"/);
   assert.match(
     trackerEntrySource,
     /detailPageMode === "worker"\)[\s\S]{0,160}await import\("\.\/detail-page-dock\.js"\)/,
   );
-  assert.doesNotMatch(
-    trackerEntrySource,
-    /detailPageMode === "worker"\)[\s\S]{0,160}await import\("\.\/bootstrap\.js"\)/,
-  );
   assert.match(trackerEntrySource, /type: "detail-page-worker-ready"/);
-  assert.match(trackerEntrySource, /type === "detail-page-worker-ping"/);
-  assert.match(workspaceSource, /payload\?\.type === "detail-page-worker-ready"/);
   assert.match(workspaceSource, /type: "detail-page-worker-ping"/);
-  assert.doesNotMatch(workspaceSource, /onLoad=\{\(\) => setWorkerReady\(true\)\}/);
+  assert.match(dockSource, /mountFrame\(url, "1688 근거 수집기"\)/);
+  assert.doesNotMatch(dockSource, /mountFrame\(url, "상세페이지 최종 조립기"\)/);
 });
 
-test("final-assembly reconnect is acknowledged by the real worker and persisted", () => {
-  assert.match(workspaceSource, /type === "detail-page-finalizer-status"/);
-  assert.match(workspaceSource, /requestId !== finalizerRequestRef\.current/);
-  assert.match(workspaceSource, /최종 조립기가 20초 안에 재연결 요청을 확인하지 못했습니다/);
-  assert.match(dockSource, /async function activateFinalizerJob/);
+test("server finalizer progress and completion are worker-authorized", () => {
+  assert.match(jobRouteSource, /server_finalizer_progress/);
+  assert.match(jobRouteSource, /serverFinalizerProgress \? 99 : 95/);
   assert.match(
-    dockSource,
-    /if \(active\?\.jobId === job\.jobId\) finishActive\(\)/,
+    jobRouteSource,
+    /if \(!workerAuthorized && !ownerAuthorized\)/,
   );
-  assert.match(dockSource, /type: "detail-page-finalizer-status"/);
-  assert.match(dockSource, /action: "finalizer_progress"/);
-  assert.match(dockSource, /recordFinalizerProgress\("engine_ready"/);
-  assert.match(dockSource, /SNAPSHOT_MAX_ATTEMPTS = 5/);
-  assert.match(dockSource, /FINALIZER_PROTOCOL_VERSION = "snapshot-ack-v2"/);
-  assert.match(dockSource, /url\.searchParams\.set\("finalizer_protocol", FINALIZER_PROTOCOL_VERSION\)/);
-  assert.match(dockSource, /url\.searchParams\.set\("connection_nonce", crypto\.randomUUID\(\)\)/);
-  assert.match(dockSource, /FINALIZER_PROTOCOL_MISMATCH/);
-  assert.match(dockSource, /finalizerProtocolVersion: FINALIZER_PROTOCOL_VERSION/);
-  assert.match(dockSource, /active\.snapshotDeliveryStarted = true/);
-  assert.match(dockSource, /type === "ops-dock-finalize-snapshot-ack"/);
-  assert.match(dockSource, /snapshotRequestId: current\.snapshotRequestId/);
-  assert.match(dockSource, /FINALIZER_SNAPSHOT_ACK_TIMEOUT/);
-  assert.match(dockSource, /FINALIZER_SNAPSHOT_PROGRESS_TIMEOUT/);
-  assert.match(dockSource, /SNAPSHOT_PROGRESS_TIMEOUT_MS = 10 \* 1000/);
-  assert.match(dockSource, /window\.clearTimeout\(activeSnapshotTimer\)/);
-  assert.match(dockSource, /window\.clearTimeout\(activeSnapshotProgressTimer\)/);
-  assert.match(dockSource, /type === "ops-dock-finalize-progress"/);
-  assert.doesNotMatch(dockSource, /recordFinalizerHeartbeat\("snapshot_loading"/);
-  assert.match(jobRouteSource, /"finalizer_heartbeat", "finalizer_progress"/);
-  assert.match(jobRouteSource, /finalizer_heartbeat_at: heartbeatAt/);
-  assert.match(jobRouteSource, /finalizer_started_at: finalizerStartedAt/);
-  assert.match(jobRouteSource, /finalizer_attempt: finalizerAttempt/);
-  assert.match(jobRouteSource, /finalizer_completed_assets: completedAssets/);
-  assert.match(jobRouteSource, /finalizer_error_code: errorCode/);
-  assert.match(workspaceSource, /이번 조립 경과/);
-  assert.match(workspaceSource, /조립 시도 횟수/);
-  assert.match(workspaceSource, /최근 실제 진행/);
-  assert.match(workspaceSource, /finalizerPhase === "failed"/);
-  assert.match(dockSource, /Number\.POSITIVE_INFINITY/);
+  assert.match(
+    jobRouteSource,
+    /finalizerMode: workerAuthorized \? "server-v1"/,
+  );
+  assert.match(jobRouteSource, /서버 조립 상세 HTML과 이미지 URL 자동 도킹 완료/);
 });
