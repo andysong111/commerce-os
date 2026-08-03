@@ -68,6 +68,11 @@ test("final-assembly reconnect is acknowledged by the real worker and persisted"
   assert.match(dockSource, /action: "finalizer_progress"/);
   assert.match(dockSource, /recordFinalizerProgress\("engine_ready"/);
   assert.match(dockSource, /SNAPSHOT_MAX_ATTEMPTS = 5/);
+  assert.match(dockSource, /FINALIZER_PROTOCOL_VERSION = "snapshot-ack-v2"/);
+  assert.match(dockSource, /url\.searchParams\.set\("finalizer_protocol", FINALIZER_PROTOCOL_VERSION\)/);
+  assert.match(dockSource, /url\.searchParams\.set\("connection_nonce", crypto\.randomUUID\(\)\)/);
+  assert.match(dockSource, /FINALIZER_PROTOCOL_MISMATCH/);
+  assert.match(dockSource, /finalizerProtocolVersion: FINALIZER_PROTOCOL_VERSION/);
   assert.match(dockSource, /active\.snapshotDeliveryStarted = true/);
   assert.match(dockSource, /type === "ops-dock-finalize-snapshot-ack"/);
   assert.match(dockSource, /snapshotRequestId: current\.snapshotRequestId/);
