@@ -238,6 +238,46 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
+    if (action === "finalizer_heartbeat") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 최종 조립 연결 상태를 기록할 수 있습니다.");
+      }
+      if (job.status !== "render_pending") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_FINALIZER_NOT_PENDING",
+            message: "최종 조립 대기 중인 작업만 다시 연결할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const phase = safeText(body.phase, 80);
+      const phaseMessages: Record<string, string> = {
+        connecting: "최종 조립기 연결 중",
+        engine_ready: "최종 조립기 연결 완료 · 저장 결과 불러오는 중",
+        snapshot_loading: "저장된 생성 결과를 불러와 최종 14,000px 조립 중",
+        failed: "최종 조립 연결 실패 · 저장 결과는 보존됨",
+      };
+      if (!phaseMessages[phase]) return invalid("최종 조립 단계가 올바르지 않습니다.");
+      const heartbeatAt = new Date().toISOString();
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "render_pending",
+        stage: "render_pending",
+        message: safeText(body.message, 500) || phaseMessages[phase],
+        progress: clamp(Number(job.progress || 96), 96, 99),
+        qa_status: "passed",
+        payload: {
+          finalizer_phase: phase,
+          finalizer_heartbeat_at: heartbeatAt,
+        },
+        error_message:
+          phase === "failed" ? safeText(body.error, 2_000) || phaseMessages.failed : "",
+        completed_at: null,
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
     if (action === "final_complete") {
       if (!ownerAuthorized) return forbidden("OPS 화면만 최종 도킹을 완료할 수 있습니다.");
       const detailImageUrl = safeText(body.detailImageUrl, 2_000);
