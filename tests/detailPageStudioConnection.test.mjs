@@ -44,12 +44,12 @@ function withEnvironment(values, run) {
   }
 }
 
-test("preview deployments automatically select the stable Studio PR branch alias", () => {
+test("preview deployments select the bounded final-assembly Studio Preview", () => {
   withEnvironment({ VERCEL_ENV: "preview" }, () => {
     const connection = resolveDetailPageStudioConnection();
     assert.equal(
       connection.engineOrigin,
-      "https://commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa.vercel.app",
+      "https://commerce-os-detail-page-studio-git-agent-final-96809d-a2bsangsa.vercel.app",
     );
     assert.equal(connection.isPreview, true);
     assert.deepEqual(connection.requestHeaders, {});
