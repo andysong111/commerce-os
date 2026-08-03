@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import {
+  extractCanonicalPriceTargetsFromUploadResult,
+  SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+} from "@/lib/shoplingCanonicalPricePolicy";
+import { dispatchShoplingPriceModifyActions } from "@/lib/shoplingPriceModifyRunner";
+import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
   readProductLaunchState,
@@ -96,7 +101,7 @@ export async function PUT(
   try {
     const body = await request.json();
     const status = String(body?.status ?? "");
-    if (!['success', 'partial_failure', 'failed'].includes(status)) {
+    if (!["success", "partial_failure", "failed"].includes(status)) {
       throw new Error("완료 상태가 올바르지 않습니다.");
     }
     const rows = Array.isArray(body?.rows) ? body.rows.map(asRecord) : [];
@@ -256,7 +261,8 @@ async function applyResultToTrackerState(
       CHANNEL_KEY_BY_LABEL[String(row.channel ?? row.channel_label ?? "")] ||
       "";
     if (!channelKey) continue;
-    const succeeded = String(row.status ?? "") === "success" || String(row.code ?? "") === "000";
+    const succeeded =
+      String(row.status ?? "") === "success" || String(row.code ?? "") === "000";
     products[channelKey] = {
       ...asRecord(products[channelKey]),
       goodsKey: String(row.goods_key ?? row.goodsKey ?? ""),
@@ -266,6 +272,7 @@ async function applyResultToTrackerState(
     };
   }
   item.shoplingProducts = products;
+  await startCanonicalPricePolicy(item, input, completedAt);
 
   const stages = { ...asRecord(item.stages) };
   const currentStage = { ...asRecord(stages.shoplingUpload) };
@@ -282,7 +289,9 @@ async function applyResultToTrackerState(
   if (input.status !== "success") {
     const note = input.errorMessage || "샵플링 등록 결과를 확인하세요.";
     const previous = String(item.notes ?? "");
-    item.notes = previous.includes(note) ? previous : [previous, note].filter(Boolean).join(" · ");
+    item.notes = previous.includes(note)
+      ? previous
+      : [previous, note].filter(Boolean).join(" · ");
   }
   items[itemIndex] = item;
   const nextState = {
@@ -295,6 +304,90 @@ async function applyResultToTrackerState(
     { userId: ownerId, email: ownerEmail },
     nextState,
   );
+}
+
+async function startCanonicalPricePolicy(
+  item: Record<string, unknown>,
+  input: {
+    status: "success" | "partial_failure" | "failed";
+    rows: Array<Record<string, unknown>>;
+  },
+  completedAt: string,
+) {
+  if (input.status !== "success") return;
+
+  const existingPolicy = asRecord(item.pricePolicy);
+  const existingRequestId = String(existingPolicy.requestId ?? "").trim();
+  const existingStatus = String(existingPolicy.status ?? "").trim();
+  if (
+    existingRequestId &&
+    ["pending", "running", "success"].includes(existingStatus)
+  ) {
+    return;
+  }
+
+  const targets = extractCanonicalPriceTargetsFromUploadResult({
+    summary: { rows: input.rows },
+  });
+  if (targets.goodsKeys.length !== 6 || targets.failedRowCount > 0) {
+    item.pricePolicy = {
+      ...existingPolicy,
+      required: true,
+      status: "failed",
+      requestId: "",
+      policyVersion: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+      goodsKeyCount: targets.goodsKeys.length,
+      message:
+        "6채널 goods_key와 상품그룹을 모두 확인하지 못해 중앙 가격정책 실행을 차단했습니다.",
+      updatedAt: completedAt,
+    };
+    return;
+  }
+
+  try {
+    const dispatch = await dispatchShoplingPriceModifyActions(
+      targets.goodsKeys.join(","),
+      [],
+      targets.goodsKeyGroupJson,
+    );
+    if (dispatch.status === "queued" && dispatch.requestId) {
+      item.pricePolicy = {
+        ...existingPolicy,
+        required: true,
+        status: "pending",
+        requestId: dispatch.requestId,
+        policyVersion: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+        goodsKeyCount: targets.goodsKeys.length,
+        message: "상품등록 완료 후 중앙 가격정책 실행을 시작했습니다.",
+        updatedAt: completedAt,
+      };
+      return;
+    }
+    item.pricePolicy = {
+      ...existingPolicy,
+      required: true,
+      status: "failed",
+      requestId: dispatch.requestId ?? "",
+      policyVersion: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+      goodsKeyCount: targets.goodsKeys.length,
+      message: dispatch.message || "중앙 가격정책 실행을 시작하지 못했습니다.",
+      updatedAt: completedAt,
+    };
+  } catch (error) {
+    item.pricePolicy = {
+      ...existingPolicy,
+      required: true,
+      status: "failed",
+      requestId: "",
+      policyVersion: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+      goodsKeyCount: targets.goodsKeys.length,
+      message:
+        error instanceof Error
+          ? error.message
+          : "중앙 가격정책 실행을 시작하지 못했습니다.",
+      updatedAt: completedAt,
+    };
+  }
 }
 
 function isValidJobId(value: string) {
