@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STORAGE_KEY = "shoplingPriceModifySimpleAutoJobId";
 
@@ -71,6 +71,8 @@ export function ShoplingPriceModifyJobDiagnostics() {
   const [lastCheckedAt, setLastCheckedAt] = useState("");
   const [changed, setChanged] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
+  const requestInFlight = useRef(false);
+  const diagnosticRef = useRef<Diagnostic | null>(null);
 
   useEffect(() => {
     const detect = () => {
@@ -83,8 +85,9 @@ export function ShoplingPriceModifyJobDiagnostics() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const refresh = useCallback(async (manual = false) => {
-    if (!jobId || loading) return;
+  const refresh = useCallback(async () => {
+    if (!jobId || requestInFlight.current) return;
+    requestInFlight.current = true;
     setLoading(true);
     setError("");
     const controller = new AbortController();
@@ -102,11 +105,12 @@ export function ShoplingPriceModifyJobDiagnostics() {
         throw new Error(`진단 응답을 읽지 못했습니다. HTTP ${response.status}`);
       }
       if (!response.ok) throw new Error(body.error || `정밀 상태 확인에 실패했습니다. HTTP ${response.status}`);
-      const previousSignature = diagnostic ? JSON.stringify({
-        job: diagnostic.job,
-        progress: diagnostic.progress,
-        active: diagnostic.current_active_chunk,
-        health: diagnostic.health,
+      const previous = diagnosticRef.current;
+      const previousSignature = previous ? JSON.stringify({
+        job: previous.job,
+        progress: previous.progress,
+        active: previous.current_active_chunk,
+        health: previous.health,
       }) : null;
       const nextSignature = JSON.stringify({
         job: body.job,
@@ -115,6 +119,7 @@ export function ShoplingPriceModifyJobDiagnostics() {
         health: body.health,
       });
       setChanged(previousSignature === null ? null : previousSignature !== nextSignature);
+      diagnosticRef.current = body;
       setDiagnostic(body);
       setLastCheckedAt(new Date().toISOString());
     } catch (caught) {
@@ -125,16 +130,20 @@ export function ShoplingPriceModifyJobDiagnostics() {
       setLastCheckedAt(new Date().toISOString());
     } finally {
       window.clearTimeout(timeout);
+      requestInFlight.current = false;
       setLoading(false);
     }
-  }, [diagnostic, jobId, loading]);
+  }, [jobId]);
 
   useEffect(() => {
     if (!jobId) return;
-    void refresh(false);
-    const timer = window.setInterval(() => void refresh(false), 30_000);
-    return () => window.clearInterval(timer);
-  }, [jobId]); // eslint-disable-line react-hooks/exhaustive-deps
+    const first = window.setTimeout(() => void refresh(), 0);
+    const timer = window.setInterval(() => void refresh(), 30_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
+  }, [jobId, refresh]);
 
   const copyable = useMemo(() => JSON.stringify({
     copied_at: new Date().toISOString(),
@@ -174,7 +183,7 @@ export function ShoplingPriceModifyJobDiagnostics() {
         {health.recommended_action && <p className="mt-1 text-sm text-slate-600">조치: {health.recommended_action}</p>}
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" disabled={loading} onClick={() => void refresh(true)} className="rounded-lg bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-50">
+        <button type="button" disabled={loading} onClick={() => void refresh()} className="rounded-lg bg-slate-950 px-4 py-2 font-bold text-white disabled:opacity-50">
           {loading ? "확인 중..." : "정밀 상태 확인"}
         </button>
         <button type="button" onClick={() => void copy()} className="rounded-lg border border-slate-400 bg-white px-4 py-2 font-bold text-slate-900">
