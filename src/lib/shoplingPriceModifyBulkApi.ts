@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  isOpsLoginTemporarilyDisabled,
+  isSameOriginOpsRequest,
+  temporaryOpsIdentity,
+} from "@/lib/opsLoginBypass";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalErrorDetail } from "@/lib/shoplingPriceModifyBulkError";
@@ -27,23 +33,119 @@ export type BulkAdmin = {
   from(table: string): BulkAdminQuery;
 };
 
-export async function normalSession() {
-  try {
-    const supabase = await createSupabaseServerClient();
-    if (!supabase) return { response: normalError("Supabase 서버 설정이 필요합니다.", 503, "CONFIGURATION_ERROR", "normal.session.auth") };
-    const { data, error } = await supabase.auth.getUser();
-    if (error) return { response: normalError("로그인 세션을 확인할 수 없습니다.", 401, "AUTH_SESSION_FAILED", "normal.session.auth", error) };
-    if (!data.user) return { response: normalError("로그인이 필요합니다.", 401, "AUTH_REQUIRED", "normal.session.auth") };
+async function currentOpsRequestFromHeaders() {
+  const requestHeaders = await headers();
+  const forwardedHost = requestHeaders
+    .get("x-forwarded-host")
+    ?.split(",", 1)[0]
+    ?.trim();
+  const host = forwardedHost || requestHeaders.get("host")?.trim();
+  if (!host) return null;
 
-    try {
-      const admin = await createSupabaseAdminClient();
-      if (!admin) return { response: normalError("Supabase 서버 설정이 필요합니다.", 503, "CONFIGURATION_ERROR", "normal.session.admin") };
-      return { ownerId: data.user.id, admin: admin as BulkAdmin };
-    } catch (error) {
-      return { response: normalError("관리자 클라이언트를 생성할 수 없습니다.", 500, "ADMIN_CLIENT_FAILED", "normal.session.admin", error) };
+  const forwardedProtocol = requestHeaders
+    .get("x-forwarded-proto")
+    ?.split(",", 1)[0]
+    ?.trim();
+  const localHost =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]");
+  const protocol = forwardedProtocol || (localHost ? "http" : "https");
+  const copiedHeaders = new Headers();
+  requestHeaders.forEach((value, key) => copiedHeaders.append(key, value));
+
+  return new Request(`${protocol}://${host}/`, { headers: copiedHeaders });
+}
+
+async function normalAdminSession(ownerId: string) {
+  try {
+    const admin = await createSupabaseAdminClient();
+    if (!admin) {
+      return {
+        response: normalError(
+          "Supabase 서버 설정이 필요합니다.",
+          503,
+          "CONFIGURATION_ERROR",
+          "normal.session.admin",
+        ),
+      };
     }
+    return { ownerId, admin: admin as BulkAdmin };
   } catch (error) {
-    return { response: normalError("로그인 세션을 확인할 수 없습니다.", 500, "AUTH_SESSION_FAILED", "normal.session.auth", error) };
+    return {
+      response: normalError(
+        "관리자 클라이언트를 생성할 수 없습니다.",
+        500,
+        "ADMIN_CLIENT_FAILED",
+        "normal.session.admin",
+        error,
+      ),
+    };
+  }
+}
+
+export async function normalSession(request?: Request) {
+  try {
+    if (isOpsLoginTemporarilyDisabled()) {
+      const opsRequest = request ?? await currentOpsRequestFromHeaders();
+      if (!opsRequest || !isSameOriginOpsRequest(opsRequest)) {
+        return {
+          response: normalError(
+            "Ops Center 화면에서 다시 실행하세요.",
+            403,
+            "OPS_LOGIN_BYPASS_SAME_ORIGIN_REQUIRED",
+            "normal.session.bypass",
+          ),
+        };
+      }
+      return normalAdminSession(temporaryOpsIdentity().userId);
+    }
+
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) {
+      return {
+        response: normalError(
+          "Supabase 서버 설정이 필요합니다.",
+          503,
+          "CONFIGURATION_ERROR",
+          "normal.session.auth",
+        ),
+      };
+    }
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      return {
+        response: normalError(
+          "로그인 세션을 확인할 수 없습니다.",
+          401,
+          "AUTH_SESSION_FAILED",
+          "normal.session.auth",
+          error,
+        ),
+      };
+    }
+    if (!data.user) {
+      return {
+        response: normalError(
+          "로그인이 필요합니다.",
+          401,
+          "AUTH_REQUIRED",
+          "normal.session.auth",
+        ),
+      };
+    }
+
+    return normalAdminSession(data.user.id);
+  } catch (error) {
+    return {
+      response: normalError(
+        "로그인 세션을 확인할 수 없습니다.",
+        500,
+        "AUTH_SESSION_FAILED",
+        "normal.session.auth",
+        error,
+      ),
+    };
   }
 }
 
