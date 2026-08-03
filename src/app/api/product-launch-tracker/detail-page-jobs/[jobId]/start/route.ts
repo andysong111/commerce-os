@@ -34,10 +34,13 @@ export async function POST(
         { status: 404 },
       );
     }
-    if (["render_pending", "success", "failed", "cancelled"].includes(job.status)) {
+    if (["success", "failed", "cancelled"].includes(job.status)) {
       return Response.json({ ok: true, accepted: false, terminal: true, status: job.status });
     }
-    if (!Array.isArray(job.payload.evidence_urls) || job.payload.evidence_urls.length < 1) {
+    if (
+      job.status !== "render_pending" &&
+      (!Array.isArray(job.payload.evidence_urls) || job.payload.evidence_urls.length < 1)
+    ) {
       return Response.json(
         { ok: false, code: "DETAIL_PAGE_EVIDENCE_NOT_READY", message: "1688 근거 이미지 저장이 완료되지 않았습니다." },
         { status: 409 },
@@ -89,3 +92,4 @@ export async function POST(
     );
   }
 }
+
