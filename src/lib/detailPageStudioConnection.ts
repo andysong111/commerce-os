@@ -1,9 +1,9 @@
 const PRODUCTION_STUDIO_URL =
   "https://commerce-os-detail-page-studio.vercel.app/";
 
-// Stable Vercel branch alias for Detail Page Studio PR #53.
+// Stable Vercel Preview for bounded final assembly recovery in Detail Page Studio PR #55.
 const PREVIEW_STUDIO_URL =
-  "https://commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa.vercel.app/";
+  "https://commerce-os-detail-page-studio-git-agent-final-96809d-a2bsangsa.vercel.app/";
 
 const STUDIO_WORKER_PATH = "/api/internal/ops-detail-page-job";
 const OPS_CALLBACK_HEALTH_PATH =
@@ -86,7 +86,7 @@ export async function probeDetailPageStudio(
         code: "DETAIL_PAGE_STUDIO_INCOMPATIBLE",
         message:
           response.status === 404
-            ? "연결된 상세페이지 Studio에 OPS 자동생성 기능이 없습니다. PR #53 Preview 연결을 확인하세요."
+            ? "연결된 상세페이지 Studio에 OPS 자동생성 기능이 없습니다. PR #55 Preview 연결을 확인하세요."
             : "상세페이지 Studio 연결 규격을 확인하지 못했습니다.",
       };
     }
