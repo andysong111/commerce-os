@@ -911,7 +911,6 @@ function finalizerPhaseLabel(phase: string) {
     snapshot_received: "저장 결과 확인",
     asset_loaded: "저장 이미지 다운로드",
     render_waiting: "렌더러 응답 대기",
-    encoding: "JPEG 변환",
     failed: "복구 가능한 조립 실패",
   };
   return labels[phase] || "조립 연결 대기";
