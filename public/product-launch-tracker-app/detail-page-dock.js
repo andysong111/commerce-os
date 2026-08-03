@@ -10,6 +10,7 @@ const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
 const SNAPSHOT_RETRY_MS = 1000;
 const SNAPSHOT_MAX_ATTEMPTS = 5;
 const SNAPSHOT_PROGRESS_TIMEOUT_MS = 10 * 1000;
+const FINALIZER_PROTOCOL_VERSION = "snapshot-ack-v2";
 const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
 const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
 const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
@@ -540,6 +541,8 @@ async function openFinalizer(job, { requestId = "" } = {}) {
     url.searchParams.set("job_id", active.jobId);
     url.searchParams.set("item_id", active.itemId);
     url.searchParams.set("target_origin", window.location.origin);
+    url.searchParams.set("finalizer_protocol", FINALIZER_PROTOCOL_VERSION);
+    url.searchParams.set("connection_nonce", crypto.randomUUID());
     mountFrame(url, "상세페이지 최종 조립기");
   } catch (error) {
     await failFinalizer(
@@ -648,6 +651,14 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
+    if (payload.finalizerProtocolVersion !== FINALIZER_PROTOCOL_VERSION) {
+      await failFinalizer(
+        "연결된 Studio 최종 조립기가 이전 버전입니다. 최신 Preview 연결을 다시 열어야 합니다.",
+        "protocol_mismatch",
+        { errorCode: "FINALIZER_PROTOCOL_MISMATCH" },
+      );
+      return;
+    }
     if (active.snapshotDeliveryStarted) return;
     active.snapshotDeliveryStarted = true;
     try {
@@ -665,6 +676,14 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalize-snapshot-ack" && active.mode === "finalize") {
+    if (payload.finalizerProtocolVersion !== FINALIZER_PROTOCOL_VERSION) {
+      await failFinalizer(
+        "Studio의 작업 수신 확인 규격이 현재 OPS와 일치하지 않습니다.",
+        "protocol_mismatch",
+        { errorCode: "FINALIZER_PROTOCOL_MISMATCH" },
+      );
+      return;
+    }
     if (
       cleanText(payload.snapshotRequestId, 160) !== active.snapshotRequestId
     ) {
@@ -766,6 +785,7 @@ function sendFinalizerSnapshot() {
         jobId: current.jobId,
         itemId: current.itemId,
         snapshotRequestId: current.snapshotRequestId,
+        finalizerProtocolVersion: FINALIZER_PROTOCOL_VERSION,
         job,
       },
       engineConfig.engineOrigin,
