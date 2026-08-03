@@ -7,6 +7,9 @@ const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
 const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
 const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
+const SNAPSHOT_RETRY_MS = 1000;
+const SNAPSHOT_MAX_ATTEMPTS = 5;
+const SNAPSHOT_PROGRESS_TIMEOUT_MS = 10 * 1000;
 const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
 const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
 const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
@@ -30,6 +33,8 @@ let active = null;
 let activeFrame = null;
 let activeTimer = null;
 let activeHandshakeTimer = null;
+let activeSnapshotTimer = null;
+let activeSnapshotProgressTimer = null;
 let engineConfig = null;
 let syncing = false;
 let enqueueing = false;
@@ -510,6 +515,10 @@ async function openFinalizer(job, { requestId = "" } = {}) {
     mode: "finalize",
     requestId,
     finalizerHeartbeatAt: 0,
+    snapshotDeliveryStarted: false,
+    snapshotRequestId: "",
+    snapshotAcked: false,
+    snapshotSendAttempts: 0,
   };
   updateAutomation(active.itemId, {
     status: "uploading",
@@ -639,7 +648,8 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
-    if (active.snapshotSent) return;
+    if (active.snapshotDeliveryStarted) return;
+    active.snapshotDeliveryStarted = true;
     try {
       await recordFinalizerProgress("engine_ready", { announce: true });
     } catch (error) {
@@ -650,27 +660,35 @@ async function handleEngineMessage(event) {
       return;
     }
     if (!active || active.mode !== "finalize") return;
-    const job = jobsById.get(active.jobId);
-    if (!job) return;
-    active.snapshotSent = true;
-    const frame = activeFrame;
-    const jobId = active.jobId;
-    const itemId = active.itemId;
-    window.setTimeout(() => {
-      if (activeFrame !== frame || active?.jobId !== jobId) return;
-      frame.contentWindow?.postMessage(
-        {
-          type: "ops-dock-finalize-snapshot",
-          jobId,
-          itemId,
-          job,
-        },
-        engineConfig.engineOrigin,
+    active.snapshotRequestId = crypto.randomUUID();
+    sendFinalizerSnapshot();
+    return;
+  }
+  if (payload.type === "ops-dock-finalize-snapshot-ack" && active.mode === "finalize") {
+    if (
+      cleanText(payload.snapshotRequestId, 160) !== active.snapshotRequestId
+    ) {
+      return;
+    }
+    if (active.snapshotAcked) return;
+    active.snapshotAcked = true;
+    window.clearTimeout(activeSnapshotTimer);
+    activeSnapshotTimer = null;
+    activeSnapshotProgressTimer = window.setTimeout(() => {
+      void failFinalizer(
+        "Studio가 최종 조립 작업 데이터는 받았지만 이미지 처리 단계를 시작하지 못했습니다.",
+        "snapshot_progress_timeout",
+        { errorCode: "FINALIZER_SNAPSHOT_PROGRESS_TIMEOUT" },
       );
-    }, 120);
+    }, SNAPSHOT_PROGRESS_TIMEOUT_MS);
     return;
   }
   if (payload.type === "ops-dock-finalize-progress" && active.mode === "finalize") {
+    active.snapshotAcked = true;
+    window.clearTimeout(activeSnapshotTimer);
+    window.clearTimeout(activeSnapshotProgressTimer);
+    activeSnapshotTimer = null;
+    activeSnapshotProgressTimer = null;
     try {
       const persisted = await recordFinalizerProgress(
         cleanText(payload.phase, 80) || "snapshot_received",
@@ -710,6 +728,63 @@ async function handleEngineMessage(event) {
       },
     );
   }
+}
+
+function sendFinalizerSnapshot() {
+  if (
+    !active ||
+    active.mode !== "finalize" ||
+    active.snapshotAcked ||
+    !active.snapshotRequestId
+  ) {
+    return;
+  }
+  const current = active;
+  const frame = activeFrame;
+  const job = jobsById.get(current.jobId);
+  if (!frame?.contentWindow || !job || !engineConfig?.engineOrigin) {
+    void failFinalizer(
+      "최종 조립 작업 데이터를 Studio에 전달할 준비가 되지 않았습니다.",
+      "snapshot_delivery_failed",
+      { errorCode: "FINALIZER_SNAPSHOT_DELIVERY_UNAVAILABLE" },
+    );
+    return;
+  }
+  if (current.snapshotSendAttempts >= SNAPSHOT_MAX_ATTEMPTS) {
+    void failFinalizer(
+      `Studio가 최종 조립 작업 데이터 수신을 ${SNAPSHOT_MAX_ATTEMPTS}회 안에 확인하지 못했습니다.`,
+      "snapshot_ack_timeout",
+      { errorCode: "FINALIZER_SNAPSHOT_ACK_TIMEOUT" },
+    );
+    return;
+  }
+  current.snapshotSendAttempts += 1;
+  try {
+    frame.contentWindow.postMessage(
+      {
+        type: "ops-dock-finalize-snapshot",
+        jobId: current.jobId,
+        itemId: current.itemId,
+        snapshotRequestId: current.snapshotRequestId,
+        job,
+      },
+      engineConfig.engineOrigin,
+    );
+  } catch (error) {
+    void failFinalizer(
+      error instanceof Error
+        ? error.message
+        : "최종 조립 작업 데이터를 Studio에 전달하지 못했습니다.",
+      "snapshot_delivery_failed",
+      { errorCode: "FINALIZER_SNAPSHOT_POST_FAILED" },
+    );
+    return;
+  }
+  window.clearTimeout(activeSnapshotTimer);
+  activeSnapshotTimer = window.setTimeout(
+    sendFinalizerSnapshot,
+    SNAPSHOT_RETRY_MS,
+  );
 }
 
 function allowedLocalBridgeRelay(path, method) {
@@ -962,8 +1037,12 @@ async function failActive(message, stage = "failed") {
 function finishActive() {
   window.clearTimeout(activeTimer);
   window.clearTimeout(activeHandshakeTimer);
+  window.clearTimeout(activeSnapshotTimer);
+  window.clearTimeout(activeSnapshotProgressTimer);
   activeTimer = null;
   activeHandshakeTimer = null;
+  activeSnapshotTimer = null;
+  activeSnapshotProgressTimer = null;
   activeFrame?.remove();
   activeFrame = null;
   active = null;
