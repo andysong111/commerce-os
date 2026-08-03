@@ -40,8 +40,6 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 export function DetailPageAiReviewWorkspace() {
   const workerRef = useRef<HTMLIFrameElement>(null);
-  const finalizerRequestRef = useRef("");
-  const finalizerAckTimerRef = useRef<number | null>(null);
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [filter, setFilter] = useState<Filter>("needs_review");
@@ -120,33 +118,6 @@ export function DetailPageAiReviewWorkspace() {
         }
         void refresh(true);
       }
-      if (payload?.source === DOCK_EVENT_SOURCE && payload?.type === "detail-page-finalizer-status") {
-        const requestId = String(payload.requestId || "");
-        if (!requestId || requestId !== finalizerRequestRef.current) return;
-        if (finalizerAckTimerRef.current !== null) {
-          window.clearTimeout(finalizerAckTimerRef.current);
-          finalizerAckTimerRef.current = null;
-        }
-        const tone =
-          payload.tone === "error" ? "error" : payload.tone === "success" ? "success" : "progress";
-        setActionState({
-          tone,
-          message: String(payload.message || "최종 조립 연결 상태를 확인하고 있습니다."),
-        });
-        if (isReviewJob(payload.job)) {
-          setJobs((current) => [
-            payload.job,
-            ...current.filter((job) => job.jobId !== payload.job.jobId),
-          ]);
-          setSelectedJobId(payload.job.jobId);
-        }
-        if (payload.phase === "engine_ready" || tone !== "progress") {
-          setActionJobId("");
-        }
-        if (tone !== "progress") finalizerRequestRef.current = "";
-        void refresh(true);
-        return;
-      }
       if (payload?.source === REVIEW_EVENT_SOURCE && payload?.type === "regeneration-status") {
         setActionState({
           tone: payload.tone === "error" ? "error" : payload.tone === "success" ? "success" : "progress",
@@ -160,15 +131,6 @@ export function DetailPageAiReviewWorkspace() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [refresh]);
-
-  useEffect(
-    () => () => {
-      if (finalizerAckTimerRef.current !== null) {
-        window.clearTimeout(finalizerAckTimerRef.current);
-      }
-    },
-    [],
-  );
 
   useEffect(() => {
     if (workerReady) return;
@@ -330,38 +292,51 @@ export function DetailPageAiReviewWorkspace() {
     );
   }
 
-  function reconnectFinalAssembly(job: DetailPageReviewJob) {
-    if (actionJobId || !workerReady || job.status !== "render_pending") return;
-    const requestId = crypto.randomUUID();
-    finalizerRequestRef.current = requestId;
-    if (finalizerAckTimerRef.current !== null) {
-      window.clearTimeout(finalizerAckTimerRef.current);
-    }
+  async function reconnectFinalAssembly(job: DetailPageReviewJob) {
+    if (actionJobId || job.status !== "render_pending") return;
     setActionJobId(job.jobId);
     setActionState({
       tone: "progress",
-      message: "저장된 검수 통과 결과로 최종 14,000px 조립기만 다시 연결하고 있습니다.",
+      message: "1688 재수집·AI 재생성 없이 저장된 검수 통과 자산으로 서버 최종 조립을 시작하고 있습니다.",
     });
-    workerRef.current?.contentWindow?.postMessage(
-      {
-        source: WORK_ASSISTANT_SOURCE,
-        type: "activate-detail-page-job",
-        job,
-        requestId,
-      },
-      window.location.origin,
-    );
-    finalizerAckTimerRef.current = window.setTimeout(() => {
-      if (finalizerRequestRef.current !== requestId) return;
-      finalizerRequestRef.current = "";
-      finalizerAckTimerRef.current = null;
-      setActionJobId((current) => (current === job.jobId ? "" : current));
+    try {
+      const response = await fetch(
+        `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        accepted?: boolean;
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true) {
+        throw new Error(
+          body.message || "서버 최종 조립을 시작하지 못했습니다.",
+        );
+      }
       setActionState({
-        tone: "error",
-        message: "최종 조립기가 20초 안에 재연결 요청을 확인하지 못했습니다. 다시 연결하기 전에 화면을 새로고침하세요.",
+        tone: "success",
+        message:
+          "서버 최종 조립을 시작했습니다. 화면을 닫아도 계속되며 저장된 1688 원본은 다시 다운로드하지 않습니다.",
       });
       void refresh(true);
-    }, 20_000);
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "서버 최종 조립을 시작하지 못했습니다.",
+      });
+      await refresh(true);
+    } finally {
+      setActionJobId("");
+    }
   }
 
   return (
@@ -628,7 +603,6 @@ function JobReviewDetail({
       <JobProgressMonitor
         job={job}
         presentation={presentation}
-        workerReady={workerReady}
         busy={busy}
         currentBusy={currentBusy}
         onReconnectFinalizer={onReconnectFinalizer}
@@ -766,14 +740,12 @@ function JobReviewDetail({
 function JobProgressMonitor({
   job,
   presentation,
-  workerReady,
   busy,
   currentBusy,
   onReconnectFinalizer,
 }: {
   job: DetailPageReviewJob;
   presentation: ReturnType<typeof bucketPresentation>;
-  workerReady: boolean;
   busy: boolean;
   currentBusy: boolean;
   onReconnectFinalizer: () => void;
@@ -783,12 +755,21 @@ function JobProgressMonitor({
     job.payload && typeof job.payload === "object" && !Array.isArray(job.payload)
       ? job.payload
       : {};
-  const finalizerPhase = String(payload.finalizer_phase || "");
+  const result =
+    job.result && typeof job.result === "object" && !Array.isArray(job.result)
+      ? job.result
+      : {};
+  const finalizerPhase = String(
+    result.finalizerPhase || payload.finalizer_phase || "",
+  );
   const finalizerHeartbeatAt = String(
-    payload.finalizer_heartbeat_at || job.updatedAt,
+    result.finalizerHeartbeatAt || payload.finalizer_heartbeat_at || job.updatedAt,
   );
   const finalizerStartedAt = String(
-    payload.finalizer_started_at || job.startedAt || job.createdAt,
+    result.finalizerStartedAt ||
+      payload.finalizer_started_at ||
+      job.startedAt ||
+      job.createdAt,
   );
   const finalizerAttempt = Math.max(
     1,
@@ -796,15 +777,27 @@ function JobProgressMonitor({
   );
   const completedAssets = Math.max(
     0,
-    Math.floor(Number(payload.finalizer_completed_assets) || 0),
+    Math.floor(
+      Number(
+        result.finalizerCompletedAssets ||
+          payload.finalizer_completed_assets,
+      ) || 0,
+    ),
   );
   const totalAssets = Math.max(
     0,
-    Math.floor(Number(payload.finalizer_total_assets) || 0),
+    Math.floor(
+      Number(
+        result.finalizerTotalAssets || payload.finalizer_total_assets,
+      ) || 0,
+    ),
   );
-  const assetLabel = String(payload.finalizer_asset_label || "").trim();
+  const assetLabel = String(
+    result.finalizerAssetLabel || payload.finalizer_asset_label || "",
+  ).trim();
   const errorCode = String(payload.finalizer_error_code || "").trim();
-  const isFinalizer = job.status === "render_pending";
+  const isFinalizer =
+    job.status === "render_pending" || job.stage === "server_final_assembly";
   const heartbeatAt = isFinalizer ? finalizerHeartbeatAt : job.updatedAt;
   const phaseStartedAt = isFinalizer
     ? finalizerStartedAt
@@ -877,15 +870,15 @@ function JobProgressMonitor({
           </p>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
             <p className="text-[11px] font-bold leading-5 text-amber-800">
-              1688 재수집·AI 재생성 없이 저장된 검수 통과 결과로 최종 조립기만 다시 연결합니다.
+              1688 재수집·AI 재생성 없이 저장된 대표·부가 5장과 상세 섹션만 서버에서 조립합니다.
             </p>
             <button
               type="button"
               onClick={onReconnectFinalizer}
-              disabled={!workerReady || busy}
+              disabled={busy}
               className="rounded-lg bg-blue-700 px-3.5 py-2 text-xs font-black text-white hover:bg-blue-800 disabled:cursor-wait disabled:bg-slate-300 disabled:text-slate-600"
             >
-              {currentBusy ? "조립 재연결 중…" : workerReady ? "최종 조립 다시 연결" : "조립기 준비 중…"}
+              {currentBusy ? "서버 조립 시작 중…" : "서버 최종 조립 다시 시작"}
             </button>
           </div>
         </div>
@@ -907,13 +900,16 @@ function ProgressMetric({ label, value, mono = false }: { label: string; value: 
 
 function finalizerPhaseLabel(phase: string) {
   const labels: Record<string, string> = {
+    asset_check: "대표·부가 이미지 저장 확인",
+    asset_loading: "상세 섹션 저장 이미지 로딩",
+    document_loading: "서버 조립 문서 준비",
+    rendering: "서버 14,000px 렌더링",
+    encoding: "최종 JPEG 확인",
+    complete: "서버 조립 완료",
     connecting: "조립기 연결",
     engine_ready: "저장 결과 전달",
     snapshot_received: "저장 결과 확인",
-    asset_loading: "저장 이미지 다운로드",
     asset_loaded: "저장 이미지 다운로드",
-    document_loading: "조립 문서 이미지 배치",
-    rendering: "14,000px 렌더링",
     render_waiting: "렌더러 응답 대기",
     encoding: "JPEG 변환",
     failed: "복구 가능한 조립 실패",
