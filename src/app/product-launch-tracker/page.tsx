@@ -1,3 +1,4 @@
+import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 export default async function ProductLaunchTrackerPage({
@@ -14,6 +15,8 @@ export default async function ProductLaunchTrackerPage({
 
   return (
     <section className="space-y-3">
+      <ProductLaunchTrackerCanonicalPriceBridge />
+
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
           <strong className="block text-sm text-slate-950">
