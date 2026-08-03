@@ -106,6 +106,23 @@ test("부분 등록 상품은 키워드 단계로 넘기지 않는다", () => {
   );
 });
 
+test("진행관리 등록 완료 콜백이 서버에서 중앙 가격정책을 즉시 시작한다", async () => {
+  const callbackRoute = await readFile(
+    new URL(
+      "../src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(callbackRoute, /dispatchShoplingPriceModifyActions/);
+  assert.match(callbackRoute, /startCanonicalPricePolicy/);
+  assert.match(callbackRoute, /targets\.goodsKeys\.length !== 6/);
+  assert.match(callbackRoute, /targets\.goodsKeyGroupJson/);
+  assert.match(callbackRoute, /status: "pending"/);
+  assert.match(callbackRoute, /SHOPLING_CANONICAL_PRICE_POLICY_VERSION/);
+});
+
 test("진행관리 UI와 중앙 가격정책 완료 콜백을 연결한다", async () => {
   const handoffUi = await readFile(
     new URL(
