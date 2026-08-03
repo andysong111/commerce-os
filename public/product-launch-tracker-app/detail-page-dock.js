@@ -64,10 +64,18 @@ if (DETAIL_PAGE_MODE === "worker") {
     }
     if (payload.type === "activate-detail-page-job") {
       const job = payload.job;
-      if (!job || !isValidJobId(job.jobId) || !cleanText(job.itemId, 160)) return;
-      jobsById.set(job.jobId, job);
-      queueCollectingJobsFromState();
-      void processNext();
+      const requestId = cleanText(payload.requestId, 160);
+      if (!job || !isValidJobId(job.jobId) || !cleanText(job.itemId, 160)) {
+        announceFinalizerStatus({
+          requestId,
+          jobId: cleanText(job?.jobId, 160),
+          tone: "error",
+          phase: "rejected",
+          message: "최종 조립 재연결 요청 값이 올바르지 않습니다.",
+        });
+        return;
+      }
+      void activateFinalizerJob(job, requestId);
     }
   });
 }
@@ -316,6 +324,110 @@ function announceServerJob(job) {
   );
 }
 
+function announceFinalizerStatus({
+  requestId = "",
+  jobId = "",
+  tone = "progress",
+  phase = "",
+  message = "",
+  job = null,
+}) {
+  window.parent?.postMessage(
+    {
+      source: DOCK_EVENT_SOURCE,
+      type: "detail-page-finalizer-status",
+      requestId,
+      jobId,
+      tone,
+      phase,
+      message,
+      job,
+    },
+    window.location.origin,
+  );
+}
+
+async function activateFinalizerJob(job, requestId) {
+  if (active && active.jobId !== job.jobId) {
+    announceFinalizerStatus({
+      requestId,
+      jobId: job.jobId,
+      tone: "error",
+      phase: "busy",
+      message: "다른 상세페이지 작업의 최종 조립이 진행 중입니다.",
+    });
+    return;
+  }
+  if (active?.jobId === job.jobId) finishActive();
+  finalizerRetryAt.delete(job.jobId);
+  jobsById.set(job.jobId, job);
+  announceFinalizerStatus({
+    requestId,
+    jobId: job.jobId,
+    tone: "progress",
+    phase: "received",
+    message: "조립기가 재연결 요청을 확인했습니다.",
+    job,
+  });
+  await openFinalizer(job, { requestId });
+}
+
+async function recordFinalizerHeartbeat(phase, {
+  message = "",
+  error = "",
+  announce = false,
+} = {}) {
+  if (!active || active.mode !== "finalize") return null;
+  const current = active;
+  const persisted = await updateServerJob(current.jobId, {
+    action: "finalizer_heartbeat",
+    phase,
+    message,
+    error,
+  });
+  if (announce) {
+    announceFinalizerStatus({
+      requestId: current.requestId,
+      jobId: current.jobId,
+      tone: phase === "failed" ? "error" : "progress",
+      phase,
+      message: persisted?.message || message,
+      job: persisted,
+    });
+  }
+  return persisted;
+}
+
+async function failFinalizer(message, phase = "failed") {
+  if (!active || active.mode !== "finalize") return;
+  const current = active;
+  finalizerRetryAt.set(current.jobId, Number.POSITIVE_INFINITY);
+  let persisted = null;
+  try {
+    persisted = await recordFinalizerHeartbeat("failed", {
+      message: "최종 조립 연결 실패 · 저장 결과는 보존됨",
+      error: message,
+    });
+  } catch {
+    // The parent still receives the exact browser-side failure below.
+  }
+  announceFinalizerStatus({
+    requestId: current.requestId,
+    jobId: current.jobId,
+    tone: "error",
+    phase,
+    message,
+    job: persisted,
+  });
+  updateAutomation(current.itemId, {
+    status: "uploading",
+    stage: "render_pending",
+    message: "최종 조립 연결 실패 · 다시 연결할 수 있습니다.",
+    error: message,
+  });
+  finishActive();
+}
+
 async function processNext() {
   if (active) return;
   const renderJob = [...jobsById.values()].find(
@@ -368,7 +480,7 @@ async function openEvidenceCollector(job) {
   }
 }
 
-async function openFinalizer(job) {
+async function openFinalizer(job, { requestId = "" } = {}) {
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
   const payload = job?.payload && typeof job.payload === "object" ? job.payload : {};
@@ -382,6 +494,8 @@ async function openFinalizer(job) {
       : String(job.salesOptions || payload.sales_options || "").slice(0, 2000),
     attempt: Number(job.attempt || item?.detailPageAutomation?.attempt || 1),
     mode: "finalize",
+    requestId,
+    finalizerHeartbeatAt: 0,
   };
   updateAutomation(active.itemId, {
     status: "uploading",
@@ -393,6 +507,10 @@ async function openFinalizer(job) {
   });
   renderMonitor();
   try {
+    const persisted = await recordFinalizerHeartbeat("connecting", {
+      announce: Boolean(requestId),
+    });
+    if (persisted) jobsById.set(active.jobId, persisted);
     const config = await getEngineConfig();
     const url = new URL(config.engineUrl);
     url.searchParams.set("ops_finalize", "1");
@@ -401,12 +519,10 @@ async function openFinalizer(job) {
     url.searchParams.set("target_origin", window.location.origin);
     mountFrame(url, "상세페이지 최종 조립기");
   } catch (error) {
-    finishActive();
-    updateAutomation(job.itemId, {
-      status: "uploading",
-      message: "최종 조립기 연결 대기 · 새로고침하면 자동 재연결됩니다.",
-      error: error instanceof Error ? error.message : "최종 조립기를 열지 못했습니다.",
-    });
+    await failFinalizer(
+      error instanceof Error ? error.message : "최종 조립기를 열지 못했습니다.",
+      "connection_failed",
+    );
   }
 }
 
@@ -432,16 +548,10 @@ async function handleFrameHandshakeTimeout() {
     );
     return;
   }
-  const itemId = active.itemId;
-  const jobId = active.jobId;
-  finishActive();
-  finalizerRetryAt.set(jobId, Date.now() + 30_000);
-  updateAutomation(itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "최종 조립기 연결 대기 · 보호 인증 확인 필요",
-    error: "상세페이지 Studio가 20초 안에 응답하지 않았습니다.",
-  });
+  await failFinalizer(
+    "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 보호 인증 또는 연결 주소를 확인하세요.",
+    "engine_timeout",
+  );
 }
 
 async function handleFrameTimeout() {
@@ -450,16 +560,10 @@ async function handleFrameTimeout() {
     await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
     return;
   }
-  const itemId = active.itemId;
-  const jobId = active.jobId;
-  finishActive();
-  finalizerRetryAt.set(jobId, Date.now() + 30_000);
-  updateAutomation(itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "최종 조립 대기 · 화면을 다시 열면 자동 재개됩니다.",
-    error: "최종 조립 시간이 15분을 초과했습니다.",
-  });
+  await failFinalizer(
+    "최종 14,000px 조립이 15분 안에 완료되지 않았습니다.",
+    "render_timeout",
+  );
 }
 
 async function handleEngineMessage(event) {
@@ -521,7 +625,25 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
-    if (active.snapshotSent) return;
+    const now = Date.now();
+    if (active.snapshotSent) {
+      if (now - Number(active.finalizerHeartbeatAt || 0) >= 10_000) {
+        active.finalizerHeartbeatAt = now;
+        void recordFinalizerHeartbeat("snapshot_loading").catch(() => undefined);
+      }
+      return;
+    }
+    active.finalizerHeartbeatAt = now;
+    try {
+      await recordFinalizerHeartbeat("engine_ready", { announce: true });
+    } catch (error) {
+      await failFinalizer(
+        error instanceof Error ? error.message : "최종 조립 연결 상태를 서버에 저장하지 못했습니다.",
+        "heartbeat_failed",
+      );
+      return;
+    }
+    if (!active || active.mode !== "finalize") return;
     const job = jobsById.get(active.jobId);
     if (!job) return;
     active.snapshotSent = true;
@@ -547,16 +669,10 @@ async function handleEngineMessage(event) {
     return;
   }
   if (payload.type === "ops-dock-finalize-failed" && active.mode === "finalize") {
-    const itemId = active.itemId;
-    const jobId = active.jobId;
-    finishActive();
-    finalizerRetryAt.set(jobId, Date.now() + 30_000);
-    updateAutomation(itemId, {
-      status: "uploading",
-      stage: "render_pending",
-      message: "최종 조립 대기 · 화면을 새로 열면 자동 재시도됩니다.",
-      error: cleanText(payload.message, 800),
-    });
+    await failFinalizer(
+      cleanText(payload.message, 800) || "최종 조립기에 오류가 발생했습니다.",
+      "render_failed",
+    );
   }
 }
 
@@ -707,8 +823,9 @@ async function acceptEvidence(payload) {
 
 async function completeFinalization(payload) {
   if (!active) return;
+  const current = active;
   try {
-    const job = jobsById.get(active.jobId);
+    const job = jobsById.get(current.jobId);
     const representatives = Array.isArray(job?.result?.representatives)
       ? job.result.representatives
       : [];
@@ -723,15 +840,15 @@ async function completeFinalization(payload) {
     if (!payload.detail?.base64 || !mainImageUrl || additionalImageUrls.length !== 4) {
       throw new Error("최종 상세·대표·부가 이미지 구성이 완전하지 않습니다.");
     }
-    updateAutomation(active.itemId, {
+    updateAutomation(current.itemId, {
       status: "uploading",
       stage: "asset_upload",
       message: "14,000px 상세페이지 저장·URL 도킹 중",
       progress: 98,
       qaStatus: "passed",
     });
-    const detailImageUrl = await uploadOne(active, "detail-page", payload.detail);
-    await updateServerJob(active.jobId, {
+    const detailImageUrl = await uploadOne(current, "detail-page", payload.detail);
+    const persisted = await updateServerJob(current.jobId, {
       action: "final_complete",
       detailImageUrl,
       mainImageUrl,
@@ -743,23 +860,25 @@ async function completeFinalization(payload) {
       stage: "docked",
       progress: 100,
       qaStatus: "passed",
-      result: { ...job.result, detailImageUrl, mainImageUrl, additionalImageUrls },
+      result: { ...(job?.result || {}), detailImageUrl, mainImageUrl, additionalImageUrls },
     };
-    jobsById.set(active.jobId, completedJob);
-    finalizerRetryAt.delete(active.jobId);
-    applyDockedJob(completedJob, payload.productName || active.productName);
+    jobsById.set(current.jobId, persisted || completedJob);
+    finalizerRetryAt.delete(current.jobId);
+    applyDockedJob(persisted || completedJob, payload.productName || current.productName);
+    announceFinalizerStatus({
+      requestId: current.requestId,
+      jobId: current.jobId,
+      tone: "success",
+      phase: "complete",
+      message: "최종 14,000px 조립과 저장이 완료됐습니다.",
+      job: persisted || completedJob,
+    });
     finishActive();
   } catch (error) {
-    const itemId = active.itemId;
-    const jobId = active.jobId;
-    finishActive();
-    finalizerRetryAt.set(jobId, Date.now() + 30_000);
-    updateAutomation(itemId, {
-      status: "uploading",
-      stage: "asset_upload",
-      message: "최종 저장 재시도 대기 · 생성 결과는 서버에 보존됨",
-      error: error instanceof Error ? error.message : "최종 결과를 저장하지 못했습니다.",
-    });
+    await failFinalizer(
+      error instanceof Error ? error.message : "최종 결과를 저장하지 못했습니다.",
+      "save_failed",
+    );
   }
 }
 
