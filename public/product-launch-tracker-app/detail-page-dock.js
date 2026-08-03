@@ -3,7 +3,14 @@ const ENGINE_CONFIG_API = "/api/product-launch-tracker/detail-page-engine-config
 const ASSET_UPLOAD_API = "/api/product-launch-tracker/detail-page-assets";
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const MESSAGE_SOURCE = "commerce-os-detail-page-studio";
+const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
+const DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const FRAME_TIMEOUT_MS = 15 * 60 * 1000;
+const FRAME_HANDSHAKE_TIMEOUT_MS = 20 * 1000;
+const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
+const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
+const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
+const LOCAL_BRIDGE_RELAY_BODY_LIMIT = 16 * 1024;
 const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
@@ -16,14 +23,19 @@ const REQUESTED_ITEM_ID = cleanText(PAGE_PARAMS.get("open_item"), 160);
 const bulkControls = document.querySelector(".bulk-controls");
 const tableBody = document.querySelector("#launch-table-body");
 let runButton = null;
+let runStatus = null;
 let monitor = null;
 let queue = [];
 let active = null;
 let activeFrame = null;
 let activeTimer = null;
+let activeHandshakeTimer = null;
 let engineConfig = null;
 let syncing = false;
 let enqueueing = false;
+let enqueuePhase = "idle";
+let messageTimer = null;
+let runStatusTimer = null;
 const jobsById = new Map();
 const workerResumeAt = new Map();
 const finalizerRetryAt = new Map();
@@ -41,10 +53,29 @@ if (DETAIL_PAGE_MODE === "worker") {
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
     const payload = event.data;
-    if (payload?.source !== "commerce-os-work-assistant") return;
+    if (payload?.source !== WORK_ASSISTANT_SOURCE) return;
     if (payload.type === "retry-detail-page-job") {
       const itemId = cleanText(payload.itemId, 160);
-      if (itemId) void retryItem(itemId);
+      if (itemId) void retryItem(itemId, {
+        requestedJobId: cleanText(payload.jobId, 160),
+        mode: payload.mode === "full" ? "full" : payload.mode === "resume" ? "resume" : "auto",
+        requestId: cleanText(payload.requestId, 160),
+      });
+    }
+    if (payload.type === "activate-detail-page-job") {
+      const job = payload.job;
+      const requestId = cleanText(payload.requestId, 160);
+      if (!job || !isValidJobId(job.jobId) || !cleanText(job.itemId, 160)) {
+        announceFinalizerStatus({
+          requestId,
+          jobId: cleanText(job?.jobId, 160),
+          tone: "error",
+          phase: "rejected",
+          message: "최종 조립 재연결 요청 값이 올바르지 않습니다.",
+        });
+        return;
+      }
+      void activateFinalizerJob(job, requestId);
     }
   });
 }
@@ -81,10 +112,26 @@ function installControls() {
   runButton.type = "button";
   runButton.className = "button button-primary";
   runButton.title = "체크한 상품을 서버 작업으로 등록합니다. 화면을 닫아도 AI 생성은 계속됩니다.";
-  runButton.addEventListener("click", () => void enqueueSelected());
+  runButton.addEventListener("click", () => {
+    void enqueueSelected().catch((error) => {
+      const message = error instanceof Error
+        ? error.message
+        : "상세페이지 생성 요청을 처리하지 못했습니다.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+    });
+  });
+  runStatus = document.createElement("p");
+  runStatus.id = "detail-page-dock-run-status";
+  runStatus.className = "detail-page-dock-run-status";
+  runStatus.setAttribute("role", "status");
+  runStatus.setAttribute("aria-live", "polite");
+  runStatus.hidden = true;
   const clear = bulkControls.querySelector("#clear-selection-button");
-  if (clear) clear.before(runButton);
-  else bulkControls.append(runButton);
+  if (clear) {
+    clear.before(runButton);
+    runButton.after(runStatus);
+  } else bulkControls.append(runButton, runStatus);
   syncRunButton();
 }
 
@@ -92,80 +139,161 @@ function syncRunButton() {
   if (!runButton) return;
   const count = selectedRowIds().length;
   runButton.disabled = count === 0 || enqueueing;
+  if (enqueueing) {
+    runButton.textContent = enqueuePhase === "registering"
+      ? `작업 등록 중… (${count}건)`
+      : `연결 확인 중… (${count}건)`;
+    return;
+  }
   runButton.textContent = count
     ? `선택 상세페이지 생성 (${count}건)`
     : "선택 상세페이지 생성";
 }
 
 async function enqueueSelected() {
-  const selectedIds = selectedRowIds();
-  const state = readState();
-  if (!selectedIds.length || !state?.items) return;
-  const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
-  const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
-  if (invalid.length) {
-    showMessage(
-      `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다.`,
-    );
-    return;
-  }
-  if (!window.confirm(
-    `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
-  )) return;
-
+  if (enqueueing) return;
   enqueueing = true;
+  enqueuePhase = "checking";
   syncRunButton();
+  showRunStatus("클릭 확인 · 선택 상품과 연결 상태를 확인하고 있습니다.", "progress");
+
+  const selectedIds = selectedRowIds();
   try {
-  if (SHOW_LOCAL_MONITOR) ensureMonitor();
-  const existingItems = new Set(
-    [...jobsById.values()]
-      .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
-      .map((job) => job.itemId),
-  );
-  for (const item of selected) {
-    const itemId = String(item.id);
-    if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) continue;
-    const job = {
-      itemId,
-      jobId: crypto.randomUUID(),
-      sourceUrl: readPrimaryChinaLink(item),
-      productName: String(item.productName || item.modelNumber || "상품"),
-      salesOptions: readSalesOptions(item),
-      attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
-      sourceRunId: "",
-    };
-    try {
-      const created = await createServerJob(job);
-      jobsById.set(job.jobId, created);
-      queue.push(job);
-      patchItem(itemId, {
-        detailPageAutomation: {
-          jobId: job.jobId,
-          status: "queued",
-          stage: "source_collection",
-          message: "1688 상품정보·이미지 수집 대기 중",
-          progress: 1,
-          qaStatus: "pending",
-          sourceUrl: job.sourceUrl,
-          sourceRunId: "",
-          attempt: job.attempt,
-          queuedAt: new Date().toISOString(),
-          startedAt: null,
-          completedAt: null,
-          error: "",
-          executionMode: "server-v1",
-        },
-      });
-      existingItems.add(itemId);
-    } catch (error) {
-      showMessage(error instanceof Error ? error.message : "상세페이지 서버 작업을 등록하지 못했습니다.");
-      break;
+    if (!selectedIds.length) {
+      const message = "선택된 상품이 없습니다. 상품 왼쪽 체크박스를 다시 선택하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 10_000);
+      return;
     }
-  }
-  renderMonitor();
-  if (CAN_EXECUTE_JOBS) void processNext();
+
+    const state = readState();
+    if (!Array.isArray(state?.items)) {
+      const message = "상품 목록 상태를 읽지 못했습니다. Ctrl+F5 후 다시 시도하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+    const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
+    if (selected.length !== selectedIds.length) {
+      const message = "선택 상태와 상품 데이터가 일치하지 않습니다. Ctrl+F5 후 다시 선택하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+    const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
+    if (invalid.length) {
+      const message = `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다. 상품 상세에서 링크를 입력한 뒤 다시 실행하세요.`;
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+
+    showRunStatus(
+      "Chrome 로컬 네트워크 권한·로컬 수집기·Studio 연결을 확인하고 있습니다.",
+      "progress",
+    );
+    try {
+      await ensureDetailPageDependencies();
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "상세페이지 생성 연결을 확인하지 못했습니다.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+      return;
+    }
+    showRunStatus("연결 확인 완료 · 생성 여부 확인창을 열었습니다.", "success");
+    if (!window.confirm(
+      `선택한 ${selected.length}개 상품의 상세페이지·대표 1장·부가 4장을 생성할까요? 1688 수집이 끝난 뒤에는 창을 닫거나 새로고침해도 서버에서 계속 생성됩니다.`,
+    )) {
+      showRunStatus("사용자가 생성을 취소했습니다. 비용은 발생하지 않았습니다.", "neutral", 8_000);
+      return;
+    }
+
+    enqueuePhase = "registering";
+    syncRunButton();
+    showRunStatus("확인 완료 · 서버 작업을 등록하고 작업도우미에 연결하고 있습니다.", "progress");
+    if (SHOW_LOCAL_MONITOR) ensureMonitor();
+    let createdCount = 0;
+    let existingCount = 0;
+    const existingItems = new Set(
+      [...jobsById.values()]
+        .filter((job) => !["success", "failed", "cancelled"].includes(job.status))
+        .map((job) => job.itemId),
+    );
+    for (const item of selected) {
+      const itemId = String(item.id);
+      if (existingItems.has(itemId) || queue.some((job) => job.itemId === itemId) || active?.itemId === itemId) {
+        existingCount += 1;
+        continue;
+      }
+      const job = {
+        itemId,
+        jobId: crypto.randomUUID(),
+        sourceUrl: readPrimaryChinaLink(item),
+        productName: String(item.productName || item.modelNumber || "상품"),
+        salesOptions: readSalesOptions(item),
+        attempt: Number(item.detailPageAutomation?.attempt || 0) + 1,
+        sourceRunId: "",
+      };
+      try {
+        const created = await createServerJob(job);
+        jobsById.set(job.jobId, created);
+        queue.push(job);
+        patchItem(itemId, {
+          detailPageAutomation: {
+            jobId: job.jobId,
+            status: "queued",
+            stage: "source_collection",
+            message: "1688 상품정보·이미지 수집 대기 중",
+            progress: 1,
+            qaStatus: "pending",
+            sourceUrl: job.sourceUrl,
+            sourceRunId: "",
+            attempt: job.attempt,
+            queuedAt: new Date().toISOString(),
+            startedAt: null,
+            completedAt: null,
+            error: "",
+            executionMode: "server-v1",
+          },
+        });
+        existingItems.add(itemId);
+        createdCount += 1;
+        announceServerJob(created);
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : "상세페이지 서버 작업을 등록하지 못했습니다.";
+        showRunStatus(message, "error");
+        showMessage(message, 15_000);
+        break;
+      }
+    }
+    renderMonitor();
+    if (CAN_EXECUTE_JOBS) void processNext();
+    if (createdCount) {
+      const message = `상세페이지 작업 ${createdCount}건 등록 완료 · 작업도우미에서 진행 상태를 확인하세요.${existingCount ? ` 이미 진행 중 ${existingCount}건은 중복 등록하지 않았습니다.` : ""}`;
+      showRunStatus(message, "success", 15_000);
+      showMessage(message, 8_000);
+    } else if (existingCount) {
+      const message = `선택한 ${existingCount}건은 이미 진행 중입니다. 작업도우미에서 현재 상태를 확인하세요.`;
+      showRunStatus(message, "neutral", 15_000);
+      showMessage(message, 10_000);
+    } else {
+      const message = "작업이 등록되지 않았습니다. 표시된 오류를 확인한 뒤 다시 시도하세요.";
+      showRunStatus(message, "error");
+      showMessage(message, 15_000);
+    }
+  } catch (error) {
+    const message = error instanceof Error
+      ? `상세페이지 생성 요청 오류: ${error.message}`
+      : "상세페이지 생성 요청 중 알 수 없는 오류가 발생했습니다.";
+    showRunStatus(message, "error");
+    showMessage(message, 15_000);
   } finally {
     enqueueing = false;
+    enqueuePhase = "idle";
     syncRunButton();
   }
 }
@@ -184,6 +312,78 @@ async function createServerJob(job) {
   return payload.job;
 }
 
+function announceServerJob(job) {
+  if (!job || !isValidJobId(job.jobId)) return;
+  window.parent?.postMessage(
+    {
+      source: DOCK_EVENT_SOURCE,
+      type: "detail-page-job-created",
+      job,
+    },
+    window.location.origin,
+  );
+}
+
+function announceFinalizerStatus({
+  requestId = "",
+  jobId = "",
+  tone = "progress",
+  phase = "",
+  message = "",
+  job = null,
+}) {
+  window.parent?.postMessage(
+    {
+      source: DOCK_EVENT_SOURCE,
+      type: "detail-page-finalizer-status",
+      requestId,
+      jobId,
+      tone,
+      phase,
+      message,
+      job,
+    },
+    window.location.origin,
+  );
+}
+
+async function activateFinalizerJob(job, requestId) {
+  jobsById.set(job.jobId, job);
+  announceFinalizerStatus({
+    requestId,
+    jobId: job.jobId,
+    tone: "progress",
+    phase: "received",
+    message: "서버 최종 조립 재시작 요청을 확인했습니다.",
+    job,
+  });
+  try {
+    finalizerRetryAt.set(job.jobId, Date.now() + 30_000);
+    await startWorker(job.jobId);
+    announceFinalizerStatus({
+      requestId,
+      jobId: job.jobId,
+      tone: "success",
+      phase: "accepted",
+      message: "저장된 검수 통과 자산으로 서버 최종 조립을 시작했습니다.",
+      job,
+    });
+  } catch (error) {
+    finalizerRetryAt.set(job.jobId, Date.now() + 30_000);
+    announceFinalizerStatus({
+      requestId,
+      jobId: job.jobId,
+      tone: "error",
+      phase: "start_failed",
+      message:
+        error instanceof Error
+          ? error.message
+          : "서버 최종 조립을 시작하지 못했습니다.",
+      job,
+    });
+  }
+}
+
 async function processNext() {
   if (active) return;
   const renderJob = [...jobsById.values()].find(
@@ -192,7 +392,8 @@ async function processNext() {
       Date.now() >= (finalizerRetryAt.get(job.jobId) || 0),
   );
   if (renderJob) {
-    await openFinalizer(renderJob);
+    finalizerRetryAt.set(renderJob.jobId, Date.now() + 30_000);
+    await startWorker(renderJob.jobId).catch(() => undefined);
     return;
   }
   while (queue.length) {
@@ -236,74 +437,30 @@ async function openEvidenceCollector(job) {
   }
 }
 
-async function openFinalizer(job) {
-  const state = readState();
-  const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
-  if (!item) return;
-  active = {
-    itemId: String(job.itemId),
-    jobId: String(job.jobId),
-    sourceUrl: job.sourceUrl,
-    productName: String(item.productName || item.modelNumber || "상품"),
-    salesOptions: readSalesOptions(item),
-    attempt: Number(job.attempt || item.detailPageAutomation?.attempt || 1),
-    mode: "finalize",
-  };
-  updateAutomation(active.itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "AI 생성·검수 완료 · 최종 14,000px 조립 중",
-    progress: 96,
-    qaStatus: "passed",
-    error: "",
-  });
-  renderMonitor();
-  try {
-    const config = await getEngineConfig();
-    const url = new URL(config.engineUrl);
-    url.searchParams.set("ops_finalize", "1");
-    url.searchParams.set("job_id", active.jobId);
-    url.searchParams.set("item_id", active.itemId);
-    url.searchParams.set("target_origin", window.location.origin);
-    mountFrame(url, "상세페이지 최종 조립기");
-  } catch (error) {
-    finishActive();
-    updateAutomation(job.itemId, {
-      status: "uploading",
-      message: "최종 조립기 연결 대기 · 새로고침하면 자동 재연결됩니다.",
-      error: error instanceof Error ? error.message : "최종 조립기를 열지 못했습니다.",
-    });
-  }
-}
-
 function mountFrame(url, title) {
   activeFrame = document.createElement("iframe");
   activeFrame.id = "detail-page-dock-engine-frame";
   activeFrame.title = title;
   activeFrame.src = url.toString();
+  activeFrame.allow = "local-network; loopback-network; local-network-access";
   activeFrame.setAttribute("aria-hidden", "true");
   document.body.append(activeFrame);
-  activeTimer = window.setTimeout(() => {
-    void handleFrameTimeout();
-  }, FRAME_TIMEOUT_MS);
+  activeHandshakeTimer = window.setTimeout(() => {
+    void handleFrameHandshakeTimeout();
+  }, FRAME_HANDSHAKE_TIMEOUT_MS);
+}
+
+async function handleFrameHandshakeTimeout() {
+  if (!active) return;
+  await failActive(
+    "상세페이지 Studio가 20초 안에 응답하지 않았습니다. Preview 주소 또는 보호 인증을 확인하세요.",
+    "studio_connection",
+  );
 }
 
 async function handleFrameTimeout() {
   if (!active) return;
-  if (active.mode === "collect") {
-    await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
-    return;
-  }
-  const itemId = active.itemId;
-  const jobId = active.jobId;
-  finishActive();
-  finalizerRetryAt.set(jobId, Date.now() + 30_000);
-  updateAutomation(itemId, {
-    status: "uploading",
-    stage: "render_pending",
-    message: "최종 조립 대기 · 화면을 다시 열면 자동 재개됩니다.",
-    error: "최종 조립 시간이 15분을 초과했습니다.",
-  });
+  await failActive("1688 수집기 연결 시간이 15분을 초과했습니다.", "source_collection");
 }
 
 async function handleEngineMessage(event) {
@@ -312,9 +469,28 @@ async function handleEngineMessage(event) {
   const payload = event.data;
   if (!payload || payload.source !== MESSAGE_SOURCE || payload.jobId !== active.jobId) return;
 
+  markFrameConnected();
+
+  if (payload.type === "ops-dock-local-bridge-request" && active.mode === "collect") {
+    await relayLocalBridgeRequest(payload);
+    return;
+  }
+
+  if (payload.type === "ops-dock-ready") {
+    updateAutomation(active.itemId, {
+      status: "running",
+      stage: "source_collection",
+      message: "Studio 연결 완료 · 로컬 수집기 확인 중",
+      progress: 5,
+      error: "",
+    });
+    renderMonitor();
+    return;
+  }
+
   if (payload.type === "ops-dock-progress") {
     updateAutomation(active.itemId, {
-      status: active.mode === "finalize" ? "uploading" : "running",
+      status: "running",
       stage: cleanText(payload.stage, 80) || "running",
       message: cleanText(payload.message, 240) || "생성 준비 중",
       progress: clamp(Number(payload.progress) || 0, 1, 99),
@@ -342,43 +518,82 @@ async function handleEngineMessage(event) {
     );
     return;
   }
-  if (payload.type === "ops-dock-finalizer-ready" && active.mode === "finalize") {
-    if (active.snapshotSent) return;
-    const job = jobsById.get(active.jobId);
-    if (!job) return;
-    active.snapshotSent = true;
-    const frame = activeFrame;
-    const jobId = active.jobId;
-    const itemId = active.itemId;
-    window.setTimeout(() => {
-      if (activeFrame !== frame || active?.jobId !== jobId) return;
-      frame.contentWindow?.postMessage(
-        {
-          type: "ops-dock-finalize-snapshot",
-          jobId,
-          itemId,
-          job,
-        },
-        engineConfig.engineOrigin,
-      );
-    }, 120);
+}
+
+function allowedLocalBridgeRelay(path, method) {
+  if (method === "POST") return path === "/runs/evidence-link";
+  if (method !== "GET") return false;
+  return path === "/health" ||
+    /^\/runs\/[A-Za-z0-9_-]+(?:\/result)?$/.test(path) ||
+    /^\/runs\/[A-Za-z0-9_-]+\/evidence-images\/[A-Za-z0-9_-]+$/.test(path);
+}
+
+function postLocalBridgeRelayResponse(frame, targetOrigin, payload, body) {
+  if (!frame?.contentWindow) return;
+  const message = {
+    source: DOCK_EVENT_SOURCE,
+    type: "ops-dock-local-bridge-response",
+    ...payload,
+  };
+  if (body instanceof ArrayBuffer) {
+    message.body = body;
+    frame.contentWindow.postMessage(message, targetOrigin, [body]);
     return;
   }
-  if (payload.type === "ops-dock-finalize-complete" && active.mode === "finalize") {
-    await completeFinalization(payload);
+  frame.contentWindow.postMessage(message, targetOrigin);
+}
+
+async function relayLocalBridgeRequest(payload) {
+  const frame = activeFrame;
+  const jobId = active?.jobId || "";
+  const targetOrigin = engineConfig?.engineOrigin || "";
+  const requestId = cleanText(payload.requestId, 100);
+  const path = cleanText(payload.path, 500);
+  const method = cleanText(payload.method, 10).toUpperCase() || "GET";
+  const body = typeof payload.body === "string" ? payload.body : "";
+  const contentType = cleanText(payload.contentType, 100);
+  const respond = (response, responseBody) => {
+    if (activeFrame !== frame || active?.jobId !== jobId) return;
+    postLocalBridgeRelayResponse(
+      frame,
+      targetOrigin,
+      { jobId, requestId, ...response },
+      responseBody,
+    );
+  };
+
+  if (
+    !requestId ||
+    !targetOrigin ||
+    !allowedLocalBridgeRelay(path, method) ||
+    body.length > LOCAL_BRIDGE_RELAY_BODY_LIMIT ||
+    (method === "POST" && contentType !== "application/json") ||
+    (method === "GET" && body)
+  ) {
+    respond({ error: "허용되지 않은 OPS 로컬 수집기 중계 요청입니다." });
     return;
   }
-  if (payload.type === "ops-dock-finalize-failed" && active.mode === "finalize") {
-    const itemId = active.itemId;
-    const jobId = active.jobId;
-    finishActive();
-    finalizerRetryAt.set(jobId, Date.now() + 30_000);
-    updateAutomation(itemId, {
-      status: "uploading",
-      stage: "render_pending",
-      message: "최종 조립 대기 · 화면을 새로 열면 자동 재시도됩니다.",
-      error: cleanText(payload.message, 800),
+
+  try {
+    const response = await fetch(`${LOCAL_BRIDGE_BASE_URL}${path}`, {
+      method,
+      cache: "no-store",
+      credentials: "omit",
+      headers: method === "POST" ? { "Content-Type": "application/json" } : {},
+      body: method === "POST" ? body : undefined,
+      targetAddressSpace: "loopback",
     });
+    const responseBody = await response.arrayBuffer();
+    respond(
+      {
+        status: response.status,
+        contentType:
+          response.headers.get("Content-Type") || "application/octet-stream",
+      },
+      responseBody,
+    );
+  } catch {
+    respond({ error: "OPS가 로컬 수집기에 연결하지 못했습니다." });
   }
 }
 
@@ -450,64 +665,6 @@ async function acceptEvidence(payload) {
   }
 }
 
-async function completeFinalization(payload) {
-  if (!active) return;
-  try {
-    const job = jobsById.get(active.jobId);
-    const representatives = Array.isArray(job?.result?.representatives)
-      ? job.result.representatives
-      : [];
-    const byRole = new Map(representatives.map((image) => [String(image.roleId), image.assetUrl]));
-    const mainImageUrl = byRole.get("main_catalog") || "";
-    const additionalImageUrls = [
-      byRole.get("alternate_whole"),
-      byRole.get("evidence_detail"),
-      byRole.get("lifestyle_usage"),
-      byRole.get("adaptive_support"),
-    ].filter(Boolean);
-    if (!payload.detail?.base64 || !mainImageUrl || additionalImageUrls.length !== 4) {
-      throw new Error("최종 상세·대표·부가 이미지 구성이 완전하지 않습니다.");
-    }
-    updateAutomation(active.itemId, {
-      status: "uploading",
-      stage: "asset_upload",
-      message: "14,000px 상세페이지 저장·URL 도킹 중",
-      progress: 98,
-      qaStatus: "passed",
-    });
-    const detailImageUrl = await uploadOne(active, "detail-page", payload.detail);
-    await updateServerJob(active.jobId, {
-      action: "final_complete",
-      detailImageUrl,
-      mainImageUrl,
-      additionalImageUrls,
-    });
-    const completedJob = {
-      ...job,
-      status: "success",
-      stage: "docked",
-      progress: 100,
-      qaStatus: "passed",
-      result: { ...job.result, detailImageUrl, mainImageUrl, additionalImageUrls },
-    };
-    jobsById.set(active.jobId, completedJob);
-    finalizerRetryAt.delete(active.jobId);
-    applyDockedJob(completedJob, payload.productName || active.productName);
-    finishActive();
-  } catch (error) {
-    const itemId = active.itemId;
-    const jobId = active.jobId;
-    finishActive();
-    finalizerRetryAt.set(jobId, Date.now() + 30_000);
-    updateAutomation(itemId, {
-      status: "uploading",
-      stage: "asset_upload",
-      message: "최종 저장 재시도 대기 · 생성 결과는 서버에 보존됨",
-      error: error instanceof Error ? error.message : "최종 결과를 저장하지 못했습니다.",
-    });
-  }
-}
-
 async function uploadOne(job, role, image) {
   const body = new FormData();
   body.set("item_id", job.itemId);
@@ -551,7 +708,9 @@ async function failActive(message, stage = "failed") {
 
 function finishActive() {
   window.clearTimeout(activeTimer);
+  window.clearTimeout(activeHandshakeTimer);
   activeTimer = null;
+  activeHandshakeTimer = null;
   activeFrame?.remove();
   activeFrame = null;
   active = null;
@@ -559,18 +718,79 @@ function finishActive() {
   window.setTimeout(() => void processNext(), 250);
 }
 
-async function retryItem(itemId) {
+async function retryItem(itemId, options = {}) {
   const normalizedItemId = String(itemId);
   if (retryingItems.has(normalizedItemId)) return;
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === normalizedItemId);
-  const sourceUrl = readPrimaryChinaLink(item);
-  if (!item || !sourceUrl) {
-    showMessage("중국링크 고정1번을 확인한 뒤 다시 생성하세요.");
+  if (!item) {
+    const message = "상품 정보를 찾지 못했습니다. 새로고침 후 다시 시도하세요.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
     return;
   }
-  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) return;
+  if (active?.itemId === normalizedItemId || queue.some((job) => job.itemId === normalizedItemId)) {
+    announceReviewRegeneration(options, "error", "같은 상품의 상세페이지 작업이 이미 진행 중입니다.");
+    return;
+  }
   retryingItems.add(normalizedItemId);
+  announceReviewRegeneration(options, "progress", "재생성할 작업과 저장된 체크포인트를 확인하고 있습니다.");
+  const checkpointed = options.mode === "full" ? null : [...jobsById.values()]
+    .filter((candidate) => isCheckpointedGenerationFailure(candidate, normalizedItemId))
+    .filter((candidate) => !options.requestedJobId || candidate.jobId === options.requestedJobId)
+    .sort((left, right) => Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""))[0];
+  if (options.mode === "resume" && !checkpointed) {
+    const message = "선택한 작업에서 안전하게 재사용할 체크포인트를 찾지 못했습니다. 전체 재생성을 별도로 선택하세요.";
+    retryingItems.delete(normalizedItemId);
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
+    return;
+  }
+  if (checkpointed) {
+    try {
+      const resumed = await updateServerJob(checkpointed.jobId, {
+        action: "resume_checkpointed_generation",
+      });
+      if (!resumed) throw new Error("이어 실행할 상세페이지 작업을 찾지 못했습니다.");
+      patchItem(normalizedItemId, {
+        detailPageAutomation: {
+          ...item.detailPageAutomation,
+          jobId: resumed.jobId,
+          status: "queued",
+          stage: "checkpoint_resume",
+          message: "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 중",
+          progress: Number(resumed.progress || checkpointed.progress || 10),
+          qaStatus: "pending",
+          attempt: Number(resumed.attempt || checkpointed.attempt || 1),
+          completedAt: null,
+          error: "",
+          executionMode: "server-v1",
+        },
+      });
+      announceServerJob(resumed);
+      renderMonitor();
+      await startWorker(resumed.jobId);
+      const message = "기존 상세 섹션과 승인 이미지를 유지하고 문제 자산만 이어서 생성합니다.";
+      showMessage(message, 10_000);
+      announceReviewRegeneration(options, "success", message, resumed);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "체크포인트 이어 생성을 시작하지 못했습니다.";
+      showMessage(message);
+      announceReviewRegeneration(options, "error", message);
+      return;
+    } finally {
+      retryingItems.delete(normalizedItemId);
+    }
+  }
+  const sourceUrl = readPrimaryChinaLink(item);
+  if (!sourceUrl) {
+    retryingItems.delete(normalizedItemId);
+    const message = "중국링크 고정1번을 확인한 뒤 다시 생성하세요.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
+    return;
+  }
   const job = {
     itemId: normalizedItemId,
     jobId: crypto.randomUUID(),
@@ -581,6 +801,7 @@ async function retryItem(itemId) {
     sourceRunId: "",
   };
   try {
+    await ensureDetailPageDependencies();
     const created = await createServerJob(job);
     jobsById.set(job.jobId, created);
     queue.push(job);
@@ -606,11 +827,38 @@ async function retryItem(itemId) {
     if (SHOW_LOCAL_MONITOR) ensureMonitor();
     renderMonitor();
     if (CAN_EXECUTE_JOBS) void processNext();
+    announceReviewRegeneration(options, "success", "전체 재생성 작업을 등록했습니다. 1688 원본 수집부터 다시 진행합니다.", created);
   } catch (error) {
-    showMessage(error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.");
+    const message = error instanceof Error ? error.message : "다시 생성 작업을 등록하지 못했습니다.";
+    showMessage(message);
+    announceReviewRegeneration(options, "error", message);
   } finally {
     retryingItems.delete(normalizedItemId);
   }
+}
+
+function announceReviewRegeneration(options, tone, message, job = null) {
+  if (!options?.requestId || DETAIL_PAGE_MODE !== "worker") return;
+  window.parent?.postMessage({
+    source: "commerce-os-detail-page-ai-review",
+    type: "regeneration-status",
+    requestId: options.requestId,
+    tone,
+    message,
+    job,
+  }, window.location.origin);
+}
+
+function isCheckpointedGenerationFailure(job, itemId) {
+  return Boolean(
+    job &&
+      job.status === "failed" &&
+      job.stage === "server_generation" &&
+      String(job.itemId) === String(itemId) &&
+      Array.isArray(job.payload?.evidence_urls) &&
+      job.payload.evidence_urls.length > 0 &&
+      job.result?.analysis?.product,
+  );
 }
 
 async function restoreMonitor() {
@@ -926,6 +1174,52 @@ async function getEngineConfig() {
   return payload;
 }
 
+async function ensureDetailPageDependencies() {
+  await Promise.all([getEngineConfig(), ensureLocalCollectorReady()]);
+}
+
+async function ensureLocalCollectorReady() {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), LOCAL_BRIDGE_TIMEOUT_MS);
+  try {
+    const response = await fetch(LOCAL_BRIDGE_HEALTH_URL, {
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal,
+      targetAddressSpace: "loopback",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`status=${response.status}`);
+    if (
+      payload.ok !== true ||
+      payload.service !== "product-detail-page-auto-local-ops-bridge"
+    ) {
+      throw new Error("unexpected-local-bridge");
+    }
+    if (payload.evidence_import_supported !== true) {
+      throw new Error(
+        "로컬 수집기 업데이트가 필요합니다. 최신 수집기를 실행한 뒤 다시 시도하세요.",
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("업데이트")) throw error;
+    throw new Error(
+      "로컬 수집기에 연결하지 못했습니다. Chrome 주소창 왼쪽 사이트 설정에서 ‘로컬 네트워크 액세스’를 허용하고, 수집기 PowerShell 창을 켠 뒤 다시 누르세요.",
+    );
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function markFrameConnected() {
+  window.clearTimeout(activeHandshakeTimer);
+  activeHandshakeTimer = null;
+  if (activeTimer) return;
+  activeTimer = window.setTimeout(() => {
+    void handleFrameTimeout();
+  }, FRAME_TIMEOUT_MS);
+}
+
 function selectedRowIds() {
   return [...document.querySelectorAll("#launch-table-body tr[data-id] input.row-check:checked")]
     .map((input) => String(input.closest("tr[data-id]")?.dataset.id || ""))
@@ -998,6 +1292,12 @@ function cleanMultiline(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function isValidJobId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || ""),
+  );
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1016,13 +1316,32 @@ function cssEscape(value) {
   return window.CSS?.escape ? window.CSS.escape(String(value || "")) : String(value || "").replace(/['\\]/g, "\\$&");
 }
 
-function showMessage(message) {
+function showMessage(message, duration = 4200) {
   const toast = document.querySelector("#toast");
   if (toast) {
     toast.textContent = message;
-    toast.classList.add("show");
-    window.setTimeout(() => toast.classList.remove("show"), 3200);
+    toast.hidden = false;
+    window.clearTimeout(messageTimer);
+    messageTimer = window.setTimeout(() => {
+      toast.hidden = true;
+      messageTimer = null;
+    }, duration);
   } else window.alert(message);
+}
+
+function showRunStatus(message, tone = "neutral", duration = 0) {
+  if (!runStatus) return;
+  window.clearTimeout(runStatusTimer);
+  runStatusTimer = null;
+  runStatus.textContent = String(message || "");
+  runStatus.dataset.tone = tone;
+  runStatus.hidden = !runStatus.textContent;
+  if (duration > 0) {
+    runStatusTimer = window.setTimeout(() => {
+      runStatus.hidden = true;
+      runStatusTimer = null;
+    }, duration);
+  }
 }
 
 function installStyles() {
@@ -1030,6 +1349,10 @@ function installStyles() {
   style.id = "detail-page-dock-styles";
   style.textContent = `
     #detail-page-dock-engine-frame{position:fixed!important;left:-20px!important;bottom:-20px!important;width:1px!important;height:1px!important;opacity:.01!important;border:0!important;pointer-events:none!important}
+    #detail-page-dock-run-status{flex:1 0 100%;margin:2px 0 0;padding:7px 9px;border-radius:7px;background:#f8fafc;color:#475569;font-size:11px;font-weight:800;line-height:1.4}
+    #detail-page-dock-run-status[data-tone="progress"]{background:#eff6ff;color:#1d4ed8}
+    #detail-page-dock-run-status[data-tone="success"]{background:#ecfdf5;color:#047857}
+    #detail-page-dock-run-status[data-tone="error"]{background:#fff1f2;color:#be123c}
     #detail-page-dock-monitor{position:fixed;right:18px;bottom:18px;z-index:70;width:min(390px,calc(100vw - 36px));max-height:min(620px,calc(100vh - 36px));overflow:hidden;border:1px solid #cbd5e1;border-radius:16px;background:#fff;box-shadow:0 18px 48px rgba(15,23,42,.24);font-size:13px;color:#0f172a}
     .dock-monitor-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;background:#0f172a;color:#fff}.dock-monitor-header div{display:flex;flex-direction:column;gap:2px}.dock-monitor-header span{font-size:11px;color:#cbd5e1}.dock-monitor-header button{width:28px;height:28px;border:0;border-radius:8px;background:#334155;color:#fff;font-weight:900;cursor:pointer}
     #dock-monitor-body{max-height:540px;overflow:auto;padding:10px;background:#f8fafc}.is-collapsed #dock-monitor-body{display:none}.dock-job{margin-bottom:9px;padding:11px;border:1px solid #e2e8f0;border-left:4px solid #2563eb;border-radius:10px;background:#fff}.dock-status-completed{border-left-color:#059669}.dock-status-failed{border-left-color:#dc2626}.dock-job-title{display:flex;justify-content:space-between;gap:10px}.dock-job-title span{font-size:11px;font-weight:800}.dock-job p{margin:6px 0 0;line-height:1.45;color:#475569}.dock-progress{height:6px;margin-top:8px;overflow:hidden;border-radius:999px;background:#e2e8f0}.dock-progress i{display:block;height:100%;border-radius:inherit;background:#2563eb;transition:width .25s}.dock-status-completed .dock-progress i{background:#059669}.dock-status-failed .dock-progress i{background:#dc2626}.dock-error{color:#b91c1c!important}.dock-job-meta{margin-top:7px;font-size:11px;color:#64748b}.dock-job-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.dock-job-actions button,.dock-monitor-footer button{min-height:30px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 9px;font:inherit;font-weight:800;cursor:pointer}.dock-monitor-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:2px}.dock-monitor-footer span{font-size:11px;color:#2563eb}.dock-monitor-footer button:disabled{opacity:.45;cursor:not-allowed}.dock-empty{padding:18px;text-align:center;color:#64748b}

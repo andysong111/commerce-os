@@ -21,8 +21,11 @@ type DetailJob = {
   progress: number;
   qaStatus: string;
   attempt: number;
+  sourceUrl?: string;
+  sourceRunId?: string;
   error: string;
   payload?: Record<string, unknown>;
+  result?: Record<string, unknown>;
   updatedAt: string;
   completedAt: string | null;
 };
@@ -67,6 +70,8 @@ const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const CATEGORY_STATUS_API = "/api/shopling-categories/status";
 const CATEGORY_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
 const CATEGORY_EVENT_SOURCE = "commerce-os-category-update";
+const DETAIL_DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
+const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
 const DISMISSED_KEY = "commerce-os-work-assistant:dismissed-jobs:v1";
 const COLLAPSED_KEY = "commerce-os-work-assistant:collapsed:v1";
 const POLL_MS = 2_500;
@@ -89,6 +94,35 @@ function safeProgress(value: number) {
 function detailName(job: DetailJob) {
   const payload = job.payload ?? {};
   return txt(payload.product_name || payload.product_name_hint || job.itemId || "상품");
+}
+
+function canResumeCheckpoint(job: DetailJob) {
+  const evidence = job.payload?.evidence_urls;
+  const analysis = job.result?.analysis;
+  return Boolean(
+    job.status === "failed" &&
+      job.stage === "server_generation" &&
+      Array.isArray(evidence) &&
+      evidence.length > 0 &&
+      analysis &&
+      typeof analysis === "object" &&
+      !Array.isArray(analysis) &&
+      (analysis as Record<string, unknown>).product,
+  );
+}
+
+function isDetailJob(value: unknown): value is DetailJob {
+  if (!value || typeof value !== "object") return false;
+  const job = value as Partial<DetailJob>;
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      txt(job.jobId),
+    ) &&
+    Boolean(txt(job.itemId)) &&
+    ["collecting", "queued", "running", "render_pending", "success", "failed", "cancelled"].includes(
+      txt(job.status),
+    )
+  );
 }
 
 function detailPresentation(job: DetailJob): {
@@ -236,6 +270,8 @@ export function OpsWorkAssistant() {
   const [jobs, setJobs] = useState<DetailJob[]>([]);
   const [categoryTask, setCategoryTask] = useState<CategoryTask | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [removingJobs, setRemovingJobs] = useState<Set<string>>(new Set());
+  const [removeErrors, setRemoveErrors] = useState<Record<string, string>>({});
   const [collapsed, setCollapsed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [workerReady, setWorkerReady] = useState(false);
@@ -369,6 +405,32 @@ export function OpsWorkAssistant() {
   }, []);
 
   useEffect(() => {
+    const onDetailDockMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data;
+      if (
+        payload?.source !== DETAIL_DOCK_EVENT_SOURCE ||
+        payload?.type !== "detail-page-job-created" ||
+        !isDetailJob(payload.job)
+      ) return;
+
+      const job = payload.job;
+      setJobs((current) => [job, ...current.filter((item) => item.jobId !== job.jobId)]);
+      setNow(Date.now());
+      workerRef.current?.contentWindow?.postMessage(
+        {
+          source: WORK_ASSISTANT_SOURCE,
+          type: "activate-detail-page-job",
+          job,
+        },
+        window.location.origin,
+      );
+    };
+    window.addEventListener("message", onDetailDockMessage);
+    return () => window.removeEventListener("message", onDetailDockMessage);
+  }, []);
+
+  useEffect(() => {
     const syncCategory = () => {
       setCategoryTask(readCategoryTask());
       setNow(Date.now());
@@ -409,6 +471,7 @@ export function OpsWorkAssistant() {
     () =>
       jobs
         .filter((job) => {
+          if (txt(job.payload?.assistant_hidden_at)) return false;
           if (ACTIVE_DETAIL.has(job.status)) return true;
           if (dismissed.has(job.jobId)) return false;
           return isRecent(job.completedAt || job.updatedAt || "", now);
@@ -456,12 +519,55 @@ export function OpsWorkAssistant() {
   function retryDetail(itemId: string) {
     workerRef.current?.contentWindow?.postMessage(
       {
-        source: "commerce-os-work-assistant",
+        source: WORK_ASSISTANT_SOURCE,
         type: "retry-detail-page-job",
         itemId,
       },
       window.location.origin,
     );
+  }
+
+  async function removeFailedDetail(job: DetailJob) {
+    if (job.status !== "failed" || removingJobs.has(job.jobId)) return;
+    const confirmed = window.confirm(
+      `\"${detailName(job)}\" 실패 기록을 작업 도우미에서 삭제할까요?\n상품과 생성 이력은 삭제되지 않습니다.`,
+    );
+    if (!confirmed) return;
+
+    setRemovingJobs((current) => new Set(current).add(job.jobId));
+    setRemoveErrors((current) => {
+      const next = { ...current };
+      delete next[job.jobId];
+      return next;
+    });
+    try {
+      const response = await fetch(`${JOBS_API}/${encodeURIComponent(job.jobId)}`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "dismiss_failed_from_assistant" }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true) {
+        throw new Error(txt(body.message) || "실패 기록을 삭제하지 못했습니다.");
+      }
+      setJobs((current) => current.filter((item) => item.jobId !== job.jobId));
+    } catch (error) {
+      setRemoveErrors((current) => ({
+        ...current,
+        [job.jobId]:
+          error instanceof Error ? error.message : "실패 기록을 삭제하지 못했습니다.",
+      }));
+    } finally {
+      setRemovingJobs((current) => {
+        const next = new Set(current);
+        next.delete(job.jobId);
+        return next;
+      });
+    }
   }
 
   return (
@@ -516,6 +622,9 @@ export function OpsWorkAssistant() {
                   workerReady={workerReady}
                   onRetry={() => retryDetail(job.itemId)}
                   onDismiss={() => dismiss(job.jobId)}
+                  onRemove={() => void removeFailedDetail(job)}
+                  removing={removingJobs.has(job.jobId)}
+                  removeError={removeErrors[job.jobId] || ""}
                 />
               ))}
               <p className="px-1 pb-0.5 text-[10px] font-bold text-blue-600">
@@ -604,15 +713,22 @@ function DetailCard({
   workerReady,
   onRetry,
   onDismiss,
+  onRemove,
+  removing,
+  removeError,
 }: {
   job: DetailJob;
   workerReady: boolean;
   onRetry: () => void;
   onDismiss: () => void;
+  onRemove: () => void;
+  removing: boolean;
+  removeError: string;
 }) {
   const status = detailPresentation(job);
   const classes = toneClasses(status.tone);
   const active = ACTIVE_DETAIL.has(job.status);
+  const resumable = canResumeCheckpoint(job);
   const progress = safeProgress(job.progress);
   return (
     <article
@@ -644,6 +760,9 @@ function DetailCard({
       {job.error ? (
         <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-rose-700">{job.error}</p>
       ) : null}
+      {removeError ? (
+        <p className="mt-2 text-[11px] font-bold leading-4 text-rose-700">{removeError}</p>
+      ) : null}
       <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
         <p className="text-[10px] font-bold text-slate-400">
           {active ? "화면 이동·새로고침 가능" : `시도 ${job.attempt || 1}회`}
@@ -663,15 +782,26 @@ function DetailCard({
                 disabled={!workerReady}
                 className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 hover:bg-slate-100 disabled:cursor-wait disabled:opacity-40"
               >
-                다시 생성
+                {resumable ? "이어서 생성" : "다시 생성"}
               </button>
-              <button
-                type="button"
-                onClick={onDismiss}
-                className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              >
-                닫기
-              </button>
+              {job.status === "failed" ? (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  disabled={removing}
+                  className="rounded-lg px-2 py-1.5 text-[11px] font-black text-rose-600 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {removing ? "삭제 중…" : "삭제"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onDismiss}
+                  className="rounded-lg px-2 py-1.5 text-[11px] font-black text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  닫기
+                </button>
+              )}
             </>
           ) : null}
         </div>

@@ -9,6 +9,10 @@ import {
   resolveDetailPageJobIdentity,
   verifyDetailPageJobToken,
 } from "@/lib/detailPageJobServer";
+import {
+  canResumeDetailPageCheckpoint,
+  standardQualityRetryPlan,
+} from "@/lib/detailPageAiReview";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 const TERMINAL = new Set(["success", "failed", "cancelled"]);
@@ -76,7 +80,7 @@ export async function POST(
 
     if (action === "claim") {
       if (!workerAuthorized) return forbidden("서버 작업자만 작업을 인계받을 수 있습니다.");
-      if (TERMINAL.has(job.status) || job.status === "render_pending") {
+      if (TERMINAL.has(job.status)) {
         return Response.json({ ok: true, terminal: true, job: publicDetailPageJob(job) });
       }
       const now = Date.now();
@@ -125,6 +129,56 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
+    if (action === "resume_checkpointed_generation") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 실패한 서버 생성을 이어서 실행할 수 있습니다.");
+      }
+      const standardRetry = standardQualityRetryPlan(job.result);
+      const standardGateFailure = job.stage === "standard_quality_gate";
+      if (
+        !canResumeDetailPageCheckpoint(job) ||
+        (standardGateFailure && !standardRetry.slots.length)
+      ) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_CHECKPOINT_NOT_RESUMABLE",
+            message: "재사용할 수 있는 상세페이지 생성 체크포인트가 없습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "queued",
+        stage: "checkpoint_resume",
+        message: standardGateFailure
+          ? `기존 승인 자산 유지 · Standard-v2 차단 상세 섹션 ${standardRetry.slots.length}장만 재생성 대기 중`
+          : "기존 승인 자산 유지 · 실패 지점부터 이어서 생성 대기 중",
+        progress: clamp(job.progress, 10, 94),
+        qa_status: "pending",
+        payload: {
+          attempt: job.attempt + 1,
+          assistant_hidden_at: "",
+        },
+        result: {
+          setAssessment: standardGateFailure ? job.result.setAssessment : null,
+          representativeRetryRole: "",
+          representativeRetryInstruction: "",
+          panelRetrySlots: standardGateFailure ? standardRetry.slots : [],
+          panelRetryInstructions: standardGateFailure
+            ? standardRetry.instructions
+            : {},
+          setRetryUsed: standardGateFailure,
+          standardRetryUsed: standardGateFailure,
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
     if (action === "evidence_ready") {
       if (!ownerAuthorized) return forbidden("OPS 화면만 수집 근거를 등록할 수 있습니다.");
       const evidenceUrls = stringList(body.evidenceUrls, 60);
@@ -152,18 +206,38 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
-    if (["progress", "checkpoint", "render_pending", "failed"].includes(action)) {
+    if (["progress", "checkpoint", "render_pending", "server_finalizer_progress", "failed"].includes(action)) {
       if (!workerAuthorized) return forbidden("Studio 서버 작업자만 생성 상태를 기록할 수 있습니다.");
-      const result = asRecord(body.result);
+      const callbackResult = asRecord(body.result);
+      const serverFinalizerProgress = action === "server_finalizer_progress";
+      const result =
+        action === "render_pending"
+          ? {
+              ...callbackResult,
+              standardFailure: null,
+              standard_failure: null,
+              panelRetrySlots: [],
+              panelRetryInstructions: {},
+            }
+          : callbackResult;
       const nextStatus =
         action === "render_pending" ? "render_pending" : action === "failed" ? "failed" : "running";
-      const releasesLease = action !== "progress";
+      const releasesLease = !["progress", "server_finalizer_progress"].includes(action);
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: nextStatus,
         stage: safeText(body.stage, 100) || job.stage,
         message: safeText(body.message, 500) || job.message,
-        progress: clamp(Number(body.progress ?? job.progress), 0, action === "render_pending" ? 99 : 95),
-        qa_status: action === "render_pending" ? "passed" : action === "failed" ? "failed" : job.qa_status,
+        progress: clamp(
+          Number(body.progress ?? job.progress),
+          0,
+          action === "render_pending" || serverFinalizerProgress ? 99 : 95,
+        ),
+        qa_status:
+          action === "render_pending" || serverFinalizerProgress
+            ? "passed"
+            : action === "failed"
+              ? "failed"
+              : job.qa_status,
         result,
         step_version: Math.max(job.step_version, Number(body.stepVersion) || job.step_version),
         lease_owner: releasesLease ? "" : job.lease_owner,
@@ -174,8 +248,128 @@ export async function POST(
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
 
+    if (["finalizer_heartbeat", "finalizer_progress"].includes(action)) {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 최종 조립 연결 상태를 기록할 수 있습니다.");
+      }
+      if (job.status !== "render_pending") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_FINALIZER_NOT_PENDING",
+            message: "최종 조립 대기 중인 작업만 다시 연결할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const phase = safeText(body.phase, 80);
+      const phaseMessages: Record<string, string> = {
+        connecting: "최종 조립기 연결 중",
+        engine_ready: "최종 조립기 연결 완료 · 저장 결과 불러오는 중",
+        snapshot_received: "저장된 생성 결과 확인 완료 · 이미지 불러오기 준비 중",
+        asset_loading: "저장 이미지 불러오는 중",
+        asset_loaded: "저장 이미지 불러오기 진행 중",
+        document_loading: "14,000px 조립 문서 이미지 배치 확인 중",
+        rendering: "14,000px 상세페이지 렌더링 중",
+        render_waiting: "14,000px 렌더러 응답 대기 중",
+        encoding: "최종 상세페이지 JPEG 변환 중",
+        failed: "최종 조립 연결 실패 · 저장 결과는 보존됨",
+      };
+      if (!phaseMessages[phase]) return invalid("최종 조립 단계가 올바르지 않습니다.");
+      const heartbeatAt = new Date().toISOString();
+      const previousAttempt = Math.max(
+        0,
+        Math.floor(Number(job.payload.finalizer_attempt) || 0),
+      );
+      const finalizerAttempt =
+        phase === "connecting" ? previousAttempt + 1 : Math.max(1, previousAttempt);
+      const finalizerStartedAt =
+        phase === "connecting"
+          ? heartbeatAt
+          : safeText(job.payload.finalizer_started_at, 80) || heartbeatAt;
+      const previousTotalAssets = Math.floor(
+        clamp(Number(job.payload.finalizer_total_assets) || 0, 0, 100),
+      );
+      const hasTotalAssets = Object.prototype.hasOwnProperty.call(
+        body,
+        "totalAssets",
+      );
+      const totalAssets =
+        phase === "connecting"
+          ? 0
+          : hasTotalAssets
+            ? Math.floor(clamp(Number(body.totalAssets) || 0, 0, 100))
+            : previousTotalAssets;
+      const previousCompletedAssets = Math.floor(
+        clamp(
+          Number(job.payload.finalizer_completed_assets) || 0,
+          0,
+          previousTotalAssets || 100,
+        ),
+      );
+      const hasCompletedAssets = Object.prototype.hasOwnProperty.call(
+        body,
+        "completedAssets",
+      );
+      const completedAssets = Math.floor(
+        clamp(
+          phase === "connecting"
+            ? 0
+            : hasCompletedAssets
+              ? Number(body.completedAssets) || 0
+              : previousCompletedAssets,
+          0,
+          totalAssets || 100,
+        ),
+      );
+      const assetLabel =
+        phase === "connecting"
+          ? ""
+          : Object.prototype.hasOwnProperty.call(body, "assetLabel")
+            ? safeText(body.assetLabel, 240)
+            : safeText(job.payload.finalizer_asset_label, 240);
+      const errorCode =
+        phase === "failed"
+          ? safeText(body.errorCode, 120) || "FINALIZER_FAILED"
+          : "";
+      const ratio = totalAssets > 0 ? completedAssets / totalAssets : 0;
+      const progressByPhase =
+        phase === "encoding"
+          ? 99
+          : ["document_loading", "rendering", "render_waiting"].includes(phase)
+            ? 98
+            : ["asset_loading", "asset_loaded"].includes(phase)
+              ? 96 + ratio * 2
+              : phase === "failed"
+                ? Number(job.progress || 96)
+                : 96;
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "render_pending",
+        stage: "render_pending",
+        message: safeText(body.message, 500) || phaseMessages[phase],
+        progress: clamp(progressByPhase, 96, 99),
+        qa_status: "passed",
+        payload: {
+          finalizer_phase: phase,
+          finalizer_heartbeat_at: heartbeatAt,
+          finalizer_started_at: finalizerStartedAt,
+          finalizer_attempt: finalizerAttempt,
+          finalizer_completed_assets: completedAssets,
+          finalizer_total_assets: totalAssets,
+          finalizer_asset_label: assetLabel,
+          finalizer_error_code: errorCode,
+        },
+        error_message:
+          phase === "failed" ? safeText(body.error, 2_000) || phaseMessages.failed : "",
+        completed_at: null,
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
     if (action === "final_complete") {
-      if (!ownerAuthorized) return forbidden("OPS 화면만 최종 도킹을 완료할 수 있습니다.");
+      if (!workerAuthorized && !ownerAuthorized) {
+        return forbidden("Studio 서버 작업자 또는 OPS 화면만 최종 도킹을 완료할 수 있습니다.");
+      }
       const detailImageUrl = safeText(body.detailImageUrl, 2_000);
       const mainImageUrl = safeText(body.mainImageUrl, 2_000);
       const additionalImageUrls = stringList(body.additionalImageUrls, 4);
@@ -184,13 +378,29 @@ export async function POST(
         return invalid("최종 상세·대표·부가 이미지 URL 구성이 올바르지 않습니다.");
       }
       const completedAt = new Date().toISOString();
+      const callbackResult = asRecord(body.result);
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "success",
         stage: "docked",
-        message: "검수 통과 · 상세 HTML과 이미지 URL 자동 도킹 완료",
+        message: "검수 통과 · 서버 조립 상세 HTML과 이미지 URL 자동 도킹 완료",
         progress: 100,
         qa_status: "passed",
-        result: { detailImageUrl, mainImageUrl, additionalImageUrls },
+        result: {
+          ...callbackResult,
+          detailImageUrl,
+          mainImageUrl,
+          additionalImageUrls,
+          finalizerMode: workerAuthorized ? "server-v1" : callbackResult.finalizerMode,
+          finalizerPhase: "complete",
+          standardFailure: null,
+          standard_failure: null,
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
+        },
+        step_version: Math.max(
+          job.step_version,
+          Number(body.stepVersion) || job.step_version,
+        ),
         lease_owner: "",
         lease_until: null,
         error_message: "",
@@ -210,6 +420,32 @@ export async function POST(
         completed_at: new Date().toISOString(),
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
+    if (action === "dismiss_failed_from_assistant") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면에서 본인의 실패 작업만 삭제할 수 있습니다.");
+      }
+      if (job.status !== "failed") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_NOT_FAILED",
+            message: "실패한 상세페이지 작업만 도우미에서 삭제할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const hiddenAt = new Date().toISOString();
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        payload: { assistant_hidden_at: hiddenAt },
+      });
+      if (!changed) return notFound();
+      return Response.json({
+        ok: true,
+        hiddenAt,
+        job: publicDetailPageJob(changed),
+      });
     }
 
     return invalid("지원하지 않는 작업 변경입니다.");
