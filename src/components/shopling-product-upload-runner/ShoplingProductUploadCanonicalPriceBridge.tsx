@@ -10,11 +10,29 @@ import {
 } from "@/lib/shoplingCanonicalPricePolicy";
 
 const UPLOAD_REQUEST_ID_STORAGE_KEY = "shoplingProductUpload.currentRequestId";
-const PRICE_REQUEST_STORAGE_PREFIX =
-  "shoplingProductUpload.canonicalPriceRequest";
+const PRICE_PLAN_STORAGE_PREFIX = "shoplingProductUpload.canonicalPricePlan";
+const AUTOMATION_CUTOFF = Date.parse("2026-08-03T08:20:00.000Z");
+const MAX_GOODS_KEYS_PER_REQUEST = 50;
 const POLL_MS = 5_000;
 
 type BridgeStatus = "idle" | "waiting" | "running" | "success" | "blocked" | "error";
+type ChunkStatus = "pending" | "success" | "failed";
+
+type StoredChunk = {
+  goodsKeys: string[];
+  groupMap: Record<string, string>;
+  requestId: string;
+  status: ChunkStatus;
+  message: string;
+};
+
+type StoredPlan = {
+  version: 1;
+  policyVersion: string;
+  uploadRequestId: string;
+  goodsKeys: string[];
+  chunks: StoredChunk[];
+};
 
 type BridgeState = {
   status: BridgeStatus;
@@ -35,8 +53,77 @@ function numeric(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function priceStorageKey(uploadRequestId: string) {
-  return `${PRICE_REQUEST_STORAGE_PREFIX}.${uploadRequestId}`;
+function pricePlanStorageKey(uploadRequestId: string) {
+  return `${PRICE_PLAN_STORAGE_PREFIX}.${uploadRequestId}`;
+}
+
+function parseUploadRequestTime(requestId: string) {
+  const match = requestId.match(
+    /^shopling-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z-/i,
+  );
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  const timestamp = Date.parse(
+    `${year}-${month}-${day}T${hour}:${minute}:${second}Z`,
+  );
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function readStoredPlan(uploadRequestId: string): StoredPlan | null {
+  try {
+    const raw = window.localStorage.getItem(pricePlanStorageKey(uploadRequestId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredPlan;
+    if (
+      parsed?.version !== 1 ||
+      parsed.uploadRequestId !== uploadRequestId ||
+      !Array.isArray(parsed.goodsKeys) ||
+      !Array.isArray(parsed.chunks)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredPlan(plan: StoredPlan) {
+  window.localStorage.setItem(
+    pricePlanStorageKey(plan.uploadRequestId),
+    JSON.stringify(plan),
+  );
+}
+
+function buildStoredPlan(
+  uploadRequestId: string,
+  goodsKeys: string[],
+  groupMap: Record<string, string>,
+): StoredPlan {
+  const chunks: StoredChunk[] = [];
+  for (let index = 0; index < goodsKeys.length; index += MAX_GOODS_KEYS_PER_REQUEST) {
+    const chunkGoodsKeys = goodsKeys.slice(index, index + MAX_GOODS_KEYS_PER_REQUEST);
+    chunks.push({
+      goodsKeys: chunkGoodsKeys,
+      groupMap: Object.fromEntries(
+        chunkGoodsKeys.map((goodsKey) => [goodsKey, groupMap[goodsKey]]),
+      ),
+      requestId: "",
+      status: "pending",
+      message: "",
+    });
+  }
+  return {
+    version: 1,
+    policyVersion: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
+    uploadRequestId,
+    goodsKeys,
+    chunks,
+  };
+}
+
+function planMatchesGoodsKeys(plan: StoredPlan, goodsKeys: string[]) {
+  return JSON.stringify(plan.goodsKeys) === JSON.stringify(goodsKeys);
 }
 
 export function ShoplingProductUploadCanonicalPriceBridge() {
@@ -55,6 +142,15 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
       setState({
         status: "idle",
         message: "상품등록 실행을 시작하면 중앙 가격정책 엔진이 자동으로 이어집니다.",
+      });
+      return;
+    }
+    const requestTime = parseUploadRequestTime(uploadRequestId);
+    if (requestTime !== null && requestTime < AUTOMATION_CUTOFF) {
+      setState({
+        status: "idle",
+        message: "기존 상품등록 기록은 자동 보정하지 않습니다. 새 상품등록부터 중앙 가격정책이 적용됩니다.",
+        uploadRequestId,
       });
       return;
     }
@@ -109,58 +205,110 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
         return;
       }
 
-      const storageKey = priceStorageKey(uploadRequestId);
-      let priceRequestId = window.localStorage.getItem(storageKey)?.trim() ?? "";
-      if (!priceRequestId) {
+      let plan = readStoredPlan(uploadRequestId);
+      if (!plan || !planMatchesGoodsKeys(plan, targets.goodsKeys)) {
+        plan = buildStoredPlan(
+          uploadRequestId,
+          targets.goodsKeys,
+          targets.groupMap,
+        );
+        writeStoredPlan(plan);
+      }
+
+      const failedChunkIndex = plan.chunks.findIndex(
+        (chunk) => chunk.status === "failed",
+      );
+      if (failedChunkIndex >= 0) {
+        const failedChunk = plan.chunks[failedChunkIndex];
+        setState({
+          status: "error",
+          message:
+            failedChunk.message ||
+            `중앙 가격정책 ${failedChunkIndex + 1}/${plan.chunks.length}묶음 결과를 확인하세요.`,
+          uploadRequestId,
+          priceRequestId: failedChunk.requestId,
+          goodsKeyCount: plan.goodsKeys.length,
+        });
+        return;
+      }
+
+      const chunkIndex = plan.chunks.findIndex(
+        (chunk) => chunk.status !== "success",
+      );
+      if (chunkIndex < 0) {
+        setState({
+          status: "success",
+          message: `중앙 가격정책 적용 완료 · 상품 ${plan.goodsKeys.length}개 · ${plan.chunks.length}묶음`,
+          uploadRequestId,
+          goodsKeyCount: plan.goodsKeys.length,
+        });
+        return;
+      }
+
+      const chunk = plan.chunks[chunkIndex];
+      if (!chunk.requestId) {
         setState({
           status: "running",
-          message: `등록된 ${targets.goodsKeys.length}개 상품을 중앙 가격정책 엔진으로 보내는 중입니다.`,
+          message: `중앙 가격정책 ${chunkIndex + 1}/${plan.chunks.length}묶음 실행을 시작합니다.`,
           uploadRequestId,
-          goodsKeyCount: targets.goodsKeys.length,
+          goodsKeyCount: plan.goodsKeys.length,
         });
         const dispatchResponse = await fetch("/api/shopling-price-modify/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            goods_key: targets.goodsKeys.join(","),
-            goods_key_group_json: targets.goodsKeyGroupJson,
+            goods_key: chunk.goodsKeys.join(","),
+            goods_key_group_json: JSON.stringify(chunk.groupMap),
             policy_overrides: [],
             reason: "canonical_after_standalone_product_upload",
             policy_version: SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
           }),
         });
         const dispatchResult = await dispatchResponse.json();
-        priceRequestId = String(dispatchResult.requestId ?? "").trim();
-        if (!dispatchResponse.ok || !priceRequestId) {
+        chunk.requestId = String(dispatchResult.requestId ?? "").trim();
+        if (!dispatchResponse.ok || !chunk.requestId) {
+          chunk.status = "failed";
+          chunk.message =
+            dispatchResult.message || "중앙 가격정책 실행을 시작하지 못했습니다.";
+          writeStoredPlan(plan);
           setState({
             status: "error",
-            message:
-              dispatchResult.message || "중앙 가격정책 실행을 시작하지 못했습니다.",
+            message: chunk.message,
             uploadRequestId,
-            goodsKeyCount: targets.goodsKeys.length,
+            goodsKeyCount: plan.goodsKeys.length,
           });
           return;
         }
-        window.localStorage.setItem(storageKey, priceRequestId);
+        writeStoredPlan(plan);
       }
 
       const priceResponse = await fetch(
-        `/api/shopling-price-modify/actions-result?request_id=${encodeURIComponent(priceRequestId)}`,
+        `/api/shopling-price-modify/actions-result?request_id=${encodeURIComponent(chunk.requestId)}`,
         { cache: "no-store" },
       );
       const priceResult = await priceResponse.json();
       if (
         isCanonicalPricePolicyResultSuccess(
           priceResult,
-          targets.goodsKeys.length,
+          chunk.goodsKeys.length,
         )
       ) {
+        chunk.status = "success";
+        chunk.message = "중앙 가격정책 적용 완료";
+        writeStoredPlan(plan);
+        const completedCount = plan.chunks.filter(
+          (candidate) => candidate.status === "success",
+        ).length;
         setState({
-          status: "success",
-          message: `중앙 가격정책 적용 완료 · 상품 ${targets.goodsKeys.length}개`,
+          status:
+            completedCount === plan.chunks.length ? "success" : "running",
+          message:
+            completedCount === plan.chunks.length
+              ? `중앙 가격정책 적용 완료 · 상품 ${plan.goodsKeys.length}개`
+              : `중앙 가격정책 ${completedCount}/${plan.chunks.length}묶음 완료 · 다음 묶음을 준비합니다.`,
           uploadRequestId,
-          priceRequestId,
-          goodsKeyCount: targets.goodsKeys.length,
+          priceRequestId: chunk.requestId,
+          goodsKeyCount: plan.goodsKeys.length,
         });
         return;
       }
@@ -168,21 +316,24 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
         !priceResponse.ok ||
         isCanonicalPricePolicyResultTerminalFailure(priceResult)
       ) {
+        chunk.status = "failed";
+        chunk.message = canonicalPricePolicyResultMessage(priceResult);
+        writeStoredPlan(plan);
         setState({
           status: "error",
-          message: canonicalPricePolicyResultMessage(priceResult),
+          message: chunk.message,
           uploadRequestId,
-          priceRequestId,
-          goodsKeyCount: targets.goodsKeys.length,
+          priceRequestId: chunk.requestId,
+          goodsKeyCount: plan.goodsKeys.length,
         });
         return;
       }
       setState({
         status: "running",
-        message: `중앙 가격정책 적용 중 · 상품 ${targets.goodsKeys.length}개`,
+        message: `중앙 가격정책 ${chunkIndex + 1}/${plan.chunks.length}묶음 적용 중`,
         uploadRequestId,
-        priceRequestId,
-        goodsKeyCount: targets.goodsKeys.length,
+        priceRequestId: chunk.requestId,
+        goodsKeyCount: plan.goodsKeys.length,
       });
     } catch (error) {
       setState({
@@ -205,8 +356,21 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
   }, [inspect]);
 
   const retry = () => {
-    if (state.uploadRequestId) {
-      window.localStorage.removeItem(priceStorageKey(state.uploadRequestId));
+    if (!state.uploadRequestId) return;
+    const plan = readStoredPlan(state.uploadRequestId);
+    if (!plan) {
+      window.localStorage.removeItem(
+        pricePlanStorageKey(state.uploadRequestId),
+      );
+      void inspect();
+      return;
+    }
+    const failedChunk = plan.chunks.find((chunk) => chunk.status === "failed");
+    if (failedChunk) {
+      failedChunk.status = "pending";
+      failedChunk.requestId = "";
+      failedChunk.message = "";
+      writeStoredPlan(plan);
     }
     void inspect();
   };
@@ -242,7 +406,7 @@ export function ShoplingProductUploadCanonicalPriceBridge() {
               onClick={retry}
               className="rounded-lg border border-current bg-white px-3 py-2 text-xs font-black"
             >
-              다시 실행
+              실패 묶음 다시 실행
             </button>
           ) : null}
         </div>
