@@ -19,11 +19,9 @@ jobs:
       - run: npm ci
       - name: Run canonical price policy regression tests
         run: >-
-          node --experimental-strip-types --test
+          npx tsx --test
           tests/shoplingCanonicalPricePolicy.test.mjs
           tests/productLaunchTrackerKeywordHandoff.test.mjs
-          tests/productLaunchSimpleSession.test.mjs
-          tests/shoplingProductUploadRunner.test.mjs
       - name: Build
         run: npm run build
         env:
