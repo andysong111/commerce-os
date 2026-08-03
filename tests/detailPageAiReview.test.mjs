@@ -27,9 +27,6 @@ const jobRouteSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/route.ts",
   "utf8",
 );
-const openFinalizerStart = dockSource.indexOf("async function openFinalizer(job)");
-const openFinalizerEnd = dockSource.indexOf("\nfunction mountFrame", openFinalizerStart);
-const openFinalizerSource = dockSource.slice(openFinalizerStart, openFinalizerEnd);
 
 function job(overrides = {}) {
   return {
@@ -117,9 +114,12 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
     jobRouteSource,
     /action === "render_pending"[\s\S]*standardFailure: null/,
   );
-  assert.doesNotMatch(openFinalizerSource, /if \(!item\) return;/);
-  assert.match(openFinalizerSource, /payload\.product_name/);
-  assert.match(openFinalizerSource, /payload\.sales_options/);
+  assert.match(workspaceSource, /서버 최종 조립 다시 시작/);
+  assert.match(workspaceSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
+  assert.doesNotMatch(dockSource, /async function openFinalizer/);
+  assert.doesNotMatch(dockSource, /ops_finalize/);
+  assert.match(jobRouteSource, /server_finalizer_progress/);
+  assert.match(jobRouteSource, /finalizerMode: workerAuthorized \? "server-v1"/);
 });
 
 test("Standard-v2 failure keeps exact section scores, defects, screenshot diagnostics, and retry scope", () => {
