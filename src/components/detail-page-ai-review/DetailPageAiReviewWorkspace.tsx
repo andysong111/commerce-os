@@ -40,6 +40,8 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 export function DetailPageAiReviewWorkspace() {
   const workerRef = useRef<HTMLIFrameElement>(null);
+  const finalizerRequestRef = useRef("");
+  const finalizerAckTimerRef = useRef<number | null>(null);
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [filter, setFilter] = useState<Filter>("needs_review");
@@ -118,6 +120,33 @@ export function DetailPageAiReviewWorkspace() {
         }
         void refresh(true);
       }
+      if (payload?.source === DOCK_EVENT_SOURCE && payload?.type === "detail-page-finalizer-status") {
+        const requestId = String(payload.requestId || "");
+        if (!requestId || requestId !== finalizerRequestRef.current) return;
+        if (finalizerAckTimerRef.current !== null) {
+          window.clearTimeout(finalizerAckTimerRef.current);
+          finalizerAckTimerRef.current = null;
+        }
+        const tone =
+          payload.tone === "error" ? "error" : payload.tone === "success" ? "success" : "progress";
+        setActionState({
+          tone,
+          message: String(payload.message || "최종 조립 연결 상태를 확인하고 있습니다."),
+        });
+        if (isReviewJob(payload.job)) {
+          setJobs((current) => [
+            payload.job,
+            ...current.filter((job) => job.jobId !== payload.job.jobId),
+          ]);
+          setSelectedJobId(payload.job.jobId);
+        }
+        if (payload.phase === "engine_ready" || tone !== "progress") {
+          setActionJobId("");
+        }
+        if (tone !== "progress") finalizerRequestRef.current = "";
+        void refresh(true);
+        return;
+      }
       if (payload?.source === REVIEW_EVENT_SOURCE && payload?.type === "regeneration-status") {
         setActionState({
           tone: payload.tone === "error" ? "error" : payload.tone === "success" ? "success" : "progress",
@@ -131,6 +160,15 @@ export function DetailPageAiReviewWorkspace() {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [refresh]);
+
+  useEffect(
+    () => () => {
+      if (finalizerAckTimerRef.current !== null) {
+        window.clearTimeout(finalizerAckTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (workerReady) return;
@@ -294,6 +332,11 @@ export function DetailPageAiReviewWorkspace() {
 
   function reconnectFinalAssembly(job: DetailPageReviewJob) {
     if (actionJobId || !workerReady || job.status !== "render_pending") return;
+    const requestId = crypto.randomUUID();
+    finalizerRequestRef.current = requestId;
+    if (finalizerAckTimerRef.current !== null) {
+      window.clearTimeout(finalizerAckTimerRef.current);
+    }
     setActionJobId(job.jobId);
     setActionState({
       tone: "progress",
@@ -304,17 +347,21 @@ export function DetailPageAiReviewWorkspace() {
         source: WORK_ASSISTANT_SOURCE,
         type: "activate-detail-page-job",
         job,
+        requestId,
       },
       window.location.origin,
     );
-    window.setTimeout(() => {
+    finalizerAckTimerRef.current = window.setTimeout(() => {
+      if (finalizerRequestRef.current !== requestId) return;
+      finalizerRequestRef.current = "";
+      finalizerAckTimerRef.current = null;
       setActionJobId((current) => (current === job.jobId ? "" : current));
       setActionState({
-        tone: "success",
-        message: "최종 조립기 재연결 요청을 전달했습니다. 현황판의 heartbeat와 상태를 확인하세요.",
+        tone: "error",
+        message: "최종 조립기가 20초 안에 재연결 요청을 확인하지 못했습니다. 다시 연결하기 전에 화면을 새로고침하세요.",
       });
       void refresh(true);
-    }, 1_500);
+    }, 20_000);
   }
 
   return (
