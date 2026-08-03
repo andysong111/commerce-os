@@ -69,7 +69,9 @@ test("migration, API security, and advanced UI prepared-job contracts", async ()
   for(const table of ["shopling_price_bulk_jobs","shopling_price_bulk_items","shopling_price_bulk_chunks"]) { assert.match(migration,new RegExp(`create table public.${table}`)); assert.match(migration,new RegExp(`alter table public.${table} enable row level security`)); }
   assert.match(migration,/on delete cascade/); assert.match(migration,/unique \(job_id, chunk_index\)/); assert.match(migration,/security definer set search_path = public/); assert.match(migration,/grant execute[\s\S]*service_role/); assert.match(migration,/'prepared'/); assert.match(migration,/'pending'/);
   assert.match(collection,/createSupabaseServerClient/); assert.match(collection,/data\.user\.id/); assert.match(collection,/status: 401/); assert.doesNotMatch(collection,/body\.owner_id/); assert.doesNotMatch(collection,/github|shopling api|cron/i);
-  assert.match(detail,/eq\("owner_id", auth\.user\.id\)/);
+  assert.match(detail,/normalSession\(request\)/);
+  assert.match(detail,/eq\("owner_id", auth\.ownerId\)/);
+  assert.doesNotMatch(detail,/createSupabaseServerClient|createSupabaseAdminClient|auth\.getUser/);
   assert.match(detail,/if \(jobResult\.error\) return NextResponse\.json\(\{ error: "Bulk 작업 조회에 실패했습니다\." \}, \{ status: 500 \}\)/);
   assert.match(detail,/if \(!jobResult\.data\) return missing\(\)/);
   assert.match(detail,/const missing = \(\) => NextResponse\.json\(\{ error: "작업을 찾을 수 없거나 접근 권한이 없습니다\." \}, \{ status: 404 \}\)/);
