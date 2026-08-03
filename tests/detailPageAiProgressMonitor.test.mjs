@@ -67,6 +67,15 @@ test("final-assembly reconnect is acknowledged by the real worker and persisted"
   assert.match(dockSource, /type: "detail-page-finalizer-status"/);
   assert.match(dockSource, /action: "finalizer_progress"/);
   assert.match(dockSource, /recordFinalizerProgress\("engine_ready"/);
+  assert.match(dockSource, /SNAPSHOT_MAX_ATTEMPTS = 5/);
+  assert.match(dockSource, /active\.snapshotDeliveryStarted = true/);
+  assert.match(dockSource, /type === "ops-dock-finalize-snapshot-ack"/);
+  assert.match(dockSource, /snapshotRequestId: current\.snapshotRequestId/);
+  assert.match(dockSource, /FINALIZER_SNAPSHOT_ACK_TIMEOUT/);
+  assert.match(dockSource, /FINALIZER_SNAPSHOT_PROGRESS_TIMEOUT/);
+  assert.match(dockSource, /SNAPSHOT_PROGRESS_TIMEOUT_MS = 10 \* 1000/);
+  assert.match(dockSource, /window\.clearTimeout\(activeSnapshotTimer\)/);
+  assert.match(dockSource, /window\.clearTimeout\(activeSnapshotProgressTimer\)/);
   assert.match(dockSource, /type === "ops-dock-finalize-progress"/);
   assert.doesNotMatch(dockSource, /recordFinalizerHeartbeat\("snapshot_loading"/);
   assert.match(jobRouteSource, /"finalizer_heartbeat", "finalizer_progress"/);
