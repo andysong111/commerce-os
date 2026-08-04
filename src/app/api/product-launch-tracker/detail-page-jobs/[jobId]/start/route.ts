@@ -152,6 +152,7 @@ export async function POST(
       body: JSON.stringify({
         callbackUrl: callbackUrl.toString(),
         workerUrl: connection.workerUrl.toString(),
+        executionId: String(runnableJob.payload.execution_id ?? "").trim() || undefined,
         token: createDetailPageJobToken(
           config.value,
           runnableJob.owner_id,

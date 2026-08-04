@@ -9,10 +9,15 @@ import {
 } from "@/lib/opsLoginBypass";
 import {
   bearerToken,
+  type DetailPageJobRow,
   getDetailPageJobConfig,
   readDetailPageJob,
   verifyDetailPageJobToken,
 } from "@/lib/detailPageJobServer";
+import {
+  DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+  matchesDetailPageExecution,
+} from "@/lib/detailPageJobRecovery";
 
 const BUCKET_NAME = "product-launch-assets";
 // Vercel 함수 요청 본문 한도보다 여유를 두고, 상세페이지 엔진도 같은
@@ -21,7 +26,11 @@ const MAX_FILE_BYTES = 4_000_000;
 const ROLE_PATTERN = /^(detail-page|main|additional-[1-4]|evidence-(?:[1-9]|[1-5][0-9]|60)|panel-[1-8])$/;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
-type TrackerIdentity = { userId: string; email: string };
+type TrackerIdentity = {
+  userId: string;
+  email: string;
+  workerJob?: DetailPageJobRow;
+};
 
 export async function POST(request: NextRequest) {
   const config = getAdminConfig();
@@ -38,6 +47,7 @@ export async function POST(request: NextRequest) {
   const jobId = safeSegment(form.get("job_id"));
   const role = String(form.get("role") ?? "").trim();
   const revision = String(form.get("revision") ?? "").trim().toLowerCase();
+  const executionId = String(form.get("execution_id") ?? "").trim();
   if (!(file instanceof File) || !itemId || !jobId || !ROLE_PATTERN.test(role)) {
     return invalid("상품·작업·이미지 역할 또는 파일 값이 올바르지 않습니다.");
   }
@@ -46,6 +56,33 @@ export async function POST(request: NextRequest) {
   }
   const identity = await resolveUploadIdentity(request, jobId, itemId);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
+  const workerJob = identity.value.workerJob;
+  if (workerJob && ["success", "failed", "cancelled"].includes(workerJob.status)) {
+    return Response.json(
+      {
+        ok: false,
+        code: "DETAIL_PAGE_JOB_TERMINAL",
+        message: "종료된 상세페이지 작업의 늦은 이미지 업로드를 차단했습니다.",
+      },
+      { status: 409 },
+    );
+  }
+  if (workerJob && !matchesDetailPageExecution(workerJob, executionId)) {
+    return Response.json(
+      {
+        ok: false,
+        code: "DETAIL_PAGE_EXECUTION_STALE",
+        message: "이전 상세페이지 실행의 이미지 업로드를 차단했습니다.",
+      },
+      { status: 409 },
+    );
+  }
+  if (
+    workerJob?.payload.pipeline_version === DETAIL_PAGE_STAGED_PIPELINE_VERSION &&
+    !revision
+  ) {
+    return invalid("단계형 상세페이지 이미지에는 변경 불가능한 버전 값이 필요합니다.");
+  }
   if (!/^image\/jpe?g$/i.test(file.type)) {
     return invalid("상세페이지 결과 이미지는 JPG 형식이어야 합니다.");
   }
@@ -124,7 +161,11 @@ async function resolveUploadIdentity(
       }
       return {
         ok: true,
-        value: { userId: job.owner_id, email: job.owner_email },
+        value: {
+          userId: job.owner_id,
+          email: job.owner_email,
+          workerJob: job,
+        },
       };
     } catch (error) {
       return {
