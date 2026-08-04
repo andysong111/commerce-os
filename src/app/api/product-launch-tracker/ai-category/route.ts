@@ -7,7 +7,7 @@ import { parseProductCategoryInputs } from "@/lib/shoplingCategoryScoring";
 import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const identity = await resolveProductLaunchIdentity(request);
@@ -25,34 +25,50 @@ export async function POST(request: NextRequest) {
   }
   try {
     const inputs = parseProductCategoryInputs(body);
+    const retryFailedIndividually = Boolean(
+      body &&
+        typeof body === "object" &&
+        !Array.isArray(body) &&
+        (body as Record<string, unknown>).retryFailedIndividually,
+    );
     const generated = await generateReliableShoplingCategoryRecommendations(
       inputs,
-      { timeoutMs: 45_000 },
+      { timeoutMs: 60_000, retryFailedIndividually },
     );
 
     const generatedById = new Map(
       generated.results.map((row) => [row.itemId, row]),
     );
-    const results = inputs.map((input) => {
+    const results = inputs.flatMap((input) => {
       const row = generatedById.get(input.itemId);
-      if (!row) {
-        throw new Error(`${input.modelNumber || input.itemId}의 AI 결과가 누락되었습니다.`);
-      }
+      if (!row) return [];
       const candidateChoices = buildCandidateChoices(
         row.selectedPath,
         row.alternatives,
         row.candidatePaths,
       );
-      return {
+      return [{
         ...row,
+        autoApply: false,
         reason: normalizeModelNameTerminology(row.reason),
         alternatives: candidateChoices.slice(1, 3),
         candidateChoices,
-      };
+      }];
     });
 
+    const failures = generated.failures.map((failure) => ({
+      ...failure,
+      message: normalizeModelNameTerminology(failure.message),
+    }));
+
     return Response.json(
-      { ok: true, ...generated, results },
+      {
+        ok: true,
+        ...generated,
+        complete: failures.length === 0,
+        results,
+        failures,
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -60,13 +76,13 @@ export async function POST(request: NextRequest) {
       error instanceof Error ? error.message : "AI 카테고리 추천에 실패했습니다.";
     const message =
       error instanceof DOMException && error.name === "AbortError"
-        ? "AI 카테고리 분석 시간이 45초를 초과했습니다. 선택 상품 수를 줄여 다시 실행하세요."
+        ? "AI 카테고리 분석 제한시간을 초과했습니다. 완료된 상품은 보존하고 실패한 상품만 다시 실행하세요."
         : isRetryableCategoryOutputError(error)
-          ? "AI 응답이 중간에서 잘렸습니다. 실패한 상품만 자동 재시도했지만 완료되지 않았습니다. 해당 상품 수를 줄여 다시 실행하세요."
+          ? "AI 응답이 중간에서 잘렸습니다. 완료된 상품은 보존하고 실패한 상품만 다시 실행하세요."
           : rawMessage;
     const status = /OPENAI_API_KEY|카테고리 스냅샷|GITHUB_/.test(message)
       ? 503
-      : /시간을 .*초과|AbortError|aborted/i.test(message)
+      : /시간[이가을]? .*초과|AbortError|aborted/i.test(message)
         ? 504
         : 400;
     return Response.json(
