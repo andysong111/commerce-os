@@ -40,7 +40,10 @@ export async function GET(request: NextRequest) {
       {
         ok: false,
         code: "DETAIL_PAGE_JOB_LIST_FAILED",
-        message: error instanceof Error ? error.message : "상세페이지 작업 목록을 읽지 못했습니다.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "상세페이지 작업 목록을 읽지 못했습니다.",
       },
       { status: 500 },
     );
@@ -82,7 +85,22 @@ export async function POST(request: NextRequest) {
       {
         ok: false,
         code: "INVALID_DETAIL_PAGE_JOB",
-        message: error instanceof Error ? error.message : "상세페이지 작업 값이 올바르지 않습니다.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "상세페이지 작업 값이 올바르지 않습니다.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (!input.salesOptions) {
+    return Response.json(
+      {
+        ok: false,
+        code: "DETAIL_PAGE_SALES_OPTIONS_REQUIRED",
+        message:
+          "옵션란이 비어있습니다. 상품 출시 관리의 옵션란을 입력한 뒤 다시 실행하세요.",
       },
       { status: 400 },
     );
@@ -130,13 +148,20 @@ export async function POST(request: NextRequest) {
       { status: 201 },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "상세페이지 작업을 만들지 못했습니다.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "상세페이지 작업을 만들지 못했습니다.";
     const duplicate = /duplicate|unique|already exists/i.test(message);
     return Response.json(
       {
         ok: false,
-        code: duplicate ? "DETAIL_PAGE_JOB_ALREADY_EXISTS" : "DETAIL_PAGE_JOB_CREATE_FAILED",
-        message: duplicate ? "같은 상세페이지 작업이 이미 등록되어 있습니다." : message,
+        code: duplicate
+          ? "DETAIL_PAGE_JOB_ALREADY_EXISTS"
+          : "DETAIL_PAGE_JOB_CREATE_FAILED",
+        message: duplicate
+          ? "같은 상세페이지 작업이 이미 등록되어 있습니다."
+          : message,
       },
       { status: duplicate ? 409 : 500 },
     );
@@ -161,7 +186,9 @@ function normalize1688Url(value: unknown) {
     url.password ||
     !/^\/offer\/\d+\.html$/i.test(url.pathname)
   ) {
-    throw new Error("https://detail.1688.com/offer/...html 형식만 사용할 수 있습니다.");
+    throw new Error(
+      "https://detail.1688.com/offer/...html 형식만 사용할 수 있습니다.",
+    );
   }
   url.hash = "";
   return url.toString();
