@@ -73,6 +73,38 @@ test("preview recovery ignores an older persistent Studio URL override", () => {
   );
 });
 
+test("production ignores a stale protected Studio Preview override", () => {
+  withEnvironment(
+    {
+      VERCEL_ENV: "production",
+      DETAIL_PAGE_STUDIO_INTERNAL_URL:
+        "https://commerce-os-detail-page-studio-git-agent-old-preview.vercel.app/",
+    },
+    () => {
+      const connection = resolveDetailPageStudioConnection();
+      assert.equal(
+        connection.engineOrigin,
+        "https://commerce-os-detail-page-studio.vercel.app",
+      );
+      assert.equal(connection.isPreview, false);
+    },
+  );
+});
+
+test("local development keeps an explicit Studio override", () => {
+  withEnvironment(
+    {
+      VERCEL_ENV: "development",
+      DETAIL_PAGE_STUDIO_INTERNAL_URL: "http://127.0.0.1:3001/",
+    },
+    () => {
+      const connection = resolveDetailPageStudioConnection();
+      assert.equal(connection.engineOrigin, "http://127.0.0.1:3001");
+      assert.equal(connection.isPreview, false);
+    },
+  );
+});
+
 test("Studio protection bypass is carried through browser and recursive worker requests", () => {
   withEnvironment(
     {
