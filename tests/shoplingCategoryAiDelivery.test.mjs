@@ -30,6 +30,9 @@ test("AI 카테고리 실행은 기존 화면 핸들러보다 먼저 가로채�
   assert.match(runner, /readServerState/);
   assert.match(runner, /saveServerState\(nextState\)/);
   assert.match(runner, /categoryAiStatus: "review_required"/);
+  assert.match(runner, /categoryAiMarketEvidence/);
+  assert.match(runner, /웹 검색하고 시장 카테고리/);
+  assert.match(runner, /실패 상세/);
   assert.match(runner, /shoplingCategory: item\.shoplingCategory/);
   assert.match(runner, /persistCategoryResults/);
   assert.match(runner, /retryFailedIndividually/);

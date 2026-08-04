@@ -65,7 +65,7 @@ test("7건 중 한 상품이 시간 초과돼도 나머지 6건 결과를 반환
     },
   });
 
-  assert.deepEqual(profileBatchSizes, [4, 3]);
+  assert.deepEqual(profileBatchSizes, [1, 1, 1, 1, 1, 1, 1]);
   assert.equal(result.status, "partial");
   assert.equal(result.results.length, 6);
   assert.deepEqual(result.failures.map((failure) => failure.itemId), ["item-4"]);
@@ -95,5 +95,37 @@ test("실패 상품 재시도는 의미 분석도 상품별로 격리한다", as
   assert.deepEqual(profileBatchSizes, [1, 1]);
   assert.equal(result.status, "success");
   assert.equal(result.results.length, 2);
+  assert.deepEqual(result.failures, []);
+});
+
+test("단일 상품의 웹 검색 의미분석이 일시 시간초과되면 서버 안에서 한 번 복구한다", async () => {
+  const input = product(410);
+  input.modelNumber = "AAA410";
+  input.productName = "곰돌이 털모자 A형";
+  let profileAttempts = 0;
+  const result = await generateReliableShoplingCategoryRecommendations([input], {
+    dependencies: {
+      generateSearchProfiles: async (batch) => {
+        profileAttempts += 1;
+        if (profileAttempts === 1) {
+          throw new DOMException("This operation was aborted", "AbortError");
+        }
+        return batch.map((item) => ({
+          itemId: item.itemId,
+          coreProductTerms: ["털모자", "방한모자"],
+          contextTerms: ["겨울", "방한"],
+          catalogCategoryTerms: ["방한모자", "모자"],
+          blockedCategoryTerms: ["완구", "인형", "반려동물"],
+          ignoredAttributes: ["곰돌이", "A형"],
+        }));
+      },
+      generateRecommendations: async (value) =>
+        recommendationResult(value.items[0]),
+    },
+  });
+
+  assert.equal(profileAttempts, 2);
+  assert.equal(result.status, "success");
+  assert.equal(result.results.length, 1);
   assert.deepEqual(result.failures, []);
 });

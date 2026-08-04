@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  calibrateShoplingCategoryConfidence,
   canAutoApplyShoplingCategory,
   inferShoplingCategoryIntent,
   inferShoplingCoreProductTerms,
@@ -183,6 +184,153 @@ test("모공브러쉬는 색상 블랙이 아니라 브러쉬 제품명사로 �
   assert.ok(shortlist.every((candidate) => candidate.matchKind === "core"));
 });
 
+test("웹 시장분류가 있으면 모공브러쉬를 세안·클렌징 후보로 제한하고 헤어·청소·반려동물 분기를 차단한다", () => {
+  const categories = [
+    {
+      depth: 4,
+      path: "화장품/미용>스킨케어>클렌징>클렌징소품",
+      names: ["화장품/미용", "스킨케어", "클렌징", "클렌징소품"],
+      codes: ["1", "11", "111", "1111"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>욕실용품>세안용품>기타세안용품",
+      names: ["생활/건강", "욕실용품", "세안용품", "기타세안용품"],
+      codes: ["2", "22", "222", "2222"],
+    },
+    {
+      depth: 4,
+      path: "화장품/미용>헤어케어>헤어소품>헤어브러시",
+      names: ["화장품/미용", "헤어케어", "헤어소품", "헤어브러시"],
+      codes: ["3", "33", "333", "3333"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>청소용품>청소기용품>청소기브러시",
+      names: ["생활/건강", "청소용품", "청소기용품", "청소기브러시"],
+      codes: ["4", "44", "444", "4444"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>반려동물>미용용품>반려동물브러시",
+      names: ["생활/건강", "반려동물", "미용용품", "반려동물브러시"],
+      codes: ["5", "55", "555", "5555"],
+    },
+  ];
+  const input = {
+    itemId: "AAA490",
+    modelNumber: "AAA490",
+    productName: "걸이형 모공 롱브러쉬 색상랜덤",
+    optionLabels: [],
+    currentCategory: "",
+    chinaProductLinks: [],
+  };
+  const shortlist = shortlistShoplingCategories(input, categories, 18, {
+    itemId: input.itemId,
+    coreProductTerms: ["모공브러쉬", "세안브러시", "클렌징브러시"],
+    contextTerms: ["얼굴", "세안", "클렌징", "피부관리"],
+    catalogCategoryTerms: ["세안용품", "클렌징소품", "미용소품"],
+    blockedCategoryTerms: ["헤어", "두피", "청소", "반려동물"],
+    marketCategoryPaths: ["화장품/미용 > 스킨케어 > 클렌징 > 클렌징소품"],
+    marketEvidenceSummary: "얼굴 모공을 세정할 때 쓰는 클렌징 도구로 분류됩니다.",
+    marketEvidenceConfidence: 92,
+    groundingStatus: "web",
+    ignoredAttributes: ["걸이형", "롱", "색상랜덤"],
+  });
+
+  assert.deepEqual(
+    new Set(shortlist.map((candidate) => candidate.path)),
+    new Set([categories[0].path, categories[1].path]),
+  );
+  assert.ok(shortlist.every((candidate) => candidate.matchKind === "market"));
+  assert.ok(
+    shortlist.every((candidate) => !/헤어|청소|반려동물/.test(candidate.path)),
+  );
+});
+
+test("제품명사 후보가 전부 금지 분기면 세안 문맥 후보로 내려가고 헤어브러시를 억지로 선택하지 않는다", () => {
+  const categories = [
+    {
+      depth: 4,
+      path: "화장품/미용>헤어케어>헤어소품>헤어브러시",
+      names: ["화장품/미용", "헤어케어", "헤어소품", "헤어브러시"],
+      codes: ["1", "11", "111", "1111"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>욕실용품>세안용품>기타세안용품",
+      names: ["생활/건강", "욕실용품", "세안용품", "기타세안용품"],
+      codes: ["2", "22", "222", "2222"],
+    },
+  ];
+  const input = {
+    itemId: "AAA490",
+    modelNumber: "AAA490",
+    productName: "걸이형 모공 롱브러쉬",
+    optionLabels: [],
+    currentCategory: "",
+    chinaProductLinks: [],
+  };
+  const shortlist = shortlistShoplingCategories(input, categories, 18, {
+    itemId: input.itemId,
+    coreProductTerms: ["롱브러시", "브러시"],
+    contextTerms: ["세안"],
+    blockedCategoryTerms: ["헤어"],
+    ignoredAttributes: ["걸이형", "롱"],
+  });
+
+  assert.equal(shortlist.length, 1);
+  assert.equal(shortlist[0].path, categories[1].path);
+  assert.equal(shortlist[0].matchKind, "context");
+});
+
+test("곰돌이 털모자는 캐릭터 단어보다 시장 상품군인 방한모자를 우선한다", () => {
+  const categories = [
+    {
+      depth: 4,
+      path: "패션의류>패션잡화>모자>방한모자",
+      names: ["패션의류", "패션잡화", "모자", "방한모자"],
+      codes: ["1", "11", "111", "1111"],
+    },
+    {
+      depth: 4,
+      path: "출산/육아>완구>인형>곰인형",
+      names: ["출산/육아", "완구", "인형", "곰인형"],
+      codes: ["2", "22", "222", "2222"],
+    },
+    {
+      depth: 4,
+      path: "생활/건강>반려동물>의류>반려동물모자",
+      names: ["생활/건강", "반려동물", "의류", "반려동물모자"],
+      codes: ["3", "33", "333", "3333"],
+    },
+  ];
+  const input = {
+    itemId: "AAA410",
+    modelNumber: "AAA410",
+    productName: "곰돌이 털모자 A형",
+    optionLabels: [],
+    currentCategory: "",
+    chinaProductLinks: [],
+  };
+  const shortlist = shortlistShoplingCategories(input, categories, 18, {
+    itemId: input.itemId,
+    coreProductTerms: ["털모자", "방한모자", "모자"],
+    contextTerms: ["겨울", "방한", "패션잡화"],
+    catalogCategoryTerms: ["방한모자", "겨울모자", "모자"],
+    blockedCategoryTerms: ["완구", "인형", "반려동물"],
+    marketCategoryPaths: ["패션잡화 > 모자 > 방한모자"],
+    marketEvidenceSummary: "곰돌이 디자인의 사람용 겨울 방한모자입니다.",
+    marketEvidenceConfidence: 88,
+    groundingStatus: "web",
+    ignoredAttributes: ["곰돌이", "A형"],
+  });
+
+  assert.equal(shortlist.length, 1);
+  assert.equal(shortlist[0].path, categories[0].path);
+  assert.equal(shortlist[0].matchKind, "market");
+});
+
 test("재질 단어가 실제 판매 제품이면 AI 핵심명사로 복원한다", () => {
   const categories = [
     {
@@ -360,6 +508,33 @@ test("정확한 제품명사 카테고리가 없으면 AI 용도 문맥으로만
     }),
     true,
   );
+  assert.equal(
+    calibrateShoplingCategoryConfidence({
+      confidence: 99,
+      matchKind: "context",
+      profile: { groundingStatus: "web" },
+    }),
+    64,
+  );
+  assert.equal(
+    calibrateShoplingCategoryConfidence({
+      confidence: 94,
+      matchKind: "market",
+      profile: {
+        groundingStatus: "web",
+        marketEvidenceConfidence: 72,
+      },
+    }),
+    72,
+  );
+  assert.equal(
+    calibrateShoplingCategoryConfidence({
+      confidence: 95,
+      matchKind: "core",
+      profile: { groundingStatus: "model_fallback" },
+    }),
+    79,
+  );
 });
 
 test("AI 카테고리 입력은 상품 ID·모델명과 최대 처리 수를 검증한다", () => {
@@ -437,6 +612,43 @@ test("AI 모델명 분석은 제품명사·용도·속성을 분리해 카테고
       ignoredAttributes: ["걸이형", "블랙", "단품"],
     },
   ]);
+  const groundedProfiles = normalizeShoplingCategorySearchProfiles(
+    [
+      {
+        itemId: "AAA489",
+        coreProductTerms: ["모공브러쉬", "세안브러시"],
+        contextTerms: ["얼굴", "세안"],
+        catalogCategoryTerms: ["세안용품", "세안용품", "클렌징소품"],
+        blockedCategoryTerms: ["용품", "헤어", "청소", "반려동물"],
+        marketCategoryPaths: ["화장품/미용 > 스킨케어 > 클렌징"],
+        marketEvidenceSummary: "얼굴 세안용 클렌징 도구로 확인됩니다.",
+        marketEvidenceConfidence: 91,
+        sourceDomains: ["WWW.Search.Naver.com", "not a domain"],
+        groundingStatus: "web",
+        ignoredAttributes: ["걸이형", "블랙"],
+      },
+    ],
+    inputs,
+  );
+  assert.deepEqual(groundedProfiles[0].catalogCategoryTerms, [
+    "세안용품",
+    "클렌징소품",
+  ]);
+  assert.deepEqual(groundedProfiles[0].blockedCategoryTerms, [
+    "헤어",
+    "청소",
+    "반려동물",
+  ]);
+  assert.deepEqual(groundedProfiles[0].sourceDomains, ["search.naver.com"]);
+  assert.equal(groundedProfiles[0].marketEvidenceConfidence, 91);
+  assert.equal(
+    canAutoApplyShoplingCategory({
+      confidence: 99,
+      currentCategory: "",
+      matchKind: "market",
+    }),
+    false,
+  );
   const source = await readFile(
     new URL("../src/lib/shoplingCategoryCatalog.ts", import.meta.url),
     "utf8",
@@ -445,6 +657,10 @@ test("AI 모델명 분석은 제품명사·용도·속성을 분리해 카테고
   assert.match(source, /합성어 안의 색상어/);
   assert.match(source, /브러시\/브러쉬/);
   assert.match(source, /걸이형 모공브러쉬 블랙/);
+  assert.match(source, /type: "web_search"/);
+  assert.match(source, /네이버 쇼핑·스마트스토어/);
+  assert.match(source, /blockedCategoryTerms/);
+  assert.match(source, /model_fallback/);
 });
 
 test("진행관리 UI는 카테고리 최신화·AI 후보 생성·수동 로그인 상태를 포함한다", async () => {

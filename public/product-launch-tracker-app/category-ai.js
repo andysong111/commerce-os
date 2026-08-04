@@ -252,6 +252,10 @@ async function runAiCategoryAssignment() {
           categoryAiConfidence: result.confidence,
           categoryAiReason: result.reason,
           categoryAiAlternatives: result.alternatives,
+          categoryAiMarketEvidence:
+            result.marketEvidence && typeof result.marketEvidence === "object"
+              ? result.marketEvidence
+              : null,
           categoryAiStatus: "review_required",
           categoryAiSnapshotHash: body.snapshot?.hash || "",
           categoryAiUpdatedAt: now,

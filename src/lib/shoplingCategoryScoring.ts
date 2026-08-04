@@ -19,7 +19,7 @@ export type CategoryCandidate = {
   score: number;
   intentMatched?: boolean;
   evidence?: string[];
-  matchKind?: "intent" | "core" | "context";
+  matchKind?: "intent" | "market" | "core" | "context";
 };
 
 export type ShoplingCategorySearchProfile = {
@@ -27,6 +27,13 @@ export type ShoplingCategorySearchProfile = {
   coreProductTerms: string[];
   contextTerms: string[];
   ignoredAttributes: string[];
+  catalogCategoryTerms?: string[];
+  blockedCategoryTerms?: string[];
+  marketCategoryPaths?: string[];
+  marketEvidenceSummary?: string;
+  marketEvidenceConfidence?: number;
+  sourceDomains?: string[];
+  groundingStatus?: "web" | "model_fallback";
 };
 
 export type ShoplingCategoryIntent = {
@@ -40,6 +47,23 @@ export type ShoplingCategoryIntent = {
 const MAX_PRODUCTS = 25;
 const MAX_CANDIDATES = 18;
 const AUTO_APPLY_CONFIDENCE = 90;
+
+const GENERIC_CATEGORY_TERMS = new Set(
+  [
+    "기타",
+    "상품",
+    "제품",
+    "용품",
+    "소품",
+    "액세서리",
+    "생활",
+    "건강",
+    "패션",
+    "쇼핑",
+  ].map((value) => value.toLocaleLowerCase("ko-KR")),
+);
+
+const NON_BLOCKABLE_CATEGORY_TERMS = GENERIC_CATEGORY_TERMS;
 
 const PRODUCT_MATERIAL_TERMS = new Set(
   [
@@ -200,9 +224,36 @@ export function canAutoApplyShoplingCategory(options: {
   return (
     !text(options.currentCategory) &&
     options.confidence >= AUTO_APPLY_CONFIDENCE &&
+    options.matchKind !== "market" &&
     options.matchKind !== "context" &&
     options.matchKind !== "none"
   );
+}
+
+export function calibrateShoplingCategoryConfidence(options: {
+  confidence: number;
+  matchKind: CategoryCandidate["matchKind"] | "none";
+  profile?: ShoplingCategorySearchProfile | null;
+}) {
+  let confidence = Math.max(
+    0,
+    Math.min(100, Math.round(Number(options.confidence) || 0)),
+  );
+  if (options.matchKind === "context") confidence = Math.min(confidence, 64);
+  if (options.matchKind === "market") {
+    const evidenceConfidence = Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(Number(options.profile?.marketEvidenceConfidence) || 0),
+      ),
+    );
+    confidence = Math.min(confidence, evidenceConfidence || 55);
+  }
+  if (options.profile?.groundingStatus !== "web") {
+    confidence = Math.min(confidence, 79);
+  }
+  return confidence;
 }
 
 export function normalizeShoplingCategorySearchProfiles(
@@ -224,6 +275,52 @@ export function normalizeShoplingCategorySearchProfiles(
       coreProductTerms: normalizeProfileTerms(row.coreProductTerms, 6),
       contextTerms: normalizeProfileTerms(row.contextTerms, 6),
       ignoredAttributes: normalizeProfileTerms(row.ignoredAttributes, 10),
+      ...(Array.isArray(row.catalogCategoryTerms)
+        ? {
+            catalogCategoryTerms: normalizeProfileTerms(
+              row.catalogCategoryTerms,
+              10,
+            ),
+          }
+        : {}),
+      ...(Array.isArray(row.blockedCategoryTerms)
+        ? {
+            blockedCategoryTerms: normalizeBlockedCategoryTerms(
+              row.blockedCategoryTerms,
+            ),
+          }
+        : {}),
+      ...(Array.isArray(row.marketCategoryPaths)
+        ? {
+            marketCategoryPaths: normalizeProfilePaths(
+              row.marketCategoryPaths,
+              4,
+            ),
+          }
+        : {}),
+      ...(typeof row.marketEvidenceSummary === "string"
+        ? {
+            marketEvidenceSummary: text(row.marketEvidenceSummary).slice(
+              0,
+              240,
+            ),
+          }
+        : {}),
+      ...(Number.isFinite(Number(row.marketEvidenceConfidence))
+        ? {
+            marketEvidenceConfidence: Math.max(
+              0,
+              Math.min(100, Math.round(Number(row.marketEvidenceConfidence))),
+            ),
+          }
+        : {}),
+      ...(Array.isArray(row.sourceDomains)
+        ? { sourceDomains: normalizeSourceDomains(row.sourceDomains) }
+        : {}),
+      ...(row.groundingStatus === "web" ||
+      row.groundingStatus === "model_fallback"
+        ? { groundingStatus: row.groundingStatus }
+        : {}),
     });
   }
   const ordered = inputs.map((input) => byId.get(input.itemId));
@@ -244,6 +341,47 @@ function normalizeProfileTerms(value: unknown, limit: number) {
     seen.add(key);
     result.push(normalized);
     if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function normalizeProfilePaths(value: unknown, limit: number) {
+  const values = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values) {
+    const normalized = text(raw).slice(0, 240);
+    const key = compact(normalized);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+function normalizeBlockedCategoryTerms(value: unknown) {
+  return normalizeProfileTerms(value, 12).filter((term) => {
+    const normalized = compact(term);
+    return normalized.length >= 2 && !NON_BLOCKABLE_CATEGORY_TERMS.has(normalized);
+  });
+}
+
+function normalizeSourceDomains(value: unknown) {
+  const values = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values) {
+    const normalized = text(raw)
+      .toLocaleLowerCase("en-US")
+      .replace(/^www\./, "")
+      .slice(0, 120);
+    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(normalized) || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+    if (result.length >= 8) break;
   }
   return result;
 }
@@ -362,12 +500,70 @@ function inferShoplingContextTerms(
   return [...new Set(ranked.map((candidate) => candidate.term))].slice(0, 8);
 }
 
+export function inferShoplingMarketCategoryTerms(
+  categories: ShoplingCategoryEntryLike[],
+  profile?: ShoplingCategorySearchProfile | null,
+) {
+  const pathCompacts = categories.map((entry) => ({
+    path: compact(entry.path),
+    leaf: compact(entry.path.split(">").at(-1)),
+  }));
+  const sources = [
+    ...(profile?.catalogCategoryTerms ?? []),
+    ...(profile?.marketCategoryPaths ?? []).flatMap((path) =>
+      path.split(/[>›]/g).map(text).filter(Boolean),
+    ),
+  ];
+  const unique: string[] = [];
+  for (const value of sources) {
+    const candidate = supportedCatalogTerms(
+      value,
+      pathCompacts,
+      false,
+      true,
+    )[0];
+    if (!candidate || unique.includes(candidate.term)) continue;
+    unique.push(candidate.term);
+    if (unique.length >= 10) break;
+  }
+  return unique;
+}
+
+function profileBlockedCategoryTerms(
+  profile: ShoplingCategorySearchProfile | null | undefined,
+) {
+  const positiveTerms = [
+    ...(profile?.coreProductTerms ?? []),
+    ...(profile?.contextTerms ?? []),
+    ...(profile?.catalogCategoryTerms ?? []),
+    ...(profile?.marketCategoryPaths ?? []).flatMap((path) =>
+      path.split(/[>›]/g),
+    ),
+  ]
+    .map(compact)
+    .filter(Boolean);
+  return (profile?.blockedCategoryTerms ?? [])
+    .map((term) => ({ term, key: compact(term) }))
+    .filter(
+      ({ key }) =>
+        key &&
+        !NON_BLOCKABLE_CATEGORY_TERMS.has(key) &&
+        !positiveTerms.some(
+          (positive) => positive.includes(key) || key.includes(positive),
+        ),
+    );
+}
+
 function supportedCatalogTerms(
   value: string,
   pathCompacts: Array<{ path: string; leaf: string }>,
   allowMaterialTerm = false,
+  rejectGenericSuffix = false,
 ) {
   return suffixTerms(value, allowMaterialTerm)
+    .filter(
+      (term) => !rejectGenericSuffix || !GENERIC_CATEGORY_TERMS.has(term),
+    )
     .map((term) => {
       let pathCount = 0;
       let leafCount = 0;
@@ -509,6 +705,8 @@ export function shortlistShoplingCategories(
     input.modelNumber,
     ...(profile?.coreProductTerms ?? []),
     ...(profile?.contextTerms ?? []),
+    ...(profile?.catalogCategoryTerms ?? []),
+    ...(profile?.marketCategoryPaths ?? []),
   ]
     .filter(Boolean)
     .join(" ");
@@ -520,16 +718,30 @@ export function shortlistShoplingCategories(
     profile,
     coreTerms,
   );
+  const marketTerms = inferShoplingMarketCategoryTerms(categories, profile);
+  const blockedCategoryTerms = profileBlockedCategoryTerms(profile);
   const ranked = categories
     .map((entry) => {
       const baseScore = scoreShoplingCategoryCandidate(productText, entry.path);
       const intentResult = scoreIntent(entry.path, intent);
       const pathCompact = compact(entry.path);
       const leafCompact = compact(entry.path.split(">").at(-1));
+      const profileBlockedTerm = blockedCategoryTerms.find(({ key }) =>
+        pathCompact.includes(key),
+      );
+      const matchedMarketTerms = marketTerms.filter((term) =>
+        pathCompact.includes(term),
+      );
       const matchedCoreTerms = coreTerms.filter((term) => pathCompact.includes(term));
       const matchedContextTerms = contextTerms.filter((term) => pathCompact.includes(term));
+      const marketMatched = matchedMarketTerms.length > 0;
       const coreMatched = matchedCoreTerms.length > 0;
       const contextMatched = matchedContextTerms.length > 0;
+      const marketBonus = matchedMarketTerms.reduce(
+        (total, term) =>
+          total + 330 + term.length * 16 + (leafCompact.includes(term) ? 90 : 0),
+        0,
+      );
       const coreBonus = matchedCoreTerms.reduce(
         (total, term) =>
           total + 260 + term.length * 14 + (leafCompact.includes(term) ? 70 : 0),
@@ -543,16 +755,25 @@ export function shortlistShoplingCategories(
       return {
         path: entry.path,
         score: Number(
-          (baseScore + intentResult.score + coreBonus + contextBonus).toFixed(4),
+          (
+            baseScore +
+            intentResult.score +
+            marketBonus +
+            coreBonus +
+            contextBonus
+          ).toFixed(4),
         ),
         intentMatched: intentResult.matched,
+        marketMatched,
         coreMatched,
         contextMatched,
-        blocked: intentResult.blocked,
+        blocked: intentResult.blocked || Boolean(profileBlockedTerm),
         evidence: [
           ...intentResult.evidence,
+          ...matchedMarketTerms.map((term) => `시장분류:${term}`),
           ...matchedCoreTerms,
           ...matchedContextTerms,
+          ...(profileBlockedTerm ? [`차단:${profileBlockedTerm.term}`] : []),
         ],
       };
     })
@@ -564,7 +785,7 @@ export function shortlistShoplingCategories(
 
   const requestedLimit = Math.max(5, Math.min(30, limit));
   if (intent) {
-    return diversifyCandidates(ranked
+    const matches = ranked
       .filter((candidate) => candidate.intentMatched)
       .map(({ path, score, intentMatched, evidence }) => ({
         path,
@@ -572,11 +793,25 @@ export function shortlistShoplingCategories(
         intentMatched,
         evidence,
         matchKind: "intent" as const,
-      })), requestedLimit);
+      }));
+    if (matches.length) return diversifyCandidates(matches, requestedLimit);
+  }
+
+  if (marketTerms.length) {
+    const matches = ranked
+      .filter((candidate) => candidate.marketMatched)
+      .map(({ path, score, intentMatched, evidence }) => ({
+        path,
+        score,
+        intentMatched,
+        evidence,
+        matchKind: "market" as const,
+      }));
+    if (matches.length) return diversifyCandidates(matches, requestedLimit);
   }
 
   if (coreTerms.length) {
-    return diversifyCandidates(ranked
+    const matches = ranked
       .filter((candidate) => candidate.coreMatched)
       .map(({ path, score, intentMatched, evidence }) => ({
         path,
@@ -584,11 +819,12 @@ export function shortlistShoplingCategories(
         intentMatched,
         evidence,
         matchKind: "core" as const,
-      })), requestedLimit);
+      }));
+    if (matches.length) return diversifyCandidates(matches, requestedLimit);
   }
 
   if (contextTerms.length) {
-    return diversifyCandidates(ranked
+    const matches = ranked
       .filter((candidate) => candidate.contextMatched)
       .map(({ path, score, intentMatched, evidence }) => ({
         path,
@@ -596,7 +832,8 @@ export function shortlistShoplingCategories(
         intentMatched,
         evidence,
         matchKind: "context" as const,
-      })), requestedLimit);
+      }));
+    if (matches.length) return diversifyCandidates(matches, requestedLimit);
   }
 
   // A category without any product-identity or category-context evidence is
