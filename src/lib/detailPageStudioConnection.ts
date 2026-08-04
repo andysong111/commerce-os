@@ -23,10 +23,17 @@ export function resolveDetailPageStudioConnection(): DetailPageStudioConnection 
   const configured =
     process.env.DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
     process.env.NEXT_PUBLIC_DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim();
-  const isPreview = process.env.VERCEL_ENV === "preview";
-  // The bounded recovery Preview must win over an older persistent Preview env value.
+  const environment = process.env.VERCEL_ENV?.trim();
+  const isPreview = environment === "preview";
+  const isProduction = environment === "production";
+  // Production must never inherit a stale protected PR Preview override.
+  // Explicit overrides remain available for local development.
   const engineUrl = validateStudioUrl(
-    isPreview ? PREVIEW_STUDIO_URL : configured || PRODUCTION_STUDIO_URL,
+    isPreview
+      ? PREVIEW_STUDIO_URL
+      : isProduction
+        ? PRODUCTION_STUDIO_URL
+        : configured || PRODUCTION_STUDIO_URL,
   );
   const bypassSecret =
     process.env.DETAIL_PAGE_STUDIO_AUTOMATION_BYPASS_SECRET?.trim() || "";
