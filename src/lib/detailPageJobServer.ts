@@ -11,6 +11,13 @@ import {
   temporaryOpsIdentity,
 } from "@/lib/opsLoginBypass";
 import { detailPageJobSearchFilters } from "@/lib/detailPageJobSearch";
+import {
+  DETAIL_PAGE_WORKER_DISPATCH_MS,
+  detailPageClaimDecision,
+  detailPageDispatchDecision,
+  nextDetailPageMutationTimestamp,
+} from "@/lib/detailPageJobConcurrency";
+import { matchesDetailPageExecution } from "@/lib/detailPageJobRecovery";
 
 // Reuse the already deployed durable job table. Detail-page jobs are isolated
 // by payload.kind and never enter the Shopling upload worker.
@@ -329,14 +336,172 @@ export async function insertDetailPageJob(
   return raw ? normalizeJobRow(raw) : null;
 }
 
+const DETAIL_PAGE_CONCURRENCY_ATTEMPTS = 3;
+
+export async function reserveDetailPageJobDispatch(
+  config: DetailPageJobConfig,
+  jobId: string,
+  dispatchId: string,
+) {
+  for (let attempt = 0; attempt < DETAIL_PAGE_CONCURRENCY_ATTEMPTS; attempt += 1) {
+    const current = await readDetailPageJob(config, jobId);
+    if (!current) {
+      return { reserved: false as const, reason: "missing" as const };
+    }
+    const now = Date.now();
+    const decision = detailPageDispatchDecision(current, now);
+    if (decision.action === "skip") {
+      return {
+        reserved: false as const,
+        reason: decision.reason,
+        job: current,
+      };
+    }
+
+    const reservedAt = nextDetailPageMutationTimestamp(current.updated_at, now);
+    const reserved = await patchDetailPageJobIfUnchanged(config, current, {
+      payload: {
+        worker_dispatch_id: dispatchId,
+        worker_dispatch_execution_id: String(
+          current.payload.execution_id ?? "",
+        ).trim(),
+        worker_dispatch_started_at: reservedAt,
+        worker_dispatch_until: new Date(
+          Date.parse(reservedAt) + DETAIL_PAGE_WORKER_DISPATCH_MS,
+        ).toISOString(),
+      },
+      updated_at: reservedAt,
+    });
+    if (reserved) {
+      return {
+        reserved: true as const,
+        dispatchId,
+        job: reserved,
+      };
+    }
+  }
+
+  const latest = await readDetailPageJob(config, jobId);
+  return {
+    reserved: false as const,
+    reason: "conflict" as const,
+    ...(latest ? { job: latest } : {}),
+  };
+}
+
+export async function claimDetailPageJobLease(
+  config: DetailPageJobConfig,
+  jobId: string,
+  workerId: string,
+  executionIdValue: unknown,
+) {
+  for (let attempt = 0; attempt < DETAIL_PAGE_CONCURRENCY_ATTEMPTS; attempt += 1) {
+    const current = await readDetailPageJob(config, jobId);
+    if (!current) {
+      return { claimed: false as const, reason: "missing" as const };
+    }
+    if (!matchesDetailPageExecution(current, executionIdValue)) {
+      return {
+        claimed: false as const,
+        reason: "stale_execution" as const,
+        job: current,
+      };
+    }
+
+    const now = Date.now();
+    const decision = detailPageClaimDecision(current, workerId, now);
+    if (decision.action === "skip") {
+      return {
+        claimed: false as const,
+        reason: decision.reason,
+        job: current,
+      };
+    }
+
+    const claimedAt = nextDetailPageMutationTimestamp(current.updated_at, now);
+    const claimed = await patchDetailPageJobIfUnchanged(config, current, {
+      status: current.status === "queued" ? "running" : current.status,
+      payload: {
+        worker_dispatch_id: "",
+        worker_dispatch_execution_id: "",
+        worker_dispatch_started_at: "",
+        worker_dispatch_until: "",
+      },
+      lease_owner: workerId,
+      lease_until: new Date(Date.parse(claimedAt) + 7 * 60 * 1000).toISOString(),
+      started_at: current.started_at ?? claimedAt,
+      updated_at: claimedAt,
+    });
+    if (claimed) {
+      return {
+        claimed: true as const,
+        reason: "claimed" as const,
+        job: claimed,
+      };
+    }
+  }
+
+  const latest = await readDetailPageJob(config, jobId);
+  return {
+    claimed: false as const,
+    reason: "conflict" as const,
+    ...(latest ? { job: latest } : {}),
+  };
+}
+
 export async function patchDetailPageJob(
   config: DetailPageJobConfig,
   jobId: string,
   patch: Record<string, unknown>,
 ) {
-  const params = new URLSearchParams({ id: `eq.${jobId}` });
   const current = await readDetailPageJob(config, jobId);
   if (!current) return null;
+  const params = new URLSearchParams({ id: `eq.${jobId}` });
+  return patchDetailPageJobSnapshot(config, current, patch, params);
+}
+
+async function patchDetailPageJobIfUnchanged(
+  config: DetailPageJobConfig,
+  current: DetailPageJobRow,
+  patch: Record<string, unknown>,
+) {
+  const params = new URLSearchParams({
+    id: `eq.${current.id}`,
+    updated_at: `eq.${current.updated_at}`,
+    "payload->>kind": "eq.detail_page",
+  });
+  return patchDetailPageJobSnapshot(config, current, patch, params);
+}
+
+async function patchDetailPageJobSnapshot(
+  config: DetailPageJobConfig,
+  current: DetailPageJobRow,
+  patch: Record<string, unknown>,
+  params: URLSearchParams,
+) {
+  const rowPatch = detailPageJobRowPatch(current, patch);
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/${DETAIL_PAGE_JOB_TABLE}?${params.toString()}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...createSupabaseAdminHeaders(config.secretKey),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify(rowPatch),
+      cache: "no-store",
+    },
+  );
+  const body = await readDetailPageJobJson(response);
+  if (!response.ok) throw new Error(readDetailPageJobError(body, response.status));
+  const raw = (Array.isArray(body) ? body[0] : null) as RawDetailPageJobRow | null;
+  return raw ? normalizeJobRow(raw) : null;
+}
+
+function detailPageJobRowPatch(
+  current: DetailPageJobRow,
+  patch: Record<string, unknown>,
+) {
   const payloadPatch = patch.payload as Record<string, unknown> | undefined;
   const resultPatch = patch.result as Record<string, unknown> | undefined;
   const logicalStatus = String(patch.status ?? current.status) as DetailPageJobRow["status"];
@@ -357,8 +522,8 @@ export async function patchDetailPageJob(
       source_run_id: patch.source_run_id ?? current.source_run_id,
       step_version: patch.step_version ?? current.step_version,
       lease_owner: patch.lease_owner ?? current.lease_owner,
-      lease_until: patch.lease_until ?? current.lease_until,
-      started_at: patch.started_at ?? current.started_at,
+      lease_until: patchValue(patch, "lease_until", current.lease_until),
+      started_at: patchValue(patch, "started_at", current.started_at),
     },
     result: resultPatch ? { ...current.result, ...resultPatch } : current.result,
     error_message: patch.error_message ?? current.error_message,
@@ -377,22 +542,17 @@ export async function patchDetailPageJob(
         ? new Date().toISOString()
         : current.completed_at,
   };
-  const response = await fetch(
-    `${config.supabaseUrl}/rest/v1/${DETAIL_PAGE_JOB_TABLE}?${params.toString()}`,
-    {
-      method: "PATCH",
-      headers: {
-        ...createSupabaseAdminHeaders(config.secretKey),
-        Prefer: "return=representation",
-      },
-      body: JSON.stringify(rowPatch),
-      cache: "no-store",
-    },
-  );
-  const body = await readDetailPageJobJson(response);
-  if (!response.ok) throw new Error(readDetailPageJobError(body, response.status));
-  const raw = (Array.isArray(body) ? body[0] : null) as RawDetailPageJobRow | null;
-  return raw ? normalizeJobRow(raw) : null;
+  return rowPatch;
+}
+
+function patchValue(
+  patch: Record<string, unknown>,
+  key: string,
+  fallback: unknown,
+) {
+  return Object.prototype.hasOwnProperty.call(patch, key)
+    ? patch[key]
+    : fallback;
 }
 
 function normalizeJobRow(raw: RawDetailPageJobRow): DetailPageJobRow {

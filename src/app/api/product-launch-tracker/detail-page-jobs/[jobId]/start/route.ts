@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import {
   createDetailPageJobToken,
@@ -5,6 +6,7 @@ import {
   isValidDetailPageJobId,
   patchDetailPageJob,
   readDetailPageJob,
+  reserveDetailPageJobDispatch,
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
 import {
@@ -139,6 +141,49 @@ export async function POST(
       );
     }
     const connection = resolveDetailPageStudioConnection();
+    const dispatchId = randomUUID();
+    const reservation = await reserveDetailPageJobDispatch(
+      config.value,
+      runnableJob.id,
+      dispatchId,
+    );
+    if (!reservation.reserved) {
+      console.info("[detail-page-start] duplicate dispatch skipped", {
+        jobId: runnableJob.id,
+        executionId: String(runnableJob.payload.execution_id ?? ""),
+        reason: reservation.reason,
+      });
+      if (reservation.reason === "missing") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_NOT_FOUND",
+            message: "상세페이지 작업을 찾지 못했습니다.",
+          },
+          { status: 404 },
+        );
+      }
+      if (reservation.reason === "terminal") {
+        return Response.json({
+          ok: true,
+          accepted: false,
+          terminal: true,
+          status: reservation.job?.status,
+        });
+      }
+      return Response.json({
+        ok: true,
+        accepted: false,
+        busy: true,
+        reason: reservation.reason,
+      });
+    }
+    runnableJob = reservation.job;
+    console.info("[detail-page-start] dispatch reserved", {
+      jobId: runnableJob.id,
+      dispatchId,
+      executionId: String(runnableJob.payload.execution_id ?? ""),
+    });
     const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
       `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
@@ -177,7 +222,12 @@ export async function POST(
         { status: 502 },
       );
     }
-    return Response.json({ ok: true, accepted: true, workerId: body.workerId });
+    return Response.json({
+      ok: true,
+      accepted: true,
+      workerId: body.workerId,
+      dispatchId,
+    });
   } catch (error) {
     return Response.json(
       {

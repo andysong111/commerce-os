@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import {
   bearerToken,
+  claimDetailPageJobLease,
   getDetailPageJobConfig,
   isValidDetailPageJobId,
   patchDetailPageJob,
@@ -102,23 +103,45 @@ export async function POST(
 
     if (action === "claim") {
       if (!workerAuthorized) return forbidden("서버 작업자만 작업을 인계받을 수 있습니다.");
-      if (TERMINAL.has(job.status)) {
-        return Response.json({ ok: true, terminal: true, job: publicDetailPageJob(job) });
-      }
-      const now = Date.now();
-      const leaseUntil = Date.parse(job.lease_until ?? "");
       const requestedWorker = safeText(body.workerId, 160);
       if (!requestedWorker) return invalid("workerId가 필요합니다.");
-      if (Number.isFinite(leaseUntil) && leaseUntil > now && job.lease_owner && job.lease_owner !== requestedWorker) {
-        return Response.json({ ok: true, busy: true, job: publicDetailPageJob(job) });
+      const claim = await claimDetailPageJobLease(
+        config.value,
+        job.id,
+        requestedWorker,
+        body.executionId,
+      );
+      if (claim.reason === "missing") return notFound();
+      if (claim.reason === "stale_execution") {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_EXECUTION_STALE",
+            message: "이전 상세페이지 실행의 작업자 인계를 차단했습니다.",
+          },
+          { status: 409 },
+        );
       }
-      const claimed = await patchDetailPageJob(config.value, job.id, {
-        status: job.status === "queued" ? "running" : job.status,
-        lease_owner: requestedWorker,
-        lease_until: new Date(now + 7 * 60 * 1000).toISOString(),
-        started_at: job.started_at ?? new Date(now).toISOString(),
+      if (claim.reason === "terminal") {
+        return Response.json({
+          ok: true,
+          terminal: true,
+          job: publicDetailPageJob(claim.job),
+        });
+      }
+      if (!claim.claimed) {
+        return Response.json({
+          ok: true,
+          busy: true,
+          reason: claim.reason,
+          job: publicDetailPageJob(claim.job ?? job),
+        });
+      }
+      return Response.json({
+        ok: true,
+        busy: false,
+        job: publicDetailPageJob(claim.job),
       });
-      return Response.json({ ok: true, busy: false, job: publicDetailPageJob(claimed ?? job) });
     }
 
     if (workerAuthorized && TERMINAL.has(job.status)) {
@@ -729,6 +752,10 @@ function freshStagedExecution(startedAt: string) {
     last_auto_recovery_at: "",
     recovery_stop_code: "",
     recovery_stopped_at: "",
+    worker_dispatch_id: "",
+    worker_dispatch_execution_id: "",
+    worker_dispatch_started_at: "",
+    worker_dispatch_until: "",
   };
 }
 
