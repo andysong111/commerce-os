@@ -4,7 +4,12 @@ import {
   createDetailPageJobToken,
   getDetailPageJobConfig,
   listRecoverableDetailPageJobs,
+  patchDetailPageJob,
 } from "@/lib/detailPageJobServer";
+import {
+  detailPageRecoveryDecision,
+  restoreManualRegenerationAssetsOnFailure,
+} from "@/lib/detailPageJobRecovery";
 import {
   buildProtectedOpsCallbackUrl,
   resolveDetailPageStudioConnection,
@@ -43,6 +48,47 @@ export async function GET(request: Request) {
     .slice(0, MAX_RECOVERY_JOBS);
   const results = [];
   for (const job of stale) {
+    const decision = detailPageRecoveryDecision(job);
+    if (decision.action === "fail") {
+      const stoppedAt = new Date().toISOString();
+      await patchDetailPageJob(config.value, job.id, {
+        status: "failed",
+        stage: job.stage || "server_generation",
+        message: decision.message,
+        qa_status: "failed",
+        payload: {
+          recovery_stop_code: decision.code,
+          recovery_stopped_at: stoppedAt,
+        },
+        result: restoreManualRegenerationAssetsOnFailure(job.result),
+        lease_owner: "",
+        lease_until: null,
+        error_message: `${decision.code}: ${decision.message}`,
+        completed_at: stoppedAt,
+      });
+      console.warn("[detail-page-cron] stopped unsafe stale job", {
+        jobId: job.id,
+        stage: job.stage,
+        code: decision.code,
+      });
+      results.push({
+        job_id: job.id,
+        accepted: false,
+        stopped: true,
+        code: decision.code,
+      });
+      continue;
+    }
+
+    const recoveryAt = new Date().toISOString();
+    await patchDetailPageJob(config.value, job.id, {
+      message: "저장된 체크포인트에서 안전 자동 재개 중",
+      payload: {
+        auto_recovery_count: decision.nextRecoveryCount,
+        last_auto_recovery_at: recoveryAt,
+      },
+      updated_at: recoveryAt,
+    });
     const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
       `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
@@ -63,6 +109,12 @@ export async function GET(request: Request) {
         cache: "no-store",
       });
       const body = await response.json().catch(() => ({}));
+      console.info("[detail-page-cron] checkpoint redispatch", {
+        jobId: job.id,
+        stage: job.stage,
+        recoveryCount: decision.nextRecoveryCount,
+        accepted: response.ok && body?.ok === true,
+      });
       results.push({
         job_id: job.id,
         accepted: response.ok && body?.ok === true,
@@ -80,6 +132,7 @@ export async function GET(request: Request) {
     ok: true,
     checked: jobs.length,
     recovered: results.filter((item) => item.accepted).length,
+    stopped: results.filter((item) => item.stopped).length,
     results,
   });
 }

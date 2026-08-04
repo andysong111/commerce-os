@@ -19,6 +19,7 @@ const BUCKET_NAME = "product-launch-assets";
 // 상한에 맞춰 JPEG 품질을 단계적으로 조정합니다.
 const MAX_FILE_BYTES = 4_000_000;
 const ROLE_PATTERN = /^(detail-page|main|additional-[1-4]|evidence-(?:[1-9]|[1-5][0-9]|60)|panel-[1-8])$/;
+const REVISION_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 type TrackerIdentity = { userId: string; email: string };
 
@@ -36,8 +37,12 @@ export async function POST(request: NextRequest) {
   const itemId = safeSegment(form.get("item_id"));
   const jobId = safeSegment(form.get("job_id"));
   const role = String(form.get("role") ?? "").trim();
+  const revision = String(form.get("revision") ?? "").trim().toLowerCase();
   if (!(file instanceof File) || !itemId || !jobId || !ROLE_PATTERN.test(role)) {
     return invalid("상품·작업·이미지 역할 또는 파일 값이 올바르지 않습니다.");
+  }
+  if (revision && !REVISION_PATTERN.test(revision)) {
+    return invalid("상세페이지 이미지 버전 값이 올바르지 않습니다.");
   }
   const identity = await resolveUploadIdentity(request, jobId, itemId);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
@@ -54,7 +59,8 @@ export async function POST(request: NextRequest) {
   }
 
   const owner = safeSegment(identity.value.userId);
-  const objectPath = `${owner}/${itemId}/${jobId}/${role}.jpg`;
+  const objectName = revision ? `${role}-${revision}.jpg` : `${role}.jpg`;
+  const objectPath = `${owner}/${itemId}/${jobId}/${objectName}`;
   const headers = createSupabaseAdminHeaders(config.secretKey);
   headers["Content-Type"] = "image/jpeg";
   headers["x-upsert"] = "true";
