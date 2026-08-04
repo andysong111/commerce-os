@@ -90,12 +90,42 @@ const ROLE_LABELS: Record<string, string> = {
   main: "대표 이미지",
   main_hero: "대표 이미지",
   hero: "대표 이미지",
-  alternate_whole: "부가 이미지 · 전체 형태",
-  use_scene: "부가 이미지 · 사용 장면",
-  feature_closeup: "부가 이미지 · 특징 확대",
-  scale_or_package: "부가 이미지 · 크기·구성",
-  package_or_scale: "부가 이미지 · 구성·크기",
-  package: "부가 이미지 · 패키지",
+  main_catalog: "대표 이미지",
+  alternate_whole: "부가 이미지 1 · 전체 형태",
+  evidence_detail: "부가 이미지 2 · 특징 확대",
+  lifestyle_usage: "부가 이미지 3 · 사용 장면",
+  adaptive_support: "부가 이미지 4 · 보조 정보",
+  use_scene: "부가 이미지 3 · 사용 장면",
+  feature_closeup: "부가 이미지 2 · 특징 확대",
+  scale_or_package: "부가 이미지 4 · 크기·구성",
+  package_or_scale: "부가 이미지 4 · 구성·크기",
+  package: "부가 이미지 4 · 패키지",
+};
+
+const MANUAL_REGENERATION_REPRESENTATIVE_ROLES = [
+  "main_catalog",
+  "alternate_whole",
+  "evidence_detail",
+  "lifestyle_usage",
+  "adaptive_support",
+] as const;
+
+const REPRESENTATIVE_ROLE_ALIASES: Record<string, string> = {
+  main: "main_catalog",
+  main_hero: "main_catalog",
+  hero: "main_catalog",
+  "additional-1": "alternate_whole",
+  "additional-2": "evidence_detail",
+  "additional-3": "lifestyle_usage",
+  "additional-4": "adaptive_support",
+};
+
+export type SelectedDetailPageAssetRegenerationPlan = {
+  selectedRoleIds: string[];
+  representativeRoleIds: string[];
+  panelSlots: number[];
+  remainingRepresentatives: unknown[];
+  remainingPanels: unknown[];
 };
 
 export function detailPageJobName(job: DetailPageReviewJob) {
@@ -219,6 +249,109 @@ export function canRevalidateCompletedDetailPageJob(
   );
 }
 
+export function canRegenerateSelectedDetailPageAssets(
+  job: Pick<DetailPageReviewJob, "status" | "stage" | "payload" | "result">,
+) {
+  if (
+    !["success", "failed"].includes(job.status) ||
+    ACTIVE.has(job.status) ||
+    isRecoverableServerFinalAssemblyJob(job)
+  ) {
+    return false;
+  }
+  const payload = record(job.payload);
+  const result = record(job.result);
+  const analysis = record(result.analysis);
+  const representatives = array(result.representatives);
+  const representativeRoles = new Set(
+    representatives.map((value) => canonicalRepresentativeRole(value)),
+  );
+  const panels = array(result.panels || result.detailPanels || result.detail_panels)
+    .filter((value) => {
+      const item = record(value);
+      const slot = Number(item.slot ?? item.sectionSlot ?? item.section_slot);
+      return Number.isInteger(slot) && slot > 0 && Boolean(panelAssetUrl(item));
+    });
+  return Boolean(
+    array(payload.evidence_urls).map(safeUrl).filter(Boolean).length > 0 &&
+      analysis.product &&
+      representatives.length === MANUAL_REGENERATION_REPRESENTATIVE_ROLES.length &&
+      MANUAL_REGENERATION_REPRESENTATIVE_ROLES.every((roleId) =>
+        representativeRoles.has(roleId),
+      ) &&
+      representatives.every((value) =>
+        Boolean(representativeAssetUrl(record(value))),
+      ) &&
+      panels.length > 0
+  );
+}
+
+export function selectedDetailPageAssetRegenerationPlan(
+  job: Pick<DetailPageReviewJob, "status" | "stage" | "payload" | "result">,
+  requestedRoleIds: unknown,
+): SelectedDetailPageAssetRegenerationPlan | null {
+  if (!canRegenerateSelectedDetailPageAssets(job)) return null;
+  const requested = [
+    ...new Set(
+      array(requestedRoleIds)
+        .map(text)
+        .map((value) => value.toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+  if (!requested.length) return null;
+
+  const result = record(job.result);
+  const representatives = array(result.representatives);
+  const panels = array(result.panels || result.detailPanels || result.detail_panels);
+  const existingRepresentativeRoles = new Set(
+    representatives.map((value) => canonicalRepresentativeRole(value)),
+  );
+  const existingPanelSlots = new Set(
+    panels
+      .map((value) => {
+        const item = record(value);
+        return Number(item.slot ?? item.sectionSlot ?? item.section_slot);
+      })
+      .filter((slot) => Number.isInteger(slot) && slot > 0),
+  );
+  const representativeRoleIds: string[] = [];
+  const panelSlots: number[] = [];
+
+  for (const requestedRoleId of requested) {
+    const panelMatch = requestedRoleId.match(/^panel-(\d+)$/);
+    if (panelMatch) {
+      const slot = Number(panelMatch[1]);
+      if (!existingPanelSlots.has(slot)) return null;
+      panelSlots.push(slot);
+      continue;
+    }
+    const representativeRoleId = canonicalRepresentativeRole(requestedRoleId);
+    if (!existingRepresentativeRoles.has(representativeRoleId)) return null;
+    representativeRoleIds.push(representativeRoleId);
+  }
+
+  const representativeSet = new Set(representativeRoleIds);
+  const panelSet = new Set(panelSlots);
+  const selectedRoleIds = [
+    ...representativeRoleIds,
+    ...panelSlots.map((slot) => `panel-${slot}`),
+  ];
+  return {
+    selectedRoleIds,
+    representativeRoleIds,
+    panelSlots,
+    remainingRepresentatives: representatives.filter(
+      (value) => !representativeSet.has(canonicalRepresentativeRole(value)),
+    ),
+    remainingPanels: panels.filter((value) => {
+      const item = record(value);
+      const slot = Number(item.slot ?? item.sectionSlot ?? item.section_slot);
+      return !panelSet.has(slot);
+    }),
+  };
+}
+
 function generatedAssetQualityPassed(result: Record<string, unknown>) {
   const assessment = record(result.setAssessment);
   return Boolean(
@@ -274,6 +407,7 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
     queued: "서버 생성 대기",
     checkpoint_resume: "문제 자산 복구 대기",
     checkpoint_revalidation: "저장 자산 재검수",
+    checkpoint_manual_selection: "선택 이미지 부분 재생성",
     server_generation: "AI 생성·검수",
     server_final_assembly: "서버 최종 14,000px 조립",
     standard_quality_retry: "Standard-v2 차단 섹션 부분 재생성",
@@ -657,6 +791,38 @@ function resumeCandidateTime(job: DetailPageReviewJob) {
   const updatedAt = Date.parse(job.updatedAt);
   if (Number.isFinite(updatedAt)) return updatedAt;
   return Number.isFinite(job.attempt) ? job.attempt : 0;
+}
+
+function canonicalRepresentativeRole(value: unknown) {
+  const item = record(value);
+  const raw = text(
+    typeof value === "string"
+      ? value
+      : item.roleId || item.role_id || item.role,
+  ).toLowerCase();
+  return REPRESENTATIVE_ROLE_ALIASES[raw] || raw;
+}
+
+function representativeAssetUrl(item: Record<string, unknown>) {
+  return firstUrl(
+    item.assetUrl,
+    item.asset_url,
+    item.imageUrl,
+    item.image_url,
+    item.url,
+  );
+}
+
+function panelAssetUrl(item: Record<string, unknown>) {
+  return firstUrl(
+    item.assetUrl,
+    item.asset_url,
+    item.imageUrl,
+    item.image_url,
+    item.panelUrl,
+    item.panel_url,
+    item.url,
+  );
 }
 
 function roleLabel(roleId: string, index: number) {

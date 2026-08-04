@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  canRegenerateSelectedDetailPageAssets,
   canReassembleCompletedDetailPageJob,
   canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
@@ -18,6 +19,7 @@ import {
   isActiveDetailPageJob,
   isRecoverableServerFinalAssemblyJob,
   mergeDetailPageReviewJobs,
+  selectedDetailPageAssetRegenerationPlan,
   standardQualityRetryPlan,
 } from "../src/lib/detailPageAiReview.ts";
 import {
@@ -152,6 +154,11 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /AI 재생성 비용은 발생하지 않습니다/);
   assert.match(workspaceSource, /전체 이력 · 상품명·AAA코드·작업 ID 검색/);
   assert.match(workspaceSource, /완료·출시플로우 전달 작업도 불러옵니다/);
+  assert.match(workspaceSource, /문제가 없어도 원하는 이미지를 직접 선택/);
+  assert.match(workspaceSource, /재생성 선택/);
+  assert.match(workspaceSource, /선택 이미지 \$\{selectedRoleIds\.length\}장만 재생성/);
+  assert.match(workspaceSource, /action: "regenerate_selected_assets"/);
+  assert.match(workspaceSource, /성공한 뒤에만 같은 상품출시플로우 항목/);
   assert.match(workspaceSource, /\?query=\$\{encodeURIComponent\(searchQuery\)\}/);
   assert.match(jobsRouteSource, /request\.nextUrl\.searchParams\.get\("query"\)/);
   assert.match(jobsRouteSource, /searchDetailPageJobs/);
@@ -165,6 +172,63 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(jobRouteSource, /action === "revalidate_completed_generation"/);
   assert.match(jobRouteSource, /revalidate_generated_assets: true/);
   assert.match(jobRouteSource, /analysis: null/);
+  assert.match(jobRouteSource, /action === "regenerate_selected_assets"/);
+  assert.match(jobRouteSource, /manual_regeneration_roles: plan\.selectedRoleIds/);
+  assert.match(jobRouteSource, /representatives: plan\.remainingRepresentatives/);
+  assert.match(jobRouteSource, /panels: plan\.remainingPanels/);
+});
+
+test("an operator can manually regenerate a clean supplemental image without discarding other assets", () => {
+  const selectable = job({
+    result: {
+      ...job().result,
+      representatives: [
+        { roleId: "main_catalog", assetUrl: "https://assets.example.com/main.jpg" },
+        { roleId: "alternate_whole", assetUrl: "https://assets.example.com/additional-1.jpg" },
+        { roleId: "evidence_detail", assetUrl: "https://assets.example.com/additional-2.jpg" },
+        { roleId: "lifestyle_usage", assetUrl: "https://assets.example.com/additional-3.jpg" },
+        { roleId: "adaptive_support", assetUrl: "https://assets.example.com/additional-4.jpg" },
+      ],
+      panels: [
+        { slot: 1, assetUrl: "https://assets.example.com/panel-1.jpg" },
+        { slot: 3, assetUrl: "https://assets.example.com/panel-3.jpg" },
+      ],
+    },
+  });
+
+  assert.equal(canRegenerateSelectedDetailPageAssets(selectable), true);
+  const plan = selectedDetailPageAssetRegenerationPlan(selectable, [
+    "alternate_whole",
+    "panel-3",
+  ]);
+  assert.deepEqual(plan?.selectedRoleIds, ["alternate_whole", "panel-3"]);
+  assert.deepEqual(plan?.representativeRoleIds, ["alternate_whole"]);
+  assert.deepEqual(plan?.panelSlots, [3]);
+  assert.deepEqual(
+    plan?.remainingRepresentatives.map((item) => item.roleId),
+    [
+      "main_catalog",
+      "evidence_detail",
+      "lifestyle_usage",
+      "adaptive_support",
+    ],
+  );
+  assert.deepEqual(plan?.remainingPanels.map((item) => item.slot), [1]);
+  assert.equal(
+    selectedDetailPageAssetRegenerationPlan(selectable, ["evidence-1"]),
+    null,
+  );
+  assert.equal(
+    canRegenerateSelectedDetailPageAssets({
+      ...selectable,
+      status: "running",
+    }),
+    false,
+  );
+  assert.equal(
+    detailPageReviewAssets(selectable).representatives[1].label,
+    "부가 이미지 1 · 전체 형태",
+  );
 });
 
 test("completed detail-page history search is safe, server-backed, and de-duplicated", () => {

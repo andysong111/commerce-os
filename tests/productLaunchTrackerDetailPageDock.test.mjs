@@ -170,10 +170,13 @@ test("approved detail, main, and four supplemental assets dock to tracker fields
   assert.match(jobRoute, /action === "final_complete"/);
   assert.match(jobRoute, /!workerAuthorized && !ownerAuthorized/);
   assert.match(jobRoute, /finalizerMode: workerAuthorized \? "server-v1"/);
-  assert.match(dockSource, /html: buildDetailHtml/);
+  assert.match(dockSource, /const detailHtml = buildDetailHtml/);
   assert.match(dockSource, /detailImageUrl,/);
   assert.match(dockSource, /mainImageUrl,/);
   assert.match(dockSource, /additionalImageUrls,/);
+  assert.match(dockSource, /currentAsset\.syncedAt === now/);
+  assert.match(dockSource, /sameStringList\(currentAsset\.additionalImageUrls, additionalImageUrls\)/);
+  assert.match(dockSource, /html: detailHtml/);
   assert.match(trackerCore, /detailPageAutomation/);
   assert.match(trackerCore, /detailImageUrl/);
 });
@@ -185,6 +188,7 @@ test("asset docking APIs enforce same-origin, roles, JPG, size, and public stabl
   assert.match(assetRoute, /MAX_FILE_BYTES = 4_000_000/);
   assert.match(assetRoute, /product-launch-assets/);
   assert.match(assetRoute, /storage\/v1\/object\/public/);
+  assert.match(assetRoute, /\?v=\$\{randomUUID\(\)\}/);
   assert.match(studioConnection, /DETAIL_PAGE_STUDIO_INTERNAL_URL/);
   assert.match(studioConnection, /commerce-os-detail-page-studio\.vercel\.app/);
   assert.match(configRoute, /isSameOriginOpsRequest/);

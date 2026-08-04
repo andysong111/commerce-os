@@ -1005,15 +1005,25 @@ function applyDockedJob(job, fallbackName = "") {
   const state = readState();
   const item = state?.items?.find((candidate) => String(candidate.id) === String(job.itemId));
   if (!item || item.detailPageAutomation?.jobId !== job.jobId) return;
-  if (item.detailPageAsset?.resultId === job.jobId && item.detailPageAutomation?.status === "completed") return;
   const now = job.completedAt || new Date().toISOString();
   const productName = fallbackName || item.productName || item.modelNumber || "상품";
+  const detailHtml = buildDetailHtml(detailImageUrl, productName);
+  const currentAsset = item.detailPageAsset || {};
+  if (
+    currentAsset.resultId === job.jobId &&
+    item.detailPageAutomation?.status === "completed" &&
+    currentAsset.syncedAt === now &&
+    currentAsset.detailImageUrl === detailImageUrl &&
+    currentAsset.mainImageUrl === mainImageUrl &&
+    currentAsset.html === detailHtml &&
+    sameStringList(currentAsset.additionalImageUrls, additionalImageUrls)
+  ) return;
   patchItem(job.itemId, (current) => ({
     detailPageAsset: {
       ...current.detailPageAsset,
       status: "ready",
       resultId: job.jobId,
-      html: buildDetailHtml(detailImageUrl, productName),
+      html: detailHtml,
       detailImageUrl,
       mainImageUrl,
       additionalImageUrls,
@@ -1271,6 +1281,13 @@ function buildDetailHtml(url, productName) {
   const safeUrl = escapeAttribute(url);
   const safeName = escapeAttribute(productName || "상품 상세페이지");
   return `<div style="margin:0 auto;max-width:1000px;text-align:center;"><img src="${safeUrl}" alt="${safeName}" style="display:block;width:100%;height:auto;margin:0 auto;" loading="lazy"></div>`;
+}
+
+function sameStringList(left, right) {
+  const normalizedLeft = Array.isArray(left) ? left.map(String) : [];
+  const normalizedRight = Array.isArray(right) ? right.map(String) : [];
+  return normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index]);
 }
 
 function base64File(base64, mimeType, name) {
