@@ -33,10 +33,16 @@ test("AI API는 관련 후보가 없을 때 엉뚱한 경로 대신 빈 검토 �
     ),
     "utf8",
   );
+  const catalog = await readFile(
+    new URL("../src/lib/shoplingCategoryCatalog.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(route, /unsupportedIds/);
-  assert.match(route, /selectedPath: ""/);
-  assert.match(route, /confidence: 0/);
-  assert.match(route, /엉뚱한 후보는 제시하지 않고 검토 상태로 남겼습니다/);
-  assert.match(route, /supportedInputs\.length/);
+  assert.match(route, /generateReliableShoplingCategoryRecommendations/);
+  assert.doesNotMatch(route, /shortlistShoplingCategories/);
+  assert.match(catalog, /noMatchRecommendation/);
+  assert.match(catalog, /selectedPath: ""/);
+  assert.match(catalog, /confidence: 0/);
+  assert.match(catalog, /엉뚱한 후보는 제시하지 않고 검토 상태로 남겼습니다/);
+  assert.match(catalog, /matchKind: "none"/);
 });

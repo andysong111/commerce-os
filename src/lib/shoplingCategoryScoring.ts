@@ -19,6 +19,14 @@ export type CategoryCandidate = {
   score: number;
   intentMatched?: boolean;
   evidence?: string[];
+  matchKind?: "intent" | "core" | "context";
+};
+
+export type ShoplingCategorySearchProfile = {
+  itemId?: string;
+  coreProductTerms: string[];
+  contextTerms: string[];
+  ignoredAttributes: string[];
 };
 
 export type ShoplingCategoryIntent = {
@@ -31,6 +39,25 @@ export type ShoplingCategoryIntent = {
 
 const MAX_PRODUCTS = 25;
 const MAX_CANDIDATES = 18;
+const AUTO_APPLY_CONFIDENCE = 90;
+
+const PRODUCT_MATERIAL_TERMS = new Set(
+  [
+    "실리콘",
+    "스텐",
+    "스테인리스",
+    "철제",
+    "메탈",
+    "아연",
+    "가죽",
+    "우드",
+    "극세사",
+    "니트",
+    "벨벳",
+    "스펀지",
+    "플라스틱",
+  ].map((value) => value.toLocaleLowerCase("ko-KR")),
+);
 
 const INTENT_RULES: readonly ShoplingCategoryIntent[] = [
   {
@@ -91,6 +118,43 @@ const PRODUCT_TOKEN_STOPWORDS = new Set(
     "컬러",
     "개입",
     "개세트",
+    "포함",
+    "케이스포함",
+    "블랙",
+    "화이트",
+    "그레이",
+    "회색",
+    "실버",
+    "골드",
+    "레드",
+    "블루",
+    "핑크",
+    "그린",
+    "옐로우",
+    "퍼플",
+    "보라",
+    "브라운",
+    "베이지",
+    "오렌지",
+    "주황",
+    "네이비",
+    "아이보리",
+    "투명",
+    "반투명",
+    "무지",
+    "실리콘",
+    "스텐",
+    "스테인리스",
+    "철제",
+    "메탈",
+    "아연",
+    "가죽",
+    "우드",
+    "극세사",
+    "니트",
+    "벨벳",
+    "스펀지",
+    "플라스틱",
   ].map((value) => value.toLocaleLowerCase("ko-KR")),
 );
 
@@ -128,6 +192,62 @@ function jaccard(left: Set<string>, right: Set<string>) {
   return intersection / (left.size + right.size - intersection);
 }
 
+export function canAutoApplyShoplingCategory(options: {
+  confidence: number;
+  currentCategory: string;
+  matchKind: CategoryCandidate["matchKind"] | "none";
+}) {
+  return (
+    !text(options.currentCategory) &&
+    options.confidence >= AUTO_APPLY_CONFIDENCE &&
+    options.matchKind !== "context" &&
+    options.matchKind !== "none"
+  );
+}
+
+export function normalizeShoplingCategorySearchProfiles(
+  value: unknown,
+  inputs: readonly Pick<ProductCategoryInput, "itemId">[],
+): ShoplingCategorySearchProfile[] {
+  if (!Array.isArray(value)) {
+    throw new Error("OpenAI 모델명 분석 결과 형식이 올바르지 않습니다.");
+  }
+  const expectedIds = new Set(inputs.map((input) => input.itemId));
+  const byId = new Map<string, ShoplingCategorySearchProfile>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const row = raw as Record<string, unknown>;
+    const itemId = text(row.itemId);
+    if (!expectedIds.has(itemId) || byId.has(itemId)) continue;
+    byId.set(itemId, {
+      itemId,
+      coreProductTerms: normalizeProfileTerms(row.coreProductTerms, 6),
+      contextTerms: normalizeProfileTerms(row.contextTerms, 6),
+      ignoredAttributes: normalizeProfileTerms(row.ignoredAttributes, 10),
+    });
+  }
+  const ordered = inputs.map((input) => byId.get(input.itemId));
+  if (ordered.some((profile) => !profile)) {
+    throw new Error("일부 상품의 모델명 핵심명사 분석 결과가 누락되었습니다.");
+  }
+  return ordered as ShoplingCategorySearchProfile[];
+}
+
+function normalizeProfileTerms(value: unknown, limit: number) {
+  const values = Array.isArray(value) ? value : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of values) {
+    const normalized = text(raw).slice(0, 40);
+    const key = compact(normalized);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
 export function inferShoplingCategoryIntent(
   input: Pick<ProductCategoryInput, "productName" | "optionLabels">,
 ): ShoplingCategoryIntent | null {
@@ -141,67 +261,167 @@ export function inferShoplingCategoryIntent(
 export function inferShoplingCoreProductTerms(
   input: Pick<ProductCategoryInput, "productName" | "optionLabels">,
   categories: ShoplingCategoryEntryLike[],
+  profile?: ShoplingCategorySearchProfile | null,
 ): string[] {
   const modelTokens = tokens(input.productName).filter(isMeaningfulProductToken);
   const optionTokens = input.optionLabels
     .flatMap((value) => tokens(value))
     .filter(isMeaningfulProductToken);
-  const tokenGroups = [modelTokens, optionTokens];
   const pathCompacts = categories.map((entry) => ({
     path: compact(entry.path),
     leaf: compact(entry.path.split(">").at(-1)),
   }));
+  const ignored = new Set(
+    (profile?.ignoredAttributes ?? []).map(compact).filter(Boolean),
+  );
+  const isAllowed = (value: string) => {
+    const normalized = compact(value);
+    return normalized && !ignored.has(normalized) && isMeaningfulProductToken(value);
+  };
+  const isAllowedProfileTerm = (value: string) => {
+    const normalized = compact(value);
+    return (
+      normalized.length >= 2 &&
+      !ignored.has(normalized) &&
+      !isNonProductVariant(normalized) &&
+      (isMeaningfulProductToken(value) || PRODUCT_MATERIAL_TERMS.has(normalized))
+    );
+  };
 
-  // The model name is the authoritative product identity. Options are consulted
-  // only when the model name has no catalog-supported product noun.
-  for (const sourceTokens of tokenGroups) {
-    for (let tokenIndex = sourceTokens.length - 1; tokenIndex >= 0; tokenIndex -= 1) {
-      const token = compact(sourceTokens[tokenIndex]);
-      const supported = suffixTerms(token)
-        .map((term) => {
-          let pathCount = 0;
-          let leafCount = 0;
-          for (const category of pathCompacts) {
-            if (!category.path.includes(term)) continue;
-            pathCount += 1;
-            if (category.leaf.includes(term)) leafCount += 1;
-          }
-          return { term, pathCount, leafCount };
-        })
-        .filter((candidate) => candidate.pathCount > 0)
-        .sort(
-          (left, right) =>
-            right.term.length - left.term.length ||
-            right.leafCount - left.leafCount ||
-            left.pathCount - right.pathCount ||
-            left.term.localeCompare(right.term, "ko-KR"),
-        );
-
-      if (supported.length) return [supported[0].term];
+  const unique: string[] = [];
+  const addSupported = (value: string, fromProfile = false) => {
+    if (!(fromProfile ? isAllowedProfileTerm(value) : isAllowed(value))) {
+      return false;
     }
+    const candidate = supportedCatalogTerms(
+      value,
+      pathCompacts,
+      fromProfile && PRODUCT_MATERIAL_TERMS.has(compact(value)),
+    )[0];
+    if (!candidate) return false;
+    if (!unique.includes(candidate.term)) unique.push(candidate.term);
+    return true;
+  };
+
+  // AI expands the model name into retail taxonomy synonyms. Every expanded
+  // term still has to match the current Shopling catalog before it is used.
+  for (const value of profile?.coreProductTerms ?? []) {
+    addSupported(value, true);
+    if (unique.length >= 7) break;
   }
 
-  return [];
+  // Korean product compounds normally end with the head noun. Inspect the
+  // model name from right to left after attributes have been removed, and use
+  // one catalog-supported head noun instead of accumulating modifiers.
+  let modelTermFound = false;
+  for (let index = modelTokens.length - 1; index >= 0; index -= 1) {
+    if (addSupported(modelTokens[index])) {
+      modelTermFound = true;
+      break;
+    }
+  }
+  if (!modelTermFound) {
+    for (let index = optionTokens.length - 1; index >= 0; index -= 1) {
+      if (addSupported(optionTokens[index])) break;
+    }
+  }
+  return unique.slice(0, 8);
+}
+
+function inferShoplingContextTerms(
+  input: Pick<ProductCategoryInput, "productName" | "optionLabels">,
+  categories: ShoplingCategoryEntryLike[],
+  profile: ShoplingCategorySearchProfile | null | undefined,
+  coreTerms: string[],
+) {
+  const pathCompacts = categories.map((entry) => ({
+    path: compact(entry.path),
+    leaf: compact(entry.path.split(">").at(-1)),
+  }));
+  const ignored = new Set(
+    (profile?.ignoredAttributes ?? []).map(compact).filter(Boolean),
+  );
+  const sources = [
+    ...(profile?.contextTerms ?? []),
+    ...tokens(input.productName),
+    ...input.optionLabels.flatMap((value) => tokens(value)),
+  ].filter((value) => {
+    const normalized = compact(value);
+    return normalized && !ignored.has(normalized) && isMeaningfulProductToken(value);
+  });
+  const ranked = sources
+    .flatMap((value) => supportedCatalogTerms(value, pathCompacts).slice(0, 1))
+    .filter((candidate) => !coreTerms.includes(candidate.term))
+    .sort(
+      (left, right) =>
+        right.term.length - left.term.length ||
+        right.leafCount - left.leafCount ||
+        left.pathCount - right.pathCount ||
+        left.term.localeCompare(right.term, "ko-KR"),
+    );
+  return [...new Set(ranked.map((candidate) => candidate.term))].slice(0, 8);
+}
+
+function supportedCatalogTerms(
+  value: string,
+  pathCompacts: Array<{ path: string; leaf: string }>,
+  allowMaterialTerm = false,
+) {
+  return suffixTerms(value, allowMaterialTerm)
+    .map((term) => {
+      let pathCount = 0;
+      let leafCount = 0;
+      for (const category of pathCompacts) {
+        if (!category.path.includes(term)) continue;
+        pathCount += 1;
+        if (category.leaf.includes(term)) leafCount += 1;
+      }
+      return { term, pathCount, leafCount };
+    })
+    .filter((candidate) => candidate.pathCount > 0)
+    .sort(
+      (left, right) =>
+        right.term.length - left.term.length ||
+        right.leafCount - left.leafCount ||
+        left.pathCount - right.pathCount ||
+        left.term.localeCompare(right.term, "ko-KR"),
+    );
 }
 
 function isMeaningfulProductToken(value: string) {
   const normalized = compact(value);
   if (normalized.length < 2) return false;
   if (PRODUCT_TOKEN_STOPWORDS.has(normalized)) return false;
-  if (normalized.endsWith("사이즈")) return false;
-  if (/^[smlx]{1,4}$/.test(normalized)) return false;
-  if (/^\d+(?:g|kg|ml|l|cm|mm|m|개|p|pcs?)?$/.test(normalized)) return false;
-  if (/^[a-z]{0,3}\d+[a-z0-9-]*$/.test(normalized)) return false;
-  return true;
+  return !isNonProductVariant(normalized);
 }
 
-function suffixTerms(value: string) {
-  const normalized = compact(value);
+function isNonProductVariant(normalized: string) {
+  if (normalized.endsWith("포함")) return true;
+  if (normalized.endsWith("사이즈")) return true;
+  if (/^[smlx]{1,4}$/.test(normalized)) return true;
+  if (/^[a-z](?:형|타입|사이즈)?$/i.test(normalized)) return true;
+  if (/^\d+(?:p|pcs?|개)?세트$/i.test(normalized)) return true;
+  if (/^\d+(?:g|kg|ml|l|cm|mm|m|호|단|구|색|종|개|쌍|p|pcs?)?$/.test(normalized)) return true;
+  if (/^[a-z]{0,3}\d+[a-z0-9-]*$/.test(normalized)) return true;
+  return false;
+}
+
+function suffixTerms(value: string, allowMaterialTerm = false) {
+  const normalized = compact(value).replace(
+    /(?:[a-z]|\d+)(?:형|타입|사이즈)$/i,
+    "",
+  );
   const result: string[] = [];
   const maximum = Math.min(12, normalized.length);
   for (let length = maximum; length >= 2; length -= 1) {
     const candidate = normalized.slice(-length);
-    if (!candidate || PRODUCT_TOKEN_STOPWORDS.has(candidate)) continue;
+    if (
+      !candidate ||
+      (PRODUCT_TOKEN_STOPWORDS.has(candidate) &&
+        !(allowMaterialTerm && PRODUCT_MATERIAL_TERMS.has(candidate)))
+    ) {
+      continue;
+    }
     if (candidate.endsWith("사이즈")) continue;
     if (/^\d+$/.test(candidate)) continue;
     result.push(candidate);
@@ -281,32 +501,58 @@ export function shortlistShoplingCategories(
   input: ProductCategoryInput,
   categories: ShoplingCategoryEntryLike[],
   limit = MAX_CANDIDATES,
+  profile?: ShoplingCategorySearchProfile | null,
 ): CategoryCandidate[] {
   const productText = [
     input.productName,
     ...input.optionLabels,
     input.modelNumber,
+    ...(profile?.coreProductTerms ?? []),
+    ...(profile?.contextTerms ?? []),
   ]
     .filter(Boolean)
     .join(" ");
   const intent = inferShoplingCategoryIntent(input);
-  const coreTerms = inferShoplingCoreProductTerms(input, categories);
+  const coreTerms = inferShoplingCoreProductTerms(input, categories, profile);
+  const contextTerms = inferShoplingContextTerms(
+    input,
+    categories,
+    profile,
+    coreTerms,
+  );
   const ranked = categories
     .map((entry) => {
       const baseScore = scoreShoplingCategoryCandidate(productText, entry.path);
       const intentResult = scoreIntent(entry.path, intent);
       const pathCompact = compact(entry.path);
-      const coreMatched = coreTerms.some((term) => pathCompact.includes(term));
-      const coreBonus = coreMatched ? 340 : 0;
+      const leafCompact = compact(entry.path.split(">").at(-1));
+      const matchedCoreTerms = coreTerms.filter((term) => pathCompact.includes(term));
+      const matchedContextTerms = contextTerms.filter((term) => pathCompact.includes(term));
+      const coreMatched = matchedCoreTerms.length > 0;
+      const contextMatched = matchedContextTerms.length > 0;
+      const coreBonus = matchedCoreTerms.reduce(
+        (total, term) =>
+          total + 260 + term.length * 14 + (leafCompact.includes(term) ? 70 : 0),
+        0,
+      );
+      const contextBonus = matchedContextTerms.reduce(
+        (total, term) =>
+          total + 45 + term.length * 5 + (leafCompact.includes(term) ? 18 : 0),
+        0,
+      );
       return {
         path: entry.path,
-        score: Number((baseScore + intentResult.score + coreBonus).toFixed(4)),
+        score: Number(
+          (baseScore + intentResult.score + coreBonus + contextBonus).toFixed(4),
+        ),
         intentMatched: intentResult.matched,
         coreMatched,
+        contextMatched,
         blocked: intentResult.blocked,
         evidence: [
           ...intentResult.evidence,
-          ...coreTerms.filter((term) => pathCompact.includes(term)),
+          ...matchedCoreTerms,
+          ...matchedContextTerms,
         ],
       };
     })
@@ -318,35 +564,69 @@ export function shortlistShoplingCategories(
 
   const requestedLimit = Math.max(5, Math.min(30, limit));
   if (intent) {
-    return ranked
+    return diversifyCandidates(ranked
       .filter((candidate) => candidate.intentMatched)
-      .slice(0, requestedLimit)
       .map(({ path, score, intentMatched, evidence }) => ({
         path,
         score,
         intentMatched,
         evidence,
-      }));
+        matchKind: "intent" as const,
+      })), requestedLimit);
   }
 
   if (coreTerms.length) {
-    return ranked
+    return diversifyCandidates(ranked
       .filter((candidate) => candidate.coreMatched)
-      .slice(0, requestedLimit)
       .map(({ path, score, intentMatched, evidence }) => ({
         path,
         score,
         intentMatched,
         evidence,
-      }));
+        matchKind: "core" as const,
+      })), requestedLimit);
   }
 
-  return ranked.slice(0, requestedLimit).map(({ path, score, intentMatched, evidence }) => ({
-    path,
-    score,
-    intentMatched,
-    evidence,
-  }));
+  if (contextTerms.length) {
+    return diversifyCandidates(ranked
+      .filter((candidate) => candidate.contextMatched)
+      .map(({ path, score, intentMatched, evidence }) => ({
+        path,
+        score,
+        intentMatched,
+        evidence,
+        matchKind: "context" as const,
+      })), requestedLimit);
+  }
+
+  // A category without any product-identity or category-context evidence is
+  // less useful than an empty review result. Never fall back to color, size,
+  // material, or coincidental character overlap.
+  return [];
+}
+
+function diversifyCandidates<T extends CategoryCandidate>(
+  ranked: T[],
+  limit: number,
+) {
+  if (ranked.length <= limit) return ranked;
+  const result: T[] = [];
+  const used = new Set<string>();
+  const representedBranches = new Set<string>();
+  const add = (candidate: T) => {
+    if (used.has(candidate.path) || result.length >= limit) return;
+    used.add(candidate.path);
+    representedBranches.add(text(candidate.path.split(">")[0]));
+    result.push(candidate);
+  };
+
+  for (const candidate of ranked.slice(0, Math.min(6, limit))) add(candidate);
+  for (const candidate of ranked) {
+    const branch = text(candidate.path.split(">")[0]);
+    if (!representedBranches.has(branch)) add(candidate);
+  }
+  for (const candidate of ranked) add(candidate);
+  return result;
 }
 
 export function parseProductCategoryInputs(value: unknown): ProductCategoryInput[] {
