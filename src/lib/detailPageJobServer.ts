@@ -277,6 +277,36 @@ export async function listRecoverableDetailPageJobs(
     );
 }
 
+export async function listStoppedDetailPageJobsForAssetRepair(
+  config: DetailPageJobConfig,
+  limit = 25,
+) {
+  const params = new URLSearchParams({
+    select: "*",
+    status: "eq.failed",
+    "payload->>kind": "eq.detail_page",
+    "payload->>recovery_stop_code": "eq.DETAIL_PAGE_LEGACY_STALLED_STOPPED",
+    order: "updated_at.asc",
+    limit: String(Math.min(100, Math.max(1, limit))),
+  });
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/${DETAIL_PAGE_JOB_TABLE}?${params.toString()}`,
+    { headers: createSupabaseAdminHeaders(config.secretKey), cache: "no-store" },
+  );
+  const body = await readDetailPageJobJson(response);
+  if (!response.ok) throw new Error(readDetailPageJobError(body, response.status));
+  return (Array.isArray(body) ? body : [])
+    .filter((row): row is RawDetailPageJobRow =>
+      Boolean(row && typeof row === "object" && row.payload?.kind === "detail_page"),
+    )
+    .map(normalizeJobRow)
+    .filter(
+      (job) =>
+        job.status === "failed" &&
+        !String(job.payload.recovery_assets_repaired_at ?? "").trim(),
+    );
+}
+
 export async function insertDetailPageJob(
   config: DetailPageJobConfig,
   row: Record<string, unknown>,

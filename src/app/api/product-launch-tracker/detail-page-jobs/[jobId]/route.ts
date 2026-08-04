@@ -19,6 +19,7 @@ import {
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 import {
   DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+  matchesDetailPageExecution,
   restoreManualRegenerationAssetsOnFailure,
 } from "@/lib/detailPageJobRecovery";
 
@@ -85,6 +86,20 @@ export async function POST(
       );
     }
 
+    if (
+      workerAuthorized &&
+      !matchesDetailPageExecution(job, body.executionId)
+    ) {
+      return Response.json(
+        {
+          ok: false,
+          code: "DETAIL_PAGE_EXECUTION_STALE",
+          message: "이전 상세페이지 실행의 콜백을 차단했습니다.",
+        },
+        { status: 409 },
+      );
+    }
+
     if (action === "claim") {
       if (!workerAuthorized) return forbidden("서버 작업자만 작업을 인계받을 수 있습니다.");
       if (TERMINAL.has(job.status)) {
@@ -104,6 +119,17 @@ export async function POST(
         started_at: job.started_at ?? new Date(now).toISOString(),
       });
       return Response.json({ ok: true, busy: false, job: publicDetailPageJob(claimed ?? job) });
+    }
+
+    if (workerAuthorized && TERMINAL.has(job.status)) {
+      return Response.json(
+        {
+          ok: false,
+          code: "DETAIL_PAGE_JOB_TERMINAL",
+          message: "종료된 상세페이지 작업의 늦은 콜백을 차단했습니다.",
+        },
+        { status: 409 },
+      );
     }
 
     if (action === "source_started") {

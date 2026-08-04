@@ -4,6 +4,7 @@ import {
   createDetailPageJobToken,
   getDetailPageJobConfig,
   listRecoverableDetailPageJobs,
+  listStoppedDetailPageJobsForAssetRepair,
   patchDetailPageJob,
 } from "@/lib/detailPageJobServer";
 import {
@@ -41,6 +42,24 @@ export async function GET(request: Request) {
   const config = getDetailPageJobConfig();
   if (!config.ok) return NextResponse.json(config.body, { status: config.status });
   const connection = resolveDetailPageStudioConnection();
+  const stoppedJobs = await listStoppedDetailPageJobsForAssetRepair(
+    config.value,
+    MAX_RECOVERY_JOBS,
+  );
+  let repaired = 0;
+  for (const job of stoppedJobs) {
+    const repair = restoreManualRegenerationAssetsOnFailure(job.result);
+    const repairedAt = new Date().toISOString();
+    await patchDetailPageJob(config.value, job.id, {
+      payload: { recovery_assets_repaired_at: repairedAt },
+      ...(Object.keys(repair).length ? { result: repair } : {}),
+    });
+    if (Object.keys(repair).length) repaired += 1;
+    console.info("[detail-page-cron] checked stopped asset restoration", {
+      jobId: job.id,
+      repaired: Object.keys(repair).length > 0,
+    });
+  }
   const jobs = await listRecoverableDetailPageJobs(config.value, 50);
   const now = Date.now();
   const stale = jobs
@@ -103,6 +122,7 @@ export async function GET(request: Request) {
         body: JSON.stringify({
           callbackUrl: callbackUrl.toString(),
           workerUrl: connection.workerUrl.toString(),
+          executionId: String(job.payload.execution_id ?? "").trim() || undefined,
           token: createDetailPageJobToken(config.value, job.owner_id, job.id),
         }),
         redirect: "manual",
@@ -131,6 +151,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     checked: jobs.length,
+    repaired,
     recovered: results.filter((item) => item.accepted).length,
     stopped: results.filter((item) => item.stopped).length,
     results,
