@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   canReassembleCompletedDetailPageJob,
+  canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
   detailPageCheckpointId,
   detailPageFailureCode,
+  detailPageJobName,
   detailPageProblemReason,
   detailPageReviewAssets,
   detailPageReviewBucket,
@@ -127,6 +129,8 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   );
   assert.match(workspaceSource, /서버 최종 조립 다시 시작/);
   assert.match(workspaceSource, /최종 조립만 다시 실행/);
+  assert.match(workspaceSource, /저장 자산 재검수·부분 재생성/);
+  assert.match(workspaceSource, /revalidate_completed_generation/);
   assert.match(workspaceSource, /reassemble_final_only/);
   assert.match(workspaceSource, /AI 재생성 비용은 발생하지 않습니다/);
   assert.match(workspaceSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
@@ -134,6 +138,9 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.doesNotMatch(dockSource, /ops_finalize/);
   assert.match(jobRouteSource, /server_finalizer_progress/);
   assert.match(jobRouteSource, /finalizerMode: workerAuthorized \? "server-v1"/);
+  assert.match(jobRouteSource, /action === "revalidate_completed_generation"/);
+  assert.match(jobRouteSource, /revalidate_generated_assets: true/);
+  assert.match(jobRouteSource, /analysis: null/);
 });
 
 test("a completed server result can reassemble only the final JPEG from stored approved assets", () => {
@@ -165,6 +172,25 @@ test("a completed server result can reassemble only the final JPEG from stored a
 
   assert.equal(isRecoverableServerFinalAssemblyJob(completed), false);
   assert.equal(canReassembleCompletedDetailPageJob(completed), true);
+  assert.equal(canRevalidateCompletedDetailPageJob(completed), true);
+  assert.equal(
+    detailPageJobName({
+      ...completed,
+      payload: {
+        ...completed.payload,
+        product_name: "1688 중국어 상품명",
+        product_name_hint: "걸이형 모공브러쉬 블랙",
+      },
+    }),
+    "걸이형 모공브러쉬 블랙",
+  );
+  assert.equal(
+    canRevalidateCompletedDetailPageJob({
+      ...completed,
+      payload: { ...completed.payload, evidence_urls: [] },
+    }),
+    false,
+  );
   assert.equal(
     canReassembleCompletedDetailPageJob({
       ...completed,

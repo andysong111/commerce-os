@@ -10,6 +10,7 @@ import {
   verifyDetailPageJobToken,
 } from "@/lib/detailPageJobServer";
 import {
+  canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
   standardQualityRetryPlan,
 } from "@/lib/detailPageAiReview";
@@ -125,6 +126,62 @@ export async function POST(
         lease_owner: "",
         lease_until: null,
         completed_at: new Date().toISOString(),
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
+    if (action === "revalidate_completed_generation") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 완료된 생성 자산을 다시 검수할 수 있습니다.");
+      }
+      if (!canRevalidateCompletedDetailPageJob(job)) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_COMPLETED_REVALIDATION_NOT_ALLOWED",
+            message:
+              "저장된 1688 근거와 검수 통과 생성 자산이 완전한 완료 작업만 다시 검수할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "queued",
+        stage: "checkpoint_revalidation",
+        message:
+          "저장된 1688 근거와 기존 생성 자산 유지 · 모델명·판매옵션 기준 재검수 대기 중",
+        progress: 10,
+        qa_status: "pending",
+        payload: {
+          attempt: job.attempt + 1,
+          assistant_hidden_at: "",
+          revalidate_generated_assets: true,
+        },
+        result: {
+          analysis: null,
+          creativeDirection: null,
+          runId: null,
+          runSummary: null,
+          setAssessment: null,
+          representativeRetryRole: "",
+          representativeRetryInstruction: "",
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
+          setRetryUsed: false,
+          standardRetryUsed: false,
+          standardDecision: null,
+          standardFailure: null,
+          standard_failure: null,
+          representativeIndividualsPassed: false,
+          representativeQualityProof: null,
+          detailPassed: false,
+          detailSetIdentityPassed: false,
+          finalizerPhase: "revalidation",
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }

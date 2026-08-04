@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   canReassembleCompletedDetailPageJob,
+  canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
   detailPageCheckpointId,
   detailPageFailureCode,
@@ -294,6 +295,91 @@ export function DetailPageAiReviewWorkspace() {
     );
   }
 
+  async function revalidateCompletedGeneration(job: DetailPageReviewJob) {
+    if (actionJobId || !canRevalidateCompletedDetailPageJob(job)) return;
+    if (
+      !window.confirm(
+        `\"${detailPageJobName(job)}\"의 저장된 1688 원본과 기존 생성 자산을 유지한 채 모델명·판매옵션 기준으로 다시 검수합니다.\n새 검수에서 지목된 문제 이미지만 재생성하며 AI 검수·이미지 비용이 일부 발생할 수 있습니다. 계속할까요?`,
+      )
+    ) {
+      return;
+    }
+    setActionJobId(job.jobId);
+    setActionState({
+      tone: "progress",
+      message:
+        "저장된 1688 원본과 생성 자산을 모델명·판매옵션 기준으로 다시 검수하고 있습니다.",
+    });
+    try {
+      const response = await fetch(
+        `${JOBS_API}/${encodeURIComponent(job.jobId)}`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action: "revalidate_completed_generation" }),
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        job?: DetailPageReviewJob;
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true || !isReviewJob(body.job)) {
+        throw new Error(
+          body.message || "완료된 생성 자산을 다시 검수하도록 준비하지 못했습니다.",
+        );
+      }
+      setJobs((current) => [
+        body.job!,
+        ...current.filter((candidate) => candidate.jobId !== body.job!.jobId),
+      ]);
+      setFilter("active");
+      setSelectedJobId(body.job.jobId);
+
+      const startResponse = await fetch(
+        `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const startBody = (await startResponse.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (!startResponse.ok || startBody.ok !== true) {
+        throw new Error(
+          startBody.message ||
+            "재검수 체크포인트는 준비됐지만 Studio 서버 작업을 시작하지 못했습니다.",
+        );
+      }
+      setActionState({
+        tone: "success",
+        message:
+          "1688 재수집 없이 전체 자산 재검수와 문제 이미지만 부분 재생성을 시작했습니다.",
+      });
+      await refresh(true);
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "완료 작업의 부분 재생성을 시작하지 못했습니다.",
+      });
+      await refresh(true);
+    } finally {
+      setActionJobId("");
+    }
+  }
+
   async function reconnectFinalAssembly(
     job: DetailPageReviewJob,
     reassembleCompleted = false,
@@ -493,6 +579,9 @@ export function DetailPageAiReviewWorkspace() {
                 onReassembleFinal={() =>
                   reconnectFinalAssembly(selected, true)
                 }
+                onRevalidateCompleted={() =>
+                  void revalidateCompletedGeneration(selected)
+                }
                 onFullRetry={() => void requestRegeneration(selected, "full")}
               />
             ) : (
@@ -559,6 +648,7 @@ function JobReviewDetail({
   onResume,
   onReconnectFinalizer,
   onReassembleFinal,
+  onRevalidateCompleted,
   onFullRetry,
 }: {
   job: DetailPageReviewJob;
@@ -570,6 +660,7 @@ function JobReviewDetail({
   onResume: () => void;
   onReconnectFinalizer: () => void;
   onReassembleFinal: () => void;
+  onRevalidateCompleted: () => void;
   onFullRetry: () => void;
 }) {
   const bucket = detailPageReviewBucket(job);
@@ -581,6 +672,7 @@ function JobReviewDetail({
     Boolean(resumeTarget) && resumeTarget?.jobId !== job.jobId;
   const active = isActiveDetailPageJob(job);
   const canReassembleFinal = canReassembleCompletedDetailPageJob(job);
+  const canRevalidateCompleted = canRevalidateCompletedDetailPageJob(job);
   const finalDetail = assets.detail[0];
   const problemAssets = [...assets.representatives, ...assets.panels].filter(
     (asset) => asset.problem,
@@ -698,11 +790,25 @@ function JobReviewDetail({
       ) : !active ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
           <p className="text-sm font-bold text-slate-600">
-            {canReassembleFinal
+            {canRevalidateCompleted
+              ? "모델명·판매옵션 기준이 바뀐 경우 저장 자산을 재검수해 문제 이미지만 다시 만들 수 있습니다."
+              : canReassembleFinal
               ? "조립 템플릿만 바뀐 경우 저장 자산으로 최종 JPEG만 다시 만들 수 있습니다."
               : "결과를 다시 만들 필요가 있을 때만 전체 재생성을 사용하세요."}
           </p>
           <div className="flex flex-wrap gap-2">
+            {canRevalidateCompleted ? (
+              <button
+                type="button"
+                onClick={onRevalidateCompleted}
+                disabled={busy}
+                className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-black text-white hover:bg-amber-700 disabled:cursor-wait disabled:opacity-40"
+              >
+                {currentBusy
+                  ? "재검수 요청 중…"
+                  : "저장 자산 재검수·부분 재생성"}
+              </button>
+            ) : null}
             {canReassembleFinal ? (
               <button
                 type="button"

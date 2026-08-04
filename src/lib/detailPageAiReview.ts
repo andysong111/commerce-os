@@ -101,8 +101,8 @@ const ROLE_LABELS: Record<string, string> = {
 export function detailPageJobName(job: DetailPageReviewJob) {
   const payload = record(job.payload);
   return text(
-    payload.product_name ||
-      payload.product_name_hint ||
+    payload.product_name_hint ||
+      payload.product_name ||
       job.itemId ||
       "상품명 미지정",
   );
@@ -187,6 +187,17 @@ export function canReassembleCompletedDetailPageJob(
   );
 }
 
+export function canRevalidateCompletedDetailPageJob(
+  job: Pick<DetailPageReviewJob, "status" | "payload" | "result">,
+) {
+  const evidence = array(record(job.payload).evidence_urls)
+    .map(safeUrl)
+    .filter(Boolean);
+  return Boolean(
+    canReassembleCompletedDetailPageJob(job) && evidence.length > 0,
+  );
+}
+
 function generatedAssetQualityPassed(result: Record<string, unknown>) {
   const assessment = record(result.setAssessment);
   return Boolean(
@@ -241,6 +252,7 @@ export function detailPageStageLabel(job: DetailPageReviewJob) {
     source_collection: "1688 원본 수집",
     queued: "서버 생성 대기",
     checkpoint_resume: "문제 자산 복구 대기",
+    checkpoint_revalidation: "저장 자산 재검수",
     server_generation: "AI 생성·검수",
     server_final_assembly: "서버 최종 14,000px 조립",
     standard_quality_retry: "Standard-v2 차단 섹션 부분 재생성",
