@@ -60,7 +60,7 @@ test("상품 수에 따라 출력 예산을 확장하고 재시도 때 더 늘�
   assert.ok(retry > first);
 });
 
-test("AI 카테고리 API는 2건 배치와 실패 묶음 단건 복구를 사용한다", async () => {
+test("AI 카테고리 API는 모델명 의미 확장 후 2건 배치와 실패 묶음 단건 복구를 사용한다", async () => {
   const runner = await readFile(
     new URL(
       "../src/lib/shoplingCategoryRecommendationRunner.ts",
@@ -78,6 +78,10 @@ test("AI 카테고리 API는 2건 배치와 실패 묶음 단건 복구를 사�
 
   assert.match(runner, /CATEGORY_BATCH_SIZE = 2/);
   assert.match(runner, /CATEGORY_BATCH_CONCURRENCY = 4/);
+  assert.match(runner, /SEARCH_PROFILE_BATCH_SIZE = 8/);
+  assert.match(runner, /generateShoplingCategorySearchProfiles/);
+  assert.match(runner, /generateSearchProfilesWithRecovery/);
+  assert.match(runner, /searchProfiles/);
   assert.match(runner, /batch\.map\(\(input\) =>/);
   assert.match(runner, /generateBatchWithRecovery\(\[input\]/);
   assert.match(runner, /두 번 연속 중간에서 잘렸습니다/);

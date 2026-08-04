@@ -2,16 +2,23 @@ import { randomBytes } from "node:crypto";
 import { dispatchGitHubActionsWorkflow } from "./githubActionsDispatch";
 import { readShoplingCategoryCatalogFromSupabase } from "./shoplingCategorySupabaseStore";
 import {
+  canAutoApplyShoplingCategory,
+  normalizeShoplingCategorySearchProfiles,
   parseProductCategoryInputs,
   shortlistShoplingCategories,
 } from "./shoplingCategoryScoring";
-import type { ProductCategoryInput } from "./shoplingCategoryScoring";
+import type {
+  ProductCategoryInput,
+  ShoplingCategorySearchProfile,
+} from "./shoplingCategoryScoring";
+import { parseOpenAiStructuredOutput } from "./openAiStructuredOutput";
 export {
   parseProductCategoryInputs,
   scoreShoplingCategoryCandidate,
   shortlistShoplingCategories,
 } from "./shoplingCategoryScoring";
 export type { CategoryCandidate, ProductCategoryInput } from "./shoplingCategoryScoring";
+export type { ShoplingCategorySearchProfile } from "./shoplingCategoryScoring";
 
 export type ShoplingCategoryEntry = {
   depth: number;
@@ -62,6 +69,7 @@ export type ProductCategoryRecommendation = {
   autoApply: boolean;
   skippedExisting: boolean;
   candidatePaths: string[];
+  matchKind: "intent" | "core" | "context" | "none";
 };
 
 type OpenAiResponse = {
@@ -272,20 +280,7 @@ export async function dispatchShoplingCategoryRefresh(requestId: string) {
   });
 }
 
-function extractOpenAiOutputText(payload: OpenAiResponse) {
-  const direct = text(payload.output_text);
-  if (direct) return direct;
-  for (const item of payload.output ?? []) {
-    for (const content of item.content ?? []) {
-      if (content.type === "output_text" && text(content.text)) {
-        return text(content.text);
-      }
-    }
-  }
-  return "";
-}
-
-function recommendationSchema(itemIds: string[]) {
+function recommendationSchema() {
   return {
     type: "object",
     additionalProperties: false,
@@ -293,14 +288,14 @@ function recommendationSchema(itemIds: string[]) {
     properties: {
       results: {
         type: "array",
-        minItems: itemIds.length,
-        maxItems: itemIds.length,
+        minItems: 1,
+        maxItems: 25,
         items: {
           type: "object",
           additionalProperties: false,
           required: ["itemId", "selectedPath", "confidence", "reason", "alternatives"],
           properties: {
-            itemId: { type: "string", enum: itemIds },
+            itemId: { type: "string", minLength: 1 },
             selectedPath: { type: "string", minLength: 1, maxLength: 300 },
             confidence: { type: "integer", minimum: 0, maximum: 100 },
             reason: { type: "string", minLength: 1, maxLength: 240 },
@@ -317,6 +312,156 @@ function recommendationSchema(itemIds: string[]) {
   };
 }
 
+function searchProfileSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["results"],
+    properties: {
+      results: {
+        type: "array",
+        minItems: 1,
+        maxItems: 25,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "itemId",
+            "coreProductTerms",
+            "contextTerms",
+            "ignoredAttributes",
+          ],
+          properties: {
+            itemId: { type: "string", minLength: 1 },
+            coreProductTerms: {
+              type: "array",
+              minItems: 0,
+              maxItems: 6,
+              items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+            contextTerms: {
+              type: "array",
+              minItems: 0,
+              maxItems: 6,
+              items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+            ignoredAttributes: {
+              type: "array",
+              minItems: 0,
+              maxItems: 10,
+              items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+export async function generateShoplingCategorySearchProfiles(
+  inputs: ProductCategoryInput[],
+  options: {
+    apiKey?: string;
+    model?: string;
+    fetcher?: typeof fetch;
+    timeoutMs?: number;
+  } = {},
+): Promise<ShoplingCategorySearchProfile[]> {
+  const normalizedInputs = parseProductCategoryInputs({ items: inputs });
+  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY가 설정되지 않아 모델명 핵심명사를 분석할 수 없습니다.");
+  }
+  const model = text(
+    options.model ??
+      process.env.OPENAI_CATEGORY_MODEL ??
+      process.env.OPENAI_MODEL ??
+      "gpt-5-mini",
+  );
+  const fetcher = options.fetcher ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
+  try {
+    const response = await fetcher("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        max_output_tokens: Math.min(8_000, 1_200 + normalizedInputs.length * 360),
+        input: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: [
+                  "당신은 한국 온라인쇼핑 카테고리 검색어 설계 담당자다.",
+                  "모델명에서 실제로 판매하는 물건의 핵심 제품명사를 찾고, 카테고리 원장에서 검색할 한국어 동의어를 만든다.",
+                  "동의어에는 카테고리에서 쓰는 표준 표기와 흔한 표기 차이(예: 브러시/브러쉬)를 포함한다.",
+                  "색상·재질·크기·수량·형번·스타일·포장 여부는 핵심 제품명사에서 제외하고 ignoredAttributes에 넣는다.",
+                  "제품의 사용 영역이나 대상은 contextTerms에 넣되 효능·인증·구성품을 추측하지 않는다.",
+                  "합성어 안의 색상어는 함부로 분리하지 않는다. 블랙보드와 블랙박스는 각각 완전한 제품명사다.",
+                  "예: '걸이형 모공브러쉬 블랙' → coreProductTerms ['모공브러쉬','모공브러시','세안브러시','클렌징브러시','페이스브러시','화장용브러시'], contextTerms ['세안','클렌징','뷰티','퍼스널케어'], ignoredAttributes ['걸이형','블랙'].",
+                  "예: '사이드 테이블 블랙' → coreProductTerms ['사이드테이블','테이블'], ignoredAttributes ['블랙'].",
+                  "예: '투구골무' → coreProductTerms ['골무','재봉골무'], contextTerms ['수예','바느질'].",
+                  "각 배열은 관련성이 높은 순서이며, 근거가 없으면 빈 배열로 둔다.",
+                ].join("\n"),
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: JSON.stringify({
+                  task: "모델명별 카테고리 검색 프로필 생성",
+                  products: normalizedInputs.map((input) => ({
+                    itemId: input.itemId,
+                    modelNumber: input.modelNumber,
+                    modelName: input.productName,
+                    optionLabels: input.optionLabels,
+                  })),
+                }),
+              },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "shopling_category_search_profiles",
+            strict: true,
+            schema: searchProfileSchema(),
+          },
+        },
+      }),
+      signal: controller.signal,
+    });
+    const payload = (await response.json()) as OpenAiResponse;
+    if (!response.ok) {
+      throw new Error(
+        text(payload.error?.message) ||
+          `OpenAI 모델명 분석 요청이 실패했습니다. HTTP ${response.status}`,
+      );
+    }
+    const parsed = parseOpenAiStructuredOutput(payload);
+    if (!Array.isArray(parsed.results)) {
+      throw new Error("OpenAI 모델명 분석 결과 형식이 올바르지 않습니다.");
+    }
+    return normalizeShoplingCategorySearchProfiles(
+      parsed.results,
+      normalizedInputs,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function generateShoplingCategoryRecommendations(
   inputValue: unknown,
   options: {
@@ -324,6 +469,7 @@ export async function generateShoplingCategoryRecommendations(
     model?: string;
     fetcher?: typeof fetch;
     timeoutMs?: number;
+    searchProfiles?: ReadonlyMap<string, ShoplingCategorySearchProfile>;
   } = {},
 ) {
   const inputs = parseProductCategoryInputs(inputValue);
@@ -336,8 +482,19 @@ export async function generateShoplingCategoryRecommendations(
   const candidatesByItem = new Map(
     inputs.map((input) => [
       input.itemId,
-      shortlistShoplingCategories(input, snapshot.categories),
+      shortlistShoplingCategories(
+        input,
+        snapshot.categories,
+        undefined,
+        options.searchProfiles?.get(input.itemId),
+      ),
     ]),
+  );
+  const supportedInputs = inputs.filter(
+    (input) => (candidatesByItem.get(input.itemId)?.length ?? 0) > 0,
+  );
+  const unsupportedInputs = inputs.filter(
+    (input) => (candidatesByItem.get(input.itemId)?.length ?? 0) === 0,
   );
   const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
   if (!apiKey) {
@@ -356,6 +513,18 @@ export async function generateShoplingCategoryRecommendations(
     options.timeoutMs ?? 60_000,
   );
   try {
+    if (!supportedInputs.length) {
+      return {
+        status: "success" as const,
+        snapshot: {
+          collectedAt: snapshot.collectedAt,
+          categoryCount: snapshot.categoryCount,
+          hash: snapshot.hash,
+        },
+        autoApplyConfidence: AUTO_APPLY_CONFIDENCE,
+        results: unsupportedInputs.map((input) => noMatchRecommendation(input)),
+      };
+    }
     const response = await fetcher("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -392,8 +561,10 @@ export async function generateShoplingCategoryRecommendations(
                   {
                     task: "상품별 샵플링 표준카테고리 선택",
                     snapshotHash: snapshot.hash,
-                    products: inputs.map((input) => ({
+                    products: supportedInputs.map((input) => ({
                       ...input,
+                      categorySearchProfile:
+                        options.searchProfiles?.get(input.itemId) ?? null,
                       candidatePaths: candidatesByItem
                         .get(input.itemId)!
                         .map((candidate) => candidate.path),
@@ -411,7 +582,7 @@ export async function generateShoplingCategoryRecommendations(
             type: "json_schema",
             name: "shopling_category_recommendations",
             strict: true,
-            schema: recommendationSchema(inputs.map((input) => input.itemId)),
+            schema: recommendationSchema(),
           },
         },
       }),
@@ -424,13 +595,13 @@ export async function generateShoplingCategoryRecommendations(
           `OpenAI API 요청이 실패했습니다. HTTP ${response.status}`,
       );
     }
-    const outputText = extractOpenAiOutputText(payload);
-    if (!outputText) throw new Error("OpenAI 카테고리 응답이 비어 있습니다.");
-    const parsed = JSON.parse(outputText) as { results?: unknown };
+    const parsed = parseOpenAiStructuredOutput(payload);
     if (!Array.isArray(parsed.results)) {
       throw new Error("OpenAI 카테고리 결과 형식이 올바르지 않습니다.");
     }
-    const inputById = new Map(inputs.map((input) => [input.itemId, input]));
+    const inputById = new Map(
+      supportedInputs.map((input) => [input.itemId, input]),
+    );
     const results: ProductCategoryRecommendation[] = [];
     const seen = new Set<string>();
     for (const raw of parsed.results) {
@@ -448,6 +619,10 @@ export async function generateShoplingCategoryRecommendations(
       const confidence = Math.max(0, Math.min(100, Math.round(Number(row.confidence) || 0)));
       const currentCategory = inputById.get(itemId)!.currentCategory;
       const skippedExisting = Boolean(currentCategory);
+      const selectedCandidate = candidatesByItem
+        .get(itemId)!
+        .find((candidate) => candidate.path === selectedPath)!;
+      const matchKind = selectedCandidate.matchKind ?? "context";
       results.push({
         itemId,
         modelNumber: inputById.get(itemId)!.modelNumber,
@@ -457,14 +632,23 @@ export async function generateShoplingCategoryRecommendations(
         alternatives: Array.isArray(row.alternatives)
           ? row.alternatives.map(text).filter((path) => candidatePaths.includes(path)).slice(0, 3)
           : [],
-        autoApply: !skippedExisting && confidence >= AUTO_APPLY_CONFIDENCE,
+        autoApply: canAutoApplyShoplingCategory({
+          confidence,
+          currentCategory,
+          matchKind,
+        }),
         skippedExisting,
         candidatePaths,
+        matchKind,
       });
       seen.add(itemId);
     }
-    if (results.length !== inputs.length) {
+    if (results.length !== supportedInputs.length) {
       throw new Error("일부 상품의 AI 카테고리 결과가 누락되었습니다.");
+    }
+    const resultById = new Map(results.map((result) => [result.itemId, result]));
+    for (const input of unsupportedInputs) {
+      resultById.set(input.itemId, noMatchRecommendation(input));
     }
     return {
       status: "success",
@@ -474,9 +658,27 @@ export async function generateShoplingCategoryRecommendations(
         hash: snapshot.hash,
       },
       autoApplyConfidence: AUTO_APPLY_CONFIDENCE,
-      results,
+      results: inputs.map((input) => resultById.get(input.itemId)!),
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function noMatchRecommendation(
+  input: ProductCategoryInput,
+): ProductCategoryRecommendation {
+  return {
+    itemId: input.itemId,
+    modelNumber: input.modelNumber,
+    selectedPath: "",
+    confidence: 0,
+    reason:
+      "모델명의 핵심 제품명사 및 용도와 일치하는 샵플링 표준카테고리를 찾지 못했습니다. 엉뚱한 후보는 제시하지 않고 검토 상태로 남겼습니다.",
+    alternatives: [],
+    autoApply: false,
+    skippedExisting: Boolean(input.currentCategory),
+    candidatePaths: [],
+    matchKind: "none",
+  };
 }

@@ -1,12 +1,16 @@
 import {
+  generateShoplingCategorySearchProfiles,
   generateShoplingCategoryRecommendations,
   type ProductCategoryInput,
   type ProductCategoryRecommendation,
+  type ShoplingCategorySearchProfile,
 } from "./shoplingCategoryCatalog";
 import { isOpenAiStructuredOutputIncompleteError } from "./openAiStructuredOutput";
 
 const CATEGORY_BATCH_SIZE = 2;
 const CATEGORY_BATCH_CONCURRENCY = 4;
+const SEARCH_PROFILE_BATCH_SIZE = 8;
+const SEARCH_PROFILE_BATCH_CONCURRENCY = 4;
 
 type RecommendationResult = Awaited<
   ReturnType<typeof generateShoplingCategoryRecommendations>
@@ -27,23 +31,63 @@ export async function generateReliableShoplingCategoryRecommendations(
     throw new Error("AI 카테고리를 설정할 상품을 선택하세요.");
   }
 
+  const profileBatches = chunk(inputs, SEARCH_PROFILE_BATCH_SIZE);
+  const profileResults = await mapWithConcurrency(
+    profileBatches,
+    SEARCH_PROFILE_BATCH_CONCURRENCY,
+    (batch) => generateSearchProfilesWithRecovery(batch, options),
+  );
+  const profiles = profileResults.flat();
+  const profileById = new Map(
+    profiles.map((profile) => [String(profile.itemId ?? ""), profile]),
+  );
+  if (inputs.some((input) => !profileById.has(input.itemId))) {
+    throw new Error("일부 상품의 모델명 핵심명사 분석 결과가 누락되었습니다.");
+  }
+
   const batches = chunk(inputs, CATEGORY_BATCH_SIZE);
   const batchResults = await mapWithConcurrency(
     batches,
     CATEGORY_BATCH_CONCURRENCY,
-    (batch) => generateBatchWithRecovery(batch, options),
+    (batch) => generateBatchWithRecovery(batch, options, profileById),
   );
   return mergeRecommendationResults(batchResults, inputs);
+}
+
+async function generateSearchProfilesWithRecovery(
+  batch: ProductCategoryInput[],
+  options: RecommendationOptions,
+): Promise<ShoplingCategorySearchProfile[]> {
+  const profileOptions = {
+    ...options,
+    timeoutMs: Math.min(options.timeoutMs ?? 15_000, 15_000),
+  };
+  try {
+    return await generateShoplingCategorySearchProfiles(batch, profileOptions);
+  } catch (error) {
+    if (!isRetryableCategoryOutputError(error)) throw error;
+    if (batch.length === 1) {
+      return generateShoplingCategorySearchProfiles(batch, profileOptions);
+    }
+    const middle = Math.ceil(batch.length / 2);
+    const recovered = await Promise.all([
+      generateSearchProfilesWithRecovery(batch.slice(0, middle), options),
+      generateSearchProfilesWithRecovery(batch.slice(middle), options),
+    ]);
+    return recovered.flat();
+  }
 }
 
 async function generateBatchWithRecovery(
   batch: ProductCategoryInput[],
   options: RecommendationOptions,
+  searchProfiles: ReadonlyMap<string, ShoplingCategorySearchProfile>,
 ): Promise<RecommendationResult> {
+  const recommendationOptions = { ...options, searchProfiles };
   try {
     return await generateShoplingCategoryRecommendations(
       { items: batch },
-      options,
+      recommendationOptions,
     );
   } catch (error) {
     if (!isRetryableCategoryOutputError(error)) throw error;
@@ -51,7 +95,7 @@ async function generateBatchWithRecovery(
       try {
         return await generateShoplingCategoryRecommendations(
           { items: batch },
-          options,
+          recommendationOptions,
         );
       } catch (retryError) {
         if (!isRetryableCategoryOutputError(retryError)) throw retryError;
@@ -64,7 +108,7 @@ async function generateBatchWithRecovery(
 
     const singleResults = await Promise.all(
       batch.map((input) =>
-        generateBatchWithRecovery([input], options),
+        generateBatchWithRecovery([input], options, searchProfiles),
       ),
     );
     return mergeRecommendationResults(singleResults, batch);
