@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import {
   bearerToken,
@@ -16,6 +17,10 @@ import {
   standardQualityRetryPlan,
 } from "@/lib/detailPageAiReview";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import {
+  DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+  restoreManualRegenerationAssetsOnFailure,
+} from "@/lib/detailPageJobRecovery";
 
 const TERMINAL = new Set(["success", "failed", "cancelled"]);
 
@@ -146,6 +151,7 @@ export async function POST(
           { status: 409 },
         );
       }
+      const restartedAt = new Date().toISOString();
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "checkpoint_revalidation",
@@ -157,8 +163,10 @@ export async function POST(
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
           revalidate_generated_assets: true,
+          ...freshStagedExecution(restartedAt),
         },
         result: {
+          assetWork: null,
           analysis: null,
           creativeDirection: null,
           runId: null,
@@ -182,6 +190,7 @@ export async function POST(
         lease_owner: "",
         lease_until: null,
         error_message: "",
+        started_at: restartedAt,
         completed_at: null,
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
@@ -206,6 +215,7 @@ export async function POST(
           { status: 409 },
         );
       }
+      const restartedAt = new Date().toISOString();
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "checkpoint_manual_selection",
@@ -217,8 +227,17 @@ export async function POST(
           assistant_hidden_at: "",
           manual_regeneration_roles: plan.selectedRoleIds,
           revalidate_generated_assets: false,
+          ...freshStagedExecution(restartedAt),
         },
         result: {
+          assetWork: null,
+          manualRegenerationBackup: {
+            representatives: job.result.representatives,
+            panels: job.result.panels,
+            detailImageUrl: job.result.detailImageUrl,
+            mainImageUrl: job.result.mainImageUrl,
+            additionalImageUrls: job.result.additionalImageUrls,
+          },
           representatives: plan.remainingRepresentatives,
           panels: plan.remainingPanels,
           setAssessment: null,
@@ -245,6 +264,7 @@ export async function POST(
         lease_owner: "",
         lease_until: null,
         error_message: "",
+        started_at: restartedAt,
         completed_at: null,
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
@@ -269,6 +289,7 @@ export async function POST(
           { status: 409 },
         );
       }
+      const restartedAt = new Date().toISOString();
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "checkpoint_resume",
@@ -280,8 +301,10 @@ export async function POST(
         payload: {
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
+          ...freshStagedExecution(restartedAt),
         },
         result: {
+          assetWork: null,
           setAssessment: standardGateFailure ? job.result.setAssessment : null,
           representativeRetryRole: "",
           representativeRetryInstruction: "",
@@ -295,6 +318,7 @@ export async function POST(
         lease_owner: "",
         lease_until: null,
         error_message: "",
+        started_at: restartedAt,
         completed_at: null,
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
@@ -308,6 +332,7 @@ export async function POST(
       }
       const productName = safeText(body.productName, 250);
       if (!productName) return invalid("수집된 상품명이 필요합니다.");
+      const queuedAt = new Date().toISOString();
       const changed = await patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "queued",
@@ -319,10 +344,14 @@ export async function POST(
           source_product_info: safeText(body.sourceProductInfo, 8_000),
           evidence_urls: evidenceUrls,
           evidence_names: stringList(body.evidenceNames, 60).map((value) => safeText(value, 160)),
+          ...freshStagedExecution(queuedAt),
         },
+        result: { assetWork: null },
         lease_owner: "",
         lease_until: null,
         error_message: "",
+        started_at: queuedAt,
+        completed_at: null,
       });
       return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
     }
@@ -395,7 +424,12 @@ export async function POST(
               panelRetrySlots: [],
               panelRetryInstructions: {},
             }
-          : callbackResult;
+          : action === "failed"
+            ? {
+                ...callbackResult,
+                ...restoreManualRegenerationAssetsOnFailure(job.result),
+              }
+            : callbackResult;
       const nextStatus =
         action === "render_pending" ? "render_pending" : action === "failed" ? "failed" : "running";
       const releasesLease = !["progress", "server_finalizer_progress"].includes(action);
@@ -563,6 +597,8 @@ export async function POST(
         qa_status: "passed",
         result: {
           ...callbackResult,
+          assetWork: null,
+          manualRegenerationBackup: null,
           detailImageUrl,
           mainImageUrl,
           additionalImageUrls,
@@ -656,6 +692,18 @@ function serverFinalizerErrorCode(value: unknown) {
     safeText(value, 2_000).match(/\b(SERVER_FINALIZER_[A-Z0-9_]+)\b/)?.[1] ||
     "SERVER_FINALIZER_FAILED"
   );
+}
+
+function freshStagedExecution(startedAt: string) {
+  return {
+    pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+    execution_id: randomUUID(),
+    execution_started_at: startedAt,
+    auto_recovery_count: 0,
+    last_auto_recovery_at: "",
+    recovery_stop_code: "",
+    recovery_stopped_at: "",
+  };
 }
 
 function isOwnedAssetUrl(
