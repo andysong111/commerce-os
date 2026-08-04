@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { dispatchGitHubActionsWorkflow } from "./githubActionsDispatch";
 import { readShoplingCategoryCatalogFromSupabase } from "./shoplingCategorySupabaseStore";
 import {
+  calibrateShoplingCategoryConfidence,
   canAutoApplyShoplingCategory,
   normalizeShoplingCategorySearchProfiles,
   parseProductCategoryInputs,
@@ -69,12 +70,29 @@ export type ProductCategoryRecommendation = {
   autoApply: boolean;
   skippedExisting: boolean;
   candidatePaths: string[];
-  matchKind: "intent" | "core" | "context" | "none";
+  matchKind: "intent" | "market" | "core" | "context" | "none";
+  marketEvidence: ProductCategoryMarketEvidence;
+};
+
+export type ProductCategoryMarketEvidence = {
+  status: "web" | "model_fallback";
+  confidence: number;
+  summary: string;
+  categoryPaths: string[];
+  sourceDomains: string[];
 };
 
 type OpenAiResponse = {
+  status?: unknown;
+  incomplete_details?: { reason?: unknown };
   output_text?: unknown;
-  output?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }>;
+  output?: Array<{
+    type?: unknown;
+    action?: {
+      sources?: Array<{ url?: unknown }>;
+    };
+    content?: Array<{ type?: unknown; text?: unknown }>;
+  }>;
   error?: { message?: unknown };
 };
 
@@ -83,6 +101,15 @@ const DEFAULT_WORKFLOW = "shopling-category-refresh.yml";
 const SNAPSHOT_PATH = "data/shopling_categories/latest.json";
 const STATUS_PATH = "data/shopling_categories/status.json";
 const AUTO_APPLY_CONFIDENCE = 90;
+// Naver's legacy Shopping Search API ended on 2026-07-31. These are public
+// search domains used through OpenAI web search, not the retired API endpoint.
+const NAVER_CATEGORY_SEARCH_DOMAINS = [
+  "search.shopping.naver.com",
+  "shopping.naver.com",
+  "search.naver.com",
+  "smartstore.naver.com",
+  "brand.naver.com",
+] as const;
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -329,6 +356,11 @@ function searchProfileSchema() {
             "itemId",
             "coreProductTerms",
             "contextTerms",
+            "catalogCategoryTerms",
+            "blockedCategoryTerms",
+            "marketCategoryPaths",
+            "marketEvidenceSummary",
+            "marketEvidenceConfidence",
             "ignoredAttributes",
           ],
           properties: {
@@ -344,6 +376,34 @@ function searchProfileSchema() {
               minItems: 0,
               maxItems: 6,
               items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+            catalogCategoryTerms: {
+              type: "array",
+              minItems: 0,
+              maxItems: 10,
+              items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+            blockedCategoryTerms: {
+              type: "array",
+              minItems: 0,
+              maxItems: 12,
+              items: { type: "string", minLength: 1, maxLength: 40 },
+            },
+            marketCategoryPaths: {
+              type: "array",
+              minItems: 0,
+              maxItems: 4,
+              items: { type: "string", minLength: 1, maxLength: 240 },
+            },
+            marketEvidenceSummary: {
+              type: "string",
+              minLength: 0,
+              maxLength: 240,
+            },
+            marketEvidenceConfidence: {
+              type: "integer",
+              minimum: 0,
+              maximum: 100,
             },
             ignoredAttributes: {
               type: "array",
@@ -365,6 +425,7 @@ export async function generateShoplingCategorySearchProfiles(
     model?: string;
     fetcher?: typeof fetch;
     timeoutMs?: number;
+    useWebSearch?: boolean;
   } = {},
 ): Promise<ShoplingCategorySearchProfile[]> {
   const normalizedInputs = parseProductCategoryInputs({ items: inputs });
@@ -379,19 +440,116 @@ export async function generateShoplingCategorySearchProfiles(
       "gpt-5-mini",
   );
   const fetcher = options.fetcher ?? fetch;
+  const totalTimeoutMs = Math.max(15_000, options.timeoutMs ?? 60_000);
+  const webSearchEnabled =
+    options.useWebSearch ??
+    !["0", "false", "off"].includes(
+      text(process.env.OPENAI_CATEGORY_WEB_SEARCH).toLocaleLowerCase("en-US"),
+    );
+  const startedAt = Date.now();
+
+  if (webSearchEnabled) {
+    let bestEffort: ShoplingCategorySearchProfile[] | null = null;
+    const webAttempts: Array<{ timeoutMs: number; allowedDomains?: string[] }> = [
+      {
+        timeoutMs: 14_000,
+        allowedDomains: [...NAVER_CATEGORY_SEARCH_DOMAINS],
+      },
+      { timeoutMs: 16_000 },
+    ];
+    for (const attempt of webAttempts) {
+      const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+      if (remainingMs < 8_000) break;
+      try {
+        const profiles = await requestShoplingCategorySearchProfiles({
+          normalizedInputs,
+          apiKey,
+          model,
+          fetcher,
+          timeoutMs: Math.min(attempt.timeoutMs, remainingMs),
+          useWebSearch: true,
+          allowedDomains: attempt.allowedDomains,
+        });
+        if (profiles.some((profile) => profile.groundingStatus === "web")) {
+          return profiles;
+        }
+        bestEffort = profiles;
+      } catch (error) {
+        if (isFatalOpenAiProfileError(error)) throw error;
+      }
+    }
+
+    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
+    if (remainingMs < 8_000 && bestEffort) return bestEffort;
+    try {
+      return await requestShoplingCategorySearchProfiles({
+        normalizedInputs,
+        apiKey,
+        model,
+        fetcher,
+        timeoutMs: Math.max(8_000, Math.min(15_000, remainingMs)),
+        useWebSearch: false,
+      });
+    } catch (error) {
+      if (bestEffort && !isFatalOpenAiProfileError(error)) return bestEffort;
+      throw error;
+    }
+  }
+
+  return requestShoplingCategorySearchProfiles({
+    normalizedInputs,
+    apiKey,
+    model,
+    fetcher,
+    timeoutMs: totalTimeoutMs,
+    useWebSearch: false,
+  });
+}
+
+async function requestShoplingCategorySearchProfiles(options: {
+  normalizedInputs: ProductCategoryInput[];
+  apiKey: string;
+  model: string;
+  fetcher: typeof fetch;
+  timeoutMs: number;
+  useWebSearch: boolean;
+  allowedDomains?: string[];
+}): Promise<ShoplingCategorySearchProfile[]> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   try {
-    const response = await fetcher("https://api.openai.com/v1/responses", {
+    const response = await options.fetcher("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${options.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
+        model: options.model,
         store: false,
-        max_output_tokens: Math.min(8_000, 1_200 + normalizedInputs.length * 360),
+        max_output_tokens: Math.min(
+          10_000,
+          1_800 + options.normalizedInputs.length * 700,
+        ),
+        ...(options.useWebSearch
+          ? {
+              tools: [
+                {
+                  type: "web_search",
+                  search_context_size: "medium",
+                  ...(options.allowedDomains?.length
+                    ? {
+                        filters: {
+                          allowed_domains: options.allowedDomains,
+                        },
+                      }
+                    : {}),
+                },
+              ],
+              tool_choice: "required",
+              include: ["web_search_call.action.sources"],
+            }
+          : {}),
         input: [
           {
             role: "system",
@@ -400,12 +558,23 @@ export async function generateShoplingCategorySearchProfiles(
                 type: "input_text",
                 text: [
                   "당신은 한국 온라인쇼핑 카테고리 검색어 설계 담당자다.",
-                  "모델명에서 실제로 판매하는 물건의 핵심 제품명사를 찾고, 카테고리 원장에서 검색할 한국어 동의어를 만든다.",
+                  options.useWebSearch
+                    ? "각 모델명마다 최소 한 번씩 웹에서 실제로 검색해 같은 물건의 상품 유형과 카테고리 경로를 확인한다. 모델명 전체 검색 후 색상·규격·A/B형 같은 속성을 뺀 검색도 사용한다."
+                    : "웹 검색을 사용할 수 없는 대체 분석이다. 모델명과 옵션만으로 보수적으로 분류하고 웹에서 확인한 것처럼 쓰지 않는다.",
+                  options.useWebSearch
+                    ? "네이버 쇼핑·스마트스토어·네이버 통합검색에 노출된 동일 상품의 카테고리 경로를 최우선으로 사용한다. 네이버 근거가 없으면 한국 주요 쇼핑몰 여러 결과에서 공통으로 확인되는 분류만 사용한다."
+                    : "marketCategoryPaths는 빈 배열로 두고 marketEvidenceConfidence는 49 이하로 제한한다.",
+                  "검색 결과 제목의 우연한 단어 일치가 아니라 용도·사용 부위·대상까지 같은 제품인지 확인한다.",
+                  "모델명에서 실제로 판매하는 물건의 핵심 제품명사를 찾고, 샵플링 원장에서 검색할 한국어 동의어를 만든다.",
                   "동의어에는 카테고리에서 쓰는 표준 표기와 흔한 표기 차이(예: 브러시/브러쉬)를 포함한다.",
                   "색상·재질·크기·수량·형번·스타일·포장 여부는 핵심 제품명사에서 제외하고 ignoredAttributes에 넣는다.",
                   "제품의 사용 영역이나 대상은 contextTerms에 넣되 효능·인증·구성품을 추측하지 않는다.",
+                  "catalogCategoryTerms에는 시장 분류를 샵플링 원장에서 찾을 때 사용할 구체적인 제품군·용도·상위 카테고리 명사를 넣는다. '용품', '기타', '액세서리'처럼 단독으로 너무 넓은 말은 넣지 않는다.",
+                  "blockedCategoryTerms에는 제품 정체성과 명백히 충돌하는 카테고리 분기만 넣는다. '생활', '용품', '기타' 같은 광범위한 말은 금지한다.",
+                  "marketCategoryPaths에는 검색 결과에서 실제로 확인된 카테고리 경로만 넣고, 확인되지 않았으면 빈 배열로 둔다.",
+                  "marketEvidenceSummary에는 어떤 물건·용도로 분류됐는지 간결하게 쓰고, marketEvidenceConfidence는 검색 근거의 일관성만 평가한다.",
                   "합성어 안의 색상어는 함부로 분리하지 않는다. 블랙보드와 블랙박스는 각각 완전한 제품명사다.",
-                  "예: '걸이형 모공브러쉬 블랙' → coreProductTerms ['모공브러쉬','모공브러시','세안브러시','클렌징브러시','페이스브러시','화장용브러시'], contextTerms ['세안','클렌징','뷰티','퍼스널케어'], ignoredAttributes ['걸이형','블랙'].",
+                  "예: '걸이형 모공브러쉬 블랙'은 얼굴 모공 세정용 도구다. coreProductTerms ['모공브러쉬','세안브러시','클렌징브러시','페이스브러시'], contextTerms ['얼굴','세안','클렌징','피부관리'], catalogCategoryTerms ['세안용품','클렌징용품','클렌징소품','미용소품'], blockedCategoryTerms ['헤어','두피','청소','세차','반려동물'], ignoredAttributes ['걸이형','블랙']처럼 분리한다.",
                   "예: '사이드 테이블 블랙' → coreProductTerms ['사이드테이블','테이블'], ignoredAttributes ['블랙'].",
                   "예: '투구골무' → coreProductTerms ['골무','재봉골무'], contextTerms ['수예','바느질'].",
                   "각 배열은 관련성이 높은 순서이며, 근거가 없으면 빈 배열로 둔다.",
@@ -420,11 +589,15 @@ export async function generateShoplingCategorySearchProfiles(
                 type: "input_text",
                 text: JSON.stringify({
                   task: "모델명별 카테고리 검색 프로필 생성",
-                  products: normalizedInputs.map((input) => ({
+                  evidenceMode: options.useWebSearch
+                    ? "web_search_with_naver_priority"
+                    : "model_name_fallback",
+                  products: options.normalizedInputs.map((input) => ({
                     itemId: input.itemId,
                     modelNumber: input.modelNumber,
                     modelName: input.productName,
                     optionLabels: input.optionLabels,
+                    referenceLinks: input.chinaProductLinks,
                   })),
                 }),
               },
@@ -453,13 +626,56 @@ export async function generateShoplingCategorySearchProfiles(
     if (!Array.isArray(parsed.results)) {
       throw new Error("OpenAI 모델명 분석 결과 형식이 올바르지 않습니다.");
     }
-    return normalizeShoplingCategorySearchProfiles(
+    const profiles = normalizeShoplingCategorySearchProfiles(
       parsed.results,
-      normalizedInputs,
+      options.normalizedInputs,
     );
+    const searchEvidence = extractWebSearchEvidence(payload);
+    return profiles.map((profile) => ({
+      ...profile,
+      sourceDomains: searchEvidence.sourceDomains,
+      groundingStatus:
+        options.useWebSearch && searchEvidence.sourceDomains.length > 0
+          ? ("web" as const)
+          : ("model_fallback" as const),
+      marketEvidenceConfidence:
+        options.useWebSearch && searchEvidence.sourceDomains.length > 0
+          ? profile.marketEvidenceConfidence ?? 0
+          : Math.min(49, profile.marketEvidenceConfidence ?? 0),
+      ...(!options.useWebSearch || !searchEvidence.sourceDomains.length
+        ? { marketCategoryPaths: [] }
+        : {}),
+    }));
   } finally {
     clearTimeout(timer);
   }
+}
+
+function extractWebSearchEvidence(payload: OpenAiResponse) {
+  let called = false;
+  const domains = new Set<string>();
+  for (const output of payload.output ?? []) {
+    if (output.type !== "web_search_call") continue;
+    called = true;
+    for (const source of output.action?.sources ?? []) {
+      try {
+        const hostname = new URL(text(source.url)).hostname
+          .toLocaleLowerCase("en-US")
+          .replace(/^www\./, "");
+        if (hostname) domains.add(hostname);
+      } catch {
+        // Ignore malformed source URLs returned by the upstream search tool.
+      }
+    }
+  }
+  return { called, sourceDomains: [...domains].slice(0, 8) };
+}
+
+function isFatalOpenAiProfileError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /invalid[_ ]api[_ ]key|incorrect api key|insufficient_quota|rate[_ ]limit|HTTP 401|HTTP 403|HTTP 429/i.test(
+    message,
+  );
 }
 
 export async function generateShoplingCategoryRecommendations(
@@ -522,7 +738,12 @@ export async function generateShoplingCategoryRecommendations(
           hash: snapshot.hash,
         },
         autoApplyConfidence: AUTO_APPLY_CONFIDENCE,
-        results: unsupportedInputs.map((input) => noMatchRecommendation(input)),
+        results: unsupportedInputs.map((input) =>
+          noMatchRecommendation(
+            input,
+            options.searchProfiles?.get(input.itemId),
+          ),
+        ),
       };
     }
     const response = await fetcher("https://api.openai.com/v1/responses", {
@@ -545,7 +766,9 @@ export async function generateShoplingCategoryRecommendations(
                   "당신은 샵플링 표준카테고리 분류 담당자다.",
                   "각 상품은 제공된 candidatePaths 중 정확히 하나만 선택한다.",
                   "후보에 없는 경로를 새로 만들거나 철자를 바꾸지 않는다.",
-                  "모델명과 옵션이 증명하는 상품 정체성만 사용하고 용도·재질·효능을 추측하지 않는다.",
+                  "모델명·옵션과 categorySearchProfile의 시장 검색 근거가 증명하는 상품 정체성만 사용하고 효능·구성품을 추측하지 않는다.",
+                  "marketCategoryPaths와 catalogCategoryTerms는 단순 단어 겹침보다 우선한다. blockedCategoryTerms가 포함된 후보는 선택하지 않는다.",
+                  "시장 검색 근거가 model_fallback이거나 신뢰도가 낮으면 최종 confidence도 보수적으로 책정한다.",
                   "애매하면 confidence를 낮게 주고 alternatives에 가까운 후보를 넣는다.",
                   "이미 카테고리가 있는 상품도 추천은 하되 기존값을 존중한다.",
                 ].join("\n"),
@@ -616,13 +839,18 @@ export async function generateShoplingCategoryRecommendations(
       if (!candidatePaths.includes(selectedPath)) {
         throw new Error(`${itemId}의 AI 결과가 최신 카테고리 후보에 없습니다.`);
       }
-      const confidence = Math.max(0, Math.min(100, Math.round(Number(row.confidence) || 0)));
       const currentCategory = inputById.get(itemId)!.currentCategory;
       const skippedExisting = Boolean(currentCategory);
       const selectedCandidate = candidatesByItem
         .get(itemId)!
         .find((candidate) => candidate.path === selectedPath)!;
       const matchKind = selectedCandidate.matchKind ?? "context";
+      const searchProfile = options.searchProfiles?.get(itemId);
+      const confidence = calibrateShoplingCategoryConfidence({
+        confidence: Number(row.confidence),
+        matchKind,
+        profile: searchProfile,
+      });
       results.push({
         itemId,
         modelNumber: inputById.get(itemId)!.modelNumber,
@@ -640,6 +868,7 @@ export async function generateShoplingCategoryRecommendations(
         skippedExisting,
         candidatePaths,
         matchKind,
+        marketEvidence: marketEvidenceFromProfile(searchProfile),
       });
       seen.add(itemId);
     }
@@ -648,7 +877,13 @@ export async function generateShoplingCategoryRecommendations(
     }
     const resultById = new Map(results.map((result) => [result.itemId, result]));
     for (const input of unsupportedInputs) {
-      resultById.set(input.itemId, noMatchRecommendation(input));
+      resultById.set(
+        input.itemId,
+        noMatchRecommendation(
+          input,
+          options.searchProfiles?.get(input.itemId),
+        ),
+      );
     }
     return {
       status: "success",
@@ -667,6 +902,7 @@ export async function generateShoplingCategoryRecommendations(
 
 function noMatchRecommendation(
   input: ProductCategoryInput,
+  profile?: ShoplingCategorySearchProfile | null,
 ): ProductCategoryRecommendation {
   return {
     itemId: input.itemId,
@@ -680,5 +916,27 @@ function noMatchRecommendation(
     skippedExisting: Boolean(input.currentCategory),
     candidatePaths: [],
     matchKind: "none",
+    marketEvidence: marketEvidenceFromProfile(profile),
+  };
+}
+
+function marketEvidenceFromProfile(
+  profile?: ShoplingCategorySearchProfile | null,
+): ProductCategoryMarketEvidence {
+  return {
+    status: profile?.groundingStatus === "web" ? "web" : "model_fallback",
+    confidence: Math.max(
+      0,
+      Math.min(100, Math.round(Number(profile?.marketEvidenceConfidence) || 0)),
+    ),
+    summary: text(profile?.marketEvidenceSummary).slice(0, 240),
+    categoryPaths: (profile?.marketCategoryPaths ?? [])
+      .map(text)
+      .filter(Boolean)
+      .slice(0, 4),
+    sourceDomains: (profile?.sourceDomains ?? [])
+      .map(text)
+      .filter(Boolean)
+      .slice(0, 8),
   };
 }

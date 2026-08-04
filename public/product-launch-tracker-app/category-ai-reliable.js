@@ -73,7 +73,7 @@ async function runReliableAiCategoryAssignment(button) {
   analysisActive = true;
   activeController = new AbortController();
   setBusyUi(button, selected.length, true);
-  setRunStatus("running", `1/4 · ${selected.length}건의 모델명·용도·동의어를 AI가 분석하고 있습니다.`);
+  setRunStatus("running", `1/4 · ${selected.length}건의 모델명을 웹 검색하고 시장 카테고리·용도·동의어를 분석하고 있습니다.`);
 
   const requestItems = selected.map(categoryRequestItem);
   const savedResultById = new Map();
@@ -149,10 +149,19 @@ async function runReliableAiCategoryAssignment(button) {
         .filter(Boolean)
         .slice(0, 8)
         .join(", ");
+      const failedDetails = unresolved
+        .slice(0, 8)
+        .map((failure) => {
+          const label = failure.modelNumber || failure.productName || failure.itemId;
+          const stage =
+            failure.stage === "search_profile" ? "검색·의미분석" : "샵플링 후보선택";
+          return `${label} · ${stage} · ${failure.message || "원인 미상"}`;
+        })
+        .join("\n");
       const message = `4/4 · ${savedCount}건은 검토함에 저장했습니다. ${unresolved.length}건은 자동 재시도 후에도 완료되지 않았습니다.`;
-      setRunStatus("failed", `${message} 실패: ${failedLabels}`);
+      setRunStatus("failed", `${message} 실패: ${failedLabels} · ${failedDetails}`);
       window.alert(
-        `${message}\n성공한 결과는 사라지지 않았습니다.\n실패 상품: ${failedLabels}`,
+        `${message}\n성공한 결과는 사라지지 않았습니다.\n실패 상세:\n${failedDetails}`,
       );
     } else {
       setRunStatus(
@@ -263,6 +272,10 @@ async function persistCategoryResults(previousState, response) {
         categoryAiCandidatePaths: Array.isArray(result.candidatePaths)
           ? result.candidatePaths
           : [],
+        categoryAiMarketEvidence:
+          result.marketEvidence && typeof result.marketEvidence === "object"
+            ? result.marketEvidence
+            : null,
         categoryAiStatus: "review_required",
         categoryAiSnapshotHash:
           response.snapshot?.hash || item.categoryAiSnapshotHash || "",

@@ -22,6 +22,7 @@ type TrackerItem = Record<string, unknown> & {
   categoryAiCandidatePaths?: unknown;
   categoryAiReason?: unknown;
   categoryAiConfidence?: unknown;
+  categoryAiMarketEvidence?: unknown;
 };
 
 type TrackerState = Record<string, unknown> & { items: TrackerItem[] };
@@ -33,6 +34,15 @@ type ReviewItem = {
   confidence: number;
   reason: string;
   candidates: string[];
+  marketEvidence: MarketEvidence | null;
+};
+
+type MarketEvidence = {
+  status: "web" | "model_fallback";
+  confidence: number;
+  summary: string;
+  categoryPaths: string[];
+  sourceDomains: string[];
 };
 
 type AiResult = {
@@ -44,6 +54,7 @@ type AiResult = {
   candidatePaths?: unknown;
   autoApply?: unknown;
   skippedExisting?: unknown;
+  marketEvidence?: unknown;
 };
 
 export function ShoplingCategoryCoreNounReview() {
@@ -167,6 +178,9 @@ export function ShoplingCategoryCoreNounReview() {
                   ai.candidateChoices,
                 ).slice(0, 3),
                 categoryAiCandidatePaths: stringArray(ai.candidatePaths),
+                categoryAiMarketEvidence: normalizeMarketEvidence(
+                  ai.marketEvidence,
+                ),
                 categoryAiStatus: autoApply
                   ? "auto_applied"
                   : skippedExisting
@@ -252,7 +266,7 @@ export function ShoplingCategoryCoreNounReview() {
             모델명에서 실제 제품명사를 먼저 찾습니다
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            예: 투구골무 → 골무, 미니짐볼 → 짐볼. 관련 후보가 없으면 엉뚱한 카테고리를 제시하지 않습니다.
+            모델명 웹 검색의 시장 카테고리와 핵심 제품명사를 함께 확인합니다. 관련 후보가 없으면 엉뚱한 카테고리를 제시하지 않습니다.
           </p>
         </div>
         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
@@ -277,6 +291,24 @@ export function ShoplingCategoryCoreNounReview() {
                     {item.modelNumber || "모델번호 없음"} · {item.productName || "모델명 없음"}
                   </p>
                   <p className="mt-1 text-xs leading-5 text-slate-600">{item.reason}</p>
+                  {item.marketEvidence ? (
+                    <div className="mt-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] leading-5 text-cyan-950">
+                      <p className="font-black">
+                        {item.marketEvidence.status === "web"
+                          ? "웹 검색 근거"
+                          : "웹 검색 대체 분석"} · 근거 신뢰도 {item.marketEvidence.confidence}%
+                      </p>
+                      {item.marketEvidence.summary ? (
+                        <p>{item.marketEvidence.summary}</p>
+                      ) : null}
+                      {item.marketEvidence.categoryPaths.length ? (
+                        <p>시장 분류: {item.marketEvidence.categoryPaths.join(" / ")}</p>
+                      ) : null}
+                      {item.marketEvidence.sourceDomains.length ? (
+                        <p>출처: {item.marketEvidence.sourceDomains.join(", ")}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -347,6 +379,7 @@ function buildReviews(state: TrackerState | null): ReviewItem[] {
           "모델명과 옵션정보 기준으로 검토가 필요합니다.",
       ),
       candidates: candidateChoices(item),
+      marketEvidence: normalizeMarketEvidence(item.categoryAiMarketEvidence),
     }))
     .filter((item) => item.itemId)
     .sort(
@@ -425,6 +458,21 @@ function normalizeReason(value: string) {
 
 function stringArray(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+}
+
+function normalizeMarketEvidence(value: unknown): MarketEvidence | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = row.status === "web" ? "web" : "model_fallback";
+  const summary = text(row.summary).slice(0, 240);
+  const categoryPaths = stringArray(row.categoryPaths).slice(0, 4);
+  const sourceDomains = stringArray(row.sourceDomains).slice(0, 8);
+  const confidence = Math.max(
+    0,
+    Math.min(100, Math.round(Number(row.confidence) || 0)),
+  );
+  if (!summary && !categoryPaths.length && !sourceDomains.length) return null;
+  return { status, confidence, summary, categoryPaths, sourceDomains };
 }
 
 function text(value: unknown) {

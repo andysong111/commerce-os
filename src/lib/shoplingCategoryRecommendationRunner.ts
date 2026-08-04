@@ -7,9 +7,9 @@ import { isOpenAiStructuredOutputIncompleteError } from "./openAiStructuredOutpu
 
 const CATEGORY_BATCH_SIZE = 1;
 const CATEGORY_BATCH_CONCURRENCY = 8;
-const SEARCH_PROFILE_BATCH_SIZE = 4;
-const SEARCH_PROFILE_BATCH_CONCURRENCY = 4;
-const SEARCH_PROFILE_TIMEOUT_MS = 30_000;
+const SEARCH_PROFILE_BATCH_SIZE = 1;
+const SEARCH_PROFILE_BATCH_CONCURRENCY = 6;
+const SEARCH_PROFILE_TIMEOUT_MS = 45_000;
 
 type SearchProfileGenerator = (
   inputs: ProductCategoryInput[],
@@ -18,6 +18,7 @@ type SearchProfileGenerator = (
     model?: string;
     fetcher?: typeof fetch;
     timeoutMs?: number;
+    useWebSearch?: boolean;
   },
 ) => Promise<ShoplingCategorySearchProfile[]>;
 
@@ -53,6 +54,7 @@ type RecommendationOptions = {
   model?: string;
   fetcher?: typeof fetch;
   timeoutMs?: number;
+  useWebSearch?: boolean;
   retryFailedIndividually?: boolean;
   dependencies?: RecommendationDependencies;
 };
@@ -207,11 +209,12 @@ async function generateSearchProfilesWithRecovery(
       options.timeoutMs ?? SEARCH_PROFILE_TIMEOUT_MS,
       SEARCH_PROFILE_TIMEOUT_MS,
     ),
+    useWebSearch: options.useWebSearch,
   };
   try {
     return await generator(batch, profileOptions);
   } catch (error) {
-    if (!isRetryableCategoryOutputError(error)) throw error;
+    if (!isRetryableCategoryRequestError(error)) throw error;
     if (batch.length === 1) {
       return generator(batch, profileOptions);
     }
