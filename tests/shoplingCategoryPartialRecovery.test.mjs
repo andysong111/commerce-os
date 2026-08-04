@@ -103,10 +103,12 @@ test("단일 상품의 웹 검색 의미분석이 일시 시간초과되면 서�
   input.modelNumber = "AAA410";
   input.productName = "곰돌이 털모자 A형";
   let profileAttempts = 0;
+  const profileModes = [];
   const result = await generateReliableShoplingCategoryRecommendations([input], {
     dependencies: {
-      generateSearchProfiles: async (batch) => {
+      generateSearchProfiles: async (batch, options) => {
         profileAttempts += 1;
+        profileModes.push(options?.useWebSearch);
         if (profileAttempts === 1) {
           throw new DOMException("This operation was aborted", "AbortError");
         }
@@ -125,7 +127,72 @@ test("단일 상품의 웹 검색 의미분석이 일시 시간초과되면 서�
   });
 
   assert.equal(profileAttempts, 2);
+  assert.deepEqual(profileModes, [undefined, false]);
   assert.equal(result.status, "success");
   assert.equal(result.results.length, 1);
   assert.deepEqual(result.failures, []);
+});
+
+test("11건 실행은 OpenAI 동시 호출을 3개 이하로 제한하고 전부 보존한다", async () => {
+  const inputs = Array.from({ length: 11 }, (_, index) => product(index + 1));
+  let activeProfiles = 0;
+  let activeRecommendations = 0;
+  let maxProfiles = 0;
+  let maxRecommendations = 0;
+
+  const result = await generateReliableShoplingCategoryRecommendations(inputs, {
+    dependencies: {
+      generateSearchProfiles: async (batch) => {
+        activeProfiles += 1;
+        maxProfiles = Math.max(maxProfiles, activeProfiles);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeProfiles -= 1;
+        return batch.map((input) => ({
+          itemId: input.itemId,
+          coreProductTerms: [input.productName],
+          contextTerms: [],
+          ignoredAttributes: [],
+        }));
+      },
+      generateRecommendations: async (value) => {
+        activeRecommendations += 1;
+        maxRecommendations = Math.max(
+          maxRecommendations,
+          activeRecommendations,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeRecommendations -= 1;
+        return recommendationResult(value.items[0]);
+      },
+    },
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.results.length, 11);
+  assert.deepEqual(result.failures, []);
+  assert.ok(maxProfiles <= 3);
+  assert.ok(maxRecommendations <= 3);
+});
+
+test("429가 반복되면 시간초과로 뭉개지 않고 요청과다 원인을 반환한다", async () => {
+  const input = product(412);
+  const rateLimitError = Object.assign(
+    new Error("OpenAI 모델명 분석 요청이 실패했습니다. (HTTP 429 · code=rate_limit_exceeded)"),
+    { status: 429, code: "rate_limit_exceeded", retryAfterMs: 2_000 },
+  );
+  const result = await generateReliableShoplingCategoryRecommendations([input], {
+    dependencies: {
+      generateSearchProfiles: async () => {
+        throw rateLimitError;
+      },
+      generateRecommendations: async (value) =>
+        recommendationResult(value.items[0]),
+    },
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.results.length, 0);
+  assert.equal(result.failures[0].code, "AI_RATE_LIMIT");
+  assert.equal(result.failures[0].retryAfterMs, 2_000);
+  assert.match(result.failures[0].message, /요청이 한꺼번에 몰려/);
 });

@@ -11,6 +11,87 @@ import {
   scoreShoplingCategoryCandidate,
   shortlistShoplingCategories,
 } from "../src/lib/shoplingCategoryScoring.ts";
+import {
+  mergeGroundedShoplingCategoryProfiles,
+  runFallbackFirstCategoryGrounding,
+} from "../src/lib/shoplingCategoryGrounding.ts";
+
+test("웹 검색이 시간초과돼도 먼저 확보한 기본 의미분석을 반환한다", async () => {
+  const fallbackProfiles = [
+    {
+      itemId: "AAA412",
+      coreProductTerms: ["테스트도구"],
+      contextTerms: ["생활"],
+      ignoredAttributes: [],
+      groundingStatus: "model_fallback",
+    },
+  ];
+  const calls = [];
+  const profiles = await runFallbackFirstCategoryGrounding({
+    totalTimeoutMs: 35_000,
+    webSearchEnabled: true,
+    requestFallback: async (timeoutMs) => {
+      calls.push(["fallback", timeoutMs]);
+      return fallbackProfiles;
+    },
+    requestWeb: async (timeoutMs) => {
+      calls.push(["web", timeoutMs]);
+      throw new DOMException("This operation was aborted", "AbortError");
+    },
+    merge: mergeGroundedShoplingCategoryProfiles,
+    isFatalWebError: () => false,
+    now: () => 1_000,
+  });
+
+  assert.deepEqual(calls, [
+    ["fallback", 15_000],
+    ["web", 18_000],
+  ]);
+  assert.deepEqual(profiles, fallbackProfiles);
+});
+
+test("웹 근거가 성공하면 기본 분석을 버리지 않고 시장 근거와 결합한다", () => {
+  const fallbackProfiles = [
+    {
+      itemId: "AAA490",
+      coreProductTerms: ["기본제품명"],
+      contextTerms: ["기본용도"],
+      catalogCategoryTerms: ["기본분류"],
+      blockedCategoryTerms: [],
+      marketCategoryPaths: [],
+      marketEvidenceSummary: "기본 분석",
+      marketEvidenceConfidence: 40,
+      sourceDomains: [],
+      groundingStatus: "model_fallback",
+      ignoredAttributes: ["속성"],
+    },
+  ];
+  const webProfiles = [
+    {
+      itemId: "AAA490",
+      coreProductTerms: ["시장제품명"],
+      contextTerms: ["시장용도"],
+      catalogCategoryTerms: ["시장분류"],
+      blockedCategoryTerms: ["오분류"],
+      marketCategoryPaths: ["대분류 > 중분류 > 시장분류"],
+      marketEvidenceSummary: "네이버 검색 근거",
+      marketEvidenceConfidence: 91,
+      sourceDomains: ["search.naver.com"],
+      groundingStatus: "web",
+      ignoredAttributes: [],
+    },
+  ];
+  const profiles = mergeGroundedShoplingCategoryProfiles(
+    fallbackProfiles,
+    webProfiles,
+  );
+
+  assert.equal(profiles[0].groundingStatus, "web");
+  assert.deepEqual(profiles[0].coreProductTerms, ["시장제품명", "기본제품명"]);
+  assert.deepEqual(profiles[0].contextTerms, ["시장용도", "기본용도"]);
+  assert.deepEqual(profiles[0].sourceDomains, ["search.naver.com"]);
+  assert.equal(profiles[0].marketEvidenceConfidence, 91);
+});
 
 test("미니짐볼 상품은 핵심명사 짐볼을 찾아 가구·도서보다 헬스 카테고리를 우선한다", () => {
   const categories = [

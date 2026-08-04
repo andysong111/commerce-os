@@ -13,6 +13,10 @@ import type {
   ShoplingCategorySearchProfile,
 } from "./shoplingCategoryScoring";
 import { parseOpenAiStructuredOutput } from "./openAiStructuredOutput";
+import {
+  mergeGroundedShoplingCategoryProfiles,
+  runFallbackFirstCategoryGrounding,
+} from "./shoplingCategoryGrounding";
 export {
   parseProductCategoryInputs,
   scoreShoplingCategoryCandidate,
@@ -93,7 +97,13 @@ type OpenAiResponse = {
     };
     content?: Array<{ type?: unknown; text?: unknown }>;
   }>;
-  error?: { message?: unknown };
+  error?: { message?: unknown; code?: unknown; type?: unknown };
+};
+
+type OpenAiCategoryRequestError = Error & {
+  status?: number;
+  code?: string;
+  retryAfterMs?: number;
 };
 
 const DEFAULT_REPO = "andysong111/shopling-product-upload-auto";
@@ -101,16 +111,6 @@ const DEFAULT_WORKFLOW = "shopling-category-refresh.yml";
 const SNAPSHOT_PATH = "data/shopling_categories/latest.json";
 const STATUS_PATH = "data/shopling_categories/status.json";
 const AUTO_APPLY_CONFIDENCE = 90;
-// Naver's legacy Shopping Search API ended on 2026-07-31. These are public
-// search domains used through OpenAI web search, not the retired API endpoint.
-const NAVER_CATEGORY_SEARCH_DOMAINS = [
-  "search.shopping.naver.com",
-  "shopping.naver.com",
-  "search.naver.com",
-  "smartstore.naver.com",
-  "brand.naver.com",
-] as const;
-
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -446,63 +446,31 @@ export async function generateShoplingCategorySearchProfiles(
     !["0", "false", "off"].includes(
       text(process.env.OPENAI_CATEGORY_WEB_SEARCH).toLocaleLowerCase("en-US"),
     );
-  const startedAt = Date.now();
-
-  if (webSearchEnabled) {
-    let bestEffort: ShoplingCategorySearchProfile[] | null = null;
-    const webAttempts: Array<{ timeoutMs: number; allowedDomains?: string[] }> = [
-      {
-        timeoutMs: 14_000,
-        allowedDomains: [...NAVER_CATEGORY_SEARCH_DOMAINS],
-      },
-      { timeoutMs: 16_000 },
-    ];
-    for (const attempt of webAttempts) {
-      const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
-      if (remainingMs < 8_000) break;
-      try {
-        const profiles = await requestShoplingCategorySearchProfiles({
-          normalizedInputs,
-          apiKey,
-          model,
-          fetcher,
-          timeoutMs: Math.min(attempt.timeoutMs, remainingMs),
-          useWebSearch: true,
-          allowedDomains: attempt.allowedDomains,
-        });
-        if (profiles.some((profile) => profile.groundingStatus === "web")) {
-          return profiles;
-        }
-        bestEffort = profiles;
-      } catch (error) {
-        if (isFatalOpenAiProfileError(error)) throw error;
-      }
-    }
-
-    const remainingMs = totalTimeoutMs - (Date.now() - startedAt);
-    if (remainingMs < 8_000 && bestEffort) return bestEffort;
-    try {
-      return await requestShoplingCategorySearchProfiles({
+  return runFallbackFirstCategoryGrounding({
+    totalTimeoutMs,
+    webSearchEnabled,
+    requestFallback: (timeoutMs) =>
+      requestShoplingCategorySearchProfiles({
         normalizedInputs,
         apiKey,
         model,
         fetcher,
-        timeoutMs: Math.max(8_000, Math.min(15_000, remainingMs)),
+        timeoutMs,
         useWebSearch: false,
-      });
-    } catch (error) {
-      if (bestEffort && !isFatalOpenAiProfileError(error)) return bestEffort;
-      throw error;
-    }
-  }
-
-  return requestShoplingCategorySearchProfiles({
-    normalizedInputs,
-    apiKey,
-    model,
-    fetcher,
-    timeoutMs: totalTimeoutMs,
-    useWebSearch: false,
+      }),
+    requestWeb: (timeoutMs) =>
+      requestShoplingCategorySearchProfiles({
+        normalizedInputs,
+        apiKey,
+        model,
+        fetcher,
+        timeoutMs,
+        useWebSearch: true,
+      }),
+    merge: mergeGroundedShoplingCategoryProfiles,
+    // The fallback already succeeded with the same key and model. Any error
+    // limited to the optional web-evidence call must therefore preserve it.
+    isFatalWebError: () => false,
   });
 }
 
@@ -617,9 +585,10 @@ async function requestShoplingCategorySearchProfiles(options: {
     });
     const payload = (await response.json()) as OpenAiResponse;
     if (!response.ok) {
-      throw new Error(
-        text(payload.error?.message) ||
-          `OpenAI 모델명 분석 요청이 실패했습니다. HTTP ${response.status}`,
+      throw createOpenAiCategoryRequestError(
+        response,
+        payload,
+        "OpenAI 모델명 분석 요청",
       );
     }
     const parsed = parseOpenAiStructuredOutput(payload);
@@ -669,13 +638,6 @@ function extractWebSearchEvidence(payload: OpenAiResponse) {
     }
   }
   return { called, sourceDomains: [...domains].slice(0, 8) };
-}
-
-function isFatalOpenAiProfileError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return /invalid[_ ]api[_ ]key|incorrect api key|insufficient_quota|rate[_ ]limit|HTTP 401|HTTP 403|HTTP 429/i.test(
-    message,
-  );
 }
 
 export async function generateShoplingCategoryRecommendations(
@@ -813,9 +775,10 @@ export async function generateShoplingCategoryRecommendations(
     });
     const payload = (await response.json()) as OpenAiResponse;
     if (!response.ok) {
-      throw new Error(
-        text(payload.error?.message) ||
-          `OpenAI API 요청이 실패했습니다. HTTP ${response.status}`,
+      throw createOpenAiCategoryRequestError(
+        response,
+        payload,
+        "OpenAI 카테고리 선택 요청",
       );
     }
     const parsed = parseOpenAiStructuredOutput(payload);
@@ -898,6 +861,45 @@ export async function generateShoplingCategoryRecommendations(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function createOpenAiCategoryRequestError(
+  response: Response,
+  payload: OpenAiResponse,
+  label: string,
+): OpenAiCategoryRequestError {
+  const status = Number(response.status) || undefined;
+  const code = text(payload.error?.code || payload.error?.type);
+  const retryAfterMs = parseRetryAfterMs(response.headers?.get?.("retry-after"));
+  const detail = text(payload.error?.message);
+  const suffix = [
+    status ? `HTTP ${status}` : "",
+    code ? `code=${code}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const error = new Error(
+    `${label}이 실패했습니다${suffix ? ` (${suffix})` : ""}${
+      detail ? `: ${detail}` : ""
+    }`,
+  ) as OpenAiCategoryRequestError;
+  error.name = "OpenAiCategoryRequestError";
+  error.status = status;
+  error.code = code;
+  error.retryAfterMs = retryAfterMs;
+  return error;
+}
+
+function parseRetryAfterMs(value: string | null | undefined) {
+  const normalized = text(value);
+  if (!normalized) return 0;
+  const seconds = Number(normalized);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(30_000, Math.ceil(seconds * 1_000));
+  }
+  const date = Date.parse(normalized);
+  if (!Number.isFinite(date)) return 0;
+  return Math.min(30_000, Math.max(0, date - Date.now()));
 }
 
 function noMatchRecommendation(
