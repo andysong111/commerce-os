@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  canRegenerateSelectedDetailPageAssets,
   canReassembleCompletedDetailPageJob,
   canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
@@ -19,11 +20,16 @@ import {
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   isRecoverableServerFinalAssemblyJob,
+  mergeDetailPageReviewJobs,
   type DetailPageReviewAsset,
   type DetailPageReviewBucket,
   type DetailPageReviewJob,
   type DetailPageStandardPanelDiagnostic,
 } from "@/lib/detailPageAiReview";
+import {
+  DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH,
+  normalizeDetailPageJobSearchQuery,
+} from "@/lib/detailPageJobSearch";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
@@ -43,12 +49,16 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 export function DetailPageAiReviewWorkspace() {
   const workerRef = useRef<HTMLIFrameElement>(null);
+  const historyJobsRef = useRef<DetailPageReviewJob[]>([]);
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
+  const [historyJobs, setHistoryJobs] = useState<DetailPageReviewJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [filter, setFilter] = useState<Filter>("needs_review");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [historySearchError, setHistorySearchError] = useState("");
+  const [historySearching, setHistorySearching] = useState(false);
   const [workerReady, setWorkerReady] = useState(false);
   const [actionJobId, setActionJobId] = useState("");
   const [actionState, setActionState] = useState<ActionState>(null);
@@ -73,7 +83,13 @@ export function DetailPageAiReviewWorkspace() {
       setJobs(body.jobs);
       setLoadError("");
       setSelectedJobId((current) => {
-        if (current && body.jobs?.some((job) => job.jobId === current)) return current;
+        if (
+          current &&
+          (body.jobs?.some((job) => job.jobId === current) ||
+            historyJobsRef.current.some((job) => job.jobId === current))
+        ) {
+          return current;
+        }
         return (
           body.jobs?.find((job) => detailPageReviewBucket(job) === "needs_review")?.jobId ||
           body.jobs?.[0]?.jobId ||
@@ -86,6 +102,64 @@ export function DetailPageAiReviewWorkspace() {
       if (!quiet) setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    historyJobsRef.current = historyJobs;
+  }, [historyJobs]);
+
+  useEffect(() => {
+    const searchQuery = normalizeDetailPageJobSearchQuery(query);
+    if (searchQuery.length < DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setHistorySearching(true);
+        setHistorySearchError("");
+        try {
+          const response = await fetch(
+            `${JOBS_API}?query=${encodeURIComponent(searchQuery)}`,
+            {
+              cache: "no-store",
+              credentials: "same-origin",
+              headers: { Accept: "application/json" },
+              signal: controller.signal,
+            },
+          );
+          const body = (await response.json().catch(() => ({}))) as {
+            ok?: boolean;
+            jobs?: DetailPageReviewJob[];
+            message?: string;
+          };
+          if (!response.ok || body.ok !== true || !Array.isArray(body.jobs)) {
+            throw new Error(
+              body.message || "이전 상세페이지 작업을 검색하지 못했습니다.",
+            );
+          }
+          historyJobsRef.current = body.jobs;
+          setHistoryJobs(body.jobs);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          historyJobsRef.current = [];
+          setHistoryJobs([]);
+          setHistorySearchError(
+            error instanceof Error
+              ? error.message
+              : "이전 상세페이지 작업을 검색하지 못했습니다.",
+          );
+        } finally {
+          if (!controller.signal.aborted) setHistorySearching(false);
+        }
+      })();
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
@@ -154,22 +228,33 @@ export function DetailPageAiReviewWorkspace() {
     };
   }, [workerReady]);
 
-  const counts = useMemo(() => countJobs(jobs), [jobs]);
-  const visibleJobs = useMemo(() => {
-    const normalized = query.replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
-    return jobs.filter((job) => {
-      const bucket = detailPageReviewBucket(job);
-      if (filter !== "all" && bucket !== filter) return false;
-      if (!normalized) return true;
-      const haystack = `${detailPageJobName(job)} ${job.itemId} ${job.message} ${job.error}`
+  const combinedJobs = useMemo(
+    () => mergeDetailPageReviewJobs(jobs, historyJobs),
+    [historyJobs, jobs],
+  );
+  const normalizedQuery = normalizeDetailPageJobSearchQuery(query)
+    .replace(/\s+/g, "")
+    .toLocaleLowerCase("ko-KR");
+  const searchedJobs = useMemo(() => {
+    if (!normalizedQuery) return jobs;
+    return combinedJobs.filter((job) => {
+      const haystack = `${detailPageJobName(job)} ${job.itemId} ${job.jobId} ${job.message} ${job.error}`
         .replace(/\s+/g, "")
         .toLocaleLowerCase("ko-KR");
-      return haystack.includes(normalized);
+      return haystack.includes(normalizedQuery);
     });
-  }, [filter, jobs, query]);
+  }, [combinedJobs, jobs, normalizedQuery]);
+  const counts = useMemo(() => countJobs(searchedJobs), [searchedJobs]);
+  const visibleJobs = useMemo(() => {
+    return searchedJobs.filter((job) => {
+      const bucket = detailPageReviewBucket(job);
+      if (filter !== "all" && bucket !== filter) return false;
+      return true;
+    });
+  }, [filter, searchedJobs]);
   const selected = visibleJobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
   const resumeTarget = selected
-    ? findDetailPageResumeCandidate(jobs, selected)
+    ? findDetailPageResumeCandidate(combinedJobs, selected)
     : null;
 
   async function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
@@ -380,6 +465,108 @@ export function DetailPageAiReviewWorkspace() {
     }
   }
 
+  async function regenerateSelectedAssets(
+    job: DetailPageReviewJob,
+    roleIds: string[],
+  ) {
+    if (
+      actionJobId ||
+      !roleIds.length ||
+      !canRegenerateSelectedDetailPageAssets(job)
+    ) {
+      return false;
+    }
+    const assets = detailPageReviewAssets(job);
+    const labels = [...assets.representatives, ...assets.panels]
+      .filter((asset) => roleIds.includes(asset.roleId))
+      .map((asset) => asset.label);
+    if (
+      !window.confirm(
+        `\"${detailPageJobName(job)}\"의 ${labels.join(", ")}만 다시 생성합니다.\nAI가 문제로 표시하지 않은 이미지도 선택할 수 있으며, 선택하지 않은 정상 자산과 저장된 1688 원본은 유지됩니다.\n완료되면 같은 상품출시플로우 항목의 이미지 URL과 상세 HTML을 새 결과로 교체합니다. AI 비용이 일부 발생할 수 있습니다. 계속할까요?`,
+      )
+    ) {
+      return false;
+    }
+    setActionJobId(job.jobId);
+    setActionState({
+      tone: "progress",
+      message: `선택한 이미지 ${roleIds.length}장만 다시 생성하도록 저장 체크포인트를 준비하고 있습니다.`,
+    });
+    try {
+      const response = await fetch(
+        `${JOBS_API}/${encodeURIComponent(job.jobId)}`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "regenerate_selected_assets",
+            roleIds,
+          }),
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        job?: DetailPageReviewJob;
+        message?: string;
+      };
+      if (!response.ok || body.ok !== true || !isReviewJob(body.job)) {
+        throw new Error(
+          body.message || "선택한 이미지의 부분 재생성을 준비하지 못했습니다.",
+        );
+      }
+      setJobs((current) => [
+        body.job!,
+        ...current.filter((candidate) => candidate.jobId !== body.job!.jobId),
+      ]);
+      setFilter("active");
+      setSelectedJobId(body.job.jobId);
+
+      const startResponse = await fetch(
+        `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
+        {
+          method: "POST",
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const startBody = (await startResponse.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (!startResponse.ok || startBody.ok !== true) {
+        throw new Error(
+          startBody.message ||
+            "선택 체크포인트는 준비됐지만 Studio 서버 작업을 시작하지 못했습니다.",
+        );
+      }
+      setActionState({
+        tone: "success",
+        message:
+          "선택한 이미지만 재생성하기 시작했습니다. 성공 전까지 기존 상품출시플로우 재료는 유지됩니다.",
+      });
+      await refresh(true);
+      return true;
+    } catch (error) {
+      setActionState({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "선택 이미지 부분 재생성을 시작하지 못했습니다.",
+      });
+      await refresh(true);
+      return false;
+    } finally {
+      setActionJobId("");
+    }
+  }
+
   async function reconnectFinalAssembly(
     job: DetailPageReviewJob,
     reassembleCompleted = false,
@@ -474,7 +661,16 @@ export function DetailPageAiReviewWorkspace() {
         <SummaryCard label="검수 필요" value={counts.needs_review} tone="red" detail="실패·문제 이미지 확인" />
         <SummaryCard label="진행 중" value={counts.active} tone="blue" detail="수집·생성·최종 조립" />
         <SummaryCard label="검수 통과" value={counts.passed} tone="green" detail="상품출시진행관리 도킹 완료" />
-        <SummaryCard label="최근 작업" value={jobs.length} tone="slate" detail="최근 50개 작업 기준" />
+        <SummaryCard
+          label={normalizedQuery ? "전체 이력 검색" : "최근 작업"}
+          value={normalizedQuery ? searchedJobs.length : jobs.length}
+          tone="slate"
+          detail={
+            normalizedQuery
+              ? "완료·출시플로우 전달 작업 포함"
+              : "최근 50개 작업 기준"
+          }
+        />
       </section>
 
       {actionState ? (
@@ -509,15 +705,34 @@ export function DetailPageAiReviewWorkspace() {
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  {item.label} {filterCount(item.id, counts, jobs.length)}
+                  {item.label} {filterCount(item.id, counts, searchedJobs.length)}
                 </button>
               ))}
             </div>
             <div className="flex gap-2">
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="상품명·모델번호 검색"
+                aria-label="전체 상세페이지 작업 이력 검색"
+                onChange={(event) => {
+                  const nextQuery = event.target.value;
+                  const nextSearchLength =
+                    normalizeDetailPageJobSearchQuery(nextQuery).length;
+                  if (
+                    normalizeDetailPageJobSearchQuery(query).length <
+                      DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH &&
+                    nextSearchLength >= DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH
+                  ) {
+                    setFilter("all");
+                  }
+                  if (nextSearchLength < DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH) {
+                    historyJobsRef.current = [];
+                    setHistoryJobs([]);
+                    setHistorySearchError("");
+                    setHistorySearching(false);
+                  }
+                  setQuery(nextQuery);
+                }}
+                placeholder="전체 이력 · 상품명·AAA코드·작업 ID 검색"
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 xl:w-72"
               />
               <button
@@ -529,6 +744,18 @@ export function DetailPageAiReviewWorkspace() {
               </button>
             </div>
           </div>
+          <p
+            role="status"
+            className={`mt-2 text-xs font-bold ${historySearchError ? "text-rose-700" : "text-slate-500"}`}
+          >
+            {historySearchError
+              ? `${historySearchError} 최근 50개 작업 안의 결과만 표시합니다.`
+              : historySearching
+                ? "최근 목록 밖의 완료·출시플로우 전달 작업까지 검색하고 있습니다…"
+                : normalizedQuery
+                  ? `전체 이력에서 ${searchedJobs.length}건을 찾았습니다. 완료 작업도 선택해 부분 재생성할 수 있습니다.`
+                  : "2자 이상 검색하면 최근 50개 밖의 완료·출시플로우 전달 작업도 불러옵니다."}
+          </p>
         </div>
 
         {loadError ? (
@@ -563,6 +790,7 @@ export function DetailPageAiReviewWorkspace() {
           <div className="min-w-0 p-4 sm:p-6">
             {selected ? (
               <JobReviewDetail
+                key={selected.jobId}
                 job={selected}
                 resumeTarget={resumeTarget}
                 workerReady={workerReady}
@@ -581,6 +809,9 @@ export function DetailPageAiReviewWorkspace() {
                 }
                 onRevalidateCompleted={() =>
                   void revalidateCompletedGeneration(selected)
+                }
+                onRegenerateSelected={(target, roleIds) =>
+                  regenerateSelectedAssets(target, roleIds)
                 }
                 onFullRetry={() => void requestRegeneration(selected, "full")}
               />
@@ -649,6 +880,7 @@ function JobReviewDetail({
   onReconnectFinalizer,
   onReassembleFinal,
   onRevalidateCompleted,
+  onRegenerateSelected,
   onFullRetry,
 }: {
   job: DetailPageReviewJob;
@@ -661,6 +893,10 @@ function JobReviewDetail({
   onReconnectFinalizer: () => void;
   onReassembleFinal: () => void;
   onRevalidateCompleted: () => void;
+  onRegenerateSelected: (
+    job: DetailPageReviewJob,
+    roleIds: string[],
+  ) => Promise<boolean>;
   onFullRetry: () => void;
 }) {
   const bucket = detailPageReviewBucket(job);
@@ -685,6 +921,20 @@ function JobReviewDetail({
       : [];
   const exactProblemCountConfirmed =
     problemCountConfirmed || standardDiagnostics.length > 0;
+  const manualRegenerationTarget = canRegenerateSelectedDetailPageAssets(
+    recoveryJob,
+  )
+    ? recoveryJob
+    : null;
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+
+  function toggleSelectedRole(roleId: string) {
+    setSelectedRoleIds((current) =>
+      current.includes(roleId)
+        ? current.filter((value) => value !== roleId)
+        : [...current, roleId],
+    );
+  }
 
   return (
     <div>
@@ -847,19 +1097,62 @@ function JobReviewDetail({
         />
       ) : null}
 
+      {manualRegenerationTarget ? (
+        <section className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-xs font-black tracking-[0.12em] text-amber-700">
+                수동 부분 재생성
+              </p>
+              <h3 className="mt-1 text-base font-black text-amber-950">
+                문제가 없어도 원하는 이미지를 직접 선택할 수 있습니다.
+              </h3>
+              <p className="mt-2 text-xs font-bold leading-5 text-amber-800">
+                아래 대표·부가·상세 섹션에서 재생성할 이미지만 체크하세요. 선택하지 않은 이미지와 1688 원본은 유지되고, 성공한 뒤에만 같은 상품출시플로우 항목의 이미지 URL·상세 HTML이 교체됩니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void onRegenerateSelected(
+                  manualRegenerationTarget,
+                  selectedRoleIds,
+                ).then((started) => {
+                  if (started) setSelectedRoleIds([]);
+                });
+              }}
+              disabled={busy || selectedRoleIds.length === 0}
+              className="shrink-0 rounded-lg bg-amber-700 px-4 py-2.5 text-sm font-black text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-amber-200 disabled:text-amber-500"
+            >
+              {currentBusy
+                ? "선택 재생성 요청 중…"
+                : selectedRoleIds.length
+                  ? `선택 이미지 ${selectedRoleIds.length}장만 재생성`
+                  : "재생성할 이미지 선택"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <AssetSection
         title="대표·부가 이미지"
-        description="빨간 표시는 AI 최종 검수에서 지목된 문제 이미지입니다. 이미지를 누르면 원본 크기로 확대합니다."
+        description="빨간 표시는 AI 최종 검수에서 지목된 문제 이미지입니다. 이미지 확대와 재생성 선택은 서로 독립적으로 사용할 수 있습니다."
         assets={assets.representatives}
         empty="아직 생성된 대표·부가 이미지가 없습니다."
         onPreview={onPreview}
+        selectable={Boolean(manualRegenerationTarget)}
+        selectedRoleIds={selectedRoleIds}
+        onToggleSelection={toggleSelectedRole}
       />
       <AssetSection
         title="상세페이지 섹션 이미지"
-        description="상세 섹션도 원본 상품과 대조합니다. 빨간 표시된 섹션만 재생성하고 정상 섹션은 유지합니다."
+        description="상세 섹션도 원본 상품과 대조합니다. AI 판정과 무관하게 필요한 섹션만 직접 선택할 수 있습니다."
         assets={assets.panels}
         empty="아직 저장된 상세 섹션 이미지가 없습니다."
         onPreview={onPreview}
+        selectable={Boolean(manualRegenerationTarget)}
+        selectedRoleIds={selectedRoleIds}
+        onToggleSelection={toggleSelectedRole}
       />
       <AssetSection
         title="1688 원본 참고 이미지"
@@ -1202,6 +1495,9 @@ function AssetSection({
   assets,
   empty,
   onPreview,
+  selectable = false,
+  selectedRoleIds = [],
+  onToggleSelection,
   collapsed = false,
 }: {
   title: string;
@@ -1209,6 +1505,9 @@ function AssetSection({
   assets: DetailPageReviewAsset[];
   empty: string;
   onPreview: (asset: DetailPageReviewAsset) => void;
+  selectable?: boolean;
+  selectedRoleIds?: string[];
+  onToggleSelection?: (roleId: string) => void;
   collapsed?: boolean;
 }) {
   const [expanded, setExpanded] = useState(!collapsed);
@@ -1228,24 +1527,51 @@ function AssetSection({
       </div>
       {visible.length ? (
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-          {visible.map((asset) => (
-            <button
-              key={asset.id}
-              type="button"
-              onClick={() => onPreview(asset)}
-              className={`group overflow-hidden rounded-xl border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${asset.problem ? "border-2 border-rose-500 ring-4 ring-rose-100" : "border-slate-200"}`}
-            >
-              <div className="relative aspect-square overflow-hidden bg-slate-100">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={asset.url} alt={asset.label} className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]" />
-                {asset.problem ? (
-                  <span className="absolute left-2 top-2 rounded-full bg-rose-600 px-2.5 py-1 text-[10px] font-black text-white shadow">문제 이미지</span>
-                ) : null}
-                <span className="absolute bottom-2 right-2 rounded-md bg-slate-950/75 px-2 py-1 text-[10px] font-black text-white">확대</span>
-              </div>
-              <p className={`truncate px-3 py-2 text-xs font-black ${asset.problem ? "text-rose-700" : "text-slate-700"}`}>{asset.label}</p>
-            </button>
-          ))}
+          {visible.map((asset) => {
+            const selected = selectedRoleIds.includes(asset.roleId);
+            return (
+              <article
+                key={asset.id}
+                className={`overflow-hidden rounded-xl border bg-white text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                  asset.problem
+                    ? "border-2 border-rose-500 ring-4 ring-rose-100"
+                    : selected
+                      ? "border-2 border-amber-500 ring-4 ring-amber-100"
+                      : "border-slate-200"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => onPreview(asset)}
+                  aria-label={`${asset.label} 확대`}
+                  className="group block w-full"
+                >
+                  <div className="relative aspect-square overflow-hidden bg-slate-100">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={asset.url} alt={asset.label} className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]" />
+                    {asset.problem ? (
+                      <span className="absolute left-2 top-2 rounded-full bg-rose-600 px-2.5 py-1 text-[10px] font-black text-white shadow">문제 이미지</span>
+                    ) : null}
+                    <span className="absolute bottom-2 right-2 rounded-md bg-slate-950/75 px-2 py-1 text-[10px] font-black text-white">확대</span>
+                  </div>
+                </button>
+                <div className="px-3 py-2">
+                  <p className={`truncate text-xs font-black ${asset.problem ? "text-rose-700" : "text-slate-700"}`}>{asset.label}</p>
+                  {selectable ? (
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] font-black text-amber-900">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => onToggleSelection?.(asset.roleId)}
+                        className="size-4 accent-amber-700"
+                      />
+                      재생성 선택
+                    </label>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm font-bold text-slate-500">{empty}</p>

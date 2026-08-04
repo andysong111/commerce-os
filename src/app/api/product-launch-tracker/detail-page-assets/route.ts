@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { randomUUID } from "node:crypto";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
     ok: true,
     role,
     path: objectPath,
-    publicUrl: `${config.supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${encodePath(objectPath)}`,
+    publicUrl: `${config.supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${encodePath(objectPath)}?v=${randomUUID()}`,
   });
 }
 

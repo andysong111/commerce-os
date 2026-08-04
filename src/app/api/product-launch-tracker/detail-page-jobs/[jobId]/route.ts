@@ -12,6 +12,7 @@ import {
 import {
   canRevalidateCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
+  selectedDetailPageAssetRegenerationPlan,
   standardQualityRetryPlan,
 } from "@/lib/detailPageAiReview";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
@@ -177,6 +178,69 @@ export async function POST(
           detailPassed: false,
           detailSetIdentityPassed: false,
           finalizerPhase: "revalidation",
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      });
+      return Response.json({ ok: true, job: publicDetailPageJob(changed ?? job) });
+    }
+
+    if (action === "regenerate_selected_assets") {
+      if (!ownerAuthorized) {
+        return forbidden("OPS 화면만 선택한 생성 자산을 다시 만들 수 있습니다.");
+      }
+      const plan = selectedDetailPageAssetRegenerationPlan(
+        job,
+        body.roleIds,
+      );
+      if (!plan) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_SELECTED_REGENERATION_NOT_ALLOWED",
+            message:
+              "저장 근거·대표·부가·상세 섹션이 완전한 작업에서 현재 표시된 이미지만 선택할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const changed = await patchDetailPageJob(config.value, job.id, {
+        status: "queued",
+        stage: "checkpoint_manual_selection",
+        message: `정상 판정 포함 선택 이미지 ${plan.selectedRoleIds.length}장만 재생성 대기 중`,
+        progress: 72,
+        qa_status: "pending",
+        payload: {
+          attempt: job.attempt + 1,
+          assistant_hidden_at: "",
+          manual_regeneration_roles: plan.selectedRoleIds,
+          revalidate_generated_assets: false,
+        },
+        result: {
+          representatives: plan.remainingRepresentatives,
+          panels: plan.remainingPanels,
+          setAssessment: null,
+          representativeRetryRole: "",
+          representativeRetryInstruction: "",
+          representativeRetryBudgetRemaining: 1,
+          retryBudgetRemaining: Math.max(
+            1,
+            Number(job.result.retryBudgetRemaining) || 0,
+          ),
+          panelRetrySlots: [],
+          panelRetryInstructions: {},
+          setRetryUsed: false,
+          standardRetryUsed: false,
+          standardDecision: null,
+          standardFailure: null,
+          standard_failure: null,
+          representativeIndividualsPassed: false,
+          representativeQualityProof: null,
+          detailPassed: false,
+          detailSetIdentityPassed: false,
+          finalizerPhase: "manual_selection",
         },
         lease_owner: "",
         lease_until: null,
