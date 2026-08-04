@@ -10,6 +10,7 @@ import {
   isSameOriginOpsRequest,
   temporaryOpsIdentity,
 } from "@/lib/opsLoginBypass";
+import { detailPageJobSearchFilters } from "@/lib/detailPageJobSearch";
 
 // Reuse the already deployed durable job table. Detail-page jobs are isolated
 // by payload.kind and never enter the Shopling upload worker.
@@ -186,6 +187,67 @@ export async function listDetailPageJobs(
       Boolean(row && typeof row === "object" && row.payload?.kind === "detail_page"),
     )
     .map(normalizeJobRow);
+}
+
+export async function searchDetailPageJobs(
+  config: DetailPageJobConfig,
+  ownerId: string,
+  query: unknown,
+  limit = 40,
+) {
+  const filters = detailPageJobSearchFilters(query);
+  if (!filters.length) return [];
+
+  const safeLimit = Math.min(50, Math.max(1, limit));
+  const batches = await Promise.all(
+    filters.map(async (filter) => {
+      const params = new URLSearchParams({
+        select: "*",
+        owner_id: `eq.${ownerId}`,
+        "payload->>kind": "eq.detail_page",
+        order: "updated_at.desc",
+        limit: String(safeLimit),
+      });
+      params.set(filter.field, filter.value);
+      const response = await fetch(
+        `${config.supabaseUrl}/rest/v1/${DETAIL_PAGE_JOB_TABLE}?${params.toString()}`,
+        {
+          headers: createSupabaseAdminHeaders(config.secretKey),
+          cache: "no-store",
+        },
+      );
+      const body = await readDetailPageJobJson(response);
+      if (!response.ok) {
+        throw new Error(readDetailPageJobError(body, response.status));
+      }
+      return (Array.isArray(body) ? body : [])
+        .filter((row): row is RawDetailPageJobRow =>
+          Boolean(
+            row &&
+              typeof row === "object" &&
+              row.payload?.kind === "detail_page",
+          ),
+        )
+        .map(normalizeJobRow);
+    }),
+  );
+
+  const unique = new Map<string, DetailPageJobRow>();
+  for (const job of batches.flat()) {
+    const current = unique.get(job.id);
+    if (
+      !current ||
+      Date.parse(job.updated_at || "") > Date.parse(current.updated_at || "")
+    ) {
+      unique.set(job.id, job);
+    }
+  }
+  return [...unique.values()]
+    .sort(
+      (left, right) =>
+        Date.parse(right.updated_at || "") - Date.parse(left.updated_at || ""),
+    )
+    .slice(0, safeLimit);
 }
 
 export async function listRecoverableDetailPageJobs(

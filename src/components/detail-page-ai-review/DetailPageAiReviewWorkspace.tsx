@@ -19,11 +19,16 @@ import {
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   isRecoverableServerFinalAssemblyJob,
+  mergeDetailPageReviewJobs,
   type DetailPageReviewAsset,
   type DetailPageReviewBucket,
   type DetailPageReviewJob,
   type DetailPageStandardPanelDiagnostic,
 } from "@/lib/detailPageAiReview";
+import {
+  DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH,
+  normalizeDetailPageJobSearchQuery,
+} from "@/lib/detailPageJobSearch";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
@@ -43,12 +48,16 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 
 export function DetailPageAiReviewWorkspace() {
   const workerRef = useRef<HTMLIFrameElement>(null);
+  const historyJobsRef = useRef<DetailPageReviewJob[]>([]);
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
+  const [historyJobs, setHistoryJobs] = useState<DetailPageReviewJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [filter, setFilter] = useState<Filter>("needs_review");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [historySearchError, setHistorySearchError] = useState("");
+  const [historySearching, setHistorySearching] = useState(false);
   const [workerReady, setWorkerReady] = useState(false);
   const [actionJobId, setActionJobId] = useState("");
   const [actionState, setActionState] = useState<ActionState>(null);
@@ -73,7 +82,13 @@ export function DetailPageAiReviewWorkspace() {
       setJobs(body.jobs);
       setLoadError("");
       setSelectedJobId((current) => {
-        if (current && body.jobs?.some((job) => job.jobId === current)) return current;
+        if (
+          current &&
+          (body.jobs?.some((job) => job.jobId === current) ||
+            historyJobsRef.current.some((job) => job.jobId === current))
+        ) {
+          return current;
+        }
         return (
           body.jobs?.find((job) => detailPageReviewBucket(job) === "needs_review")?.jobId ||
           body.jobs?.[0]?.jobId ||
@@ -86,6 +101,64 @@ export function DetailPageAiReviewWorkspace() {
       if (!quiet) setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    historyJobsRef.current = historyJobs;
+  }, [historyJobs]);
+
+  useEffect(() => {
+    const searchQuery = normalizeDetailPageJobSearchQuery(query);
+    if (searchQuery.length < DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setHistorySearching(true);
+        setHistorySearchError("");
+        try {
+          const response = await fetch(
+            `${JOBS_API}?query=${encodeURIComponent(searchQuery)}`,
+            {
+              cache: "no-store",
+              credentials: "same-origin",
+              headers: { Accept: "application/json" },
+              signal: controller.signal,
+            },
+          );
+          const body = (await response.json().catch(() => ({}))) as {
+            ok?: boolean;
+            jobs?: DetailPageReviewJob[];
+            message?: string;
+          };
+          if (!response.ok || body.ok !== true || !Array.isArray(body.jobs)) {
+            throw new Error(
+              body.message || "이전 상세페이지 작업을 검색하지 못했습니다.",
+            );
+          }
+          historyJobsRef.current = body.jobs;
+          setHistoryJobs(body.jobs);
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          historyJobsRef.current = [];
+          setHistoryJobs([]);
+          setHistorySearchError(
+            error instanceof Error
+              ? error.message
+              : "이전 상세페이지 작업을 검색하지 못했습니다.",
+          );
+        } finally {
+          if (!controller.signal.aborted) setHistorySearching(false);
+        }
+      })();
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0);
@@ -154,22 +227,33 @@ export function DetailPageAiReviewWorkspace() {
     };
   }, [workerReady]);
 
-  const counts = useMemo(() => countJobs(jobs), [jobs]);
-  const visibleJobs = useMemo(() => {
-    const normalized = query.replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
-    return jobs.filter((job) => {
-      const bucket = detailPageReviewBucket(job);
-      if (filter !== "all" && bucket !== filter) return false;
-      if (!normalized) return true;
-      const haystack = `${detailPageJobName(job)} ${job.itemId} ${job.message} ${job.error}`
+  const combinedJobs = useMemo(
+    () => mergeDetailPageReviewJobs(jobs, historyJobs),
+    [historyJobs, jobs],
+  );
+  const normalizedQuery = normalizeDetailPageJobSearchQuery(query)
+    .replace(/\s+/g, "")
+    .toLocaleLowerCase("ko-KR");
+  const searchedJobs = useMemo(() => {
+    if (!normalizedQuery) return jobs;
+    return combinedJobs.filter((job) => {
+      const haystack = `${detailPageJobName(job)} ${job.itemId} ${job.jobId} ${job.message} ${job.error}`
         .replace(/\s+/g, "")
         .toLocaleLowerCase("ko-KR");
-      return haystack.includes(normalized);
+      return haystack.includes(normalizedQuery);
     });
-  }, [filter, jobs, query]);
+  }, [combinedJobs, jobs, normalizedQuery]);
+  const counts = useMemo(() => countJobs(searchedJobs), [searchedJobs]);
+  const visibleJobs = useMemo(() => {
+    return searchedJobs.filter((job) => {
+      const bucket = detailPageReviewBucket(job);
+      if (filter !== "all" && bucket !== filter) return false;
+      return true;
+    });
+  }, [filter, searchedJobs]);
   const selected = visibleJobs.find((job) => job.jobId === selectedJobId) || visibleJobs[0] || null;
   const resumeTarget = selected
-    ? findDetailPageResumeCandidate(jobs, selected)
+    ? findDetailPageResumeCandidate(combinedJobs, selected)
     : null;
 
   async function requestRegeneration(job: DetailPageReviewJob, mode: "resume" | "full") {
@@ -474,7 +558,16 @@ export function DetailPageAiReviewWorkspace() {
         <SummaryCard label="검수 필요" value={counts.needs_review} tone="red" detail="실패·문제 이미지 확인" />
         <SummaryCard label="진행 중" value={counts.active} tone="blue" detail="수집·생성·최종 조립" />
         <SummaryCard label="검수 통과" value={counts.passed} tone="green" detail="상품출시진행관리 도킹 완료" />
-        <SummaryCard label="최근 작업" value={jobs.length} tone="slate" detail="최근 50개 작업 기준" />
+        <SummaryCard
+          label={normalizedQuery ? "전체 이력 검색" : "최근 작업"}
+          value={normalizedQuery ? searchedJobs.length : jobs.length}
+          tone="slate"
+          detail={
+            normalizedQuery
+              ? "완료·출시플로우 전달 작업 포함"
+              : "최근 50개 작업 기준"
+          }
+        />
       </section>
 
       {actionState ? (
@@ -509,15 +602,34 @@ export function DetailPageAiReviewWorkspace() {
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  {item.label} {filterCount(item.id, counts, jobs.length)}
+                  {item.label} {filterCount(item.id, counts, searchedJobs.length)}
                 </button>
               ))}
             </div>
             <div className="flex gap-2">
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="상품명·모델번호 검색"
+                aria-label="전체 상세페이지 작업 이력 검색"
+                onChange={(event) => {
+                  const nextQuery = event.target.value;
+                  const nextSearchLength =
+                    normalizeDetailPageJobSearchQuery(nextQuery).length;
+                  if (
+                    normalizeDetailPageJobSearchQuery(query).length <
+                      DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH &&
+                    nextSearchLength >= DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH
+                  ) {
+                    setFilter("all");
+                  }
+                  if (nextSearchLength < DETAIL_PAGE_JOB_SEARCH_MIN_LENGTH) {
+                    historyJobsRef.current = [];
+                    setHistoryJobs([]);
+                    setHistorySearchError("");
+                    setHistorySearching(false);
+                  }
+                  setQuery(nextQuery);
+                }}
+                placeholder="전체 이력 · 상품명·AAA코드·작업 ID 검색"
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 xl:w-72"
               />
               <button
@@ -529,6 +641,18 @@ export function DetailPageAiReviewWorkspace() {
               </button>
             </div>
           </div>
+          <p
+            role="status"
+            className={`mt-2 text-xs font-bold ${historySearchError ? "text-rose-700" : "text-slate-500"}`}
+          >
+            {historySearchError
+              ? `${historySearchError} 최근 50개 작업 안의 결과만 표시합니다.`
+              : historySearching
+                ? "최근 목록 밖의 완료·출시플로우 전달 작업까지 검색하고 있습니다…"
+                : normalizedQuery
+                  ? `전체 이력에서 ${searchedJobs.length}건을 찾았습니다. 완료 작업도 선택해 부분 재생성할 수 있습니다.`
+                  : "2자 이상 검색하면 최근 50개 밖의 완료·출시플로우 전달 작업도 불러옵니다."}
+          </p>
         </div>
 
         {loadError ? (

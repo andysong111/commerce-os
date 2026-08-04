@@ -6,6 +6,7 @@ import {
   listDetailPageJobs,
   publicDetailPageJob,
   resolveDetailPageJobIdentity,
+  searchDetailPageJobs,
 } from "@/lib/detailPageJobServer";
 
 const MAX_RECENT_JOBS = 50;
@@ -16,9 +17,22 @@ export async function GET(request: NextRequest) {
   const config = getDetailPageJobConfig();
   if (!config.ok) return Response.json(config.body, { status: config.status });
   try {
-    const jobs = await listDetailPageJobs(config.value, identity.value.userId, MAX_RECENT_JOBS);
+    const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
+    const jobs = query
+      ? await searchDetailPageJobs(
+          config.value,
+          identity.value.userId,
+          query,
+          MAX_RECENT_JOBS,
+        )
+      : await listDetailPageJobs(
+          config.value,
+          identity.value.userId,
+          MAX_RECENT_JOBS,
+        );
     return Response.json({
       ok: true,
+      scope: query ? "search" : "recent",
       jobs: jobs.map(publicDetailPageJob),
     });
   } catch (error) {

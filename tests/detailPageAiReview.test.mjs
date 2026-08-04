@@ -17,8 +17,13 @@ import {
   hasFullAssetDetailPageAssessment,
   isActiveDetailPageJob,
   isRecoverableServerFinalAssemblyJob,
+  mergeDetailPageReviewJobs,
   standardQualityRetryPlan,
 } from "../src/lib/detailPageAiReview.ts";
+import {
+  detailPageJobSearchFilters,
+  normalizeDetailPageJobSearchQuery,
+} from "../src/lib/detailPageJobSearch.ts";
 import { moduleRegistry } from "../src/lib/moduleRegistry.ts";
 
 const pageSource = await readFile("src/app/detail-page-ai-review/page.tsx", "utf8");
@@ -36,6 +41,18 @@ const jobRouteSource = await readFile(
 );
 const startRouteSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts",
+  "utf8",
+);
+const jobsRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/route.ts",
+  "utf8",
+);
+const jobServerSource = await readFile(
+  "src/lib/detailPageJobServer.ts",
+  "utf8",
+);
+const jobSearchSource = await readFile(
+  "src/lib/detailPageJobSearch.ts",
   "utf8",
 );
 
@@ -133,6 +150,13 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(workspaceSource, /revalidate_completed_generation/);
   assert.match(workspaceSource, /reassemble_final_only/);
   assert.match(workspaceSource, /AI 재생성 비용은 발생하지 않습니다/);
+  assert.match(workspaceSource, /전체 이력 · 상품명·AAA코드·작업 ID 검색/);
+  assert.match(workspaceSource, /완료·출시플로우 전달 작업도 불러옵니다/);
+  assert.match(workspaceSource, /\?query=\$\{encodeURIComponent\(searchQuery\)\}/);
+  assert.match(jobsRouteSource, /request\.nextUrl\.searchParams\.get\("query"\)/);
+  assert.match(jobsRouteSource, /searchDetailPageJobs/);
+  assert.match(jobServerSource, /detailPageJobSearchFilters/);
+  assert.match(jobSearchSource, /payload->>product_name_hint/);
   assert.match(workspaceSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
   assert.doesNotMatch(dockSource, /async function openFinalizer/);
   assert.doesNotMatch(dockSource, /ops_finalize/);
@@ -141,6 +165,40 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
   assert.match(jobRouteSource, /action === "revalidate_completed_generation"/);
   assert.match(jobRouteSource, /revalidate_generated_assets: true/);
   assert.match(jobRouteSource, /analysis: null/);
+});
+
+test("completed detail-page history search is safe, server-backed, and de-duplicated", () => {
+  assert.equal(
+    normalizeDetailPageJobSearchQuery("  AAA489(),*  "),
+    "AAA489",
+  );
+  assert.deepEqual(detailPageJobSearchFilters("A"), []);
+  assert.deepEqual(
+    detailPageJobSearchFilters("AAA489").map((filter) => filter.field),
+    [
+      "launch_item_id",
+      "payload->>product_name_hint",
+      "payload->>product_name",
+    ],
+  );
+
+  const older = job({
+    jobId: "11112233-4455-4677-8899-aabbccddeeff",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  });
+  const newer = {
+    ...older,
+    message: "최신 상태",
+    updatedAt: "2026-08-04T00:00:00.000Z",
+  };
+  const another = job({
+    jobId: "22222233-4455-4677-8899-aabbccddeeff",
+    updatedAt: "2026-08-03T00:00:00.000Z",
+  });
+  const merged = mergeDetailPageReviewJobs([older, another], [newer]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].jobId, newer.jobId);
+  assert.equal(merged[0].message, "최신 상태");
 });
 
 test("a completed server result can reassemble only the final JPEG from stored approved assets", () => {

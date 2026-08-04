@@ -108,6 +108,27 @@ export function detailPageJobName(job: DetailPageReviewJob) {
   );
 }
 
+export function mergeDetailPageReviewJobs(
+  ...groups: DetailPageReviewJob[][]
+) {
+  const jobs = new Map<string, DetailPageReviewJob>();
+  for (const group of groups) {
+    for (const job of group) {
+      const current = jobs.get(job.jobId);
+      if (
+        !current ||
+        Date.parse(job.updatedAt || "") > Date.parse(current.updatedAt || "")
+      ) {
+        jobs.set(job.jobId, job);
+      }
+    }
+  }
+  return [...jobs.values()].sort(
+    (left, right) =>
+      Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""),
+  );
+}
+
 export function detailPageReviewBucket(
   job: DetailPageReviewJob,
 ): DetailPageReviewBucket {
