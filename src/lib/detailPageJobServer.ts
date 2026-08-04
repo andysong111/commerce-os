@@ -210,7 +210,9 @@ export async function listRecoverableDetailPageJobs(
       Boolean(row && typeof row === "object" && row.payload?.kind === "detail_page"),
     )
     .map(normalizeJobRow)
-    .filter((job) => ["queued", "running"].includes(job.status));
+    .filter((job) =>
+      ["queued", "running", "render_pending"].includes(job.status),
+    );
 }
 
 export async function insertDetailPageJob(
@@ -247,6 +249,10 @@ export async function patchDetailPageJob(
   const resultPatch = patch.result as Record<string, unknown> | undefined;
   const logicalStatus = String(patch.status ?? current.status) as DetailPageJobRow["status"];
   const terminal = ["success", "failed", "cancelled"].includes(logicalStatus);
+  const completedAtProvided = Object.prototype.hasOwnProperty.call(
+    patch,
+    "completed_at",
+  );
   const rowPatch: Record<string, unknown> = {
     payload: {
       ...current.payload,
@@ -273,8 +279,11 @@ export async function patchDetailPageJob(
             ? "queued"
             : "running",
     updated_at: patch.updated_at ?? new Date().toISOString(),
-    completed_at:
-      patch.completed_at ?? (terminal ? new Date().toISOString() : current.completed_at),
+    completed_at: completedAtProvided
+      ? patch.completed_at
+      : terminal
+        ? new Date().toISOString()
+        : current.completed_at,
   };
   const response = await fetch(
     `${config.supabaseUrl}/rest/v1/${DETAIL_PAGE_JOB_TABLE}?${params.toString()}`,

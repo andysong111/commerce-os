@@ -5,14 +5,16 @@ import {
   getDetailPageJobConfig,
   listRecoverableDetailPageJobs,
 } from "@/lib/detailPageJobServer";
+import {
+  buildProtectedOpsCallbackUrl,
+  resolveDetailPageStudioConnection,
+} from "@/lib/detailPageStudioConnection";
 
 export const runtime = "nodejs";
 export const maxDuration = 50;
 
 const RECOVERY_AFTER_MS = 8 * 60 * 1000;
 const MAX_RECOVERY_JOBS = 10;
-const DEFAULT_DETAIL_PAGE_STUDIO_URL =
-  "https://commerce-os-detail-page-studio.vercel.app/";
 
 function authorized(request: Request, secret: string) {
   const expected = Buffer.from(`Bearer ${secret}`);
@@ -33,12 +35,7 @@ export async function GET(request: Request) {
   }
   const config = getDetailPageJobConfig();
   if (!config.ok) return NextResponse.json(config.body, { status: config.status });
-  const studio = new URL(
-    process.env.DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-      process.env.NEXT_PUBLIC_DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-      DEFAULT_DETAIL_PAGE_STUDIO_URL,
-  );
-  const workerUrl = new URL("/api/internal/ops-detail-page-job", studio).toString();
+  const connection = resolveDetailPageStudioConnection();
   const jobs = await listRecoverableDetailPageJobs(config.value, 50);
   const now = Date.now();
   const stale = jobs
@@ -46,19 +43,23 @@ export async function GET(request: Request) {
     .slice(0, MAX_RECOVERY_JOBS);
   const results = [];
   for (const job of stale) {
-    const callbackUrl = new URL(
-      `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
+    const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
-    ).toString();
+      `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
+    );
     try {
-      const response = await fetch(workerUrl, {
+      const response = await fetch(connection.workerUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...connection.requestHeaders,
+        },
         body: JSON.stringify({
-          callbackUrl,
-          workerUrl,
+          callbackUrl: callbackUrl.toString(),
+          workerUrl: connection.workerUrl.toString(),
           token: createDetailPageJobToken(config.value, job.owner_id, job.id),
         }),
+        redirect: "manual",
         cache: "no-store",
       });
       const body = await response.json().catch(() => ({}));

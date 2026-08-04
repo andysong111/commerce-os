@@ -24,6 +24,10 @@ const trackerPage = await readFile(
   new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
   "utf8",
 );
+const nextConfig = await readFile(
+  new URL("../next.config.ts", import.meta.url),
+  "utf8",
+);
 const trackerEntry = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
@@ -50,6 +54,10 @@ const jobRoute = await readFile(
 );
 const startRoute = await readFile(
   new URL("../src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts", import.meta.url),
+  "utf8",
+);
+const studioConnection = await readFile(
+  new URL("../src/lib/detailPageStudioConnection.ts", import.meta.url),
   "utf8",
 );
 const jobServer = await readFile(
@@ -96,15 +104,72 @@ test("selected launch rows run from China primary link and expose background pro
   assert.match(dockSource, /data-retry-item/);
   assert.match(dockSource, /event\.source !== activeFrame\.contentWindow/);
   assert.match(dockSource, /event\.origin !== engineConfig\.engineOrigin/);
+  assert.match(dockSource, /LOCAL_BRIDGE_HEALTH_URL/);
+  assert.match(dockSource, /ensureDetailPageDependencies/);
+  assert.match(dockSource, /FRAME_HANDSHAKE_TIMEOUT_MS = 20 \* 1000/);
+  assert.match(dockSource, /payload\.type === "ops-dock-ready"/);
+  assert.match(dockSource, /studio_connection/);
+});
+
+test("detail page dependency checks stay visible and always restore the selection button", () => {
+  assert.match(dockSource, /enqueueing = true;\s+enqueuePhase = "checking";\s+syncRunButton\(\);/);
+  assert.match(dockSource, /연결 확인 중…/);
+  assert.match(dockSource, /enqueuePhase = "registering";\s+syncRunButton\(\);/);
+  assert.match(dockSource, /작업 등록 중…/);
+  assert.match(
+    dockSource,
+    /finally \{\s+enqueueing = false;\s+enqueuePhase = "idle";\s+syncRunButton\(\);\s+\}/,
+  );
+  assert.match(dockSource, /toast\.hidden = false/);
+  assert.match(dockSource, /toast\.hidden = true/);
+  assert.match(
+    dockSource,
+    /!\["success", "failed", "cancelled"\]\.includes\(job\.status\)/,
+  );
+  assert.match(dockSource, /announceServerJob\(created\)/);
+  assert.match(dockSource, /상세페이지 작업 \$\{createdCount\}건 등록 완료/);
+  assert.match(dockSource, /이미 진행 중입니다\. 작업도우미에서 현재 상태를 확인하세요/);
+  assert.match(dockSource, /showMessage\([\s\S]*15_000/);
+  assert.match(dockSource, /detail-page-dock-run-status/);
+  assert.match(dockSource, /클릭 확인 · 선택 상품과 연결 상태를 확인하고 있습니다/);
+  assert.match(dockSource, /상품 목록 상태를 읽지 못했습니다/);
+  assert.match(dockSource, /선택 상태와 상품 데이터가 일치하지 않습니다/);
+  assert.match(dockSource, /작업이 등록되지 않았습니다/);
+  assert.match(dockSource, /showRunStatus\(message, "error"\)/);
+});
+
+test("Chrome local network permission is delegated through both nested detail-page frames", () => {
+  assert.match(trackerPage, /allow="local-network; loopback-network; local-network-access"/);
+  assert.match(
+    dockSource,
+    /activeFrame\.allow = "local-network; loopback-network; local-network-access"/,
+  );
+  assert.match(dockSource, /targetAddressSpace: "loopback"/);
+  assert.match(dockSource, /Chrome 주소창 왼쪽 사이트 설정/);
+  assert.match(nextConfig, /Permissions-Policy/);
+  assert.match(nextConfig, /local-network=/);
+  assert.match(nextConfig, /loopback-network=/);
+  assert.match(nextConfig, /commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa/);
+});
+
+test("OPS origin relays only the evidence collector routes for the hidden Studio frame", () => {
+  assert.match(dockSource, /payload\.type === "ops-dock-local-bridge-request"/);
+  assert.match(dockSource, /path === "\/runs\/evidence-link"/);
+  assert.match(dockSource, /evidence-images/);
+  assert.match(dockSource, /ops-dock-local-bridge-response/);
+  assert.match(dockSource, /postMessage\(message, targetOrigin, \[body\]\)/);
+  assert.match(dockSource, /body\.length > LOCAL_BRIDGE_RELAY_BODY_LIMIT/);
+  assert.match(dockSource, /targetAddressSpace: "loopback"/);
+  assert.doesNotMatch(dockSource, /LOCAL_BRIDGE_BASE_URL\}\$\{path\}`[\s\S]*credentials: "include"/);
 });
 
 test("approved detail, main, and four supplemental assets dock to tracker fields", () => {
-  assert.match(dockSource, /byRole\.get\("main_catalog"\)/);
-  assert.match(dockSource, /byRole\.get\("alternate_whole"\)/);
-  assert.match(dockSource, /byRole\.get\("evidence_detail"\)/);
-  assert.match(dockSource, /byRole\.get\("lifestyle_usage"\)/);
-  assert.match(dockSource, /byRole\.get\("adaptive_support"\)/);
-  assert.match(dockSource, /action: "final_complete"/);
+  assert.match(jobRoute, /const detailImageUrl = safeText\(body\.detailImageUrl/);
+  assert.match(jobRoute, /const mainImageUrl = safeText\(body\.mainImageUrl/);
+  assert.match(jobRoute, /stringList\(body\.additionalImageUrls, 4\)/);
+  assert.match(jobRoute, /action === "final_complete"/);
+  assert.match(jobRoute, /!workerAuthorized && !ownerAuthorized/);
+  assert.match(jobRoute, /finalizerMode: workerAuthorized \? "server-v1"/);
   assert.match(dockSource, /html: buildDetailHtml/);
   assert.match(dockSource, /detailImageUrl,/);
   assert.match(dockSource, /mainImageUrl,/);
@@ -120,9 +185,20 @@ test("asset docking APIs enforce same-origin, roles, JPG, size, and public stabl
   assert.match(assetRoute, /MAX_FILE_BYTES = 4_000_000/);
   assert.match(assetRoute, /product-launch-assets/);
   assert.match(assetRoute, /storage\/v1\/object\/public/);
-  assert.match(configRoute, /DETAIL_PAGE_STUDIO_INTERNAL_URL/);
-  assert.match(configRoute, /commerce-os-detail-page-studio\.vercel\.app/);
+  assert.match(studioConnection, /DETAIL_PAGE_STUDIO_INTERNAL_URL/);
+  assert.match(studioConnection, /commerce-os-detail-page-studio\.vercel\.app/);
   assert.match(configRoute, /isSameOriginOpsRequest/);
+  assert.match(configRoute, /probeDetailPageStudio/);
+  assert.match(configRoute, /probeProtectedOpsCallback/);
+  assert.match(studioConnection, /detail-page-callback-health/);
+  assert.match(studioConnection, /OPS_PREVIEW_CALLBACK_PROTECTED/);
+  assert.match(
+    studioConnection,
+    /commerce-os-detail-page-studio-git-agent-ops-l-6edf36-a2bsangsa\.vercel\.app/,
+  );
+  assert.match(studioConnection, /DETAIL_PAGE_STUDIO_AUTOMATION_BYPASS_SECRET/);
+  assert.match(studioConnection, /x-vercel-set-bypass-cookie", "samesitenone"/);
+  assert.match(studioConnection, /opsDockVersion !== "server-v1"/);
 });
 
 test("interrupted generation is recoverable instead of remaining permanently active", () => {
@@ -131,7 +207,9 @@ test("interrupted generation is recoverable instead of remaining permanently act
   assert.match(dockSource, /sourceRunId: job\.sourceRunId/);
   assert.match(dockSource, /job\.status === "render_pending"/);
   assert.match(dockSource, /화면 종료 가능/);
-  assert.match(dockSource, /finalizerRetryAt\.set\(jobId, Date\.now\(\) \+ 30_000\)/);
+  assert.match(dockSource, /finalizerRetryAt\.set\(renderJob\.jobId, Date\.now\(\) \+ 30_000\)/);
+  assert.match(dockSource, /await startWorker\(renderJob\.jobId\)/);
+  assert.doesNotMatch(dockSource, /openFinalizer/);
   assert.doesNotMatch(dockSource, /browser_interrupted/);
 });
 
@@ -140,9 +218,12 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(workAssistant, /실시간 작업 도우미/);
   assert.match(workAssistant, /현재 진행 중인 작업/);
   assert.match(workAssistant, /detail_page_mode=worker/);
-  assert.match(workAssistant, /POLL_INTERVAL_MS = 2_500/);
+  assert.match(workAssistant, /POLL_MS = 2_500/);
   assert.match(workAssistant, /visibleJobs\.map/);
   assert.match(workAssistant, /retry-detail-page-job/);
+  assert.match(workAssistant, /detail-page-job-created/);
+  assert.match(workAssistant, /activate-detail-page-job/);
+  assert.match(workAssistant, /setJobs\(\(current\) => \[job, \.\.\.current\.filter/);
   assert.match(workAssistant, /detailPageItem=/);
   assert.match(trackerPage, /detail_page_mode: "client"/);
   assert.match(dockSource, /DETAIL_PAGE_MODE/);
@@ -155,6 +236,40 @@ test("OPS-wide work assistant survives route changes and owns the persistent bro
   assert.match(dockSource, /markLegacyFailed: synced/);
   assert.match(dockSource, /event\.source !== window\.parent/);
   assert.match(dockSource, /event\.key !== STORAGE_KEY/);
+  assert.match(dockSource, /payload\.type === "activate-detail-page-job"/);
+  assert.match(dockSource, /jobsById\.set\(job\.jobId, job\)/);
+});
+
+test("failed detail-page jobs can be removed from the shared assistant without deleting audit history", () => {
+  assert.match(workAssistant, /payload\?\.assistant_hidden_at/);
+  assert.match(workAssistant, /job\.status !== "failed"/);
+  assert.match(workAssistant, /window\.confirm/);
+  assert.match(workAssistant, /action: "dismiss_failed_from_assistant"/);
+  assert.match(workAssistant, /상품과 생성 이력은 삭제되지 않습니다/);
+  assert.match(workAssistant, /removing \? "삭제 중…" : "삭제"/);
+  assert.match(jobRoute, /action === "dismiss_failed_from_assistant"/);
+  assert.match(jobRoute, /job\.status !== "failed"/);
+  assert.match(jobRoute, /assistant_hidden_at: hiddenAt/);
+  assert.match(jobRoute, /본인의 실패 작업만 삭제/);
+});
+
+test("checkpointed server-generation failures resume without recollecting or discarding approved assets", () => {
+  assert.match(dockSource, /isCheckpointedGenerationFailure/);
+  assert.match(dockSource, /action: "resume_checkpointed_generation"/);
+  assert.match(dockSource, /기존 승인 자산 유지/);
+  assert.match(dockSource, /await startWorker\(resumed\.jobId\)/);
+  assert.ok(
+    dockSource.indexOf("if (checkpointed)") <
+      dockSource.indexOf("const sourceUrl = readPrimaryChinaLink(item);", dockSource.indexOf("async function retryItem")),
+  );
+  assert.match(workAssistant, /canResumeCheckpoint/);
+  assert.match(workAssistant, /"이어서 생성"/);
+  assert.match(jobRoute, /action === "resume_checkpointed_generation"/);
+  assert.match(jobRoute, /job\.stage !== "server_generation"/);
+  assert.match(jobRoute, /setAssessment: null/);
+  assert.match(jobRoute, /setRetryUsed: false/);
+  assert.match(jobRoute, /completed_at: null/);
+  assert.match(jobServer, /completedAtProvided/);
 });
 
 test("durable jobs reuse the deployed job ledger and require a signed per-job worker token", () => {
@@ -166,9 +281,12 @@ test("durable jobs reuse the deployed job ledger and require a signed per-job wo
   assert.match(jobRoute, /action === "claim"/);
   assert.match(jobRoute, /action === "evidence_ready"/);
   assert.match(jobRoute, /action === "final_complete"/);
-  assert.match(jobRoute, /const releasesLease = action !== "progress"/);
+  assert.match(jobRoute, /\["progress", "server_finalizer_progress"\]\.includes\(action\)/);
   assert.doesNotMatch(jobRoute, /workerToken:/);
-  assert.match(startRoute, /\/api\/internal\/ops-detail-page-job/);
+  assert.match(studioConnection, /\/api\/internal\/ops-detail-page-job/);
+  assert.match(startRoute, /resolveDetailPageStudioConnection/);
+  assert.match(startRoute, /buildProtectedOpsCallbackUrl/);
+  assert.match(startRoute, /redirect: "manual"/);
   const config = { supabaseUrl: "https://example.supabase.co", secretKey: "test-secret" };
   const token = createDetailPageJobToken(
     config,

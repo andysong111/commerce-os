@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
-
-const DEFAULT_DETAIL_PAGE_STUDIO_URL =
-  "https://commerce-os-detail-page-studio.vercel.app/";
+import {
+  probeDetailPageStudio,
+  probeProtectedOpsCallback,
+  resolveDetailPageStudioConnection,
+} from "@/lib/detailPageStudioConnection";
 
 export async function GET(request: NextRequest) {
   if (!isSameOriginOpsRequest(request)) {
@@ -16,26 +18,32 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const configured =
-    process.env.DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-    process.env.NEXT_PUBLIC_DETAIL_PAGE_STUDIO_INTERNAL_URL?.trim() ||
-    DEFAULT_DETAIL_PAGE_STUDIO_URL;
-  const engineUrl = new URL(configured);
-  if (engineUrl.protocol !== "https:" && engineUrl.hostname !== "localhost") {
+  try {
+    const connection = resolveDetailPageStudioConnection();
+    const [studioProbe, callbackProbe] = await Promise.all([
+      probeDetailPageStudio(connection),
+      probeProtectedOpsCallback(request.url),
+    ]);
+    if (!studioProbe.ok) return Response.json(studioProbe, { status: 503 });
+    if (!callbackProbe.ok) return Response.json(callbackProbe, { status: 503 });
+    return Response.json({
+      ok: true,
+      engineUrl: connection.browserUrl.toString(),
+      engineOrigin: connection.engineOrigin,
+      workerUrl: connection.workerUrl.toString(),
+      connectionMode: connection.isPreview ? "preview" : "production",
+    });
+  } catch (error) {
     return Response.json(
       {
         ok: false,
         code: "INVALID_DETAIL_PAGE_STUDIO_URL",
-        message: "상세페이지 엔진 연결 주소는 HTTPS여야 합니다.",
+        message:
+          error instanceof Error
+            ? error.message
+            : "상세페이지 Studio 연결 주소가 올바르지 않습니다.",
       },
       { status: 503 },
     );
   }
-
-  return Response.json({
-    ok: true,
-    engineUrl: engineUrl.toString(),
-    engineOrigin: engineUrl.origin,
-    workerUrl: new URL("/api/internal/ops-detail-page-job", engineUrl).toString(),
-  });
 }
