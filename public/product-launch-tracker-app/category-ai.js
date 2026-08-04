@@ -55,7 +55,7 @@ function installCategoryControls() {
   aiButton.id = "shopling-category-ai-button";
   aiButton.type = "button";
   aiButton.className = "button button-primary";
-  aiButton.textContent = "선택 AI 카테고리 자동설정";
+  aiButton.textContent = "선택 AI 카테고리 후보 생성";
   aiButton.addEventListener("click", () => void runAiCategoryAssignment());
 
   const clearButton = bulkControls.querySelector("#clear-selection-button");
@@ -78,8 +78,8 @@ function syncSelectionState() {
   const count = selectedItemIds().length;
   aiButton.disabled = count === 0;
   aiButton.textContent = count
-    ? `선택 AI 카테고리 자동설정 (${count}건)`
-    : "선택 AI 카테고리 자동설정";
+    ? `선택 AI 카테고리 후보 생성 (${count}건)`
+    : "선택 AI 카테고리 후보 생성";
 }
 
 async function startCategoryRefresh() {
@@ -215,26 +215,20 @@ async function runAiCategoryAssignment() {
       .slice(0, 15)
       .map(
         (result) =>
-          `${result.modelNumber || result.itemId}: ${result.selectedPath} (${result.confidence}%)${
-            result.autoApply ? " · 자동입력" : result.skippedExisting ? " · 기존값 유지" : " · 검토 필요"
-          }`,
+          `${result.modelNumber || result.itemId}: ${result.selectedPath} (${result.confidence}%) · 검토 필요`,
       )
       .join("\n");
-    const autoCount = body.results.filter((result) => result.autoApply).length;
-    const reviewCount = body.results.filter(
-      (result) => !result.autoApply && !result.skippedExisting,
-    ).length;
-    const existingCount = body.results.filter((result) => result.skippedExisting).length;
+    const reviewCount = body.results.length;
     if (
       !window.confirm(
         [
           `AI 카테고리 결과 ${body.results.length}건`,
-          `자동입력 ${autoCount}건 · 검토 필요 ${reviewCount}건 · 기존값 유지 ${existingCount}건`,
+          `검토 필요 ${reviewCount}건`,
           "",
           preview,
           body.results.length > 15 ? `외 ${body.results.length - 15}건` : "",
           "",
-          "고신뢰도 빈 카테고리는 자동입력하고, 나머지는 추천 이력으로 저장할까요?",
+          "모든 후보를 검토 이력으로 저장할까요?",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -253,27 +247,23 @@ async function runAiCategoryAssignment() {
         if (!result) return item;
         return {
           ...item,
-          shoplingCategory: result.autoApply ? result.selectedPath : item.shoplingCategory,
+          shoplingCategory: item.shoplingCategory,
           categoryAiSuggestion: result.selectedPath,
           categoryAiConfidence: result.confidence,
           categoryAiReason: result.reason,
           categoryAiAlternatives: result.alternatives,
-          categoryAiStatus: result.autoApply
-            ? "auto_applied"
-            : result.skippedExisting
-              ? "existing_preserved"
-              : "review_required",
+          categoryAiStatus: "review_required",
           categoryAiSnapshotHash: body.snapshot?.hash || "",
           categoryAiUpdatedAt: now,
           updatedAt: now,
-          updatedBy: result.autoApply ? "AI 카테고리 자동설정" : item.updatedBy,
+          updatedBy: item.updatedBy,
         };
       }),
     };
     await saveState(nextState);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
     window.alert(
-      `AI 카테고리 처리가 완료됐습니다.\n자동입력 ${autoCount}건 · 검토 필요 ${reviewCount}건 · 기존값 유지 ${existingCount}건`,
+      `AI 카테고리 후보 ${reviewCount}건을 검토함에 저장했습니다.`,
     );
     window.location.reload();
   } catch (error) {

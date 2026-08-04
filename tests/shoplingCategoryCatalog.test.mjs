@@ -447,7 +447,7 @@ test("AI 모델명 분석은 제품명사·용도·속성을 분리해 카테고
   assert.match(source, /걸이형 모공브러쉬 블랙/);
 });
 
-test("진행관리 UI는 카테고리 최신화·AI 자동설정·수동 로그인 상태를 포함한다", async () => {
+test("진행관리 UI는 카테고리 최신화·AI 후보 생성·수동 로그인 상태를 포함한다", async () => {
   const source = await readFile(
     new URL(
       "../public/product-launch-tracker-app/category-ai.js",
@@ -460,9 +460,10 @@ test("진행관리 UI는 카테고리 최신화·AI 자동설정·수동 로그�
     "utf8",
   );
   assert.match(source, /샵플링 카테고리 최신화/);
-  assert.match(source, /선택 AI 카테고리 자동설정/);
+  assert.match(source, /선택 AI 카테고리 후보 생성/);
   assert.match(source, /manual_login_required/);
   assert.match(source, /categoryAiSuggestion/);
-  assert.match(source, /기존값 유지/);
+  assert.match(source, /categoryAiStatus: "review_required"/);
+  assert.match(source, /shoplingCategory: item\.shoplingCategory/);
   assert.match(app, /category-ai\.js/);
 });

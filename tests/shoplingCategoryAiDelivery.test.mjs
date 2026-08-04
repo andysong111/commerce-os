@@ -29,10 +29,13 @@ test("AI 카테고리 실행은 기존 화면 핸들러보다 먼저 가로채�
   assert.match(runner, /stopImmediatePropagation/);
   assert.match(runner, /readServerState/);
   assert.match(runner, /saveServerState\(nextState\)/);
-  assert.match(runner, /categoryAiStatus: result\.autoApply/);
-  assert.match(runner, /"review_required"/);
+  assert.match(runner, /categoryAiStatus: "review_required"/);
+  assert.match(runner, /shoplingCategory: item\.shoplingCategory/);
+  assert.match(runner, /persistCategoryResults/);
+  assert.match(runner, /retryFailedIndividually/);
+  assert.match(runner, /성공한 결과는 사라지지 않았습니다/);
   assert.match(runner, /updateReviewLinkCount\(nextState\)/);
-  assert.match(runner, /AI_TIMEOUT_MS = 55_000/);
+  assert.match(runner, /AI_TIMEOUT_MS = 285_000/);
   assert.match(runner, /STATE_TIMEOUT_MS = 20_000/);
   assert.match(runner, /guardReviewNavigation/);
   assert.doesNotMatch(runner, /고신뢰도 빈 카테고리는 자동입력하고, 나머지는 추천 이력으로 저장할까요/);
@@ -46,8 +49,11 @@ test("AI 카테고리 API는 서버 실행시간과 OpenAI 제한시간을 명�
     ),
     "utf8",
   );
-  assert.match(route, /export const maxDuration = 60/);
-  assert.match(route, /timeoutMs: 45_000/);
-  assert.match(route, /AI 카테고리 분석 시간이 45초를 초과/);
+  assert.match(route, /export const maxDuration = 300/);
+  assert.match(route, /timeoutMs: 60_000/);
+  assert.match(route, /retryFailedIndividually/);
+  assert.match(route, /complete: failures\.length === 0/);
+  assert.match(route, /autoApply: false/);
+  assert.match(route, /완료된 상품은 보존하고 실패한 상품만 다시 실행/);
   assert.match(route, /status, headers: \{ "Cache-Control": "no-store" \}/);
 });

@@ -4,7 +4,7 @@ const STATUS_ID = "shopling-category-ai-run-status";
 const STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
 const STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const AI_ENDPOINT = "/api/product-launch-tracker/ai-category";
-const AI_TIMEOUT_MS = 55_000;
+const AI_TIMEOUT_MS = 285_000;
 const STATE_TIMEOUT_MS = 20_000;
 let analysisActive = false;
 let activeController = null;
@@ -73,111 +73,102 @@ async function runReliableAiCategoryAssignment(button) {
   analysisActive = true;
   activeController = new AbortController();
   setBusyUi(button, selected.length, true);
-  setRunStatus("running", `1/3 · ${selected.length}건의 모델명·옵션을 AI가 분석하고 있습니다.`);
+  setRunStatus("running", `1/4 · ${selected.length}건의 모델명·용도·동의어를 AI가 분석하고 있습니다.`);
+
+  const requestItems = selected.map(categoryRequestItem);
+  const savedResultById = new Map();
+  let savedCount = 0;
 
   try {
-    const aiResponse = await fetchJsonWithTimeout(
-      AI_ENDPOINT,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          items: selected.map((item) => ({
-            itemId: item.id,
-            modelNumber: item.modelNumber,
-            productName: item.productName,
-            optionLabels: Array.isArray(item.orderOptions)
-              ? item.orderOptions.map((option) => option?.saleOption).filter(Boolean)
-              : [],
-            currentCategory: item.shoplingCategory || "",
-            chinaProductLinks: Array.isArray(item.chinaProductLinks)
-              ? item.chinaProductLinks
-              : [],
-          })),
-        }),
-        signal: activeController.signal,
-      },
-      AI_TIMEOUT_MS,
-      "AI 카테고리 분석 시간이 55초를 초과했습니다.",
+    const firstResponse = await requestCategoryRecommendations(
+      requestItems,
+      false,
     );
-    if (aiResponse?.ok !== true || !Array.isArray(aiResponse.results)) {
-      throw new Error(aiResponse?.message || "AI 카테고리 결과를 받지 못했습니다.");
+    let latestState = (await readServerState().catch(() => null)) || displayedState;
+
+    if (firstResponse.results.length) {
+      setRunStatus(
+        "running",
+        `2/4 · 완료된 ${firstResponse.results.length}건을 검토함에 먼저 저장하고 있습니다.`,
+      );
+      latestState = await persistCategoryResults(latestState, firstResponse);
+      for (const result of firstResponse.results) {
+        savedResultById.set(String(result.itemId), result);
+      }
+      savedCount = savedResultById.size;
     }
 
-    const autoCount = aiResponse.results.filter((result) => result.autoApply).length;
-    const reviewCount = aiResponse.results.filter(
-      (result) => !result.autoApply && !result.skippedExisting,
-    ).length;
-    const existingCount = aiResponse.results.filter((result) => result.skippedExisting).length;
-    setRunStatus(
-      "running",
-      `2/3 · 분석 완료. 자동입력 ${autoCount}건, 검토함 ${reviewCount}건을 서버에 저장하고 있습니다.`,
+    let unresolved = collectCategoryFailures(firstResponse, requestItems);
+    const retryIds = new Set(
+      unresolved
+        .filter((failure) => failure.retryable !== false)
+        .map((failure) => String(failure.itemId)),
     );
+    const retryItems = requestItems.filter((item) => retryIds.has(String(item.itemId)));
 
-    const latestState = (await readServerState().catch(() => null)) || displayedState;
-    const resultById = new Map(
-      aiResponse.results.map((result) => [String(result.itemId), result]),
-    );
-    const now = new Date().toISOString();
-    const nextState = {
-      ...latestState,
-      savedAt: now,
-      items: latestState.items.map((item) => {
-        const result = resultById.get(String(item?.id ?? ""));
-        if (!result) return item;
-        return {
-          ...item,
-          shoplingCategory: result.autoApply
-            ? result.selectedPath
-            : item.shoplingCategory,
-          categoryAiSuggestion: result.selectedPath,
-          categoryAiConfidence: result.confidence,
-          categoryAiReason: result.reason,
-          categoryAiAlternatives: result.alternatives,
-          categoryAiCandidateChoices: Array.isArray(result.candidateChoices)
-            ? result.candidateChoices
-            : [],
-          categoryAiCandidatePaths: Array.isArray(result.candidatePaths)
-            ? result.candidatePaths
-            : [],
-          categoryAiStatus: result.autoApply
-            ? "auto_applied"
-            : result.skippedExisting
-              ? "existing_preserved"
-              : "review_required",
-          categoryAiSnapshotHash: aiResponse.snapshot?.hash || "",
-          categoryAiUpdatedAt: now,
-          updatedAt: now,
-          updatedBy: result.autoApply ? "AI 카테고리 자동설정" : item.updatedBy,
-        };
-      }),
-    };
+    if (retryItems.length) {
+      setRunStatus(
+        "running",
+        `3/4 · ${savedCount}건은 보존했습니다. 실패한 ${retryItems.length}건만 자동 재시도하고 있습니다.`,
+      );
+      try {
+        const retryResponse = await requestCategoryRecommendations(
+          retryItems,
+          true,
+        );
+        if (retryResponse.results.length) {
+          await persistCategoryResults(latestState, retryResponse);
+          for (const result of retryResponse.results) {
+            savedResultById.set(String(result.itemId), result);
+          }
+          savedCount = savedResultById.size;
+        }
+        const retryFailures = collectCategoryFailures(retryResponse, retryItems);
+        unresolved = [
+          ...unresolved.filter((failure) => !retryIds.has(String(failure.itemId))),
+          ...retryFailures,
+        ];
+      } catch (retryError) {
+        const retryMessage = readableError(retryError);
+        unresolved = [
+          ...unresolved.filter((failure) => !retryIds.has(String(failure.itemId))),
+          ...retryItems.map((item) => ({
+            itemId: item.itemId,
+            modelNumber: item.modelNumber,
+            productName: item.productName,
+            retryable: true,
+            message: retryMessage,
+          })),
+        ];
+      }
+    }
 
-    await saveServerState(nextState);
-    const serialized = JSON.stringify(nextState);
-    localStorage.setItem(STORAGE_KEY, serialized);
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: STORAGE_KEY,
-        newValue: serialized,
-        storageArea: localStorage,
-      }),
-    );
-    updateReviewLinkCount(nextState);
-    setRunStatus(
-      "success",
-      `3/3 · 저장 완료. 자동입력 ${autoCount}건 · 검토함 ${reviewCount}건 · 기존값 유지 ${existingCount}건`,
-    );
-    window.alert(
-      `AI 카테고리 처리가 완료됐습니다.\n자동입력 ${autoCount}건 · 검토 필요 ${reviewCount}건 · 기존값 유지 ${existingCount}건`,
-    );
+    if (unresolved.length) {
+      const failedLabels = unresolved
+        .map((failure) => failure.modelNumber || failure.productName || failure.itemId)
+        .filter(Boolean)
+        .slice(0, 8)
+        .join(", ");
+      const message = `4/4 · ${savedCount}건은 검토함에 저장했습니다. ${unresolved.length}건은 자동 재시도 후에도 완료되지 않았습니다.`;
+      setRunStatus("failed", `${message} 실패: ${failedLabels}`);
+      window.alert(
+        `${message}\n성공한 결과는 사라지지 않았습니다.\n실패 상품: ${failedLabels}`,
+      );
+    } else {
+      setRunStatus(
+        "success",
+        `4/4 · ${savedCount}건의 새 카테고리 후보를 검토함에 저장했습니다.`,
+      );
+      window.alert(
+        `AI 카테고리 후보 생성이 완료됐습니다.\n${savedCount}건 모두 검토함에 저장했습니다.`,
+      );
+    }
     window.location.reload();
   } catch (error) {
-    const message = readableError(error);
+    const rawMessage = readableError(error);
+    const message = savedCount
+      ? `${savedCount}건은 이미 검토함에 저장했습니다. 나머지 처리 중 오류: ${rawMessage}`
+      : rawMessage;
     setRunStatus("failed", message);
     window.alert(message);
   } finally {
@@ -185,6 +176,118 @@ async function runReliableAiCategoryAssignment(button) {
     activeController = null;
     setBusyUi(button, selectedItemIds().length, false);
   }
+}
+
+function categoryRequestItem(item) {
+  return {
+    itemId: item.id,
+    modelNumber: item.modelNumber,
+    productName: item.productName,
+    optionLabels: Array.isArray(item.orderOptions)
+      ? item.orderOptions.map((option) => option?.saleOption).filter(Boolean)
+      : [],
+    currentCategory: item.shoplingCategory || "",
+    chinaProductLinks: Array.isArray(item.chinaProductLinks)
+      ? item.chinaProductLinks
+      : [],
+  };
+}
+
+async function requestCategoryRecommendations(items, retryFailedIndividually) {
+  const response = await fetchJsonWithTimeout(
+    AI_ENDPOINT,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({ items, retryFailedIndividually }),
+      signal: activeController.signal,
+    },
+    AI_TIMEOUT_MS,
+    "AI 카테고리 분석 제한시간을 초과했습니다. 완료된 결과는 보존하고 실패 상품만 다시 실행하세요.",
+  );
+  if (response?.ok !== true || !Array.isArray(response.results)) {
+    throw new Error(response?.message || "AI 카테고리 결과를 받지 못했습니다.");
+  }
+  return {
+    ...response,
+    failures: Array.isArray(response.failures) ? response.failures : [],
+  };
+}
+
+function collectCategoryFailures(response, requestedItems) {
+  const resultIds = new Set(
+    response.results.map((result) => String(result?.itemId ?? "")),
+  );
+  const failureById = new Map(
+    response.failures.map((failure) => [String(failure?.itemId ?? ""), failure]),
+  );
+  return requestedItems
+    .filter((item) => !resultIds.has(String(item.itemId)))
+    .map((item) =>
+      failureById.get(String(item.itemId)) || {
+        itemId: item.itemId,
+        modelNumber: item.modelNumber,
+        productName: item.productName,
+        retryable: true,
+        message: "AI 결과가 누락되어 자동 재시도가 필요합니다.",
+      },
+    );
+}
+
+async function persistCategoryResults(previousState, response) {
+  const latestState = (await readServerState().catch(() => null)) || previousState;
+  const resultById = new Map(
+    response.results.map((result) => [String(result.itemId), result]),
+  );
+  const now = new Date().toISOString();
+  const nextState = {
+    ...latestState,
+    savedAt: now,
+    items: latestState.items.map((item) => {
+      const result = resultById.get(String(item?.id ?? ""));
+      if (!result) return item;
+      return {
+        ...item,
+        shoplingCategory: item.shoplingCategory,
+        categoryAiSuggestion: result.selectedPath,
+        categoryAiConfidence: result.confidence,
+        categoryAiReason: result.reason,
+        categoryAiAlternatives: result.alternatives,
+        categoryAiCandidateChoices: Array.isArray(result.candidateChoices)
+          ? result.candidateChoices
+          : [],
+        categoryAiCandidatePaths: Array.isArray(result.candidatePaths)
+          ? result.candidatePaths
+          : [],
+        categoryAiStatus: "review_required",
+        categoryAiSnapshotHash:
+          response.snapshot?.hash || item.categoryAiSnapshotHash || "",
+        categoryAiUpdatedAt: now,
+        updatedAt: now,
+        updatedBy: item.updatedBy,
+      };
+    }),
+  };
+  await saveServerState(nextState);
+  writeLocalState(nextState);
+  updateReviewLinkCount(nextState);
+  return nextState;
+}
+
+function writeLocalState(state) {
+  const serialized = JSON.stringify(state);
+  localStorage.setItem(STORAGE_KEY, serialized);
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key: STORAGE_KEY,
+      newValue: serialized,
+      storageArea: localStorage,
+    }),
+  );
 }
 
 function selectedItemIds() {
@@ -270,8 +373,8 @@ function setBusyUi(button, count, busy) {
   button.textContent = busy
     ? `${count}건 AI 분석 중…`
     : count
-      ? `선택 AI 카테고리 자동설정 (${count}건)`
-      : "선택 AI 카테고리 자동설정";
+      ? `선택 AI 카테고리 후보 생성 (${count}건)`
+      : "선택 AI 카테고리 후보 생성";
   const link = document.querySelector(`#${REVIEW_LINK_ID}`);
   if (link instanceof HTMLElement) {
     link.setAttribute("aria-disabled", busy ? "true" : "false");
