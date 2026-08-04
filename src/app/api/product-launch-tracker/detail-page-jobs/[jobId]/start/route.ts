@@ -7,7 +7,10 @@ import {
   readDetailPageJob,
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
-import { isRecoverableServerFinalAssemblyJob } from "@/lib/detailPageAiReview";
+import {
+  canReassembleCompletedDetailPageJob,
+  isRecoverableServerFinalAssemblyJob,
+} from "@/lib/detailPageAiReview";
 import {
   buildProtectedOpsCallbackUrl,
   resolveDetailPageStudioConnection,
@@ -41,14 +44,39 @@ export async function POST(
       stage: job.stage,
       result: job.result,
     });
+    const command = (await request.json().catch(() => ({}))) as {
+      action?: string;
+    };
+    const finalAssemblyOnly = command.action === "reassemble_final_only";
+    const completedFinalReassembly =
+      finalAssemblyOnly &&
+      canReassembleCompletedDetailPageJob({
+        status: job.status,
+        result: job.result,
+      });
+    if (finalAssemblyOnly && !completedFinalReassembly) {
+      return Response.json(
+        {
+          ok: false,
+          code: "DETAIL_PAGE_FINAL_REASSEMBLY_NOT_ALLOWED",
+          message:
+            "검수 통과 저장 자산이 완전한 완료 작업만 최종 조립을 다시 실행할 수 있습니다.",
+        },
+        { status: 409 },
+      );
+    }
     if (
       ["success", "failed", "cancelled"].includes(job.status) &&
-      !recoverableFinalAssembly
+      !recoverableFinalAssembly &&
+      !completedFinalReassembly
     ) {
       return Response.json({ ok: true, accepted: false, terminal: true, status: job.status });
     }
     let runnableJob = job;
-    if (job.status === "failed" && recoverableFinalAssembly) {
+    if (
+      (job.status === "failed" && recoverableFinalAssembly) ||
+      completedFinalReassembly
+    ) {
       const restartedAt = new Date().toISOString();
       const finalizerAttempt =
         Math.max(
@@ -59,8 +87,12 @@ export async function POST(
         status: "render_pending",
         stage: "server_final_assembly",
         message:
-          "기존 검수 통과 자산을 보존하고 서버 최종 조립을 다시 시작합니다.",
-        progress: Math.min(99, Math.max(0, Number(job.progress) || 0)),
+          completedFinalReassembly
+            ? "검수 통과 저장 자산을 유지하고 최신 템플릿으로 최종 상세페이지만 다시 조립합니다."
+            : "기존 검수 통과 자산을 보존하고 서버 최종 조립을 다시 시작합니다.",
+        progress: completedFinalReassembly
+          ? 95
+          : Math.min(99, Math.max(0, Number(job.progress) || 0)),
         qa_status: "passed",
         payload: {
           finalizer_phase: "connecting",

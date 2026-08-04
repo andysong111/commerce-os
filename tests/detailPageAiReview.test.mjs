@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  canReassembleCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
   detailPageCheckpointId,
   detailPageFailureCode,
@@ -125,11 +126,57 @@ test("review workspace provides overview filters, enlarged evidence, and cost-aw
     /action === "render_pending"[\s\S]*standardFailure: null/,
   );
   assert.match(workspaceSource, /서버 최종 조립 다시 시작/);
+  assert.match(workspaceSource, /최종 조립만 다시 실행/);
+  assert.match(workspaceSource, /reassemble_final_only/);
+  assert.match(workspaceSource, /AI 재생성 비용은 발생하지 않습니다/);
   assert.match(workspaceSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
   assert.doesNotMatch(dockSource, /async function openFinalizer/);
   assert.doesNotMatch(dockSource, /ops_finalize/);
   assert.match(jobRouteSource, /server_finalizer_progress/);
   assert.match(jobRouteSource, /finalizerMode: workerAuthorized \? "server-v1"/);
+});
+
+test("a completed server result can reassemble only the final JPEG from stored approved assets", () => {
+  const completed = job({
+    status: "success",
+    stage: "docked",
+    qaStatus: "passed",
+    error: "",
+    result: {
+      ...job().result,
+      setAssessment: {
+        ...job().result.setAssessment,
+        status: "passed",
+      },
+      representatives: Array.from({ length: 5 }, (_, index) => ({
+        roleId: `role-${index + 1}`,
+        assetUrl: `https://assets.example.com/representative-${index + 1}.jpg`,
+      })),
+      panels: [
+        { slot: 1, assetUrl: "https://assets.example.com/panel-1.jpg" },
+      ],
+      detailImageUrl: "https://assets.example.com/detail-page.jpg",
+      representativeIndividualsPassed: true,
+      detailSetIdentityPassed: true,
+      finalizerMode: "server-v1",
+      finalizerPhase: "complete",
+    },
+  });
+
+  assert.equal(isRecoverableServerFinalAssemblyJob(completed), false);
+  assert.equal(canReassembleCompletedDetailPageJob(completed), true);
+  assert.equal(
+    canReassembleCompletedDetailPageJob({
+      ...completed,
+      result: { ...completed.result, representatives: completed.result.representatives.slice(0, 4) },
+    }),
+    false,
+  );
+  assert.match(startRouteSource, /command\.action === "reassemble_final_only"/);
+  assert.match(
+    startRouteSource,
+    /completedFinalReassembly[\s\S]*status: "render_pending"[\s\S]*progress: completedFinalReassembly[\s\S]*\? 95/,
+  );
 });
 
 test("Standard-v2 failure keeps exact section scores, defects, screenshot diagnostics, and retry scope", () => {

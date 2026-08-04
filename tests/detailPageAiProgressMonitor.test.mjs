@@ -36,13 +36,16 @@ test("detail-page review shows live server job progress", () => {
   assert.match(workspaceSource, /서버 14,000px 렌더링/);
 });
 
-test("legacy render_pending and failed server finalizers resume through the server start API only", () => {
-  assert.match(workspaceSource, /!isRecoverableServerFinalAssemblyJob\(job\)/);
+test("failed and completed finalizers use the server start API without regenerating AI assets", () => {
+  assert.match(workspaceSource, /const recoverable = isRecoverableServerFinalAssemblyJob\(job\)/);
+  assert.match(workspaceSource, /canReassembleCompletedDetailPageJob\(job\)/);
   assert.match(
     workspaceSource,
     /\$\{JOBS_API\}\/\$\{encodeURIComponent\(job\.jobId\)\}\/start/,
   );
   assert.match(workspaceSource, /서버 최종 조립 다시 시작/);
+  assert.match(workspaceSource, /최종 조립만 다시 실행/);
+  assert.match(workspaceSource, /reassemble_final_only/);
   assert.match(workspaceSource, /1688 재수집·AI 재생성 없이/);
   assert.match(dockSource, /await startWorker\(renderJob\.jobId\)/);
   assert.doesNotMatch(dockSource, /ops_finalize/);

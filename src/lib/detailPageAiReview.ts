@@ -126,13 +126,9 @@ export function isRecoverableServerFinalAssemblyJob(
   job: Pick<DetailPageReviewJob, "status" | "stage" | "result">,
 ) {
   const result = record(job.result);
-  const assessment = record(result.setAssessment);
   const finalizerMode = text(result.finalizerMode || result.finalizer_mode);
   const finalizerPhase = text(result.finalizerPhase || result.finalizer_phase);
-  const qualityPassed =
-    assessment.status === "passed" ||
-    (result.representativeIndividualsPassed === true &&
-      result.detailSetIdentityPassed === true);
+  const qualityPassed = generatedAssetQualityPassed(result);
 
   if (job.status === "render_pending") return true;
   if (job.stage === "server_final_assembly" && qualityPassed) return true;
@@ -142,6 +138,61 @@ export function isRecoverableServerFinalAssemblyJob(
       finalizerPhase &&
       finalizerPhase !== "complete" &&
       qualityPassed,
+  );
+}
+
+export function canReassembleCompletedDetailPageJob(
+  job: Pick<DetailPageReviewJob, "status" | "result">,
+) {
+  const result = record(job.result);
+  const finalizerMode = text(result.finalizerMode || result.finalizer_mode);
+  const finalizerPhase = text(result.finalizerPhase || result.finalizer_phase);
+  const representativeCount = array(result.representatives).filter((value) => {
+    const item = record(value);
+    return Boolean(
+      firstUrl(
+        item.assetUrl,
+        item.asset_url,
+        item.imageUrl,
+        item.image_url,
+        item.url,
+      ),
+    );
+  }).length;
+  const panelCount = array(
+    result.panels || result.detailPanels || result.detail_panels,
+  ).filter((value) => {
+    const item = record(value);
+    return Boolean(
+      firstUrl(
+        item.assetUrl,
+        item.asset_url,
+        item.imageUrl,
+        item.image_url,
+        item.panelUrl,
+        item.panel_url,
+        item.url,
+      ),
+    );
+  }).length;
+
+  return Boolean(
+    job.status === "success" &&
+      finalizerMode === "server-v1" &&
+      finalizerPhase === "complete" &&
+      generatedAssetQualityPassed(result) &&
+      representativeCount === 5 &&
+      panelCount > 0 &&
+      firstUrl(result.detailImageUrl, result.detail_image_url)
+  );
+}
+
+function generatedAssetQualityPassed(result: Record<string, unknown>) {
+  const assessment = record(result.setAssessment);
+  return Boolean(
+    assessment.status === "passed" ||
+      (result.representativeIndividualsPassed === true &&
+        result.detailSetIdentityPassed === true),
   );
 }
 

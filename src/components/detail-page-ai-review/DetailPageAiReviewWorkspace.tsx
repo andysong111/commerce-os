@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  canReassembleCompletedDetailPageJob,
   canResumeDetailPageCheckpoint,
   detailPageCheckpointId,
   detailPageFailureCode,
@@ -293,12 +294,28 @@ export function DetailPageAiReviewWorkspace() {
     );
   }
 
-  async function reconnectFinalAssembly(job: DetailPageReviewJob) {
-    if (actionJobId || !isRecoverableServerFinalAssemblyJob(job)) return;
+  async function reconnectFinalAssembly(
+    job: DetailPageReviewJob,
+    reassembleCompleted = false,
+  ) {
+    const recoverable = isRecoverableServerFinalAssemblyJob(job);
+    const completedReassembly =
+      reassembleCompleted && canReassembleCompletedDetailPageJob(job);
+    if (actionJobId || (!recoverable && !completedReassembly)) return;
+    if (
+      completedReassembly &&
+      !window.confirm(
+        `"${detailPageJobName(job)}"의 대표·부가 이미지와 상세 섹션은 그대로 유지하고 최종 14,000px JPEG만 최신 템플릿으로 다시 조립합니다.\n1688 재수집과 AI 재생성 비용은 발생하지 않습니다. 계속할까요?`,
+      )
+    ) {
+      return;
+    }
     setActionJobId(job.jobId);
     setActionState({
       tone: "progress",
-      message: "1688 재수집·AI 재생성 없이 저장된 검수 통과 자산으로 서버 최종 조립을 시작하고 있습니다.",
+      message: completedReassembly
+        ? "저장된 검수 통과 자산으로 최종 14,000px JPEG만 다시 조립하고 있습니다."
+        : "1688 재수집·AI 재생성 없이 저장된 검수 통과 자산으로 서버 최종 조립을 시작하고 있습니다.",
     });
     try {
       const response = await fetch(
@@ -307,7 +324,13 @@ export function DetailPageAiReviewWorkspace() {
           method: "POST",
           cache: "no-store",
           credentials: "same-origin",
-          headers: { Accept: "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: completedReassembly
+            ? JSON.stringify({ action: "reassemble_final_only" })
+            : undefined,
         },
       );
       const body = (await response.json().catch(() => ({}))) as {
@@ -322,8 +345,9 @@ export function DetailPageAiReviewWorkspace() {
       }
       setActionState({
         tone: "success",
-        message:
-          "서버 최종 조립을 시작했습니다. 화면을 닫아도 계속되며 저장된 1688 원본은 다시 다운로드하지 않습니다.",
+        message: completedReassembly
+          ? "최종 상세페이지만 다시 조립하기 시작했습니다. AI 이미지와 저장된 1688 원본은 그대로 유지됩니다."
+          : "서버 최종 조립을 시작했습니다. 화면을 닫아도 계속되며 저장된 1688 원본은 다시 다운로드하지 않습니다.",
       });
       void refresh(true);
     } catch (error) {
@@ -466,6 +490,9 @@ export function DetailPageAiReviewWorkspace() {
                   if (resumeTarget) void requestRegeneration(resumeTarget, "resume");
                 }}
                 onReconnectFinalizer={() => reconnectFinalAssembly(selected)}
+                onReassembleFinal={() =>
+                  reconnectFinalAssembly(selected, true)
+                }
                 onFullRetry={() => void requestRegeneration(selected, "full")}
               />
             ) : (
@@ -531,6 +558,7 @@ function JobReviewDetail({
   onPreview,
   onResume,
   onReconnectFinalizer,
+  onReassembleFinal,
   onFullRetry,
 }: {
   job: DetailPageReviewJob;
@@ -541,6 +569,7 @@ function JobReviewDetail({
   onPreview: (asset: DetailPageReviewAsset) => void;
   onResume: () => void;
   onReconnectFinalizer: () => void;
+  onReassembleFinal: () => void;
   onFullRetry: () => void;
 }) {
   const bucket = detailPageReviewBucket(job);
@@ -551,6 +580,7 @@ function JobReviewDetail({
   const recoveringPriorCheckpoint =
     Boolean(resumeTarget) && resumeTarget?.jobId !== job.jobId;
   const active = isActiveDetailPageJob(job);
+  const canReassembleFinal = canReassembleCompletedDetailPageJob(job);
   const finalDetail = assets.detail[0];
   const problemAssets = [...assets.representatives, ...assets.panels].filter(
     (asset) => asset.problem,
@@ -667,15 +697,31 @@ function JobReviewDetail({
         </section>
       ) : !active ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4">
-          <p className="text-sm font-bold text-slate-600">결과를 다시 만들 필요가 있을 때만 전체 재생성을 사용하세요.</p>
-          <button
-            type="button"
-            onClick={onFullRetry}
-            disabled={!workerReady || busy}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-40"
-          >
-            {currentBusy ? "재생성 요청 중…" : "전체 다시 생성"}
-          </button>
+          <p className="text-sm font-bold text-slate-600">
+            {canReassembleFinal
+              ? "조립 템플릿만 바뀐 경우 저장 자산으로 최종 JPEG만 다시 만들 수 있습니다."
+              : "결과를 다시 만들 필요가 있을 때만 전체 재생성을 사용하세요."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {canReassembleFinal ? (
+              <button
+                type="button"
+                onClick={onReassembleFinal}
+                disabled={busy}
+                className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-800 disabled:cursor-wait disabled:opacity-40"
+              >
+                {currentBusy ? "최종 조립 요청 중…" : "최종 조립만 다시 실행"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onFullRetry}
+              disabled={!workerReady || busy}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-40"
+            >
+              {currentBusy ? "재생성 요청 중…" : "전체 다시 생성"}
+            </button>
+          </div>
         </div>
       ) : null}
 
