@@ -10,6 +10,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   const identity = await resolveProductLaunchIdentity(request);
   if (!identity.ok) {
     return Response.json(identity.body, { status: identity.status });
@@ -61,6 +62,37 @@ export async function POST(request: NextRequest) {
       message: normalizeModelNameTerminology(failure.message),
     }));
 
+    console.info(
+      JSON.stringify({
+        event: "shopling_category_batch_complete",
+        inputCount: inputs.length,
+        resultCount: results.length,
+        failureCount: failures.length,
+        durationMs: Date.now() - startedAt,
+        retryFailedIndividually,
+        failureCodes: failures.reduce<Record<string, number>>(
+          (counts, failure) => {
+            counts[failure.code] = (counts[failure.code] ?? 0) + 1;
+            return counts;
+          },
+          {},
+        ),
+      }),
+    );
+    for (const failure of failures) {
+      console.warn(
+        JSON.stringify({
+          event: "shopling_category_item_failed",
+          itemId: failure.itemId,
+          modelNumber: failure.modelNumber,
+          stage: failure.stage,
+          code: failure.code,
+          retryable: failure.retryable,
+          retryAfterMs: failure.retryAfterMs,
+        }),
+      );
+    }
+
     return Response.json(
       {
         ok: true,
@@ -85,6 +117,15 @@ export async function POST(request: NextRequest) {
       : /시간[이가을]? .*초과|AbortError|aborted/i.test(message)
         ? 504
         : 400;
+    console.error(
+      JSON.stringify({
+        event: "shopling_category_batch_failed",
+        durationMs: Date.now() - startedAt,
+        status,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        message: rawMessage.slice(0, 240),
+      }),
+    );
     return Response.json(
       { ok: false, message },
       { status, headers: { "Cache-Control": "no-store" } },

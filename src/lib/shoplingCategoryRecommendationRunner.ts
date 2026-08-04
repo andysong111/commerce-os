@@ -6,10 +6,14 @@ import type {
 import { isOpenAiStructuredOutputIncompleteError } from "./openAiStructuredOutput.ts";
 
 const CATEGORY_BATCH_SIZE = 1;
-const CATEGORY_BATCH_CONCURRENCY = 8;
+const CATEGORY_BATCH_CONCURRENCY = 3;
+const CATEGORY_RECOMMENDATION_TIMEOUT_MS = 35_000;
 const SEARCH_PROFILE_BATCH_SIZE = 1;
-const SEARCH_PROFILE_BATCH_CONCURRENCY = 6;
-const SEARCH_PROFILE_TIMEOUT_MS = 45_000;
+const SEARCH_PROFILE_BATCH_CONCURRENCY = 3;
+const SEARCH_PROFILE_TIMEOUT_MS = 35_000;
+const SEARCH_PROFILE_FALLBACK_RETRY_TIMEOUT_MS = 15_000;
+const CATEGORY_RETRY_BASE_DELAY_MS = 900;
+const CATEGORY_RETRY_MAX_DELAY_MS = 12_000;
 
 type SearchProfileGenerator = (
   inputs: ProductCategoryInput[],
@@ -65,6 +69,15 @@ export type CategoryRecommendationFailure = {
   productName: string;
   stage: "search_profile" | "recommendation";
   retryable: boolean;
+  code:
+    | "AI_TIMEOUT"
+    | "AI_RATE_LIMIT"
+    | "AI_NETWORK"
+    | "AI_UPSTREAM"
+    | "AI_OUTPUT_INCOMPLETE"
+    | "AI_INVALID_RESPONSE"
+    | "AI_UNKNOWN";
+  retryAfterMs: number;
   message: string;
 };
 
@@ -216,7 +229,15 @@ async function generateSearchProfilesWithRecovery(
   } catch (error) {
     if (!isRetryableCategoryRequestError(error)) throw error;
     if (batch.length === 1) {
-      return generator(batch, profileOptions);
+      await waitBeforeCategoryRetry(error, options);
+      return generator(batch, {
+        ...profileOptions,
+        timeoutMs: Math.min(
+          profileOptions.timeoutMs,
+          SEARCH_PROFILE_FALLBACK_RETRY_TIMEOUT_MS,
+        ),
+        useWebSearch: false,
+      });
     }
     const middle = Math.ceil(batch.length / 2);
     const recovered = await Promise.all([
@@ -239,7 +260,10 @@ async function generateBatchWithRecovery(
     apiKey: options.apiKey,
     model: options.model,
     fetcher: options.fetcher,
-    timeoutMs: options.timeoutMs,
+    timeoutMs: Math.min(
+      options.timeoutMs ?? CATEGORY_RECOMMENDATION_TIMEOUT_MS,
+      CATEGORY_RECOMMENDATION_TIMEOUT_MS,
+    ),
     searchProfiles,
   };
   try {
@@ -247,6 +271,7 @@ async function generateBatchWithRecovery(
   } catch (error) {
     if (!isRetryableCategoryOutputError(error)) throw error;
     if (batch.length === 1) {
+      await waitBeforeCategoryRetry(error, options);
       try {
         return await generator({ items: batch }, recommendationOptions);
       } catch (retryError) {
@@ -279,6 +304,8 @@ export function isRetryableCategoryOutputError(error: unknown) {
 export function isRetryableCategoryRequestError(error: unknown) {
   if (isRetryableCategoryOutputError(error)) return true;
   if (error instanceof DOMException && error.name === "AbortError") return true;
+  const status = categoryErrorNumber(error, "status");
+  if (status === 408 || status === 429 || status >= 500) return true;
   const name = error instanceof Error ? error.name : "";
   const message = error instanceof Error ? error.message : String(error ?? "");
   return (
@@ -292,7 +319,7 @@ export function isRetryableCategoryRequestError(error: unknown) {
 function throwIfFatalCategoryError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (
-    /OPENAI_API_KEY|invalid[_ ]api[_ ]key|incorrect api key|insufficient_quota|HTTP 401|카테고리 스냅샷|GITHUB_/i.test(
+    /OPENAI_API_KEY|invalid[_ ]api[_ ]key|incorrect api key|insufficient_quota|credit_balance_exhausted|spend_limit|HTTP 401|HTTP 403|카테고리 스냅샷|GITHUB_/i.test(
       message,
     )
   ) {
@@ -305,22 +332,111 @@ function categoryFailure(
   stage: CategoryRecommendationFailure["stage"],
   error: unknown,
 ): CategoryRecommendationFailure {
-  const retryable = isRetryableCategoryRequestError(error);
-  const message = retryable
-    ? isRetryableCategoryOutputError(error)
-      ? "AI 응답이 중간에서 잘렸습니다."
-      : "AI 분석 제한시간 또는 일시적인 네트워크 문제로 완료되지 않았습니다."
-    : error instanceof Error
-      ? error.message.slice(0, 240)
-      : "AI 카테고리 분석을 완료하지 못했습니다.";
+  const diagnostic = categoryErrorDiagnostic(error);
   return {
     itemId: input.itemId,
     modelNumber: input.modelNumber,
     productName: input.productName,
     stage,
-    retryable,
-    message,
+    retryable: diagnostic.retryable,
+    code: diagnostic.code,
+    retryAfterMs: diagnostic.retryAfterMs,
+    message: diagnostic.message,
   };
+}
+
+function categoryErrorDiagnostic(error: unknown): Pick<
+  CategoryRecommendationFailure,
+  "retryable" | "code" | "retryAfterMs" | "message"
+> {
+  const retryAfterMs = Math.min(
+    CATEGORY_RETRY_MAX_DELAY_MS,
+    Math.max(0, categoryErrorNumber(error, "retryAfterMs")),
+  );
+  const status = categoryErrorNumber(error, "status");
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (isRetryableCategoryOutputError(error)) {
+    return {
+      retryable: true,
+      code: "AI_OUTPUT_INCOMPLETE",
+      retryAfterMs,
+      message: "AI 응답이 중간에서 잘렸습니다.",
+    };
+  }
+  if (status === 429 || /rate[_ ]limit|too many requests|HTTP 429/i.test(message)) {
+    return {
+      retryable: true,
+      code: "AI_RATE_LIMIT",
+      retryAfterMs,
+      message:
+        "AI 요청이 한꺼번에 몰려 제한되었습니다. 서버가 속도를 낮춰 재시도했지만 완료되지 않았습니다.",
+    };
+  }
+  if (
+    status === 408 ||
+    name === "AbortError" ||
+    /aborted|timeout|timed out|시간[이가을]? .*초과|HTTP 408/i.test(message)
+  ) {
+    return {
+      retryable: true,
+      code: "AI_TIMEOUT",
+      retryAfterMs,
+      message: "AI 기본 분석 제한시간을 초과했습니다.",
+    };
+  }
+  if (status >= 500 || /HTTP 5\d\d|temporar|overloaded|slow down/i.test(message)) {
+    return {
+      retryable: true,
+      code: "AI_UPSTREAM",
+      retryAfterMs,
+      message: "AI 서비스가 일시적으로 응답하지 않았습니다.",
+    };
+  }
+  if (/fetch failed|network|ECONN|connection/i.test(message)) {
+    return {
+      retryable: true,
+      code: "AI_NETWORK",
+      retryAfterMs,
+      message: "AI 연결이 일시적으로 끊겼습니다.",
+    };
+  }
+  if (/형식|누락|비어/.test(message)) {
+    return {
+      retryable: false,
+      code: "AI_INVALID_RESPONSE",
+      retryAfterMs: 0,
+      message: message.slice(0, 240),
+    };
+  }
+  return {
+    retryable: isRetryableCategoryRequestError(error),
+    code: "AI_UNKNOWN",
+    retryAfterMs,
+    message: message.slice(0, 240) || "AI 카테고리 분석을 완료하지 못했습니다.",
+  };
+}
+
+function categoryErrorNumber(error: unknown, key: "status" | "retryAfterMs") {
+  if (!error || typeof error !== "object") return 0;
+  const value = Number((error as Record<string, unknown>)[key]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+async function waitBeforeCategoryRetry(
+  error: unknown,
+  options: RecommendationOptions,
+) {
+  if (options.dependencies) return;
+  const retryAfterMs = categoryErrorNumber(error, "retryAfterMs");
+  const delayMs = Math.min(
+    CATEGORY_RETRY_MAX_DELAY_MS,
+    Math.max(
+      CATEGORY_RETRY_BASE_DELAY_MS + Math.floor(Math.random() * 300),
+      retryAfterMs,
+    ),
+  );
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 function mergeRecommendationResults(

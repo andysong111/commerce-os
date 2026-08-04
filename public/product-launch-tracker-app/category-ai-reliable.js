@@ -6,6 +6,8 @@ const STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const AI_ENDPOINT = "/api/product-launch-tracker/ai-category";
 const AI_TIMEOUT_MS = 285_000;
 const STATE_TIMEOUT_MS = 20_000;
+const AI_RETRY_MIN_DELAY_MS = 1_500;
+const AI_RETRY_MAX_DELAY_MS = 15_000;
 let analysisActive = false;
 let activeController = null;
 
@@ -73,7 +75,7 @@ async function runReliableAiCategoryAssignment(button) {
   analysisActive = true;
   activeController = new AbortController();
   setBusyUi(button, selected.length, true);
-  setRunStatus("running", `1/4 · ${selected.length}건의 모델명을 웹 검색하고 시장 카테고리·용도·동의어를 분석하고 있습니다.`);
+  setRunStatus("running", `1/4 · ${selected.length}건의 기본 의미분석을 먼저 확보한 뒤 웹 검색 근거로 보강하고 있습니다.`);
 
   const requestItems = selected.map(categoryRequestItem);
   const savedResultById = new Map();
@@ -107,11 +109,13 @@ async function runReliableAiCategoryAssignment(button) {
     const retryItems = requestItems.filter((item) => retryIds.has(String(item.itemId)));
 
     if (retryItems.length) {
+      const retryDelayMs = categoryRetryDelayMs(firstResponse.failures);
       setRunStatus(
         "running",
-        `3/4 · ${savedCount}건은 보존했습니다. 실패한 ${retryItems.length}건만 자동 재시도하고 있습니다.`,
+        `3/4 · ${savedCount}건은 보존했습니다. 실패한 ${retryItems.length}건만 요청 속도를 낮춰 자동 재시도하고 있습니다.`,
       );
       try {
+        await delay(retryDelayMs);
         const retryResponse = await requestCategoryRecommendations(
           retryItems,
           true,
@@ -245,6 +249,21 @@ function collectCategoryFailures(response, requestedItems) {
         message: "AI 결과가 누락되어 자동 재시도가 필요합니다.",
       },
     );
+}
+
+function categoryRetryDelayMs(failures) {
+  const upstreamDelay = (Array.isArray(failures) ? failures : []).reduce(
+    (maximum, failure) => Math.max(maximum, Number(failure?.retryAfterMs) || 0),
+    0,
+  );
+  return Math.min(
+    AI_RETRY_MAX_DELAY_MS,
+    Math.max(AI_RETRY_MIN_DELAY_MS, upstreamDelay),
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 async function persistCategoryResults(previousState, response) {
