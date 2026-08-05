@@ -56,6 +56,25 @@ export const priceAdjustmentEngineModule: CommerceModule = {
   safetyBadge: "그림자 운영 · 실제 미반영",
 };
 
+export const priceGradeShadowComparisonModule: CommerceModule = {
+  id: "price-grade-shadow-comparison",
+  title: "상품등급 그림자 비교",
+  navigationLabel: "상품등급 그림자 비교",
+  description:
+    "최근 24개월 판매와 최근 365일 확정 입고원가를 Ops Center 자체 등급 엔진으로 다시 계산해 Product Master 기존 lifecycle과 비교합니다.",
+  status: "check_mode",
+  route: "/price-adjustment-engine/shadow-compare",
+  category: "가격·수익 관리",
+  inputType: "안정 SKU 판매원장, 입고원가 원장, 기존 상품등급·목표가·보호가격",
+  outputType: "완전 일치, 오래된 판정, 구형 규칙 차이, 원인 추가분석 대상",
+  historySupport: true,
+  externalProject: false,
+  note: "비교 결과만 불변 실행원장에 저장합니다. 원인 추가분석 건수가 0이 되기 전에는 가격 실행기로 전달하지 않습니다.",
+  helperNote: "자체 엔진 검증 · 실제 미반영",
+  actionLabel: "그림자 비교 실행",
+  safetyBadge: "가격·등급 쓰기 차단",
+};
+
 export const productDecisionAgentModule: CommerceModule = {
   id: "product-decision-agent",
   title: "발주 추천",
@@ -125,5 +144,6 @@ export const extendedModuleRegistry: readonly CommerceModule[] = [
   shoplingCategoryReviewQueueModule,
   productDecisionAgentModule,
   priceAdjustmentEngineModule,
+  priceGradeShadowComparisonModule,
   shoplingPriceAdjustmentModule,
 ];
