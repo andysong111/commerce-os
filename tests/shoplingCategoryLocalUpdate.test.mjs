@@ -50,8 +50,8 @@ test("카테고리 업데이트 버튼은 GitHub Actions보다 로컬 실행기�
       app.indexOf("category-update-progress.js"),
   );
   assert.match(local, /http:\/\/127\.0\.0\.1:8776/);
-  assert.match(local, /targetAddressSpace:\s*"local"/);
-  assert.doesNotMatch(local, /targetAddressSpace:\s*"loopback"/);
+  assert.match(local, /targetAddressSpace:\s*"loopback"/);
+  assert.doesNotMatch(local, /targetAddressSpace:\s*"local"/);
   assert.match(local, /stopImmediatePropagation/);
   assert.match(local, /category-update\/start/);
   assert.match(local, /category-update\/status/);
