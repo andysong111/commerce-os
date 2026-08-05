@@ -1,3 +1,7 @@
+import {
+  compactPriceGradeBlockedReasonAudit,
+  ensurePriceGradeBlockedReasonAudit,
+} from "@/lib/priceGradeBlockedReasonAudit";
 import { runPriceGradeReceiptShadowBootstrap } from "@/lib/priceGradeReceiptShadowBootstrap";
 
 export const runtime = "nodejs";
@@ -19,10 +23,39 @@ export async function GET(request: Request) {
   }
 
   try {
+    const bootstrap = await runPriceGradeReceiptShadowBootstrap();
+    const audit = compactPriceGradeBlockedReasonAudit(
+      await ensurePriceGradeBlockedReasonAudit(
+        bootstrap.contentFingerprint,
+      ),
+    );
+    console.info(
+      "[price-grade-blocked-reason-audit]",
+      JSON.stringify({
+        processed: audit.processed,
+        reason: audit.reason,
+        inputCount: audit.inputCount,
+        blockedInputCount: audit.blockedInputCount,
+        unblockedInputCount: audit.unblockedInputCount,
+        blockedWithExistingLifecycleCount:
+          audit.blockedWithExistingLifecycleCount,
+        blockedWithoutExistingLifecycleCount:
+          audit.blockedWithoutExistingLifecycleCount,
+        reasonCounts: audit.reasonCounts,
+        combinationCounts: audit.combinationCounts,
+        fallbackProductCount:
+          audit.receiptEvidence.fallbackProductCount,
+        remainingWithoutReceiptCount:
+          audit.receiptEvidence.remainingWithoutReceiptCount,
+        writesEnabled: false,
+      }),
+    );
     return Response.json(
       {
         ok: true,
-        ...(await runPriceGradeReceiptShadowBootstrap()),
+        bootstrap,
+        audit,
+        writesEnabled: false,
       },
       { headers: { "cache-control": "no-store" } },
     );
