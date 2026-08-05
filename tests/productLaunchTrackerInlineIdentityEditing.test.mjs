@@ -61,10 +61,46 @@ test("정적 초기 데이터와 오래된 브라우저 데이터의 AAA451 책�
       { id: "other", modelNumber: "AAA451", productName: "다른 상품" },
     ],
   };
-  const migrated = migrateTrackerModelNumbers(input);
+  const migrated = migrateTrackerModelNumbers(input, "2026-08-05T13:30:00.000Z");
   assert.equal(migrated.changed, true);
   assert.equal(migrated.value.items[0].modelNumber, "AAA452");
   assert.equal(migrated.value.items[1].modelNumber, "AAA451");
+});
+
+test("같은 바코드의 기존 AAA452가 있으면 완료 행을 보존하고 AAA451 중복 행을 삭제 보호한다", () => {
+  const input = {
+    serverDeletedItemIds: ["older-delete"],
+    items: [
+      {
+        id: "duplicate-451",
+        modelNumber: "AAA451",
+        productName: "반자동 책갈피 3P 색상랜덤",
+        barcode: "BCB7-1",
+        stages: { detailPage: { status: "미시작" } },
+        source: { rows: [2478] },
+      },
+      {
+        id: "canonical-452",
+        modelNumber: "AAA452",
+        productName: "반자동 책갈피 3p 색상랜덤",
+        barcode: "BCB7-1",
+        stages: { detailPage: { status: "완료" } },
+        source: { rows: [2376] },
+      },
+    ],
+  };
+  const migrated = migrateTrackerModelNumbers(input, "2026-08-05T13:30:00.000Z");
+  assert.equal(migrated.changed, true);
+  assert.equal(migrated.value.items.length, 1);
+  assert.equal(migrated.value.items[0].id, "canonical-452");
+  assert.equal(migrated.value.items[0].modelNumber, "AAA452");
+  assert.equal(migrated.value.items[0].productName, "반자동 책갈피 3P 색상랜덤");
+  assert.equal(migrated.value.items[0].stages.detailPage.status, "완료");
+  assert.deepEqual(migrated.value.items[0].source.rows.sort(), [2376, 2478]);
+  assert.deepEqual(
+    migrated.value.serverDeletedItemIds.sort(),
+    ["duplicate-451", "older-delete"],
+  );
 });
 
 test("옵션 포커스 기억 함수는 브라우저가 아닌 테스트 환경에서 안전하게 무시한다", () => {
