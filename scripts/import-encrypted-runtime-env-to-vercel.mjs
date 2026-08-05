@@ -55,42 +55,34 @@ function fail(code) {
   throw new Error(code);
 }
 
-function runNpxVercel(tempProject, args, input) {
+function runNpxVercel(args, { tempProject = null, input } = {}) {
   const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  const result = spawnSync(
-    npx,
-    [
-      "--yes",
-      "vercel@latest",
+  const command = ["--yes", "vercel@latest", ...args];
+  if (tempProject) {
+    command.push(
       "--scope",
       VERCEL_PROJECT.scope,
       "--cwd",
       tempProject,
-      "--no-color",
-      ...args,
-    ],
-    {
-      input,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-      env: {
-        ...process.env,
-        VERCEL_TELEMETRY_DISABLED: "1",
-      },
-    },
-  );
-  if (result.error || result.status !== 0) {
-    return {
-      ok: false,
-      status: result.status ?? -1,
-      stdout: String(result.stdout || ""),
-    };
+    );
   }
+  command.push("--no-color");
+
+  const result = spawnSync(npx, command, {
+    input,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: false,
+    env: {
+      ...process.env,
+      VERCEL_TELEMETRY_DISABLED: "1",
+    },
+  });
   return {
-    ok: true,
-    status: 0,
+    ok: !result.error && result.status === 0,
+    status: result.status ?? -1,
     stdout: String(result.stdout || ""),
+    errorCode: result.error?.code || "",
   };
 }
 
@@ -169,13 +161,19 @@ try {
     "utf8",
   );
 
-  const whoami = runNpxVercel(tempProject, ["whoami"]);
-  if (!whoami.ok) fail("VERCEL_CLI_AUTH_REQUIRED");
+  // Run the same command the operator just used successfully. `whoami` must
+  // precede global options; placing --scope/--cwd before the command makes
+  // newer Vercel CLI versions exit as though no authenticated command ran.
+  const whoami = runNpxVercel(["whoami"]);
+  if (!whoami.ok) {
+    fail(
+      `VERCEL_CLI_AUTH_REQUIRED:${whoami.status}:${whoami.errorCode || "CLI"}`,
+    );
+  }
 
   for (const name of TARGET_KEYS) {
     const value = variables[name];
     const result = runNpxVercel(
-      tempProject,
       [
         "env",
         "add",
@@ -184,13 +182,18 @@ try {
         "--force",
         "--sensitive",
       ],
-      `${value}\n`,
+      {
+        tempProject,
+        input: `${value}\n`,
+      },
     );
     variables[name] = "";
     if (!result.ok) fail(`VERCEL_ENV_SET_FAILED:${name}:${result.status}`);
   }
 
-  const listed = runNpxVercel(tempProject, ["env", "ls", "production"]);
+  const listed = runNpxVercel(["env", "ls", "production"], {
+    tempProject,
+  });
   if (
     !listed.ok ||
     TARGET_KEYS.some((name) => !listed.stdout.includes(name))
@@ -199,13 +202,13 @@ try {
   }
 
   const redeploy = runNpxVercel(
-    tempProject,
     [
       "redeploy",
       VERCEL_PROJECT.productionAlias,
       "--target=production",
       "--no-wait",
     ],
+    { tempProject },
   );
   if (!redeploy.ok) fail(`VERCEL_REDEPLOY_FAILED:${redeploy.status}`);
 
