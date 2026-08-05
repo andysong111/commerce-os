@@ -48,3 +48,9 @@ test("등록 작업은 기존 진행관리 샵플링 API를 재사용하고 새�
   assert.match(connectedSource, /registrationPartial/);
   assert.match(connectedSource, /registrationComplete/);
 });
+
+test("샵플링 등록 후 중앙 가격정책 확인기가 같은 상품출시플로우 화면에서 계속 실행된다", () => {
+  assert.match(pageSource, /ProductLaunchTrackerCanonicalPriceBridge/);
+  assert.match(pageSource, /<ProductLaunchTrackerCanonicalPriceBridge\s*\/>/);
+  assert.match(connectedSource, /pricePolicy\.status/);
+});
