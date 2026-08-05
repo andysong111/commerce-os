@@ -1,45 +1,22 @@
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  type ProductDecisionRow,
+  type ProductDecisionScore,
+  type ProductDecisionSnapshot,
+} from "@/lib/productDecisionSnapshot";
+
+export type { ProductDecisionRow, ProductDecisionScore, ProductDecisionSnapshot };
+
 const DEFAULT_PRODUCT_DECISION_AGENT_BASE_URL =
   "https://commerce-os-product-decision-agent.andy123df23.chatgpt.site";
-
-export type ProductDecisionScore = {
-  total?: number;
-};
-
-export type ProductDecisionRow = {
-  barcode?: string;
-  name?: string;
-  modelNo?: string | null;
-  status?: string;
-  trend?: string;
-  recommendedQty?: number;
-  rawRecommendedQty?: number;
-  forecastUnits?: number;
-  expectedCost?: number;
-  estimatedStock?: number;
-  openCommitment?: number;
-  securedQuantity?: number;
-  netRequiredRaw?: number;
-  inventoryKnown?: boolean;
-  score?: ProductDecisionScore;
-};
-
-export type ProductDecisionSnapshot = {
-  mode?: "DEMO" | "LIVE";
-  notice?: string;
-  runId?: string;
-  runStatus?: string;
-  generatedAt?: string;
-  periodLabel?: string;
-  budget?: number;
-  budgetBasis?: string;
-  expectedSpend?: number;
-  products?: ProductDecisionRow[];
-};
+const PRODUCT_DECISION_SNAPSHOT_OPERATION =
+  "PRODUCT_DECISION_SNAPSHOT_IMPORT";
 
 export type ProductDecisionIntegrationResult = {
   snapshot: ProductDecisionSnapshot;
   error: string | null;
   sourceHost: string;
+  sourceMode: "internal_snapshot" | "legacy_site";
   writesEnabled: false;
 };
 
@@ -82,7 +59,56 @@ function normalizeSnapshot(value: unknown): ProductDecisionSnapshot {
   };
 }
 
+async function loadInternalSnapshot() {
+  const admin = await createSupabaseAdminClient();
+  if (!admin) return { snapshot: null, error: null };
+
+  const result = await admin
+    .from("commerce_operation_runs")
+    .select("result_snapshot,started_at,source_event_id")
+    .eq("operation_type", PRODUCT_DECISION_SNAPSHOT_OPERATION)
+    .eq("status", "SUCCEEDED")
+    .order("started_at", { ascending: false })
+    .limit(1);
+  if (result.error) {
+    return { snapshot: null, error: result.error.message };
+  }
+
+  const row = Array.isArray(result.data) ? result.data[0] : null;
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return { snapshot: null, error: null };
+  }
+
+  try {
+    return {
+      snapshot: normalizeSnapshot(
+        (row as { result_snapshot?: unknown }).result_snapshot,
+      ),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      snapshot: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "내부 발주 추천 스냅샷을 읽지 못했습니다.",
+    };
+  }
+}
+
 export async function loadProductDecisionSnapshot(): Promise<ProductDecisionIntegrationResult> {
+  const internal = await loadInternalSnapshot();
+  if (internal.snapshot) {
+    return {
+      snapshot: internal.snapshot,
+      error: null,
+      sourceHost: "Ops Center Supabase · 검증 D1 백업",
+      sourceMode: "internal_snapshot",
+      writesEnabled: false,
+    };
+  }
+
   const baseUrl = productDecisionBaseUrl();
   const sourceHost = safeSourceHost(baseUrl);
 
@@ -103,16 +129,21 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
       snapshot: normalizeSnapshot(await response.json()),
       error: null,
       sourceHost,
+      sourceMode: "legacy_site",
       writesEnabled: false,
     };
   } catch (error) {
+    const legacyError =
+      error instanceof Error
+        ? error.message
+        : "기존 발주 추천 데이터를 불러오지 못했습니다.";
     return {
       snapshot: emptySnapshot(),
-      error:
-        error instanceof Error
-          ? error.message
-          : "기존 발주 추천 데이터를 불러오지 못했습니다.",
+      error: internal.error
+        ? `내부 스냅샷 확인 실패 · ${internal.error} / ${legacyError}`
+        : legacyError,
       sourceHost,
+      sourceMode: "legacy_site",
       writesEnabled: false,
     };
   }

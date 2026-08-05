@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { loadProductDecisionSnapshot } from "@/lib/integrations/productDecisionAgent";
 
@@ -28,14 +29,14 @@ function statusTone(status: string | null | undefined) {
   if (status === "소량 검토") {
     return "border-amber-200 bg-amber-50 text-amber-800";
   }
-  if (status === "보류") {
+  if (status === "보류" || status === "발주 보류") {
     return "border-slate-200 bg-slate-100 text-slate-700";
   }
   return "border-slate-200 bg-white text-slate-700";
 }
 
 export default async function ProductDecisionAgentPage() {
-  const { snapshot, error, sourceHost, writesEnabled } =
+  const { snapshot, error, sourceHost, sourceMode, writesEnabled } =
     await loadProductDecisionSnapshot();
   const products = (snapshot.products ?? []).slice(0, 500);
   const recommendedCount = products.filter(
@@ -44,28 +45,49 @@ export default async function ProductDecisionAgentPage() {
   const reviewCount = products.filter(
     (product) => product.status === "소량 검토",
   ).length;
+  const internalSnapshot = sourceMode === "internal_snapshot";
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="COMMERCE OS · 내부 이전 1단계"
         title="발주 추천"
-        description="기존 발주 추천 엔진의 최신 계산 결과를 Ops Center 안에서 조회합니다. 현재는 그림자 운영 단계이며 승인·중국 주문 전송·실제 주문 기능은 모두 차단되어 있습니다."
+        description="기존 발주 추천의 계산 결과를 Ops Center 안에서 조회합니다. 현재는 그림자 운영 단계이며 승인·중국 주문 전송·실제 주문 기능은 모두 차단되어 있습니다."
+        actions={
+          <Link
+            href="/product-decision-agent/migration"
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            검증 백업 복원
+          </Link>
+        }
       />
 
-      <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-950">
+      <section
+        className={`rounded-2xl border p-5 text-sm ${
+          internalSnapshot
+            ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+            : "border-blue-200 bg-blue-50 text-blue-950"
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <strong className="block text-base">Ops Center 내부 조회 전환 완료</strong>
+            <strong className="block text-base">
+              {internalSnapshot
+                ? "Ops Center 내부 조회 전환 완료 · 검증 백업 복원됨"
+                : "Ops Center 내부 조회 전환 완료"}
+            </strong>
             <p className="mt-1 leading-6">
-              데이터 원본은 아직 기존 발주 추천 엔진이며, Ops Center 서버가 읽기 전용으로 가져옵니다.
+              {internalSnapshot
+                ? "검증된 기존 D1 백업의 최신 발주 계산을 Ops Center 운영 원장에서 직접 읽습니다."
+                : "데이터 원본은 아직 기존 발주 추천 엔진이며, Ops Center 서버가 읽기 전용으로 가져옵니다."}
             </p>
           </div>
-          <span className="inline-flex rounded-full border border-blue-300 bg-white px-3 py-1 text-xs font-black text-blue-800">
+          <span className="inline-flex rounded-full border border-current/20 bg-white px-3 py-1 text-xs font-black">
             {writesEnabled ? "쓰기 허용" : "쓰기 차단"}
           </span>
         </div>
-        <p className="mt-3 text-xs text-blue-700">현재 원본: {sourceHost}</p>
+        <p className="mt-3 text-xs opacity-75">현재 원본: {sourceHost}</p>
       </section>
 
       {error ? (
@@ -73,8 +95,14 @@ export default async function ProductDecisionAgentPage() {
           <strong className="block text-base">발주 추천 데이터를 불러오지 못했습니다.</strong>
           <p className="mt-2 break-words">{error}</p>
           <p className="mt-2 text-xs leading-5 text-rose-700">
-            기존 발주 추천 Site에는 영향을 주지 않았습니다. 연결 환경변수 또는 기존 Site 상태만 확인하면 됩니다.
+            기존 발주 추천 Site에는 영향을 주지 않았습니다. 검증 백업을 내부 원장에 복원하면 외부 Site 인증과 무관하게 조회할 수 있습니다.
           </p>
+          <Link
+            href="/product-decision-agent/migration"
+            className="mt-4 inline-flex rounded-lg bg-rose-700 px-3 py-2 text-xs font-bold text-white hover:bg-rose-800"
+          >
+            검증 백업 복원 화면 열기
+          </Link>
         </section>
       ) : null}
 
