@@ -1,0 +1,54 @@
+name: Fix product launch detail and link regression
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.event.pull_request.head.ref == 'fix/product-launch-detail-link-regression-20260806'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Apply regression fix
+        run: |
+          node --check scripts/run-product-launch-detail-link-regression-fix.mjs
+          node scripts/run-product-launch-detail-link-regression-fix.mjs
+          node --check public/product-launch-tracker-app/optimized-app.js
+          node --check public/product-launch-tracker-app/detail-page-dock.js
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Focused product launch tests
+        run: node --experimental-strip-types --test tests/productLaunchTrackerOptimized.test.mjs tests/productLaunchTrackerOptimizedContracts.test.mjs tests/productLaunchTrackerSorting.test.mjs
+      - name: Full test suite
+        run: npm test
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Diff safety check
+        run: git diff --check
+      - name: Commit verified source changes
+        run: |
+          rm -f scripts/fix-product-launch-detail-link-regression.mjs
+          rm -f scripts/run-product-launch-detail-link-regression-fix.mjs
+          rm -f .github/workflows/fix-product-launch-detail-link-regression.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: restore launch detail action and server link lookup"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
