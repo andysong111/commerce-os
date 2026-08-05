@@ -1,0 +1,44 @@
+name: Shopling Live Aggregation CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/shopling/shoplingLiveAggregation.ts"
+      - "src/lib/shopling/shoplingNormalize.ts"
+      - "tests/shoplingLiveAggregation.test.mjs"
+      - ".github/workflows/shopling-live-aggregation-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopling-live-aggregation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aggregation-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint live aggregation
+        run: >-
+          npx eslint
+          src/lib/shopling/shoplingLiveAggregation.ts
+          src/lib/shopling/shoplingNormalize.ts
+          tests/shoplingLiveAggregation.test.mjs
+      - name: Run aggregation and full decision assembly tests
+        run: >-
+          node --experimental-strip-types --test
+          tests/shoplingLiveAggregation.test.mjs
+      - name: Build Ops Center
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://shopling-live-aggregation-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_shopling_live_aggregation_build_check
