@@ -25,3 +25,15 @@ test("exposes authenticated receipt cache read and push endpoints", async () => 
   assert.match(writer, /MAX_RECEIPTS_PER_PAGE = 500/);
   assert.match(writer, /가격조정 입고원가 캐시/);
 });
+
+test("receipt cache backfill can use an existing shared Commerce OS service secret", async () => {
+  const writer = await source(
+    "../src/app/api/integrations/price-adjustment/receipt-cache/push/route.ts",
+  );
+  assert.match(writer, /PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET/);
+  assert.match(writer, /PRODUCT_MASTER_INTEGRATION_SECRET/);
+  assert.match(writer, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
+  assert.match(writer, /timingSafeEqual/);
+  assert.match(writer, /candidates\.some\(\(expected\) => secureEqual\(expected, supplied\)\)/);
+  assert.doesNotMatch(writer, /console\.log[^\n]*(?:secret|supplied|expected)/i);
+});
