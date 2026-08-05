@@ -26,7 +26,9 @@ if (detailPageMode === "worker") {
     }
   });
 } else {
+  await import("./tracker-deleted-seed-filter.js");
   await import("./bootstrap.js");
+  await import("./selected-row-delete.js");
   await import("./table-horizontal-scroll.js");
   await import("./dialog-close-fix.js");
   await import("./product-launch-flow-handoff.js");
