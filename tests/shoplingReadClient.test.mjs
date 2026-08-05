@@ -1,36 +1,64 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
+import ts from "typescript";
 import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
 
-const xml = await importTranspiledTypeScript(
-  new URL("../src/lib/shopling/simpleXml.ts", import.meta.url),
-);
-const client = await importTranspiledTypeScript(
-  new URL("../src/lib/shopling/shoplingReadClient.ts", import.meta.url),
-  {
-    replacements: [
-      {
-        from: 'import { parseSimpleXml } from "@/lib/shopling/simpleXml";',
-        to: `const { parseSimpleXml } = await import(${JSON.stringify(
-          new URL("../src/lib/shopling/simpleXml.ts", import.meta.url).href,
-        )});`,
-      },
-    ],
-  },
-);
+async function loadShoplingClient() {
+  const directory = await mkdtemp(
+    join(dirname(new URL(import.meta.url).pathname), ".shopling-client-"),
+  );
+  try {
+    const xmlSource = await readFile("src/lib/shopling/simpleXml.ts", "utf8");
+    const clientSource = (
+      await readFile("src/lib/shopling/shoplingReadClient.ts", "utf8")
+    ).replace(
+      'import { parseSimpleXml } from "@/lib/shopling/simpleXml";',
+      'import { parseSimpleXml } from "./simpleXml.mjs";',
+    );
+    const compile = (source, fileName) =>
+      ts.transpileModule(source, {
+        compilerOptions: {
+          module: ts.ModuleKind.ESNext,
+          target: ts.ScriptTarget.ES2022,
+        },
+        fileName,
+      }).outputText;
+    await writeFile(
+      join(directory, "simpleXml.mjs"),
+      compile(xmlSource, "simpleXml.ts"),
+    );
+    await writeFile(
+      join(directory, "shoplingReadClient.mjs"),
+      compile(clientSource, "shoplingReadClient.ts"),
+    );
+    return {
+      xml: await import(
+        `${pathToFileURL(join(directory, "simpleXml.mjs")).href}?v=${Date.now()}`
+      ),
+      client: await import(
+        `${pathToFileURL(join(directory, "shoplingReadClient.mjs")).href}?v=${Date.now()}`
+      ),
+    };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const loaded = await loadShoplingClient();
 const normalize = await importTranspiledTypeScript(
   new URL("../src/lib/shopling/shoplingNormalize.ts", import.meta.url),
 );
 
-const {
-  parseSimpleXml,
-} = xml;
+const { parseSimpleXml } = loaded.xml;
 const {
   buildShoplingReadRequestXml,
   parseShoplingReadResponse,
   shoplingReadConfigFromEnv,
   splitShoplingDateRange,
-} = client;
+} = loaded.client;
 const {
   classifyShoplingClaim,
   normalizeShoplingClaim,
