@@ -30,6 +30,7 @@ if (detailPageMode === "worker") {
   await import("./tracker-deleted-seed-filter.js");
   await import("./single-option-barcode-sync.js");
   await import("./bootstrap.js");
+  await import("./manual-detail-add.js");
   await import("./selected-row-delete.js");
   await import("./single-row-add.js");
   await import("./single-row-add-barcode-guard.js");
