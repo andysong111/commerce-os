@@ -34,6 +34,7 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+const corruptParts = [];
 const encodedParts = await Promise.all(
   partPaths.map(async (partPath, index) => {
     const part = (await readFile(partPath, "utf8")).trim();
@@ -41,13 +42,16 @@ const encodedParts = await Promise.all(
     const expected = expectedParts[index];
     console.log(`${partPath}: length=${actual.length} sha256=${actual.sha256}`);
     if (actual.length !== expected.length || actual.sha256 !== expected.sha256) {
-      throw new Error(
-        `Corrupt payload part ${index + 1}: expected length=${expected.length} sha256=${expected.sha256}`,
+      corruptParts.push(
+        `part ${index + 1}: expected length=${expected.length} sha256=${expected.sha256}`,
       );
     }
     return part;
   }),
 );
+if (corruptParts.length) {
+  throw new Error(`Corrupt payload parts:\n${corruptParts.join("\n")}`);
+}
 const encoded = encodedParts.join("");
 
 if (!encoded) {
