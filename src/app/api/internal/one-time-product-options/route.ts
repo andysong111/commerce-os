@@ -9,137 +9,229 @@ const UPDATES = [
   {
     "modelNumber": "AAA448",
     "productName": "책상정리 미니서랍 화이트",
-    "options": ["1단", "2단", "3단"]
+    "options": [
+      "1단",
+      "2단",
+      "3단"
+    ]
   },
   {
     "modelNumber": "AAA449",
     "productName": "투명 굿즈서랍 수납함",
-    "options": ["화이트", "핑크", "블루"]
+    "options": [
+      "화이트",
+      "핑크",
+      "블루"
+    ]
   },
   {
     "modelNumber": "AAA446",
     "productName": "볼펜꽂이 미니 가죽노트",
-    "options": ["하늘", "블랙", "그레이", "그린", "네이비", "핑크", "브라운", "전용미니펜 5자루"]
+    "options": [
+      "하늘",
+      "블랙",
+      "그레이",
+      "그린",
+      "네이비",
+      "핑크",
+      "브라운",
+      "전용미니펜 5자루"
+    ]
   },
   {
     "modelNumber": "AAA484",
     "productName": "크루아상 쿠션",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA479",
     "productName": "헤드레스트 스웨이드 후크",
-    "options": ["브라운", "블랙", "그레이"]
+    "options": [
+      "브라운",
+      "블랙",
+      "그레이"
+    ]
   },
   {
     "modelNumber": "AAA467",
     "productName": "모자세탁망 색상랜덤",
-    "options": ["색상랜덤 발송"]
+    "options": [
+      "색상랜덤 발송"
+    ]
   },
   {
     "modelNumber": "AAA465",
     "productName": "쿨수건 원형파우치포함",
-    "options": ["블루", "핑크"]
+    "options": [
+      "블루",
+      "핑크"
+    ]
   },
   {
     "modelNumber": "AAA465",
     "productName": "쿨수건 사각파우치포함",
-    "options": ["블루", "핑크"]
+    "options": [
+      "블루",
+      "핑크"
+    ]
   },
   {
     "modelNumber": "AAA471",
     "productName": "사각 샤워헤드기 블랙",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA473",
     "productName": "스타트버튼 배트맨커버 블랙",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA475",
     "productName": "실리콘 차량용핸들커버 블랙",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA476",
     "productName": "문콕방지 실리콘 스티커 6개입",
-    "options": ["6개입 발송"]
+    "options": [
+      "6개입 발송"
+    ]
   },
   {
     "modelNumber": "AAA477",
     "productName": "무소음 차량용 스퀴지",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA483",
     "productName": "대형 에어 반달쿠션",
-    "options": ["블루", "그레이"]
+    "options": [
+      "블루",
+      "그레이"
+    ]
   },
   {
     "modelNumber": "AAA489",
     "productName": "걸이형 모공브러쉬 블랙",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA491",
     "productName": "발바닥 지압스텝퍼 색상랜덤",
-    "options": ["색상랜덤 발송"]
+    "options": [
+      "색상랜덤 발송"
+    ]
   },
   {
     "modelNumber": "AAA492",
     "productName": "미니짐볼 300g 색상랜덤",
-    "options": ["색상랜덤 발송"]
+    "options": [
+      "색상랜덤 발송"
+    ]
   },
   {
     "modelNumber": "AAA490",
     "productName": "걸이형 모공 롱브러쉬",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA384",
     "productName": "스케이트보드 곰돌이",
-    "options": ["대쉬보드형", "네비게이션형"]
+    "options": [
+      "대쉬보드형",
+      "네비게이션형"
+    ]
   },
   {
     "modelNumber": "AAA410",
     "productName": "곰돌이 털모자 A형",
-    "options": ["핑크"]
+    "options": [
+      "핑크"
+    ]
   },
   {
     "modelNumber": "AAA412",
     "productName": "여우귀 넥워머",
-    "options": ["화이트"]
+    "options": [
+      "화이트"
+    ]
   },
   {
     "modelNumber": "AAA413",
     "productName": "곰돌이 목도리 넥워머",
-    "options": ["브라운", "베이지", "화이트"]
+    "options": [
+      "브라운",
+      "베이지",
+      "화이트"
+    ]
   },
   {
     "modelNumber": "AAA414",
     "productName": "곰돌이 방울 털모자",
-    "options": ["브라운", "베이지", "화이트", "핑크"]
+    "options": [
+      "브라운",
+      "베이지",
+      "화이트",
+      "핑크"
+    ]
   },
   {
     "modelNumber": "AAA444",
     "productName": "투명 라면정리함",
-    "options": ["단품"]
+    "options": [
+      "단품"
+    ]
   },
   {
     "modelNumber": "AAA451",
     "productName": "반자동 책갈피 3P 색상랜덤",
-    "options": ["색상랜덤 발송"]
+    "options": [
+      "색상랜덤 발송"
+    ]
   },
   {
     "modelNumber": "AAA455",
     "productName": "발편한 등산화",
-    "options": ["블랙 260", "블랙 270", "블랙 280", "그레이 260", "그레이 270", "그레이 280", "카키 260", "카키 270", "카키 280"]
+    "options": [
+      "블랙 260",
+      "블랙 270",
+      "블랙 280",
+      "그레이 260",
+      "그레이 270",
+      "그레이 280",
+      "카키 260",
+      "카키 270",
+      "카키 280"
+    ]
   },
   {
     "modelNumber": "AAA456",
     "productName": "메쉬 여성운동화",
-    "options": ["블랙 230", "블랙 240", "블랙 250", "핑크 230", "핑크 240", "핑크 250", "화이트 230", "화이트 240", "화이트 250"]
+    "options": [
+      "블랙 230",
+      "블랙 240",
+      "블랙 250",
+      "핑크 230",
+      "핑크 240",
+      "핑크 250",
+      "화이트 230",
+      "화이트 240",
+      "화이트 250"
+    ]
   }
 ] as const;
 
@@ -155,6 +247,7 @@ type TrackerItem = {
 type TrackerState = {
   schemaVersion?: unknown;
   savedAt?: unknown;
+  policy?: unknown;
   items?: unknown;
   [key: string]: unknown;
 };
@@ -305,17 +398,19 @@ function resolveTargets(items: TrackerItem[]) {
     const exact = modelMatches.filter(
       (entry) => normalizeName(entry.item.productName) === normalizeName(update.productName),
     );
-    const candidates = exact.length ? exact : modelMatches.length === 1 ? modelMatches : [];
-
-    if (candidates.length === 1) {
-      matches.push({ ...candidates[0], update });
-    } else if (candidates.length === 0) {
+    if (exact.length > 0) {
+      for (const candidate of exact) {
+        matches.push({ ...candidate, update });
+      }
+    } else if (modelMatches.length === 1) {
+      matches.push({ ...modelMatches[0], update });
+    } else if (modelMatches.length === 0) {
       missing.push({ modelNumber: update.modelNumber, productName: update.productName });
     } else {
       ambiguous.push({
         modelNumber: update.modelNumber,
         productName: update.productName,
-        candidateNames: candidates.map((entry) => String(entry.item.productName ?? "")),
+        candidateNames: modelMatches.map((entry) => String(entry.item.productName ?? "")),
       });
     }
   }
