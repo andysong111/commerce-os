@@ -21,6 +21,7 @@ type TrackerState = {
   schemaVersion?: unknown;
   savedAt?: unknown;
   items?: unknown;
+  serverDeletedItemIds?: unknown;
   [key: string]: unknown;
 };
 
@@ -39,19 +40,33 @@ export async function GET(request: Request) {
   }
 
   const { row, state, items } = rowResult;
-  const targetIndexes = items
+  const targetEntries = items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => isExactProduct(item, CURRENT_MODEL));
-  const nextModelItems = items.filter(
-    (item) => normalizeModelNumber(item.modelNumber) === NEXT_MODEL,
-  );
+  const nextModelEntries = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => normalizeModelNumber(item.modelNumber) === NEXT_MODEL);
+  const duplicateMergeReady =
+    targetEntries.length === 1 &&
+    nextModelEntries.length === 1 &&
+    sameDuplicateIdentity(targetEntries[0].item, nextModelEntries[0].item);
+  const plannedAction =
+    targetEntries.length !== 1
+      ? "blocked_target_count"
+      : nextModelEntries.length === 0
+        ? "rename"
+        : duplicateMergeReady
+          ? "merge_duplicate_keep_existing_aaa452"
+          : "blocked_aaa452_conflict";
   const report = {
     sourceUpdatedAt: String(row.updated_at ?? ""),
     totalItems: items.length,
-    currentExactCount: targetIndexes.length,
-    nextModelCount: nextModelItems.length,
-    currentTargets: targetIndexes.map(({ item }) => summarize(item)),
-    nextModelItems: nextModelItems.map(summarize),
+    currentExactCount: targetEntries.length,
+    nextModelCount: nextModelEntries.length,
+    duplicateMergeReady,
+    plannedAction,
+    currentTargets: targetEntries.map(({ item }) => summarize(item)),
+    nextModelItems: nextModelEntries.map(({ item }) => summarize(item)),
   };
 
   const apply = url.searchParams.get("apply") === "1";
@@ -73,7 +88,7 @@ export async function GET(request: Request) {
       { status: 409 },
     );
   }
-  if (targetIndexes.length !== 1) {
+  if (targetEntries.length !== 1) {
     return Response.json(
       {
         ok: false,
@@ -84,35 +99,56 @@ export async function GET(request: Request) {
       { status: 409 },
     );
   }
-  if (nextModelItems.length > 0) {
+
+  const updatedAt = new Date().toISOString();
+  let nextItems: TrackerItem[];
+  let nextDeletedIds = stringArray(state.serverDeletedItemIds);
+  let action: "renamed" | "merged_duplicate";
+
+  if (nextModelEntries.length === 0) {
+    const targetIndex = targetEntries[0].index;
+    nextItems = items.map((item, index) =>
+      index === targetIndex
+        ? {
+            ...item,
+            modelNumber: NEXT_MODEL,
+            productName: PRODUCT_NAME,
+            updatedAt,
+            updatedBy: "승준",
+          }
+        : item,
+    );
+    action = "renamed";
+  } else if (duplicateMergeReady) {
+    const target = targetEntries[0];
+    const canonical = nextModelEntries[0];
+    const targetId = String(target.item.id ?? "").trim();
+    const merged = mergeDuplicateItem(canonical.item, target.item, updatedAt);
+    nextItems = items.flatMap((item, index) => {
+      if (index === target.index) return [];
+      if (index === canonical.index) return [merged];
+      return [item];
+    });
+    nextDeletedIds = [...new Set([...nextDeletedIds, targetId].filter(Boolean))];
+    action = "merged_duplicate";
+  } else {
     return Response.json(
       {
         ok: false,
-        code: "AAA452_ALREADY_USED",
-        message: "AAA452가 이미 다른 행에서 사용 중이어서 변경하지 않았습니다.",
+        code: "AAA452_CONFLICT_NOT_EQUIVALENT",
+        message: "AAA452가 이미 사용 중이며 동일 중복 행으로 확정할 수 없어 변경하지 않았습니다.",
         ...report,
       },
       { status: 409 },
     );
   }
 
-  const targetIndex = targetIndexes[0].index;
-  const updatedAt = new Date().toISOString();
-  const nextItems = items.map((item, index) =>
-    index === targetIndex
-      ? {
-          ...item,
-          modelNumber: NEXT_MODEL,
-          updatedAt,
-          updatedBy: "승준",
-        }
-      : item,
-  );
   const nextState = {
     ...state,
     schemaVersion: Number(state.schemaVersion ?? row.schema_version ?? 3),
     savedAt: updatedAt,
     items: nextItems,
+    serverDeletedItemIds: nextDeletedIds,
   };
 
   const writeResponse = await fetch(
@@ -144,10 +180,12 @@ export async function GET(request: Request) {
   return Response.json({
     ok: true,
     mode: "applied",
-    changed: 1,
+    action,
     from: CURRENT_MODEL,
     to: NEXT_MODEL,
     productName: PRODUCT_NAME,
+    totalBefore: items.length,
+    totalAfter: nextItems.length,
     updatedAt,
   });
 }
@@ -155,15 +193,130 @@ export async function GET(request: Request) {
 function isExactProduct(item: TrackerItem, modelNumber: string) {
   return (
     normalizeModelNumber(item.modelNumber) === modelNumber &&
-    String(item.productName ?? "").trim() === PRODUCT_NAME
+    normalizeProductName(item.productName) === normalizeProductName(PRODUCT_NAME)
   );
+}
+
+function sameDuplicateIdentity(left: TrackerItem, right: TrackerItem) {
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftBarcode = String(leftRecord.barcode ?? "").trim().toUpperCase();
+  const rightBarcode = String(rightRecord.barcode ?? "").trim().toUpperCase();
+  return (
+    normalizeProductName(left.productName) === normalizeProductName(right.productName) &&
+    Boolean(leftBarcode && rightBarcode && leftBarcode === rightBarcode) &&
+    JSON.stringify(readSaleOptions(leftRecord.orderOptions)) ===
+      JSON.stringify(readSaleOptions(rightRecord.orderOptions))
+  );
+}
+
+function mergeDuplicateItem(
+  canonicalItem: TrackerItem,
+  duplicateItem: TrackerItem,
+  updatedAt: string,
+) {
+  const canonical = canonicalItem as Record<string, unknown>;
+  const duplicate = duplicateItem as Record<string, unknown>;
+  return {
+    ...duplicate,
+    ...canonical,
+    modelNumber: NEXT_MODEL,
+    productName: PRODUCT_NAME,
+    barcode:
+      String(canonical.barcode ?? "").trim() ||
+      String(duplicate.barcode ?? "").trim(),
+    orderOptions:
+      Array.isArray(canonical.orderOptions) && canonical.orderOptions.length
+        ? canonical.orderOptions
+        : duplicate.orderOptions,
+    shoplingProducts: mergeShoplingProducts(
+      duplicate.shoplingProducts,
+      canonical.shoplingProducts,
+    ),
+    stages: mergeStages(canonical.stages, duplicate.stages),
+    source: mergeSource(canonical.source, duplicate.source),
+    notes: mergeText(duplicate.notes, canonical.notes),
+    updatedAt,
+    updatedBy: "승준",
+  };
+}
+
+function mergeShoplingProducts(duplicateValue: unknown, canonicalValue: unknown) {
+  const duplicate = asRecord(duplicateValue);
+  const canonical = asRecord(canonicalValue);
+  const keys = new Set([...Object.keys(duplicate), ...Object.keys(canonical)]);
+  return Object.fromEntries(
+    [...keys].map((key) => {
+      const left = asRecord(duplicate[key]);
+      const right = asRecord(canonical[key]);
+      return [
+        key,
+        {
+          ...left,
+          ...right,
+          goodsKey:
+            String(right.goodsKey ?? "").trim() ||
+            String(left.goodsKey ?? "").trim(),
+        },
+      ];
+    }),
+  );
+}
+
+function mergeStages(canonicalValue: unknown, duplicateValue: unknown) {
+  const canonical = asRecord(canonicalValue);
+  const duplicate = asRecord(duplicateValue);
+  const keys = new Set([...Object.keys(duplicate), ...Object.keys(canonical)]);
+  return Object.fromEntries(
+    [...keys].map((key) => {
+      const left = asRecord(canonical[key]);
+      const right = asRecord(duplicate[key]);
+      return [
+        key,
+        stageRank(left.status) >= stageRank(right.status)
+          ? { ...right, ...left }
+          : { ...left, ...right },
+      ];
+    }),
+  );
+}
+
+function mergeSource(canonicalValue: unknown, duplicateValue: unknown) {
+  const canonical = asRecord(canonicalValue);
+  const duplicate = asRecord(duplicateValue);
+  return {
+    ...duplicate,
+    ...canonical,
+    rows: uniqueUnknownValues(duplicate.rows, canonical.rows),
+    sheetRowRefs: uniqueUnknownValues(
+      duplicate.sheetRowRefs,
+      canonical.sheetRowRefs,
+    ),
+  };
+}
+
+function mergeText(leftValue: unknown, rightValue: unknown) {
+  const values = [leftValue, rightValue]
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+  return [...new Set(values)].join(" · ");
+}
+
+function readSaleOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((option) => {
+      const record = asRecord(option);
+      return `${String(record.saleOption ?? "").trim()}|${String(record.barcode ?? "").trim().toUpperCase()}`;
+    })
+    .sort();
 }
 
 function summarize(item: TrackerItem) {
   const candidate = item as Record<string, unknown>;
   const orderOptions = Array.isArray(candidate.orderOptions)
     ? candidate.orderOptions.map((option) => {
-        const value = option && typeof option === "object" ? option as Record<string, unknown> : {};
+        const value = asRecord(option);
         return {
           saleOption: String(value.saleOption ?? ""),
           barcode: String(value.barcode ?? ""),
@@ -171,32 +324,18 @@ function summarize(item: TrackerItem) {
         };
       })
     : [];
-  const shoplingProducts =
-    candidate.shoplingProducts && typeof candidate.shoplingProducts === "object"
-      ? Object.fromEntries(
-          Object.entries(candidate.shoplingProducts as Record<string, unknown>).map(
-            ([key, value]) => {
-              const product = value && typeof value === "object"
-                ? value as Record<string, unknown>
-                : {};
-              return [key, String(product.goodsKey ?? "")];
-            },
-          ),
-        )
-      : {};
-  const stages =
-    candidate.stages && typeof candidate.stages === "object"
-      ? Object.fromEntries(
-          Object.entries(candidate.stages as Record<string, unknown>).map(
-            ([key, value]) => {
-              const stage = value && typeof value === "object"
-                ? value as Record<string, unknown>
-                : {};
-              return [key, String(stage.status ?? "")];
-            },
-          ),
-        )
-      : {};
+  const shoplingProducts = Object.fromEntries(
+    Object.entries(asRecord(candidate.shoplingProducts)).map(([key, value]) => {
+      const product = asRecord(value);
+      return [key, String(product.goodsKey ?? "")];
+    }),
+  );
+  const stages = Object.fromEntries(
+    Object.entries(asRecord(candidate.stages)).map(([key, value]) => {
+      const stage = asRecord(value);
+      return [key, String(stage.status ?? "")];
+    }),
+  );
 
   return {
     id: String(item.id ?? ""),
@@ -218,6 +357,44 @@ function normalizeModelNumber(value: unknown) {
   const compact = String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
   const match = compact.match(/^AAA0*(\d+)$/);
   return match ? `AAA${match[1].padStart(3, "0")}` : compact;
+}
+
+function normalizeProductName(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLocaleLowerCase("ko-KR")
+    .replace(/\s+/g, " ");
+}
+
+function stageRank(value: unknown) {
+  return (
+    {
+      미시작: 0,
+      "진행 중": 1,
+      보류: 2,
+      완료: 3,
+      제외: 3,
+    }[String(value ?? "").trim()] ?? -1
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function uniqueUnknownValues(...values: unknown[]) {
+  return [
+    ...new Set(
+      values.flatMap((value) => (Array.isArray(value) ? value : [])),
+    ),
+  ];
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
 }
 
 async function readTrackerRow(supabaseUrl: string, secretKey: string) {
