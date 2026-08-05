@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DETAIL_PAGE_STAGED_PIPELINE_VERSION,
   detailPageRecoveryDecision,
+  detailPageRecoveryScope,
   matchesDetailPageExecution,
   restoreManualRegenerationAssetsOnFailure,
 } from "../src/lib/detailPageJobRecovery.ts";
@@ -63,62 +64,122 @@ test("an unknown paid step outcome never triggers an automatic duplicate call", 
 });
 
 test("stored-candidate QA can be repeated once without another image generation", () => {
-  assert.deepEqual(
-    detailPageRecoveryDecision({
-      status: "running",
-      stage: "asset_candidate_qa",
-      lease_owner: "expired-worker",
-      payload: {
-        pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
-        auto_recovery_count: 0,
+  const job = {
+    status: "running",
+    stage: "asset_candidate_qa",
+    lease_owner: "expired-worker",
+    payload: {
+      pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+      auto_recovery_count: 0,
+    },
+    result: {
+      assetWork: {
+        kind: "representative",
+        roleId: "alternate_whole",
+        generationAttempt: 1,
+        phase: "qa_running",
+        candidateUrl: "https://assets.example/candidate.jpg",
       },
-      result: {
-        assetWork: {
-          phase: "qa_running",
-          candidateUrl: "https://assets.example/candidate.jpg",
-        },
-      },
-    }),
-    { action: "dispatch", nextRecoveryCount: 1 },
-  );
+    },
+  };
+  assert.deepEqual(detailPageRecoveryDecision(job), {
+    action: "dispatch",
+    nextRecoveryCount: 1,
+    recoveryScope: detailPageRecoveryScope(job),
+  });
 });
 
-test("a checkpointed staged job gets at most one safe automatic redispatch", () => {
-  assert.deepEqual(
-    detailPageRecoveryDecision({
-      status: "running",
-      stage: "asset_candidate_qa",
-      lease_owner: "",
-      payload: {
-        pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
-        auto_recovery_count: 0,
-      },
-    }),
-    { action: "dispatch", nextRecoveryCount: 1 },
-  );
-  const exhausted = detailPageRecoveryDecision({
+test("a checkpoint gets at most one safe redispatch but a later checkpoint gets its own budget", () => {
+  const firstCheckpoint = {
     status: "running",
     stage: "asset_candidate_qa",
     lease_owner: "",
     payload: {
       pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
+      auto_recovery_count: 0,
+    },
+    result: {
+      assetWork: {
+        kind: "representative",
+        roleId: "alternate_whole",
+        generationAttempt: 1,
+        phase: "qa_pending",
+      },
+      representatives: [{ roleId: "main_catalog", assetUrl: "https://assets.example/main.jpg" }],
+    },
+  };
+  const firstScope = detailPageRecoveryScope(firstCheckpoint);
+  assert.deepEqual(detailPageRecoveryDecision(firstCheckpoint), {
+    action: "dispatch",
+    nextRecoveryCount: 1,
+    recoveryScope: firstScope,
+  });
+
+  const exhausted = detailPageRecoveryDecision({
+    ...firstCheckpoint,
+    payload: {
+      ...firstCheckpoint.payload,
       auto_recovery_count: 1,
+      auto_recovery_scope: firstScope,
     },
   });
   assert.equal(exhausted.action, "fail");
   assert.equal(exhausted.code, "DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED");
+
+  const laterCheckpoint = {
+    ...firstCheckpoint,
+    stage: "representative_images",
+    payload: {
+      ...firstCheckpoint.payload,
+      auto_recovery_count: 1,
+      auto_recovery_scope: firstScope,
+    },
+    result: {
+      assetWork: null,
+      representatives: [
+        { roleId: "main_catalog", assetUrl: "https://assets.example/main.jpg" },
+        { roleId: "alternate_whole", assetUrl: "https://assets.example/alternate.jpg" },
+      ],
+    },
+  };
+  const later = detailPageRecoveryDecision(laterCheckpoint);
+  assert.equal(later.action, "dispatch");
+  assert.equal(later.nextRecoveryCount, 1);
+  assert.notEqual(later.recoveryScope, firstScope);
 });
 
-test("failed manual regeneration restores every previously published asset", () => {
+test("failed manual regeneration preserves passed replacements and fills only missing assets from backup", () => {
   const restored = restoreManualRegenerationAssetsOnFailure({
     assetWork: { phase: "generation_running" },
-    representatives: [{ roleId: "main_catalog" }],
+    representatives: [
+      {
+        roleId: "main_catalog",
+        assetUrl: "https://assets.example/main-new.jpg",
+        status: "ready",
+      },
+    ],
+    panels: [
+      {
+        slot: 1,
+        assetUrl: "https://assets.example/panel-1-new.jpg",
+        status: "ready",
+      },
+    ],
     manualRegenerationBackup: {
       representatives: [
-        { roleId: "main_catalog" },
-        { roleId: "alternate_whole" },
+        {
+          roleId: "main_catalog",
+          assetUrl: "https://assets.example/main-old.jpg",
+        },
+        {
+          roleId: "alternate_whole",
+          assetUrl: "https://assets.example/alternate-old.jpg",
+        },
       ],
-      panels: [{ slot: 1 }],
+      panels: [
+        { slot: 1, assetUrl: "https://assets.example/panel-1-old.jpg" },
+        { slot: 3, assetUrl: "https://assets.example/panel-3-old.jpg" },
+      ],
       detailImageUrl: "https://assets.example/detail-old.jpg",
       mainImageUrl: "https://assets.example/main-old.jpg",
       additionalImageUrls: ["https://assets.example/additional-old.jpg"],
@@ -127,6 +188,24 @@ test("failed manual regeneration restores every previously published asset", () 
   assert.equal(restored.assetWork, null);
   assert.deepEqual(restored.lastAssetWork, { phase: "generation_running" });
   assert.equal(restored.representatives.length, 2);
+  assert.equal(
+    restored.representatives.find((item) => item.roleId === "main_catalog")
+      .assetUrl,
+    "https://assets.example/main-new.jpg",
+  );
+  assert.equal(
+    restored.representatives.find((item) => item.roleId === "alternate_whole")
+      .assetUrl,
+    "https://assets.example/alternate-old.jpg",
+  );
+  assert.equal(
+    restored.panels.find((item) => item.slot === 1).assetUrl,
+    "https://assets.example/panel-1-new.jpg",
+  );
+  assert.equal(
+    restored.panels.find((item) => item.slot === 3).assetUrl,
+    "https://assets.example/panel-3-old.jpg",
+  );
   assert.equal(
     restored.detailImageUrl,
     "https://assets.example/detail-old.jpg",
@@ -198,6 +277,7 @@ test("staged execution metadata, immutable candidate uploads, and the watchdog a
   assert.match(jobRoute, /DETAIL_PAGE_JOB_TERMINAL/);
   assert.match(startRoute, /executionId: String\(runnableJob\.payload\.execution_id/);
   assert.match(cronRoute, /detailPageRecoveryDecision\(job\)/);
+  assert.match(cronRoute, /auto_recovery_scope: decision\.recoveryScope/);
   assert.match(cronRoute, /executionId: String\(job\.payload\.execution_id/);
   assert.match(cronRoute, /listStoppedDetailPageJobsForAssetRepair/);
   assert.match(cronRoute, /recovery_assets_repaired_at/);

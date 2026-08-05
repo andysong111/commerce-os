@@ -104,6 +104,7 @@ export async function GET(request: Request) {
       message: "저장된 체크포인트에서 안전 자동 재개 중",
       payload: {
         auto_recovery_count: decision.nextRecoveryCount,
+        auto_recovery_scope: decision.recoveryScope,
         last_auto_recovery_at: recoveryAt,
       },
       updated_at: recoveryAt,
@@ -132,6 +133,7 @@ export async function GET(request: Request) {
       console.info("[detail-page-cron] checkpoint redispatch", {
         jobId: job.id,
         stage: job.stage,
+        recoveryScope: decision.recoveryScope,
         recoveryCount: decision.nextRecoveryCount,
         accepted: response.ok && body?.ok === true,
       });
