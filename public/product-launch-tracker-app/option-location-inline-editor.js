@@ -1,8 +1,8 @@
 const STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const ITEM_PATCHED_EVENT = "product-launch-tracker:item-patched";
 const tableBody = document.querySelector("#launch-table-body");
 
 let renderQueued = false;
-let toastTimer = null;
 
 installStyles();
 queueRender();
@@ -14,7 +14,14 @@ if (tableBody) {
   });
 }
 
-window.addEventListener("product-launch-tracker:external-state", queueRender);
+window.addEventListener(ITEM_PATCHED_EVENT, (event) => {
+  const itemId = String(event?.detail?.itemId ?? "");
+  if (event?.detail?.source === "option-location") {
+    synchronizeContainerSignature(itemId);
+    return;
+  }
+  queueRender();
+});
 window.addEventListener("storage", (event) => {
   if (event.key === STORAGE_KEY) queueRender();
 });
@@ -24,14 +31,15 @@ function installStyles() {
   const style = document.createElement("style");
   style.id = "option-location-inline-editor-styles";
   style.textContent = `
-    [data-column-key="options"] {
-      min-width: 310px;
+    [data-column-key="barcode"] {
+      min-width: 270px;
+      vertical-align: top;
     }
     .inline-option-location-list {
       display: grid;
       gap: 6px;
-      margin-top: 7px;
-      padding-top: 7px;
+      margin-top: 8px;
+      padding-top: 8px;
       border-top: 1px dashed #cbd5e1;
     }
     .inline-option-location-title {
@@ -42,7 +50,7 @@ function installStyles() {
     }
     .inline-option-location-row {
       display: grid;
-      grid-template-columns: minmax(90px, 1fr) minmax(92px, 118px);
+      grid-template-columns: minmax(120px, 1fr) minmax(94px, 112px);
       align-items: center;
       gap: 7px;
     }
@@ -100,29 +108,25 @@ function renderOptionLocationEditors() {
   const itemById = new Map(items.map((item) => [String(item?.id ?? ""), item]));
 
   for (const row of tableBody.querySelectorAll("tr[data-id]")) {
+    for (const oldContainer of row.querySelectorAll(
+      "[data-column-key='options'] .inline-option-location-list",
+    )) {
+      oldContainer.remove();
+    }
+
     const itemId = String(row.dataset.id ?? "");
     const item = itemById.get(itemId);
-    const cell = row.querySelector("[data-column-key='options']") || row.querySelector(".options-cell");
+    const cell = row.querySelector("[data-column-key='barcode']");
     if (!(cell instanceof HTMLElement) || !item) continue;
 
-    const optionEntries = (Array.isArray(item.orderOptions) ? item.orderOptions : [])
-      .map((option, index) => ({ option, index }))
-      .filter(({ option }) => String(option?.saleOption ?? "").trim());
-
+    const optionEntries = optionEntriesFor(item);
     let container = cell.querySelector(".inline-option-location-list");
     if (!optionEntries.length) {
       container?.remove();
       continue;
     }
 
-    const signature = JSON.stringify(
-      optionEntries.map(({ option, index }) => ({
-        id: String(option?.id ?? ""),
-        index,
-        label: String(option?.saleOption ?? "").trim(),
-        barcode: normalizeLocationCode(option?.barcode),
-      })),
-    );
+    const signature = buildSignature(optionEntries);
     if (container?.dataset.signature === signature) continue;
 
     if (!(container instanceof HTMLElement)) {
@@ -156,6 +160,10 @@ function renderOptionLocationEditors() {
       input.className = "inline-option-location-input";
       input.value = locationCode;
       input.dataset.empty = locationCode ? "false" : "true";
+      input.dataset.itemId = itemId;
+      input.dataset.optionId = optionId;
+      input.dataset.optionIndex = String(index);
+      input.dataset.optionLabel = labelText;
       input.autocomplete = "off";
       input.setAttribute("aria-label", `${labelText} 위치코드`);
       input.addEventListener("input", () => {
@@ -167,16 +175,6 @@ function renderOptionLocationEditors() {
           input.blur();
         }
       });
-      input.addEventListener("change", () => {
-        saveOptionLocationCode({
-          itemId,
-          optionId,
-          optionIndex: index,
-          optionLabel: labelText,
-          rawValue: input.value,
-          input,
-        });
-      });
 
       optionRow.append(label, input);
       container.append(optionRow);
@@ -184,83 +182,34 @@ function renderOptionLocationEditors() {
   }
 }
 
-function saveOptionLocationCode({
-  itemId,
-  optionId,
-  optionIndex,
-  optionLabel,
-  rawValue,
-  input,
-}) {
+function synchronizeContainerSignature(itemId) {
+  if (!tableBody || !itemId) return;
   const trackerState = readTrackerState();
-  if (!trackerState || !Array.isArray(trackerState.items)) {
-    showMessage("상품출시관리 저장 데이터를 읽지 못했습니다.");
-    queueRender();
-    return;
-  }
-
-  const itemIndex = trackerState.items.findIndex(
-    (item) => String(item?.id ?? "") === itemId,
+  const item = trackerState?.items?.find(
+    (candidate) => String(candidate?.id ?? "") === itemId,
   );
-  if (itemIndex < 0) {
-    showMessage("위치코드를 저장할 상품을 찾지 못했습니다.");
-    queueRender();
-    return;
-  }
+  const row = tableBody.querySelector(`tr[data-id="${cssEscape(itemId)}"]`);
+  const container = row?.querySelector(
+    "[data-column-key='barcode'] .inline-option-location-list",
+  );
+  if (!(container instanceof HTMLElement) || !item) return;
+  container.dataset.signature = buildSignature(optionEntriesFor(item));
+}
 
-  const item = trackerState.items[itemIndex];
-  const options = Array.isArray(item?.orderOptions)
-    ? item.orderOptions.map((option) => ({ ...option }))
-    : [];
-  let targetIndex = optionId
-    ? options.findIndex((option) => String(option?.id ?? "") === optionId)
-    : -1;
-  if (targetIndex < 0 && options[optionIndex]) targetIndex = optionIndex;
-  if (targetIndex < 0) {
-    const matching = options
-      .map((option, index) => ({ option, index }))
-      .filter(
-        ({ option }) =>
-          String(option?.saleOption ?? "").trim() === optionLabel,
-      );
-    if (matching.length === 1) targetIndex = matching[0].index;
-  }
-  if (targetIndex < 0) {
-    showMessage(`${optionLabel} 옵션을 다시 찾지 못했습니다.`);
-    queueRender();
-    return;
-  }
+function optionEntriesFor(item) {
+  return (Array.isArray(item?.orderOptions) ? item.orderOptions : [])
+    .map((option, index) => ({ option, index }))
+    .filter(({ option }) => String(option?.saleOption ?? "").trim());
+}
 
-  const nextCode = normalizeLocationCode(rawValue);
-  const previousCode = normalizeLocationCode(options[targetIndex]?.barcode);
-  input.value = nextCode;
-  input.dataset.empty = nextCode ? "false" : "true";
-  if (nextCode === previousCode) return;
-
-  const now = new Date().toISOString();
-  options[targetIndex] = {
-    ...options[targetIndex],
-    barcode: nextCode,
-  };
-  const nextItems = [...trackerState.items];
-  nextItems[itemIndex] = {
-    ...item,
-    orderOptions: options,
-    updatedAt: now,
-    updatedBy: "승준",
-  };
-  const nextState = {
-    ...trackerState,
-    items: nextItems,
-    savedAt: now,
-  };
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
-  window.dispatchEvent(new CustomEvent("product-launch-tracker:external-state"));
-  showMessage(
-    nextCode
-      ? `${optionLabel} 위치코드 ${nextCode} 저장`
-      : `${optionLabel} 위치코드를 비웠습니다.`,
+function buildSignature(optionEntries) {
+  return JSON.stringify(
+    optionEntries.map(({ option, index }) => ({
+      id: String(option?.id ?? ""),
+      index,
+      label: String(option?.saleOption ?? "").trim(),
+      barcode: normalizeLocationCode(option?.barcode),
+    })),
   );
 }
 
@@ -280,13 +229,7 @@ function normalizeLocationCode(value) {
     .toUpperCase();
 }
 
-function showMessage(message) {
-  const toast = document.querySelector("#toast");
-  if (!(toast instanceof HTMLElement)) return;
-  window.clearTimeout(toastTimer);
-  toast.textContent = message;
-  toast.hidden = false;
-  toastTimer = window.setTimeout(() => {
-    if (toast.textContent === message) toast.hidden = true;
-  }, 4_000);
+function cssEscape(value) {
+  if (window.CSS?.escape) return window.CSS.escape(value);
+  return String(value).replace(/["\\]/g, "\\$&");
 }
