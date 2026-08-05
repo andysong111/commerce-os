@@ -36,7 +36,10 @@ test("Product Master shadow mode never auto-selects a real price write", () => {
     /defaultSelected:\s*!Boolean\(row\.shadowMode\)\s*&&\s*decision === "increase_required"/,
   );
   assert.match(page, /실제 가격변경 차단/);
-  assert.match(page, /row\.shadowMode \? "향후 제한" : "제한"/);
+  assert.match(
+    page,
+    /row\.reorderingAllowed === false[\s\S]*?row\.shadowMode[\s\S]*?"향후 제한"[\s\S]*?"제한"/,
+  );
   assert.match(page, /그림자 모드에서는 미래 가격·단종 상태만 표시/);
 });
 
