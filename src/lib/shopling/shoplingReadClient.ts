@@ -375,14 +375,6 @@ export function splitShoplingDateRange(
   return result;
 }
 
-function retryableStatus(status: number) {
-  return status === 408 || status === 425 || status === 429 || status >= 500;
-}
-
-function delay(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
 export class ShoplingReadClient {
   constructor(private readonly config: ShoplingReadConfig) {}
 
@@ -394,43 +386,24 @@ export class ShoplingReadClient {
 
   async read(resource: ShoplingReadResource, range: ShoplingDateRange) {
     const xml = buildShoplingReadRequestXml(resource, this.config, range);
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60_000);
-      try {
-        const response = await fetch(this.url(resource), {
-          method: "POST",
-          headers: {
-            accept: "application/xml, text/xml",
-            "content-type": "application/xml; charset=utf-8",
-            "user-agent": "commerce-os-ops-center-shopling-read/1.0",
-          },
-          body: xml,
-          signal: controller.signal,
-          cache: "no-store",
-        });
-        const body = await response.text();
-        if (!response.ok) {
-          const error = new Error(
-            `SHOPLING_${resource.toUpperCase()}_HTTP_${response.status}`,
-          );
-          if (!retryableStatus(response.status) || attempt === 3) throw error;
-          lastError = error;
-        } else {
-          return parseShoplingReadResponse(resource, body);
-        }
-      } catch (error) {
-        lastError = error;
-        if (attempt === 3) throw error;
-      } finally {
-        clearTimeout(timeout);
-      }
-      await delay(500 * 2 ** (attempt - 1));
+    const response = await fetch(this.url(resource), {
+      method: "POST",
+      headers: {
+        accept: "application/xml, text/xml",
+        "content-type": "application/xml; charset=utf-8",
+        "user-agent": "commerce-os-ops-center-shopling-read/1.0",
+      },
+      body: xml,
+      signal: AbortSignal.timeout(45_000),
+      cache: "no-store",
+    });
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `SHOPLING_${resource.toUpperCase()}_HTTP_${response.status}`,
+      );
     }
-    throw lastError instanceof Error
-      ? lastError
-      : new Error("SHOPLING_READ_FAILED");
+    return parseShoplingReadResponse(resource, body);
   }
 
   async readRanges(
