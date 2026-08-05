@@ -8,45 +8,104 @@ const EXTERNAL_STATE_EVENT = "product-launch-tracker:external-state";
 const ITEM_PATCHED_EVENT = "product-launch-tracker:item-patched";
 const INLINE_INPUT_SELECTOR = [
   ".barcode-input",
+  ".inline-model-number-editor",
+  ".inline-product-name-editor",
   ".inline-category-editor",
   ".inline-options-editor",
   ".inline-option-location-input",
 ].join(", ");
 
+const composingInputs = new WeakSet();
 let toastTimer = null;
 
-document.addEventListener("change", handleInlineChange, true);
+document.addEventListener("input", handleInlineInput, true);
+document.addEventListener("change", handleInlineCommit, true);
+document.addEventListener("keydown", handleInlineKeydown, true);
+document.addEventListener("compositionstart", handleCompositionStart, true);
+document.addEventListener("compositionend", handleCompositionEnd, true);
+window.addEventListener("pagehide", flushActiveInlineInput);
 
-function handleInlineChange(event) {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || !input.matches(INLINE_INPUT_SELECTOR)) {
-    return;
-  }
+function handleInlineInput(event) {
+  const input = inlineInputFrom(event.target);
+  if (!input) return;
+  input.dataset.autosaveDirty = "true";
+  setSaveStatus("입력 중 · 칸을 벗어나면 저장");
+}
 
-  const row = input.closest("#launch-table-body tr[data-id]");
-  if (!(row instanceof HTMLTableRowElement)) return;
+function handleInlineCommit(event) {
+  const input = inlineInputFrom(event.target);
+  if (!input) return;
 
   event.preventDefault();
   event.stopImmediatePropagation();
+  commitInlineChange(input);
+}
+
+function handleInlineKeydown(event) {
+  const input = inlineInputFrom(event.target);
+  if (
+    !input ||
+    event.key !== "Enter" ||
+    event.isComposing ||
+    event.keyCode === 229 ||
+    composingInputs.has(input)
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  commitInlineChange(input);
+}
+
+function handleCompositionStart(event) {
+  const input = inlineInputFrom(event.target);
+  if (input) composingInputs.add(input);
+}
+
+function handleCompositionEnd(event) {
+  const input = inlineInputFrom(event.target);
+  if (input) composingInputs.delete(input);
+}
+
+function flushActiveInlineInput() {
+  const input = inlineInputFrom(document.activeElement);
+  if (!input || composingInputs.has(input)) return;
+  commitInlineChange(input, { silent: true });
+}
+
+function inlineInputFrom(target) {
+  return target instanceof HTMLInputElement && target.matches(INLINE_INPUT_SELECTOR)
+    ? target
+    : null;
+}
+
+function commitInlineChange(input, { silent = false } = {}) {
+  const row = input.closest("#launch-table-body tr[data-id]");
+  if (!(row instanceof HTMLTableRowElement)) return false;
 
   const itemId = String(row.dataset.id ?? "");
   const trackerState = readTrackerState();
   if (!trackerState || !Array.isArray(trackerState.items)) {
-    showMessage("상품출시관리 저장 데이터를 읽지 못했습니다.");
-    return;
+    if (!silent) showMessage("상품출시관리 저장 데이터를 읽지 못했습니다.");
+    return false;
   }
 
   const itemIndex = trackerState.items.findIndex(
     (item) => String(item?.id ?? "") === itemId,
   );
   if (itemIndex < 0) {
-    showMessage("저장할 상품을 찾지 못했습니다.");
-    return;
+    if (!silent) showMessage("저장할 상품을 찾지 못했습니다.");
+    return false;
   }
 
   const item = trackerState.items[itemIndex];
-  const change = buildInlineChange(input, item);
-  if (!change) return;
+  const change = buildInlineChange(input, item, { silent });
+  input.dataset.autosaveDirty = "false";
+  if (!change) {
+    setSaveStatus("변경 없음");
+    return false;
+  }
 
   const now = new Date().toISOString();
   const nextItem = {
@@ -74,10 +133,12 @@ function handleInlineChange(event) {
       },
     }),
   );
-  showMessage(change.message);
+  setSaveStatus("브라우저 저장 완료 · 서버 저장 대기");
+  if (!silent) showMessage(change.message);
+  return true;
 }
 
-function buildInlineChange(input, item) {
+function buildInlineChange(input, item, { silent = false } = {}) {
   if (input.matches(".barcode-input")) {
     const nextValue = normalizeLocationCode(input.value);
     const previousValue = normalizeLocationCode(item?.barcode);
@@ -87,6 +148,40 @@ function buildInlineChange(input, item) {
       source: "barcode",
       patch: { barcode: nextValue },
       message: `${safeText(item?.modelNumber) || "상품"} 기준바코드 저장`,
+    };
+  }
+
+  if (input.matches(".inline-model-number-editor")) {
+    const previousValue = normalizeModelNumber(item?.modelNumber);
+    const nextValue = normalizeModelNumber(input.value);
+    if (!nextValue) {
+      input.value = previousValue;
+      if (!silent) showMessage("모델번호는 비워둘 수 없습니다.");
+      return null;
+    }
+    input.value = nextValue;
+    if (nextValue === previousValue) return null;
+    return {
+      source: "model-number",
+      patch: { modelNumber: nextValue },
+      message: `${nextValue} 모델번호 저장`,
+    };
+  }
+
+  if (input.matches(".inline-product-name-editor")) {
+    const previousValue = safeText(item?.productName);
+    const nextValue = safeText(input.value);
+    if (!nextValue) {
+      input.value = previousValue;
+      if (!silent) showMessage("모델명은 비워둘 수 없습니다.");
+      return null;
+    }
+    input.value = nextValue;
+    if (nextValue === previousValue) return null;
+    return {
+      source: "product-name",
+      patch: { productName: nextValue },
+      message: `${safeText(item?.modelNumber) || "상품"} 모델명 저장`,
     };
   }
 
@@ -140,7 +235,7 @@ function buildInlineChange(input, item) {
       if (matching.length === 1) targetIndex = matching[0].index;
     }
     if (targetIndex < 0) {
-      showMessage(`${optionLabel || "해당"} 옵션을 다시 찾지 못했습니다.`);
+      if (!silent) showMessage(`${optionLabel || "해당"} 옵션을 다시 찾지 못했습니다.`);
       return null;
     }
 
@@ -166,20 +261,22 @@ function buildInlineChange(input, item) {
 }
 
 function synchronizeMainStateWithoutTableRender(itemId, source) {
+  const detail = {
+    itemId,
+    source,
+    suppressTableRender: true,
+    typingGuardBypass: true,
+  };
   const tableBody = document.querySelector("#launch-table-body");
   if (!(tableBody instanceof HTMLElement)) {
-    window.dispatchEvent(
-      new CustomEvent(EXTERNAL_STATE_EVENT, { detail: { itemId, source } }),
-    );
+    window.dispatchEvent(new CustomEvent(EXTERNAL_STATE_EVENT, { detail }));
     return;
   }
 
   const inheritedDescriptor = findPropertyDescriptor(tableBody, "innerHTML");
   const ownDescriptor = Object.getOwnPropertyDescriptor(tableBody, "innerHTML");
   if (!inheritedDescriptor?.get) {
-    window.dispatchEvent(
-      new CustomEvent(EXTERNAL_STATE_EVENT, { detail: { itemId, source } }),
-    );
+    window.dispatchEvent(new CustomEvent(EXTERNAL_STATE_EVENT, { detail }));
     return;
   }
 
@@ -191,19 +288,13 @@ function synchronizeMainStateWithoutTableRender(itemId, source) {
         return inheritedDescriptor.get.call(tableBody);
       },
       set() {
-        // The main tracker still receives the new state, but the visible rows stay in place.
+        // The main tracker receives the new state while the visible rows stay in place.
       },
     });
-    window.dispatchEvent(
-      new CustomEvent(EXTERNAL_STATE_EVENT, {
-        detail: { itemId, source, suppressTableRender: true },
-      }),
-    );
+    window.dispatchEvent(new CustomEvent(EXTERNAL_STATE_EVENT, { detail }));
   } catch (error) {
     console.error(error);
-    window.dispatchEvent(
-      new CustomEvent(EXTERNAL_STATE_EVENT, { detail: { itemId, source } }),
-    );
+    window.dispatchEvent(new CustomEvent(EXTERNAL_STATE_EVENT, { detail }));
   } finally {
     if (ownDescriptor) {
       Object.defineProperty(tableBody, "innerHTML", ownDescriptor);
@@ -239,8 +330,22 @@ function normalizeLocationCode(value) {
     .toUpperCase();
 }
 
+function normalizeModelNumber(value) {
+  const compact = String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  const match = compact.match(/^AAA0*(\d+)$/);
+  return match ? `AAA${match[1].padStart(3, "0")}` : compact;
+}
+
 function safeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function setSaveStatus(message) {
+  const element = document.querySelector("#save-status");
+  if (element && element.textContent !== message) element.textContent = message;
 }
 
 function showMessage(message) {
