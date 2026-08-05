@@ -44,18 +44,16 @@ export const priceAdjustmentEngineModule: CommerceModule = {
   description:
     "확정 입고원가와 바코드별 3개월 판매강도를 분석하고 숨은 시즌을 자동 구분해 +6~-4 상품등급, 안전 목표가격, 단종후보 재고정리 상태를 제안합니다.",
   status: "available",
-  route:
-    process.env.NEXT_PUBLIC_PRICE_ADJUSTMENT_ENGINE_URL?.trim() ||
-    "https://commerce-os-price-adjustment-engine.andy123df23.chatgpt.site",
+  route: "/price-adjustment-engine",
   category: "가격·수익 관리",
   inputType: "확정 입고원가, 바코드별 월 판매량, 샵플링 현재가, 상품마스터 확인재고",
   outputType: "상품등급, 자동 시즌판정, 등급 목표가격, -3~-4 재고정리 상태와 이력",
   historySupport: true,
-  externalProject: true,
-  note: "초기 그림자 운영에서는 등급과 목표가격만 계산·표시하고 실제 가격변경과 재발주 차단은 실행하지 않습니다.",
-  helperNote: "등급·시즌·가격 통합관리",
-  actionLabel: "상품등급 대시보드 보기",
-  safetyBadge: "그림자 운영 · 실제 미반영",
+  externalProject: false,
+  note: "Ops Center 내부 이전 1단계입니다. 가격판정과 실행원장을 읽기만 하며 자체 등급 엔진과 실제 가격변경은 아직 분리되어 있습니다.",
+  helperNote: "Ops Center 내부 · 조회 전용",
+  actionLabel: "내부 상품등급 대시보드 보기",
+  safetyBadge: "이전 1단계 · 실제 미반영",
 };
 
 export const productDecisionAgentModule: CommerceModule = {
@@ -71,10 +69,10 @@ export const productDecisionAgentModule: CommerceModule = {
   outputType: "바코드별 신규 주문 필요량, 예산·MOQ·박스입수 반영 발주안",
   historySupport: true,
   externalProject: false,
-  note: "Ops Center 내부 이전 1단계입니다. 기존 발주 추천 엔진의 최신 계산 결과를 서버에서 읽기만 하며 승인·중국 주문 전송·실제 주문은 차단합니다.",
-  helperNote: "Ops Center 내부 · 조회 전용",
+  note: "Ops Center 자체 계산 엔진과 검증 D1 그림자 재계산까지 완료했습니다. 실시간 판매·재고·미입고 원장 연결과 Worker 전환을 진행 중입니다.",
+  helperNote: "자체 엔진 · 실시간 연결 진행",
   actionLabel: "내부 발주 추천 보기",
-  safetyBadge: "이전 1단계 · 쓰기 차단",
+  safetyBadge: "원인불명 0 · 쓰기 차단",
 };
 
 export const shoplingCategoryReviewQueueModule: CommerceModule = {
@@ -96,18 +94,30 @@ export const shoplingCategoryReviewQueueModule: CommerceModule = {
   safetyBadge: "승인 후 진행관리 반영",
 };
 
-const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) =>
-  module.id === "shopling-price-modify-runner"
-    ? {
-        ...module,
-        title: "샵플링 쇼핑몰별 가격정책 적용기",
-        navigationLabel: "샵플링 가격정책 적용기",
-        description: "goods_key 기준으로 기본 판매가와 쇼핑몰별 지정 가격정책을 일괄 적용합니다.",
-        helperNote: "실제 가격정책 적용",
-        actionLabel: "가격정책 적용기 열기",
-      }
-    : module,
-);
+const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) => {
+  if (module.id === "china-order-cost") {
+    return {
+      ...module,
+      route: "/china-order-manager",
+      externalProject: false,
+      note: "외부 Site로 이동하지 않고 Ops Center 내부 원가계산·운영원장 화면을 사용합니다. 주문·입고 이벤트 원장과 Worker 이전을 진행 중입니다.",
+      helperNote: "Ops Center 내부 · 원장 이전 진행",
+      actionLabel: "내부 발주·입고 관리 열기",
+      safetyBadge: "실제 입고·재고 변경 차단",
+    };
+  }
+  if (module.id === "shopling-price-modify-runner") {
+    return {
+      ...module,
+      title: "샵플링 쇼핑몰별 가격정책 적용기",
+      navigationLabel: "샵플링 가격정책 적용기",
+      description: "goods_key 기준으로 기본 판매가와 쇼핑몰별 지정 가격정책을 일괄 적용합니다.",
+      helperNote: "실제 가격정책 적용",
+      actionLabel: "가격정책 적용기 열기",
+    };
+  }
+  return module;
+});
 
 export const extendedModuleRegistry: readonly CommerceModule[] = [
   commerceOperationsModule,
