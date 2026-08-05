@@ -377,7 +377,9 @@ export function canResumeDetailPageCheckpoint(
 
 export function hasFullAssetDetailPageAssessment(job: DetailPageReviewJob) {
   const assessment = record(record(job.result).setAssessment);
-  return assessment.assessment_version === "full_generated_asset_identity_v1";
+  return /^full_generated_asset_identity_v\d+$/.test(
+    text(assessment.assessment_version),
+  );
 }
 
 export function findDetailPageResumeCandidate(
