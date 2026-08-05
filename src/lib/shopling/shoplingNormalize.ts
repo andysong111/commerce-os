@@ -197,7 +197,7 @@ export function normalizeShoplingOrder(row: ShoplingRawRow) {
   );
   const calculatedLineAmount = unitPrice * quantity;
   return {
-    id: `${orderNo}:$${
+    id: `${orderNo}:${
       optionId ||
       cleanCode(pick(row, ["prod_id", "mall_prod_key"])) ||
       "unknown"
