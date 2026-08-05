@@ -1,0 +1,29 @@
+name: Agent Detail Assessment Version Patch
+
+on:
+  push:
+    branches:
+      - agent/accept-detail-page-assessment-versions-20260805
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[assessment-version-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/accept-detail-page-assessment-versions-20260805
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+      - run: node scripts/agent-detail-assessment-version-patch.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/detailPageAiReview.ts tests/detailPageAiReview.test.mjs
+          git commit -m "Accept versioned detail-page assessments [assessment-version-patched]"
+          git push origin HEAD:agent/accept-detail-page-assessment-versions-20260805
