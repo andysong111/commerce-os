@@ -271,13 +271,15 @@ export function stableStringify(value: unknown) {
 }
 
 export async function sha256Hex(value: string | ArrayBuffer | Uint8Array) {
-  const bytes =
+  const source =
     typeof value === "string"
       ? new TextEncoder().encode(value)
       : value instanceof Uint8Array
         ? value
         : new Uint8Array(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const bytes = new Uint8Array(source.byteLength);
+  bytes.set(source);
+  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
