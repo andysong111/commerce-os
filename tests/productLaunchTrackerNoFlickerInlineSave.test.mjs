@@ -47,12 +47,47 @@ test("single-option products do not render separate option location inputs", () 
   assert.match(locationEditorSource, /container\?\.remove\(\);/);
 });
 
-test("inline saves update storage while suppressing the full table replacement", () => {
-  assert.match(smoothSaveSource, /document\.addEventListener\("change", handleInlineChange, true\)/);
+test("inline autosave waits for blur or Enter instead of saving during a typing pause", () => {
+  assert.match(
+    smoothSaveSource,
+    /document\.addEventListener\("input", handleInlineInput, true\)/,
+  );
+  assert.match(
+    smoothSaveSource,
+    /document\.addEventListener\("change", handleInlineCommit, true\)/,
+  );
+  assert.match(
+    smoothSaveSource,
+    /document\.addEventListener\("keydown", handleInlineKeydown, true\)/,
+  );
+  assert.match(smoothSaveSource, /event\.key !== "Enter"/);
+  assert.match(smoothSaveSource, /commitInlineChange\(input\)/);
+  assert.doesNotMatch(smoothSaveSource, /setTimeout\([^)]*commitInlineChange/);
+});
+
+test("all editable identity and option fields use the no-flicker save path", () => {
+  for (const className of [
+    "barcode-input",
+    "inline-model-number-editor",
+    "inline-product-name-editor",
+    "inline-category-editor",
+    "inline-options-editor",
+    "inline-option-location-input",
+  ]) {
+    assert.match(smoothSaveSource, new RegExp(`\\.${className}`));
+  }
+  assert.match(smoothSaveSource, /event\.preventDefault\(\)/);
   assert.match(smoothSaveSource, /event\.stopImmediatePropagation\(\)/);
-  assert.match(smoothSaveSource, /localStorage\.setItem\(STORAGE_KEY, JSON\.stringify\(nextState\)\)/);
+});
+
+test("inline saves update storage and main state without replacing the visible table", () => {
+  assert.match(
+    smoothSaveSource,
+    /localStorage\.setItem\(STORAGE_KEY, JSON\.stringify\(nextState\)\)/,
+  );
   assert.match(smoothSaveSource, /Object\.defineProperty\(tableBody, "innerHTML"/);
   assert.match(smoothSaveSource, /suppressTableRender: true/);
+  assert.match(smoothSaveSource, /typingGuardBypass: true/);
   assert.match(smoothSaveSource, /applyInlineOptionLabels\(item\?\.orderOptions, labels\)/);
   assert.doesNotMatch(smoothSaveSource, /window\.location\.reload/);
 });
