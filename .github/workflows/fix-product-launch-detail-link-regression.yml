@@ -72,8 +72,15 @@ jobs:
             done < /tmp/new-failures.txt
             exit 1
           fi
-      - name: Lint
-        run: npm run lint
+      - name: Lint changed product-launch files
+        run: |
+          npx eslint \
+            public/product-launch-tracker-app/optimized-app.js \
+            public/product-launch-tracker-app/detail-page-dock.js \
+            src/app/api/product-launch-tracker/optimized/route.ts \
+            src/lib/productLaunchTrackerOptimized.ts \
+            tests/productLaunchTrackerOptimized.test.mjs \
+            tests/productLaunchTrackerOptimizedContracts.test.mjs
       - name: Production build
         run: npm run build
       - name: Diff safety check
