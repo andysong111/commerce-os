@@ -18,12 +18,20 @@ export default async function PriceGradeShadowComparePage() {
         title="상품등급 그림자 비교"
         description="Product Master의 안정 SKU 판매·입고원가 원장을 Ops Center 자체 가격등급 엔진으로 다시 계산하고 기존 lifecycle과 비교합니다."
         actions={
-          <Link
-            href="/price-adjustment-engine"
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            상품등급·가격조정으로 돌아가기
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/price-adjustment-engine/blocked-reasons"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 shadow-sm hover:bg-rose-100"
+            >
+              차단 원인 전수보기
+            </Link>
+            <Link
+              href="/price-adjustment-engine"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              상품등급·가격조정으로 돌아가기
+            </Link>
+          </div>
         }
       />
 
