@@ -12,7 +12,7 @@ test("China order manager stays inside Ops Center and exposes the internal calcu
   assert.doesNotMatch(chinaPage, /redirect\(/);
   assert.doesNotMatch(chinaPage, /chatgpt\.site/);
   assert.match(chinaPage, /href="\/china-orders"/);
-  assert.match(chinaPage, /실제 입고·재고 쓰기 차단/);
+  assert.match(chinaPage, /실제 재고·가격 쓰기 차단/);
   assert.match(registry, /module\.id === "china-order-cost"/);
   assert.match(registry, /route: "\/china-order-manager"/);
   assert.match(registry, /externalProject: false/);

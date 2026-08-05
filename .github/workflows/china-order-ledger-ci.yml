@@ -1,0 +1,46 @@
+name: China Order Ledger CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/chinaOrderLedger.ts"
+      - "src/app/api/china-order-ledger/**"
+      - "src/app/china-order-manager/**"
+      - "tests/chinaOrderLedger.test.mjs"
+      - ".github/workflows/china-order-ledger-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: china-order-ledger-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ledger-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint China order ledger
+        run: >-
+          npx eslint
+          src/lib/chinaOrderLedger.ts
+          src/app/api/china-order-ledger/events/route.ts
+          src/app/china-order-manager/page.tsx
+          tests/chinaOrderLedger.test.mjs
+      - name: Run China order ledger tests
+        run: >-
+          node --experimental-strip-types --test
+          tests/chinaOrderLedger.test.mjs
+      - name: Build Ops Center
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://china-order-ledger-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_china_order_ledger_build_check
