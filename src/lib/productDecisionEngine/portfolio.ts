@@ -184,9 +184,7 @@ export function allocatePurchasePortfolio(
     .sort((left, right) => {
       const group = groupRank(left.finalGroup) - groupRank(right.finalGroup);
       if (group !== 0) return group;
-      const score = right.totalScore - left.totalScore;
-      if (score !== 0) return score;
-      return left.barcode.localeCompare(right.barcode, "ko");
+      return right.totalScore - left.totalScore;
     });
 
   for (const entry of candidates) {
