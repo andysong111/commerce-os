@@ -1,0 +1,50 @@
+name: Commerce OS Site Internalization CI
+
+on:
+  pull_request:
+    paths:
+      - "src/app/china-order-manager/**"
+      - "src/app/price-adjustment-engine/**"
+      - "src/lib/integrations/chinaOrderManager.ts"
+      - "src/lib/integrations/priceAdjustmentEngine.ts"
+      - "src/lib/extendedModuleRegistry.ts"
+      - "tests/commerceOsSiteInternalization.test.mjs"
+      - ".github/workflows/commerce-os-site-internalization-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commerce-os-site-internalization-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  internal-entrypoints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint internal entrypoints
+        run: >-
+          npx eslint
+          src/app/china-order-manager/page.tsx
+          src/app/price-adjustment-engine/page.tsx
+          src/lib/integrations/chinaOrderManager.ts
+          src/lib/integrations/priceAdjustmentEngine.ts
+          src/lib/extendedModuleRegistry.ts
+          tests/commerceOsSiteInternalization.test.mjs
+      - name: Test internal entrypoint safety
+        run: >-
+          node --experimental-strip-types --test
+          tests/commerceOsSiteInternalization.test.mjs
+      - name: Build Ops Center
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://site-internalization-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_site_internalization_build_check
