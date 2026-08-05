@@ -42,6 +42,11 @@ test("per-option location inputs render under the reference barcode column", () 
   );
 });
 
+test("single-option products do not render separate option location inputs", () => {
+  assert.match(locationEditorSource, /if \(optionEntries\.length < 2\) \{/);
+  assert.match(locationEditorSource, /container\?\.remove\(\);/);
+});
+
 test("inline saves update storage while suppressing the full table replacement", () => {
   assert.match(smoothSaveSource, /document\.addEventListener\("change", handleInlineChange, true\)/);
   assert.match(smoothSaveSource, /event\.stopImmediatePropagation\(\)/);

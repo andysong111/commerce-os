@@ -121,7 +121,7 @@ function renderOptionLocationEditors() {
 
     const optionEntries = optionEntriesFor(item);
     let container = cell.querySelector(".inline-option-location-list");
-    if (!optionEntries.length) {
+    if (optionEntries.length < 2) {
       container?.remove();
       continue;
     }
