@@ -34,7 +34,26 @@ jobs:
       - name: Focused product launch tests
         run: node --experimental-strip-types --test tests/productLaunchTrackerOptimized.test.mjs tests/productLaunchTrackerOptimizedContracts.test.mjs tests/productLaunchTrackerSorting.test.mjs
       - name: Full test suite
-        run: npm test
+        run: |
+          set +e
+          failed=0
+          : > /tmp/failing-test-files.txt
+          for file in tests/*.test.mjs; do
+            log="/tmp/$(basename "$file").log"
+            node --experimental-strip-types --test "$file" > "$log" 2>&1
+            code=$?
+            if [ "$code" -ne 0 ]; then
+              failed=1
+              echo "$file" >> /tmp/failing-test-files.txt
+              echo "===== FAILED: $file ====="
+              tail -n 120 "$log"
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "===== FAILING TEST FILES ====="
+            cat /tmp/failing-test-files.txt
+            exit 1
+          fi
       - name: Lint
         run: npm run lint
       - name: Production build
