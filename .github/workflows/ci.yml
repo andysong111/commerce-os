@@ -25,6 +25,11 @@ jobs:
           src/app/api/integrations/price-adjustment/jobs/route.ts
           'src/app/api/integrations/price-adjustment/jobs/[jobId]/route.ts'
           src/lib/extendedModuleRegistry.ts
+          src/lib/productLaunchTrackerRows.ts
+          src/lib/productLaunchTrackerShopling.ts
+          src/app/api/product-launch-tracker/flow-selection/route.ts
+          src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
+          src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -37,6 +42,12 @@ jobs:
           tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
           tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
           tests/priceAdjustmentEngineIntegration.test.mjs
+      - name: Test tracker-connected product launch flow
+        run: >-
+          node --experimental-strip-types --test
+          tests/productLaunchTrackerRows.test.mjs
+          tests/productLaunchTrackerBarcodeMapping.test.mjs
+          tests/productLaunchTrackerFlowConnection.test.mjs
       - name: Build
         run: npm run build
         env:
