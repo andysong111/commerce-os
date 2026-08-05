@@ -43,6 +43,22 @@ export type PriceAdjustmentIntegrationResult = {
   error: string | null;
 };
 
+type OperationRow = {
+  id?: unknown;
+  operation_type?: unknown;
+  source?: unknown;
+  status?: unknown;
+  started_at?: unknown;
+  result_snapshot?: unknown;
+  error_message?: unknown;
+};
+
+function isPriceOperation(row: OperationRow) {
+  const identity = `${String(row.operation_type ?? "")} ${String(row.source ?? "")}`
+    .toUpperCase();
+  return identity.includes("PRICE") || identity.includes("MARGIN");
+}
+
 function emptyDashboard(notice: string): PriceAdjustmentDashboard {
   return {
     mode: "EMPTY",
@@ -129,16 +145,17 @@ async function loadInternalLedgerStatus() {
   if (!admin) return null;
   const result = await admin
     .from("commerce_operation_runs")
-    .select("id,operation_type,status,started_at,result_snapshot,error_message")
-    .or(
-      "operation_type.ilike.%PRICE%,source.ilike.%price-adjustment%,source.ilike.%price-engine%",
+    .select(
+      "id,operation_type,source,status,started_at,result_snapshot,error_message",
     )
     .order("started_at", { ascending: false })
-    .limit(1);
+    .limit(200);
   if (result.error) throw new Error(result.error.message);
-  const row = Array.isArray(result.data) ? result.data[0] : null;
-  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-  const snapshot = (row as { result_snapshot?: unknown }).result_snapshot;
+  const row = (Array.isArray(result.data) ? result.data : [])
+    .filter((value): value is OperationRow => Boolean(value && typeof value === "object"))
+    .find(isPriceOperation);
+  if (!row) return null;
+  const snapshot = row.result_snapshot;
   if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
     try {
       return normalizeDashboard(snapshot);
@@ -146,18 +163,17 @@ async function loadInternalLedgerStatus() {
       // 실행 원장의 결과가 대시보드 형식이 아니면 상태 요약으로 표시한다.
     }
   }
-  const typed = row as Record<string, unknown>;
   return {
     ...emptyDashboard(
-      typed.error_message
-        ? `최근 가격조정 원장 오류: ${String(typed.error_message)}`
+      row.error_message
+        ? `최근 가격조정 원장 오류: ${String(row.error_message)}`
         : "최근 가격조정 실행 원장을 Ops Center에서 확인했습니다.",
     ),
     mode: "OPS_LEDGER",
     run: {
-      id: String(typed.id ?? ""),
-      generatedAt: String(typed.started_at ?? ""),
-      status: String(typed.status ?? "UNKNOWN"),
+      id: String(row.id ?? ""),
+      generatedAt: String(row.started_at ?? ""),
+      status: String(row.status ?? "UNKNOWN"),
     },
   } satisfies PriceAdjustmentDashboard;
 }
