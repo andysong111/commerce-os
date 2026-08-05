@@ -32,6 +32,7 @@ if (detailPageMode === "worker") {
   await import("./bootstrap.js");
   await import("./selected-row-delete.js");
   await import("./single-row-add.js");
+  await import("./single-row-add-barcode-guard.js");
   await import("./product-launch-flow-batch-handoff.js");
   await import("./table-horizontal-scroll.js");
   await import("./dialog-close-fix.js");
