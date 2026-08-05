@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/PageHeader";
 import { KeywordRecommendationRerunButton } from "@/components/product-launch-flow/KeywordRecommendationRerunButton";
 import { ProductLaunchAiTitleTermsPanel } from "@/components/product-launch-flow/ProductLaunchAiTitleTermsPanel";
-import { ProductLaunchFlowSimple } from "@/components/product-launch-flow/ProductLaunchFlowSimple";
+import { ProductLaunchFlowConnected } from "@/components/product-launch-flow/ProductLaunchFlowConnected";
 import { ProductLaunchTrackerHandoffSync } from "@/components/product-launch-flow/ProductLaunchTrackerHandoffSync";
 
 export default function ProductLaunchFlowPage() {
@@ -9,12 +9,12 @@ export default function ProductLaunchFlowPage() {
     <>
       <PageHeader
         title="상품 출시 플로우"
-        description="실재고 행번호 또는 신규 상품 출시 진행관리의 등록완료 상품을 기준으로 검색어와 쇼핑몰별 상품명을 반영합니다. 마켓 전송은 직접 실행합니다."
+        description="상품출시진행관리 행번호 또는 체크 선택 상품을 기준으로 샵플링 등록부터 가격·키워드 작업까지 이어갑니다. 마켓 전송은 직접 실행합니다."
       />
       <ProductLaunchTrackerHandoffSync />
       <KeywordRecommendationRerunButton />
       <ProductLaunchAiTitleTermsPanel />
-      <ProductLaunchFlowSimple />
+      <ProductLaunchFlowConnected />
     </>
   );
 }
