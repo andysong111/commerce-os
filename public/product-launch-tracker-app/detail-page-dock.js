@@ -1247,9 +1247,7 @@ async function ensureLocalCollectorReady() {
   }
 
   const shouldStart = window.confirm(
-    "승준컴 로컬 수집기가 꺼져 있거나 Chrome 연결 권한이 아직 허용되지 않았습니다.
-
-확인을 누르면 수집기를 자동 실행하고 약 12초 동안 다시 연결합니다.",
+    "승준컴 로컬 수집기가 꺼져 있거나 Chrome 연결 권한이 아직 허용되지 않았습니다.\n\n확인을 누르면 수집기를 자동 실행하고 약 12초 동안 다시 연결합니다.",
   );
   if (shouldStart) {
     showRunStatus("승준컴 로컬 수집기 자동 실행 요청 · 연결을 다시 확인하고 있습니다.", "progress");
