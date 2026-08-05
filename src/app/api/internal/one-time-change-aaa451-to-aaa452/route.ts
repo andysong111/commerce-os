@@ -160,10 +160,57 @@ function isExactProduct(item: TrackerItem, modelNumber: string) {
 }
 
 function summarize(item: TrackerItem) {
+  const candidate = item as Record<string, unknown>;
+  const orderOptions = Array.isArray(candidate.orderOptions)
+    ? candidate.orderOptions.map((option) => {
+        const value = option && typeof option === "object" ? option as Record<string, unknown> : {};
+        return {
+          saleOption: String(value.saleOption ?? ""),
+          barcode: String(value.barcode ?? ""),
+          sourceOrderItemId: value.sourceOrderItemId ?? null,
+        };
+      })
+    : [];
+  const shoplingProducts =
+    candidate.shoplingProducts && typeof candidate.shoplingProducts === "object"
+      ? Object.fromEntries(
+          Object.entries(candidate.shoplingProducts as Record<string, unknown>).map(
+            ([key, value]) => {
+              const product = value && typeof value === "object"
+                ? value as Record<string, unknown>
+                : {};
+              return [key, String(product.goodsKey ?? "")];
+            },
+          ),
+        )
+      : {};
+  const stages =
+    candidate.stages && typeof candidate.stages === "object"
+      ? Object.fromEntries(
+          Object.entries(candidate.stages as Record<string, unknown>).map(
+            ([key, value]) => {
+              const stage = value && typeof value === "object"
+                ? value as Record<string, unknown>
+                : {};
+              return [key, String(stage.status ?? "")];
+            },
+          ),
+        )
+      : {};
+
   return {
     id: String(item.id ?? ""),
     modelNumber: String(item.modelNumber ?? ""),
     productName: String(item.productName ?? ""),
+    workBatch: String(candidate.workBatch ?? ""),
+    barcode: String(candidate.barcode ?? ""),
+    selfCodeBase: String(candidate.selfCodeBase ?? ""),
+    orderOptions,
+    shoplingProducts,
+    stages,
+    source: candidate.source ?? null,
+    createdAt: candidate.createdAt ?? null,
+    updatedAt: candidate.updatedAt ?? null,
   };
 }
 
