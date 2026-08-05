@@ -1,3 +1,9 @@
+import { openChinaOrderCommitmentsByBarcode } from "@/lib/chinaOrderLedger";
+import {
+  applyProductDecisionLiveOverlay,
+  type ProductDecisionInventoryRow,
+  type ProductDecisionLiveOverlaySummary,
+} from "@/lib/productDecisionLiveOverlay";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   type ProductDecisionRow,
@@ -9,6 +15,8 @@ export type { ProductDecisionRow, ProductDecisionScore, ProductDecisionSnapshot 
 
 const DEFAULT_PRODUCT_DECISION_AGENT_BASE_URL =
   "https://commerce-os-product-decision-agent.andy123df23.chatgpt.site";
+const DEFAULT_PRODUCT_MASTER_BASE_URL =
+  "https://commerce-os-product-master.vercel.app";
 const PRODUCT_DECISION_SNAPSHOT_OPERATION =
   "PRODUCT_DECISION_SNAPSHOT_IMPORT";
 
@@ -16,8 +24,25 @@ export type ProductDecisionIntegrationResult = {
   snapshot: ProductDecisionSnapshot;
   error: string | null;
   sourceHost: string;
-  sourceMode: "internal_snapshot" | "legacy_site";
+  sourceMode:
+    | "internal_live_overlay"
+    | "internal_snapshot"
+    | "legacy_site";
   writesEnabled: false;
+  liveOverlay: ProductDecisionLiveOverlaySummary;
+};
+
+type InventoryPayload = {
+  ok?: boolean;
+  generatedAt?: string;
+  inventories?: Array<{
+    barcode?: unknown;
+    estimatedQuantity?: unknown;
+    confirmed?: unknown;
+    requiresReview?: unknown;
+  }>;
+  message?: string;
+  error?: string;
 };
 
 function productDecisionBaseUrl() {
@@ -36,6 +61,23 @@ function emptySnapshot(): ProductDecisionSnapshot {
     budget: 0,
     expectedSpend: 0,
     products: [],
+  };
+}
+
+function emptyOverlay(
+  inventoryError: string | null = null,
+  commitmentError: string | null = null,
+): ProductDecisionLiveOverlaySummary {
+  return {
+    applied: Boolean(inventoryError || commitmentError),
+    productCount: 0,
+    confirmedInventoryCount: 0,
+    commitmentBarcodeCount: 0,
+    changedProductCount: 0,
+    zeroNeedCount: 0,
+    inventoryGeneratedAt: null,
+    inventoryError,
+    commitmentError,
   };
 }
 
@@ -97,15 +139,106 @@ async function loadInternalSnapshot() {
   }
 }
 
+async function loadProductMasterInventory(): Promise<{
+  rows: ProductDecisionInventoryRow[];
+  generatedAt: string | null;
+  error: string | null;
+}> {
+  const secret = process.env.PRODUCT_MASTER_INTEGRATION_SECRET?.trim();
+  if (!secret) {
+    return {
+      rows: [],
+      generatedAt: null,
+      error: "상품마스터 연동키가 없어 최신 확인재고를 덧씌우지 못했습니다.",
+    };
+  }
+  const baseUrl = (
+    process.env.PRODUCT_MASTER_BASE_URL?.trim() ||
+    DEFAULT_PRODUCT_MASTER_BASE_URL
+  ).replace(/\/$/, "");
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/integrations/inventory-snapshot`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "x-commerce-os-integration-secret": secret,
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(25_000),
+      },
+    );
+    const payload = (await response.json().catch(() => ({}))) as InventoryPayload;
+    if (
+      !response.ok ||
+      payload.ok !== true ||
+      !Array.isArray(payload.inventories)
+    ) {
+      throw new Error(
+        payload.message ||
+          payload.error ||
+          `상품마스터 재고 조회 실패 · HTTP ${response.status}`,
+      );
+    }
+
+    return {
+      rows: payload.inventories.map((row) => ({
+        barcode: String(row.barcode ?? ""),
+        estimatedQuantity: Number(row.estimatedQuantity ?? 0),
+        confirmed: Boolean(row.confirmed),
+        requiresReview: Boolean(row.requiresReview),
+      })),
+      generatedAt:
+        payload.generatedAt && Number.isFinite(Date.parse(payload.generatedAt))
+          ? new Date(payload.generatedAt).toISOString()
+          : null,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      rows: [],
+      generatedAt: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "상품마스터 최신 확인재고를 읽지 못했습니다.",
+    };
+  }
+}
+
+async function applyLiveOverlay(snapshot: ProductDecisionSnapshot) {
+  const [inventory, commitment] = await Promise.all([
+    loadProductMasterInventory(),
+    openChinaOrderCommitmentsByBarcode(),
+  ]);
+  return applyProductDecisionLiveOverlay(
+    snapshot,
+    inventory.rows,
+    commitment.commitments,
+    {
+      inventoryGeneratedAt: inventory.generatedAt,
+      inventoryError: inventory.error,
+      commitmentError: commitment.error,
+    },
+  );
+}
+
 export async function loadProductDecisionSnapshot(): Promise<ProductDecisionIntegrationResult> {
   const internal = await loadInternalSnapshot();
   if (internal.snapshot) {
+    const overlaid = await applyLiveOverlay(internal.snapshot);
     return {
-      snapshot: internal.snapshot,
+      snapshot: overlaid.snapshot,
       error: null,
-      sourceHost: "Ops Center Supabase · 검증 D1 백업",
-      sourceMode: "internal_snapshot",
+      sourceHost:
+        "Ops Center 검증 수요 · Product Master 확인재고 · 중국 미입고 원장",
+      sourceMode: overlaid.summary.applied
+        ? "internal_live_overlay"
+        : "internal_snapshot",
       writesEnabled: false,
+      liveOverlay: overlaid.summary,
     };
   }
 
@@ -124,13 +257,15 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
     if (!response.ok) {
       throw new Error(`기존 발주 추천 조회 실패 · HTTP ${response.status}`);
     }
+    const snapshot = normalizeSnapshot(await response.json());
 
     return {
-      snapshot: normalizeSnapshot(await response.json()),
+      snapshot,
       error: null,
       sourceHost,
       sourceMode: "legacy_site",
       writesEnabled: false,
+      liveOverlay: emptyOverlay(),
     };
   } catch (error) {
     const legacyError =
@@ -145,6 +280,7 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
       sourceHost,
       sourceMode: "legacy_site",
       writesEnabled: false,
+      liveOverlay: emptyOverlay(),
     };
   }
 }
