@@ -11,5 +11,14 @@ source = source.replace(
   malformedTemplate,
   'OPTIMIZED_TRACKER_API + "?" + params.toString()',
 );
+const fragileRegexAssertion =
+  '  assert.match(dock, /state\\?\\.partialPage !== true/);';
+if (!source.includes(fragileRegexAssertion)) {
+  throw new Error("partial-page test assertion repair anchor was not found");
+}
+source = source.replace(
+  fragileRegexAssertion,
+  '  assert.ok(dock.includes("state?.partialPage !== true"));',
+);
 fs.writeFileSync(patchPath, source);
 await import(pathToFileURL(patchPath).href);
