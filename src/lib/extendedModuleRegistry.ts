@@ -53,7 +53,7 @@ export const priceAdjustmentEngineModule: CommerceModule = {
   note: "Ops Center 내부 이전 1단계입니다. 가격판정과 실행원장을 읽기만 하며 자체 등급 엔진과 실제 가격변경은 아직 분리되어 있습니다.",
   helperNote: "Ops Center 내부 · 조회 전용",
   actionLabel: "내부 상품등급 대시보드 보기",
-  safetyBadge: "이전 1단계 · 실제 미반영",
+  safetyBadge: "그림자 운영 · 실제 미반영",
 };
 
 export const productDecisionAgentModule: CommerceModule = {
