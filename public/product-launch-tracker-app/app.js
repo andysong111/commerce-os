@@ -26,6 +26,7 @@ if (detailPageMode === "worker") {
     }
   });
 } else {
+  await import("./tracker-seed-model-migrations.js");
   await import("./tracker-deleted-seed-filter.js");
   await import("./bootstrap.js");
   await import("./selected-row-delete.js");
@@ -35,6 +36,8 @@ if (detailPageMode === "worker") {
   await import("./relaunch-reset-fixed.js");
   await import("./china-product-links.js");
   await import("./table-inline-ops-loader.js");
+  await import("./inline-options-focus-guard.js");
+  await import("./inline-identity-editors.js");
   await import("./option-location-inline-editor.js");
   await import("./multi-option-main-barcode-visibility.js");
   await import("./inline-save-no-flicker.js");
