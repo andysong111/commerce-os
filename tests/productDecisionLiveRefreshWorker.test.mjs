@@ -10,6 +10,10 @@ const shoplingClient = await readFile(
   "src/lib/shopling/shoplingReadClient.ts",
   "utf8",
 );
+const shoplingTransport = await readFile(
+  "src/lib/shopling/shoplingTlsTransport.ts",
+  "utf8",
+);
 const api = await readFile(
   "src/app/api/product-decision-agent/live-refresh/route.ts",
   "utf8",
@@ -72,11 +76,15 @@ test("planning snapshot is frozen by deterministic content fingerprint and drift
 });
 
 test("each Shopling chunk performs one bounded HTTP attempt and worker retries are the only retry layer", () => {
-  assert.match(shoplingClient, /AbortSignal\.timeout\(45_000\)/);
-  assert.doesNotMatch(shoplingClient, /for \(let attempt/);
-  assert.doesNotMatch(shoplingClient, /await delay\(/);
+  assert.match(shoplingClient, /postShoplingXml\(this\.url\(resource\), xml/);
+  assert.match(shoplingClient, /timeoutMs: 45_000/);
+  assert.match(shoplingTransport, /AbortSignal\.timeout\(timeoutMs\)/);
+  assert.match(shoplingTransport, /requestHandle\.setTimeout\(timeoutMs/);
+  assert.match(shoplingTransport, /isShoplingWeakDhFailure\(error\)/);
+  assert.doesNotMatch(shoplingClient + shoplingTransport, /for \(let attempt/);
+  assert.doesNotMatch(shoplingClient + shoplingTransport, /await delay\(/);
   assert.equal(
-    (shoplingClient.match(/await fetch\(this\.url\(resource\)/g) ?? []).length,
+    (shoplingTransport.match(/await fetch\(url,/g) ?? []).length,
     1,
   );
 });
