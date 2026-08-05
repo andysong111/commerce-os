@@ -10,6 +10,23 @@ export type ChinaOrderInternalStatus = {
   error: string | null;
 };
 
+type OperationRow = {
+  operation_type?: unknown;
+  source?: unknown;
+  status?: unknown;
+  started_at?: unknown;
+};
+
+function isChinaOrderOperation(row: OperationRow) {
+  const identity = `${String(row.operation_type ?? "")} ${String(row.source ?? "")}`
+    .toUpperCase();
+  return (
+    identity.includes("CHINA") ||
+    identity.includes("RECEIPT") ||
+    identity.includes("INBOUND")
+  );
+}
+
 export async function loadChinaOrderInternalStatus(): Promise<ChinaOrderInternalStatus> {
   const admin = await createSupabaseAdminClient();
   if (!admin) {
@@ -26,12 +43,9 @@ export async function loadChinaOrderInternalStatus(): Promise<ChinaOrderInternal
 
   const result = await admin
     .from("commerce_operation_runs")
-    .select("operation_type,status,started_at")
-    .or(
-      "operation_type.ilike.%CHINA%,operation_type.ilike.%RECEIPT%,source.ilike.%china-order%",
-    )
+    .select("operation_type,source,status,started_at")
     .order("started_at", { ascending: false })
-    .limit(100);
+    .limit(200);
 
   if (result.error) {
     return {
@@ -45,7 +59,9 @@ export async function loadChinaOrderInternalStatus(): Promise<ChinaOrderInternal
     };
   }
 
-  const rows = Array.isArray(result.data) ? result.data : [];
+  const rows = (Array.isArray(result.data) ? result.data : [])
+    .filter((row): row is OperationRow => Boolean(row && typeof row === "object"))
+    .filter(isChinaOrderOperation);
   return {
     sourceMode: rows.length ? "ops_ledger" : "empty",
     latestOperationAt:
