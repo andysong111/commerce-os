@@ -26,36 +26,66 @@ if (detailPageMode === "worker") {
     }
   });
 } else {
-  await import("./tracker-seed-model-migrations.js");
-  await import("./tracker-deleted-seed-filter.js");
-  await import("./single-option-barcode-sync.js");
-  await import("./bootstrap.js");
-  await import("./manual-detail-add.js");
-  await import("./selected-row-delete.js");
-  await import("./single-row-add.js");
-  await import("./single-row-add-barcode-guard.js");
-  await import("./product-launch-flow-batch-handoff.js");
+  // The optimized app owns list loading, paging, lazy details and item-scoped saves.
+  await import("./optimized-app.js");
+
+  // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
   await import("./dialog-close-fix.js");
-  await import("./product-launch-flow-handoff.js");
-  await import("./relaunch-reset-fixed.js");
-  await import("./china-product-links.js");
   await import("./table-inline-ops-loader.js");
-  await import("./inline-options-focus-guard.js");
-  await import("./inline-identity-editors.js");
-  await import("./option-location-inline-editor.js");
-  await import("./multi-option-main-barcode-visibility.js");
-  await import("./inline-save-no-flicker.js");
-  await import("./category-ai.js");
-  await import("./category-ai-reliable.js");
-  await import("./category-review-queue-link.js");
-  await import("./category-toolbar-layout.js");
-  await import("./category-local-update.js");
-  await import("./category-local-result-recovery.js");
-  await import("./category-update-progress.js");
-  await import("./category-update-cancel-guard.js");
-  await import("./category-update-work-assistant-bridge.js");
   await import("./detail-page-dock.js");
   await import("./detail-page-option-guard.js");
   await import("./empty-cell-placeholder-cleanup.js");
+  await import("./shopling-upload-ui.js");
+  await import("./product-launch-flow-handoff.js");
+
+  // Network-heavy and rarely used category integrations wait until the browser is idle.
+  scheduleIdleIntegrations();
+}
+
+function scheduleIdleIntegrations() {
+  let started = false;
+  const eagerStart = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      target?.closest(
+        "#bulk-apply-button, #export-menu-button, #policy-button, button[data-action='detail'], button[data-action='preview']",
+      )
+    ) {
+      start();
+    }
+  };
+  const start = () => {
+    if (started) return;
+    started = true;
+    document.removeEventListener("pointerdown", eagerStart, true);
+    void loadIdleIntegrations();
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(start, { timeout: 1_200 });
+  } else {
+    window.setTimeout(start, 250);
+  }
+  document.addEventListener("pointerdown", eagerStart, true);
+}
+
+async function loadIdleIntegrations() {
+  const modules = [
+    "./category-ai.js",
+    "./category-ai-reliable.js",
+    "./category-review-queue-link.js",
+    "./category-toolbar-layout.js",
+    "./category-local-update.js",
+    "./category-local-result-recovery.js",
+    "./category-update-progress.js",
+    "./category-update-cancel-guard.js",
+    "./category-update-work-assistant-bridge.js",
+  ];
+  for (const path of modules) {
+    try {
+      await import(path);
+    } catch (error) {
+      console.error(`Product launch integration failed to load: ${path}`, error);
+    }
+  }
 }
