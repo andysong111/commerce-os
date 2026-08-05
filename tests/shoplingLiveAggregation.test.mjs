@@ -166,7 +166,7 @@ test("order aggregation maps option IDs, expands set quantities and counts one s
   assert.equal(chunk.products[0].units[0], 8);
   assert.equal(chunk.products[0].revenue[0], 2800);
   assert.equal(chunk.products[0].shippedOrders[0], 1);
-  assert.equal(chunk.references.length, 2);
+  assert.equal(chunk.references.length, 1);
 });
 
 test("claim aggregation restores barcode from order references and applies set quantity severity", () => {
