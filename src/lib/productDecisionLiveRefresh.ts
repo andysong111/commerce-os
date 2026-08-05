@@ -47,6 +47,7 @@ export type ProductDecisionLiveRequest = {
   analysisStartDate: string;
   analysisEndDate: string;
   planningGeneratedAt: string;
+  planningContentFingerprint: string;
   planningProductCount: number;
   orderRanges: ShoplingDateRange[];
   claimRanges: ShoplingDateRange[];
@@ -117,10 +118,15 @@ type StoreOperationInput = {
 type PlanningPayload = {
   ok?: boolean;
   generatedAt?: string;
+  contentFingerprint?: string;
   productCount?: number;
   products?: ProductPlanningSnapshot["products"];
   message?: string;
   error?: string;
+};
+
+type VersionedProductPlanningSnapshot = ProductPlanningSnapshot & {
+  contentFingerprint: string;
 };
 
 type FailureSnapshot = {
@@ -199,7 +205,7 @@ function planningConnection() {
   return { baseUrl, secret };
 }
 
-export async function loadProductPlanningSnapshot(): Promise<ProductPlanningSnapshot> {
+export async function loadProductPlanningSnapshot(): Promise<VersionedProductPlanningSnapshot> {
   const { baseUrl, secret } = planningConnection();
   const response = await fetch(
     `${baseUrl}/api/integrations/planning-snapshot`,
@@ -227,10 +233,14 @@ export async function loadProductPlanningSnapshot(): Promise<ProductPlanningSnap
   }
   const generatedAt = iso(payload.generatedAt);
   if (!generatedAt) throw new Error("PRODUCT_MASTER_PLANNING_TIME_INVALID");
+  const contentFingerprint = text(payload.contentFingerprint);
+  if (!/^sha256:[a-f0-9]{64}$/.test(contentFingerprint)) {
+    throw new Error("PRODUCT_MASTER_PLANNING_FINGERPRINT_INVALID");
+  }
   if (!payload.products.length) {
     throw new Error("PRODUCT_MASTER_PLANNING_PRODUCTS_EMPTY");
   }
-  return { generatedAt, products: payload.products };
+  return { generatedAt, contentFingerprint, products: payload.products };
 }
 
 function supabaseConnection() {
@@ -314,6 +324,7 @@ function requestFromRow(row: OperationRow): ProductDecisionLiveRequest | null {
   const requestId = text(value.requestId);
   const analysisAsOf = iso(value.analysisAsOf);
   const planningGeneratedAt = iso(value.planningGeneratedAt);
+  const planningContentFingerprint = text(value.planningContentFingerprint);
   const orderRanges = Array.isArray(value.orderRanges)
     ? value.orderRanges
         .map(object)
@@ -330,6 +341,7 @@ function requestFromRow(row: OperationRow): ProductDecisionLiveRequest | null {
     !requestId ||
     !analysisAsOf ||
     !planningGeneratedAt ||
+    !/^sha256:[a-f0-9]{64}$/.test(planningContentFingerprint) ||
     !orderRanges.length ||
     !claimRanges.length
   ) {
@@ -341,6 +353,7 @@ function requestFromRow(row: OperationRow): ProductDecisionLiveRequest | null {
     analysisStartDate: text(value.analysisStartDate),
     analysisEndDate: text(value.analysisEndDate),
     planningGeneratedAt,
+    planningContentFingerprint,
     planningProductCount: integer(value.planningProductCount),
     orderRanges,
     claimRanges,
@@ -350,7 +363,7 @@ function requestFromRow(row: OperationRow): ProductDecisionLiveRequest | null {
 
 export function createProductDecisionLiveRequestPlan(
   requestId: string,
-  planning: ProductPlanningSnapshot,
+  planning: VersionedProductPlanningSnapshot,
   analysisAsOf = new Date().toISOString(),
 ): ProductDecisionLiveRequest {
   const asOf = new Date(analysisAsOf);
@@ -366,6 +379,7 @@ export function createProductDecisionLiveRequestPlan(
     analysisStartDate,
     analysisEndDate,
     planningGeneratedAt: planning.generatedAt,
+    planningContentFingerprint: planning.contentFingerprint,
     planningProductCount: planning.products.length,
     orderRanges: splitShoplingDateRange(
       analysisStartDate,
@@ -516,9 +530,9 @@ async function storeTerminalFailure(
 
 async function verifiedPlanning(request: ProductDecisionLiveRequest) {
   const planning = await loadProductPlanningSnapshot();
-  if (planning.generatedAt !== request.planningGeneratedAt) {
+  if (planning.contentFingerprint !== request.planningContentFingerprint) {
     throw new Error(
-      `PRODUCT_MASTER_PLANNING_CHANGED:${request.planningGeneratedAt}:${planning.generatedAt}`,
+      `PRODUCT_MASTER_PLANNING_CHANGED:${request.planningContentFingerprint}:${planning.contentFingerprint}`,
     );
   }
   if (planning.products.length !== request.planningProductCount) {
@@ -598,6 +612,7 @@ async function executeOrderStep(
       range,
       rangeKey: rangeKey(range),
       planningGeneratedAt: request.planningGeneratedAt,
+      planningContentFingerprint: request.planningContentFingerprint,
     },
     resultSnapshot: summary,
   });
@@ -632,6 +647,7 @@ async function executeClaimStep(
       range,
       rangeKey: rangeKey(range),
       planningGeneratedAt: request.planningGeneratedAt,
+      planningContentFingerprint: request.planningContentFingerprint,
     },
     resultSnapshot: summary,
   });
