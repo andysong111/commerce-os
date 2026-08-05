@@ -2,6 +2,7 @@ import {
   productDecisionLiveRefreshConfigured,
   runProductDecisionLiveRefreshStep,
 } from "@/lib/productDecisionLiveRefresh";
+import { recoverLegacyShoplingFetchFailure } from "@/lib/productDecisionLiveRecovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,10 +36,12 @@ export async function GET(request: Request) {
   }
 
   try {
+    const recovery = await recoverLegacyShoplingFetchFailure();
     return Response.json(
       {
         ok: true,
         configured: true,
+        recovery,
         ...(await runProductDecisionLiveRefreshStep()),
       },
       { headers: { "cache-control": "no-store" } },
