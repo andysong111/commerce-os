@@ -118,7 +118,7 @@ export function ProductDecisionSnapshotImporter() {
       setProgress(100);
       setDone(true);
       setMessage(
-        `검증 완료 · 내부 스냅샷 ${Number(body.productCount ?? 0).toLocaleString("ko-KR")}개 · 그림자 최종 일치 ${Number(body.shadowExactCount ?? 0).toLocaleString("ko-KR")}개 · 시점차이 ${Number(body.shadowMismatchCount ?? 0).toLocaleString("ko-KR")}개 · 원인불명 0개`,
+        `검증 완료 · 내부 스냅샷 ${Number(body.productCount ?? 0).toLocaleString("ko-KR")}개 · 그림자 최종 일치 ${Number(body.shadowExactCount ?? 0).toLocaleString("ko-KR")}개 · 최종 차이 ${Number(body.shadowMismatchCount ?? 0).toLocaleString("ko-KR")}개 · 원인불명 0개`,
       );
     } catch (error) {
       setProgress(0);
