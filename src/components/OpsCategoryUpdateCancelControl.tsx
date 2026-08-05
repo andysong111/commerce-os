@@ -76,8 +76,8 @@ async function cancelLocalCategory(
       requestId: session.requestId || task.requestId || "",
     }),
     cache: "no-store",
-    targetAddressSpace: "loopback",
-  } as RequestInit & { targetAddressSpace: "loopback" };
+    targetAddressSpace: "local",
+  } as RequestInit & { targetAddressSpace: "local" };
   const response = await fetch(`${localBase}/category-update/cancel`, init);
   const body = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
