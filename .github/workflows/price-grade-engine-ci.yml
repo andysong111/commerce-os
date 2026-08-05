@@ -1,0 +1,42 @@
+name: Price Grade Engine CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/priceGradeEngine.ts"
+      - "tests/priceGradeEngine.test.mjs"
+      - ".github/workflows/price-grade-engine-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: price-grade-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  price-grade-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint price grade engine
+        run: >-
+          npx eslint
+          src/lib/priceGradeEngine.ts
+          tests/priceGradeEngine.test.mjs
+      - name: Run price grade engine tests
+        run: >-
+          node --experimental-strip-types --test
+          tests/priceGradeEngine.test.mjs
+      - name: Build Ops Center
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-grade-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_grade_build_check
