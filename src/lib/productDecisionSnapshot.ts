@@ -1,6 +1,6 @@
 export const VERIFIED_PRODUCT_DECISION_BACKUP = {
   zipSha256: "81968ab38e3ab177c7e8cb3aff9e95554752ab4ee7257854e8feaf6a89c808ba",
-  dashboardSha256: "75d2f4a16c12c9eb338fb0d43a88d53c189a0476455ab64f8a74bb593dd9647a",
+  dashboardSha256: "cf7892ab0776a3de126afecccf29917f4315c8fc66240dd156ce8c9ecf697a9e",
   source: "https://commerce-os-product-decision-agent.andy123df23.chatgpt.site",
   exportedAt: "2026-08-05T09:58:04.240Z",
   completedAt: "2026-08-05T10:01:33.070Z",
@@ -257,7 +257,7 @@ export function buildProductDecisionSnapshot(
       "검증된 기존 D1 백업에서 복원한 발주 추천 스냅샷입니다. 실제 주문·결제·샵플링 변경은 실행하지 않습니다.",
     runId,
     runStatus: text(run.status),
-    generatedAt: formatKorea(text(run.generated_at)),
+    generatedAt: text(run.generated_at),
     periodLabel: "검증 백업 기준 최신 발주안",
     budget: nonnegativeNumber(run.budget) ?? 0,
     budgetBasis: text(run.budget_basis),
@@ -339,16 +339,4 @@ function flagValue(flags: string[], key: string) {
 function numberFlag(flags: string[], key: string) {
   const parsed = Number(flagValue(flags, key));
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function formatKorea(value: string) {
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
 }
