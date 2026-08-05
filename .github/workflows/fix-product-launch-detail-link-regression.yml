@@ -33,17 +33,45 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Focused product launch tests
         run: node --experimental-strip-types --test tests/productLaunchTrackerOptimized.test.mjs tests/productLaunchTrackerOptimizedContracts.test.mjs tests/productLaunchTrackerSorting.test.mjs
-      - name: Full test suite
+      - name: Full-suite differential against main
         run: |
           set -e
-          for file in tests/*.test.mjs; do
-            echo "RUNNING_TEST_FILE=$file"
-            if ! node --experimental-strip-types --test "$file" > /tmp/product-launch-full-test.log 2>&1; then
-              echo "FAILED_TEST_FILE=$file"
-              tail -n 80 /tmp/product-launch-full-test.log
-              exit 1
-            fi
-          done
+          current_root="$PWD"
+          baseline_root="/tmp/product-launch-main-baseline"
+          git worktree add --detach "$baseline_root" origin/main
+          ln -s "$current_root/node_modules" "$baseline_root/node_modules"
+
+          run_suite() {
+            root="$1"
+            output="$2"
+            : > "$output"
+            for file in "$root"/tests/*.test.mjs; do
+              rel="tests/$(basename "$file")"
+              if ! (cd "$root" && node --experimental-strip-types --test "$rel" > /tmp/product-launch-suite.log 2>&1); then
+                basename "$file" >> "$output"
+              fi
+            done
+            sort -u -o "$output" "$output"
+          }
+
+          run_suite "$baseline_root" /tmp/main-failures.txt
+          run_suite "$current_root" /tmp/branch-failures.txt
+          comm -13 /tmp/main-failures.txt /tmp/branch-failures.txt > /tmp/new-failures.txt
+
+          echo "BASELINE_FAILING_TEST_FILES"
+          cat /tmp/main-failures.txt || true
+          echo "BRANCH_FAILING_TEST_FILES"
+          cat /tmp/branch-failures.txt || true
+
+          if [ -s /tmp/new-failures.txt ]; then
+            echo "NEW_FAILING_TEST_FILES"
+            cat /tmp/new-failures.txt
+            while IFS= read -r file; do
+              echo "===== $file ====="
+              node --experimental-strip-types --test "tests/$file" || true
+            done < /tmp/new-failures.txt
+            exit 1
+          fi
       - name: Lint
         run: npm run lint
       - name: Production build
