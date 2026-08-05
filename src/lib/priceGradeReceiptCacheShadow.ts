@@ -115,8 +115,6 @@ export function augmentPriceGradeSnapshotWithReceiptCache(
   const contentFingerprint = fingerprint({
     base: snapshot.contentFingerprint,
     augmentationVersion: AUGMENTATION_VERSION,
-    cacheSnapshotId: cache?.complete ? cache.snapshotId : null,
-    cacheGeneratedAt: cache?.complete ? cache.generatedAt : null,
     usedFallback,
   });
   const receiptEvidence: PriceGradeReceiptEvidence = {
@@ -149,6 +147,14 @@ async function loadReceiptCacheSafely() {
   } catch {
     return null;
   }
+}
+
+export async function loadPriceGradeReceiptAugmentedSnapshot() {
+  const [snapshot, cache] = await Promise.all([
+    loadPriceGradeInputSnapshot(),
+    loadReceiptCacheSafely(),
+  ]);
+  return augmentPriceGradeSnapshotWithReceiptCache(snapshot, cache);
 }
 
 function supabaseConnection() {
@@ -210,11 +216,7 @@ async function storeComparison(result: PriceGradeReceiptCacheShadowResult) {
 }
 
 export async function runPriceGradeShadowComparisonWithReceiptCache(): Promise<PriceGradeReceiptCacheShadowResult> {
-  const [snapshot, cache] = await Promise.all([
-    loadPriceGradeInputSnapshot(),
-    loadReceiptCacheSafely(),
-  ]);
-  const augmented = augmentPriceGradeSnapshotWithReceiptCache(snapshot, cache);
+  const augmented = await loadPriceGradeReceiptAugmentedSnapshot();
   const baseResult = comparePriceGradeInputs(augmented.snapshot);
   const result: PriceGradeReceiptCacheShadowResult = {
     ...baseResult,
