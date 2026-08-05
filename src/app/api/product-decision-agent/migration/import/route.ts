@@ -74,7 +74,7 @@ export async function POST(request: Request) {
         method: "POST",
         headers: {
           ...createSupabaseAdminHeaders(supabaseSecretKey),
-          Prefer: "resolution=merge-duplicates,return=representation",
+          Prefer: "resolution=ignore-duplicates,return=representation",
         },
         body: JSON.stringify([
           {
@@ -124,7 +124,7 @@ export async function POST(request: Request) {
       productCount: snapshot.products?.length ?? 0,
       importedAt: now,
       message:
-        "검증된 D1 발주 추천 스냅샷을 Ops Center 운영 원장에 저장했습니다.",
+        "검증된 D1 발주 추천 스냅샷을 Ops Center 운영 원장에 보존했습니다.",
     });
   } catch (error) {
     return json(
