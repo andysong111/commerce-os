@@ -10,7 +10,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 }
 
 export function rememberInlineOptionsEditor(input, now = Date.now()) {
-  if (!(input instanceof HTMLInputElement)) return null;
+  if (
+    typeof HTMLInputElement === "undefined" ||
+    !(input instanceof HTMLInputElement)
+  ) {
+    return null;
+  }
   const row = input.closest("tr[data-id]");
   const id = String(row?.dataset.id ?? "").trim();
   if (!id) return null;
