@@ -1,4 +1,5 @@
 const STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const OPTIMIZED_TRACKER_API = "/api/product-launch-tracker/optimized";
 const ENGINE_CONFIG_API = "/api/product-launch-tracker/detail-page-engine-config";
 const ASSET_UPLOAD_API = "/api/product-launch-tracker/detail-page-assets";
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
@@ -176,13 +177,7 @@ async function enqueueSelected() {
       showMessage(message, 15_000);
       return;
     }
-    const selected = state.items.filter((item) => selectedIds.includes(String(item.id)));
-    if (selected.length !== selectedIds.length) {
-      const message = "선택 상태와 상품 데이터가 일치하지 않습니다. Ctrl+F5 후 다시 선택하세요.";
-      showRunStatus(message, "error");
-      showMessage(message, 15_000);
-      return;
-    }
+    const selected = await loadAuthoritativeSelectedItems(state, selectedIds);
     const invalid = selected.filter((item) => !readPrimaryChinaLink(item));
     if (invalid.length) {
       const message = `${invalid.map((item) => item.modelNumber || item.productName || item.id).join(", ")} 상품에 중국링크 고정1번이 없습니다. 상품 상세에서 링크를 입력한 뒤 다시 실행하세요.`;
@@ -1287,6 +1282,37 @@ function readSalesOptions(item) {
     .filter(Boolean)
     .join(" / ")
     .slice(0, 2000);
+}
+
+async function loadAuthoritativeSelectedItems(state, selectedIds) {
+  const localItems = Array.isArray(state?.items) ? state.items : [];
+  const orderSelected = (items) => {
+    const byId = new Map(items.map((item) => [String(item?.id ?? ""), item]));
+    const selected = selectedIds.map((itemId) => byId.get(itemId)).filter(Boolean);
+    if (selected.length !== selectedIds.length) {
+      throw new Error(
+        "선택 상태와 상품 데이터가 일치하지 않습니다. 목록을 새로고침한 뒤 다시 선택하세요.",
+      );
+    }
+    return selected;
+  };
+
+  if (state?.partialPage !== true) return orderSelected(localItems);
+
+  const params = new URLSearchParams({ mode: "items" });
+  selectedIds.forEach((itemId) => params.append("id", itemId));
+  const response = await fetch(
+    OPTIMIZED_TRACKER_API + "?" + params.toString(),
+    { credentials: "same-origin", cache: "no-store" },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok !== true || !Array.isArray(payload.items)) {
+    throw new Error(
+      payload?.message ||
+        "선택 상품의 최신 상세정보를 서버에서 불러오지 못했습니다.",
+    );
+  }
+  return orderSelected(payload.items);
 }
 
 function readState() {

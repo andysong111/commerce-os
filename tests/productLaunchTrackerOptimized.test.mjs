@@ -175,3 +175,31 @@ test("bulk stage mutation updates the selected IDs in one state write", () => {
   assert.equal(mutation.state.items[2].stages.detailPage.status, "완료");
   assert.equal(mutation.state.items[1].stages.detailPage.status, "미시작");
 });
+
+
+test("list summary preserves canonical China product links for partial-page cache", () => {
+  const source = state(1);
+  source.items[0].chinaProductLinks = [
+    "https://detail.1688.com/offer/904143560486.html",
+  ];
+  let summary = summarizeProductLaunchTrackerItem(source.items[0]);
+  assert.deepEqual(summary.chinaProductLinks, [
+    "https://detail.1688.com/offer/904143560486.html",
+  ]);
+
+  source.items[0].chinaProductLinks = [];
+  source.items[0].primaryChinaProductLink =
+    "https://detail.1688.com/offer/111.html";
+  source.items[0].detailPageSource = {
+    primaryUrl: "https://detail.1688.com/offer/111.html",
+    urls: [
+      "https://detail.1688.com/offer/111.html",
+      "https://detail.1688.com/offer/222.html",
+    ],
+  };
+  summary = summarizeProductLaunchTrackerItem(source.items[0]);
+  assert.deepEqual(summary.chinaProductLinks, [
+    "https://detail.1688.com/offer/111.html",
+    "https://detail.1688.com/offer/222.html",
+  ]);
+});
