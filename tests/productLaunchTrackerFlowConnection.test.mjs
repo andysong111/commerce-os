@@ -17,9 +17,9 @@ const trackerAppSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
-const batchHandoffSource = await readFile(
+const optimizedTrackerSource = await readFile(
   new URL(
-    "../public/product-launch-tracker-app/product-launch-flow-batch-handoff.js",
+    "../public/product-launch-tracker-app/optimized-app.js",
     import.meta.url,
   ),
   "utf8",
@@ -33,12 +33,16 @@ test("상품출시플로우는 실재고 입력 화면 대신 진행관리 연�
   assert.match(connectedSource, /진행관리 상품 선택/);
 });
 
-test("진행관리 표에 행번호와 체크 선택 일괄 전달 기능이 연결된다", () => {
-  assert.match(trackerAppSource, /product-launch-flow-batch-handoff\.js/);
-  assert.match(batchHandoffSource, /trackerRowNumberHeader/);
-  assert.match(batchHandoffSource, /선택 상품을 출시플로우로 등록 진행/);
-  assert.match(batchHandoffSource, /productLaunchFlow\.trackerBatchSelection\.v1/);
-  assert.match(batchHandoffSource, /MAX_SELECTION = 20/);
+test("진행관리 표에 행번호와 체크 선택 일괄 전달 기능이 최적화 앱에 통합된다", () => {
+  assert.match(trackerAppSource, /optimized-app\.js/);
+  assert.match(optimizedTrackerSource, /optimized-row-number/);
+  assert.match(optimizedTrackerSource, /선택 상품을 출시플로우로 등록 진행/);
+  assert.match(
+    optimizedTrackerSource,
+    /productLaunchFlow\.trackerBatchSelection\.v1/,
+  );
+  assert.match(optimizedTrackerSource, /MAX_PRODUCT_FLOW_SELECTION = 20/);
+  assert.doesNotMatch(trackerAppSource, /product-launch-flow-batch-handoff\.js/);
 });
 
 test("등록 작업은 기존 진행관리 샵플링 API를 재사용하고 새로고침 복구 정보를 저장한다", () => {
