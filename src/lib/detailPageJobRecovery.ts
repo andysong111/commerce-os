@@ -11,7 +11,11 @@ export type DetailPageRecoveryJob = {
 };
 
 export type DetailPageRecoveryDecision =
-  | { action: "dispatch"; nextRecoveryCount: number }
+  | {
+      action: "dispatch";
+      nextRecoveryCount: number;
+      recoveryScope: string;
+    }
   | { action: "fail"; code: string; message: string };
 
 export function matchesDetailPageExecution(
@@ -24,6 +28,48 @@ export function matchesDetailPageExecution(
   }
   const expectedExecutionId = text(payload.execution_id);
   return Boolean(expectedExecutionId) && text(executionIdValue) === expectedExecutionId;
+}
+
+export function detailPageRecoveryScope(job: DetailPageRecoveryJob) {
+  const result = record(job.result);
+  const assetWork = record(result.assetWork);
+  const stage = text(job.stage) || "unknown";
+  const assetTarget =
+    text(assetWork.roleId || assetWork.role_id) ||
+    (positiveInteger(assetWork.slot) ? `panel-${positiveInteger(assetWork.slot)}` : "");
+  const assetScope = [
+    text(assetWork.phase),
+    text(assetWork.kind),
+    assetTarget,
+    String(positiveInteger(assetWork.generationAttempt) || 0),
+  ].join(":");
+  const representativeRoles = array(result.representatives)
+    .map((value) => text(record(value).roleId || record(value).role_id || record(value).role))
+    .filter(Boolean)
+    .sort()
+    .join(",");
+  const panelSlots = array(result.panels || result.detailPanels || result.detail_panels)
+    .map((value) => positiveInteger(record(value).slot))
+    .filter((value) => value > 0)
+    .sort((left, right) => left - right)
+    .join(",");
+  const retryScope = [
+    text(result.representativeRetryRole),
+    array(result.panelRetrySlots)
+      .map(positiveInteger)
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right)
+      .join(","),
+    text(record(result.setAssessment).status),
+  ].join(":");
+
+  return [
+    stage,
+    assetScope,
+    `representatives=${representativeRoles}`,
+    `panels=${panelSlots}`,
+    `retry=${retryScope}`,
+  ].join("|");
 }
 
 export function detailPageRecoveryDecision(
@@ -52,17 +98,26 @@ export function detailPageRecoveryDecision(
     };
   }
 
-  const recoveryCount = nonNegativeInteger(payload.auto_recovery_count);
+  const recoveryScope = detailPageRecoveryScope(job);
+  const previousScope = text(payload.auto_recovery_scope);
+  const recoveryCount =
+    previousScope === recoveryScope
+      ? nonNegativeInteger(payload.auto_recovery_count)
+      : 0;
   if (recoveryCount >= DETAIL_PAGE_MAX_SAFE_AUTO_RECOVERIES) {
     return {
       action: "fail",
       code: "DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED",
       message:
-        "안전한 자동 재개 한도를 사용해 작업을 중단했습니다. 저장된 마지막 단계에서 수동으로 다시 시작할 수 있습니다.",
+        "현재 저장 단계의 안전한 자동 재개 한도를 사용해 작업을 중단했습니다. 저장된 마지막 단계에서 수동으로 다시 시작할 수 있습니다.",
     };
   }
 
-  return { action: "dispatch", nextRecoveryCount: recoveryCount + 1 };
+  return {
+    action: "dispatch",
+    nextRecoveryCount: recoveryCount + 1,
+    recoveryScope,
+  };
 }
 
 export function restoreManualRegenerationAssetsOnFailure(
@@ -70,17 +125,23 @@ export function restoreManualRegenerationAssetsOnFailure(
 ): Record<string, unknown> {
   const result = record(resultValue);
   const backup = record(result.manualRegenerationBackup);
-  const representatives = Array.isArray(backup.representatives)
-    ? backup.representatives
-    : null;
-  const panels = Array.isArray(backup.panels) ? backup.panels : null;
-  if (representatives?.length && panels?.length) {
+  const backupRepresentatives = arrayOrNull(backup.representatives);
+  const backupPanels = arrayOrNull(backup.panels);
+  if (backupRepresentatives?.length && backupPanels?.length) {
     return {
       lastAssetWork: result.assetWork ?? null,
       assetWork: null,
       manualRegenerationBackup: null,
-      representatives,
-      panels,
+      representatives: mergeAssetRecords(
+        backupRepresentatives,
+        array(result.representatives),
+        representativeIdentity,
+      ),
+      panels: mergeAssetRecords(
+        backupPanels,
+        array(result.panels || result.detailPanels || result.detail_panels),
+        panelIdentity,
+      ),
       detailImageUrl: backup.detailImageUrl ?? result.detailImageUrl,
       mainImageUrl: backup.mainImageUrl ?? result.mainImageUrl,
       additionalImageUrls:
@@ -138,6 +199,61 @@ function restorePublishedRepresentativeRecords(
   };
 }
 
+function mergeAssetRecords(
+  backupValues: unknown[],
+  currentValues: unknown[],
+  identity: (value: unknown) => string,
+) {
+  const merged = new Map<string, unknown>();
+  for (const value of backupValues) {
+    const key = identity(value);
+    if (key) merged.set(key, value);
+  }
+  for (const value of currentValues) {
+    const key = identity(value);
+    if (!key) continue;
+    const current = record(value);
+    const backup = record(merged.get(key));
+    if (hasStableAsset(current) || !Object.keys(backup).length) {
+      merged.set(key, value);
+    }
+  }
+  return [...merged.values()];
+}
+
+function representativeIdentity(value: unknown) {
+  const item = record(value);
+  return text(item.roleId || item.role_id || item.role);
+}
+
+function panelIdentity(value: unknown) {
+  const item = record(value);
+  const slot = positiveInteger(item.slot || item.sectionSlot || item.section_slot);
+  return slot ? `panel-${slot}` : "";
+}
+
+function hasStableAsset(value: Record<string, unknown>) {
+  return Boolean(
+    text(
+      value.assetUrl ||
+        value.asset_url ||
+        value.imageUrl ||
+        value.image_url ||
+        value.panelUrl ||
+        value.panel_url ||
+        value.url,
+    ),
+  );
+}
+
+function arrayOrNull(value: unknown) {
+  return Array.isArray(value) ? value : null;
+}
+
+function array(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -146,6 +262,11 @@ function record(value: unknown): Record<string, unknown> {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function positiveInteger(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : 0;
 }
 
 function nonNegativeInteger(value: unknown) {
