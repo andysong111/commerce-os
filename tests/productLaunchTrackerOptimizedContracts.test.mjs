@@ -65,7 +65,6 @@ test("legacy partial-page writes merge into the canonical full state", () => {
   assert.match(stateRoute, /delete merged\.partialPage/);
 });
 
-
 test("optimized table keeps the product detail action aligned with the manage column", () => {
   assert.match(app, /data-column-key="manage"/);
   assert.doesNotMatch(app, /data-column-key="actions"/);
