@@ -6,7 +6,7 @@ export const VERIFIED_PRODUCT_DECISION_SHADOW = {
   productCount: 316,
   exactFinalCount: 311,
   finalMismatchCount: 5,
-  sourceInputDriftCount: 10,
+  sourceInputDriftCount: 8,
   salesCalculationMismatchCount: 10,
   unexplainedMismatchCount: 0,
   expectedProductOrderBudget: 3_309_555,
