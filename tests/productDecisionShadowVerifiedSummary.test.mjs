@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   VERIFIED_PRODUCT_DECISION_SHADOW,
@@ -47,4 +48,13 @@ test("the corrected verified summary accepts eight direct source drifts and reje
       }),
     /sourceInputDriftCount: 10 ≠ 8/,
   );
+});
+
+test("migration completion message labels the final mismatch count accurately", async () => {
+  const importer = await readFile(
+    "src/app/product-decision-agent/migration/ProductDecisionSnapshotImporter.tsx",
+    "utf8",
+  );
+  assert.match(importer, /최종 차이 \$\{Number\(body\.shadowMismatchCount/);
+  assert.doesNotMatch(importer, /시점차이 \$\{Number\(body\.shadowMismatchCount/);
 });
