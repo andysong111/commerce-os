@@ -34,6 +34,12 @@ function installStyles() {
     [data-column-key="barcode"] {
       min-width: 270px;
       vertical-align: top;
+      text-align: left;
+    }
+    [data-column-key="barcode"] > .barcode-input {
+      display: block;
+      margin-left: 0;
+      margin-right: auto;
     }
     .inline-option-location-list {
       display: grid;
@@ -41,32 +47,40 @@ function installStyles() {
       margin-top: 8px;
       padding-top: 8px;
       border-top: 1px dashed #cbd5e1;
+      justify-items: start;
     }
     .inline-option-location-title {
       color: #475569;
       font-size: 11px;
       font-weight: 900;
       line-height: 1.2;
+      text-align: left;
     }
     .inline-option-location-row {
       display: grid;
-      grid-template-columns: minmax(120px, 1fr) minmax(94px, 112px);
+      width: 100%;
+      grid-template-columns: minmax(94px, 112px) minmax(120px, 1fr);
       align-items: center;
+      justify-items: start;
       gap: 7px;
     }
     .inline-option-location-label {
       overflow: hidden;
+      width: 100%;
       color: #334155;
       font-size: 11px;
       font-weight: 800;
       line-height: 1.3;
+      text-align: left;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .inline-option-location-input {
       box-sizing: border-box;
-      width: 100%;
-      min-width: 0;
+      width: 112px;
+      max-width: 112px;
+      min-width: 94px;
+      justify-self: start;
       border: 1px solid #94a3b8;
       border-radius: 7px;
       background: #fff;
@@ -176,7 +190,7 @@ function renderOptionLocationEditors() {
         }
       });
 
-      optionRow.append(label, input);
+      optionRow.append(input, label);
       container.append(optionRow);
     }
   }
