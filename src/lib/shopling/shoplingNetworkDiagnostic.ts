@@ -2,6 +2,10 @@ import {
   buildShoplingReadRequestXml,
   shoplingReadConfigFromEnv,
 } from "@/lib/shopling/shoplingReadClient";
+import {
+  postShoplingXml,
+  type ShoplingTransportMode,
+} from "@/lib/shopling/shoplingTlsTransport";
 
 export type ShoplingNetworkDiagnosticResult = {
   checkedAt: string;
@@ -11,6 +15,7 @@ export type ShoplingNetworkDiagnosticResult = {
   elapsedMs: number;
   httpStatus: number | null;
   responseType: string | null;
+  transportMode: ShoplingTransportMode | null;
   error: {
     name: string;
     code: string | null;
@@ -117,18 +122,15 @@ export async function runShoplingOrderNetworkDiagnostic(): Promise<ShoplingNetwo
   const secrets = [config.loginId, config.companyId, config.authKey];
 
   try {
-    const response = await fetch(config.ordersUrl, {
-      method: "POST",
+    const response = await postShoplingXml(config.ordersUrl, xml, {
       headers: {
         accept: "application/xml, text/xml",
         "content-type": "application/xml; charset=utf-8",
         "user-agent": "commerce-os-ops-center-shopling-diagnostic/1.0",
       },
-      body: xml,
-      signal: AbortSignal.timeout(20_000),
-      cache: "no-store",
+      timeoutMs: 20_000,
     });
-    await response.body?.cancel().catch(() => undefined);
+    await response.text();
     return {
       checkedAt,
       resource: "orders",
@@ -137,9 +139,12 @@ export async function runShoplingOrderNetworkDiagnostic(): Promise<ShoplingNetwo
       elapsedMs: Date.now() - startedAt,
       httpStatus: response.status,
       responseType: response.headers.get("content-type"),
+      transportMode: response.transportMode,
       error: null,
       notice:
-        "Shopling 주문 조회 호스트에 연결했습니다. 응답 원문과 인증값은 저장하거나 표시하지 않았습니다.",
+        response.transportMode === "scoped_legacy_dh"
+          ? "Shopling 서버 인증서를 검증하면서 이 호스트의 읽기 요청에만 제한적 DH 호환 전송을 적용해 연결했습니다. 응답 원문과 인증값은 표시하지 않았습니다."
+          : "Shopling 주문 조회 호스트에 표준 HTTPS로 연결했습니다. 응답 원문과 인증값은 표시하지 않았습니다.",
     };
   } catch (error) {
     return {
@@ -150,6 +155,7 @@ export async function runShoplingOrderNetworkDiagnostic(): Promise<ShoplingNetwo
       elapsedMs: Date.now() - startedAt,
       httpStatus: null,
       responseType: null,
+      transportMode: null,
       error: sanitizeShoplingFetchError(error, secrets),
       notice:
         "Shopling 연결 실패 원인 중 DNS·TLS·연결·시간초과 관련 안전 필드만 표시합니다. 인증값과 요청·응답 원문은 제외했습니다.",

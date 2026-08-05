@@ -14,10 +14,15 @@ async function loadShoplingClient() {
     const xmlSource = await readFile("src/lib/shopling/simpleXml.ts", "utf8");
     const clientSource = (
       await readFile("src/lib/shopling/shoplingReadClient.ts", "utf8")
-    ).replace(
-      'import { parseSimpleXml } from "@/lib/shopling/simpleXml";',
-      'import { parseSimpleXml } from "./simpleXml.mjs";',
-    );
+    )
+      .replace(
+        'import { parseSimpleXml } from "@/lib/shopling/simpleXml";',
+        'import { parseSimpleXml } from "./simpleXml.mjs";',
+      )
+      .replace(
+        'import { postShoplingXml } from "@/lib/shopling/shoplingTlsTransport";',
+        'import { postShoplingXml } from "./shoplingTlsTransport.mjs";',
+      );
     const compile = (source, fileName) =>
       ts.transpileModule(source, {
         compilerOptions: {
@@ -29,6 +34,10 @@ async function loadShoplingClient() {
     await writeFile(
       join(directory, "simpleXml.mjs"),
       compile(xmlSource, "simpleXml.ts"),
+    );
+    await writeFile(
+      join(directory, "shoplingTlsTransport.mjs"),
+      'export async function postShoplingXml() { throw new Error("SHOPLING_NETWORK_NOT_USED_IN_PARSER_TESTS"); }\n',
     );
     await writeFile(
       join(directory, "shoplingReadClient.mjs"),

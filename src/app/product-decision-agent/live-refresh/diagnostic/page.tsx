@@ -20,6 +20,7 @@ export default async function ShoplingNetworkDiagnosticPage() {
     elapsedMs: 0,
     httpStatus: null,
     responseType: null,
+    transportMode: null,
     error: {
       name: error instanceof Error ? error.name : "Error",
       code: "DIAGNOSTIC_SETUP_FAILED",
@@ -41,6 +42,14 @@ export default async function ShoplingNetworkDiagnosticPage() {
     ["상태", result.ok ? "연결 성공" : "연결 실패"],
     ["확인 시각", new Date(result.checkedAt).toLocaleString("ko-KR")],
     ["대상 호스트", result.host],
+    [
+      "HTTPS 전송",
+      result.transportMode === "scoped_legacy_dh"
+        ? "Shopling 한정 DH 호환"
+        : result.transportMode === "standard"
+          ? "표준 HTTPS"
+          : "-",
+    ],
     ["소요 시간", `${result.elapsedMs.toLocaleString("ko-KR")}ms`],
     ["HTTP 상태", value(result.httpStatus)],
     ["응답 형식", value(result.responseType)],
@@ -101,6 +110,8 @@ export default async function ShoplingNetworkDiagnosticPage() {
       <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-xs leading-5 text-amber-900">
         이 진단은 Shopling 상품·가격·주문상태를 변경하지 않습니다. 인증값,
         요청 XML, 주문 응답 원문은 화면·로그·데이터베이스에 남기지 않습니다.
+        표준 HTTPS가 약한 DH 키로 거절될 때도 서버 인증서 검증과 TLS 1.2
+        최저선은 유지합니다.
       </section>
     </div>
   );

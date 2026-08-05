@@ -1,4 +1,5 @@
 import { parseSimpleXml } from "@/lib/shopling/simpleXml";
+import { postShoplingXml } from "@/lib/shopling/shoplingTlsTransport";
 
 export type ShoplingReadResource = "products" | "orders" | "claims";
 
@@ -386,16 +387,13 @@ export class ShoplingReadClient {
 
   async read(resource: ShoplingReadResource, range: ShoplingDateRange) {
     const xml = buildShoplingReadRequestXml(resource, this.config, range);
-    const response = await fetch(this.url(resource), {
-      method: "POST",
+    const response = await postShoplingXml(this.url(resource), xml, {
       headers: {
         accept: "application/xml, text/xml",
         "content-type": "application/xml; charset=utf-8",
         "user-agent": "commerce-os-ops-center-shopling-read/1.0",
       },
-      body: xml,
-      signal: AbortSignal.timeout(45_000),
-      cache: "no-store",
+      timeoutMs: 45_000,
     });
     const body = await response.text();
     if (!response.ok) {
