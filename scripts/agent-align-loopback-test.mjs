@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
+// Align the last stale category-runner assertion with 127.0.0.1 loopback semantics.
 const path = "tests/shoplingCategoryLocalUpdate.test.mjs";
 let source = readFileSync(path, "utf8");
 const before = `  assert.match(local, /targetAddressSpace:\\s*"local"/);\n  assert.doesNotMatch(local, /targetAddressSpace:\\s*"loopback"/);`;
