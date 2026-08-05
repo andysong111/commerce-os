@@ -1,16 +1,16 @@
 import {
   calculateNetRequirement,
   type NetRequirementResult,
-} from "@/lib/productDecisionEngine/netRequirement";
+} from "./netRequirement.ts";
 import {
   allocatePurchasePortfolio,
   type PortfolioAllocationResult,
-} from "@/lib/productDecisionEngine/portfolio";
+} from "./portfolio.ts";
 import {
   calculateSalesOrderRecommendation,
   type SalesOrderInput,
   type SalesOrderResult,
-} from "@/lib/productDecisionEngine/salesOrder";
+} from "./salesOrder.ts";
 
 export type ProductDecisionEngineProductInput = SalesOrderInput & {
   barcode: string;
@@ -107,7 +107,9 @@ export function calculateProductDecisionPlan(
   const products = demandCalculations.map((entry) => {
     const allocated = allocationByBarcode.get(entry.input.barcode);
     if (!allocated) {
-      throw new Error(`PRODUCT_DECISION_ALLOCATION_MISSING:${entry.input.barcode}`);
+      throw new Error(
+        `PRODUCT_DECISION_ALLOCATION_MISSING:${entry.input.barcode}`,
+      );
     }
     return {
       ...entry,
