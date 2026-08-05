@@ -13,17 +13,21 @@ const appSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
-const moduleSource = await readFile(
-  new URL("../public/product-launch-tracker-app/single-row-add.js", import.meta.url),
+const optimizedSource = await readFile(
+  new URL(
+    "../public/product-launch-tracker-app/optimized-app.js",
+    import.meta.url,
+  ),
   "utf8",
 );
 
-test("행 추가 모듈과 버튼이 상품출시진행관리 앱에 연결된다", () => {
-  assert.match(appSource, /single-row-add\.js/);
-  assert.match(appSource, /single-row-add-barcode-guard\.js/);
-  assert.match(moduleSource, /\+ 행 추가/);
-  assert.match(moduleSource, /여러 행 붙여넣기/);
-  assert.match(moduleSource, /상품 행 추가/);
+test("상품 추가 버튼과 단건·다건 생성이 최적화 진행관리 앱에 연결된다", () => {
+  assert.match(appSource, /optimized-app\.js/);
+  assert.doesNotMatch(appSource, /single-row-add\.js/);
+  assert.match(optimizedSource, /#add-items-button/);
+  assert.match(optimizedSource, /operation: "create_items"/);
+  assert.match(optimizedSource, /items: \[changed\]/);
+  assert.match(optimizedSource, /items: parsed/);
 });
 
 test("옵션 입력은 쉼표와 줄바꿈을 지원한다", () => {
