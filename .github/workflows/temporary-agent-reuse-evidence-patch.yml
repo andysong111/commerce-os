@@ -4,13 +4,20 @@ on:
   push:
     branches:
       - agent/reuse-blocked-evidence-run-20260805-v2
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[evidence-reuse-patched]') }}
+    if: >-
+      ${{
+        (github.event_name == 'push' && !contains(github.event.head_commit.message, '[evidence-reuse-patched]')) ||
+        (github.event_name == 'pull_request' && github.head_ref == 'agent/reuse-blocked-evidence-run-20260805-v2')
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
