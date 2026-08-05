@@ -41,6 +41,7 @@ jobs:
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/productLaunchTrackerSingleRowAdd.test.mjs
+          tests/productLaunchTrackerTableOps.test.mjs
           tests/shoplingCategoryCatalog.test.mjs
           tests/shoplingCategoryRunStatus.test.mjs
           tests/shoplingCategoryLocalUpdate.test.mjs

@@ -57,6 +57,26 @@ export function frozenColumnKeys(orderInput, frozenThrough) {
   return order.slice(0, order.indexOf(frozenThrough) + 1);
 }
 
+export function buildFrozenColumnGeometry(measurements) {
+  const source = Array.isArray(measurements) ? measurements : [];
+  const geometry = [];
+  let left = 0;
+  for (const measurement of source) {
+    const key = String(measurement?.key ?? "").trim();
+    if (!key) continue;
+    const widths = Array.isArray(measurement?.widths)
+      ? measurement.widths
+      : [measurement?.width];
+    const width = Math.max(
+      1,
+      ...widths.map((value) => Math.ceil(Number(value) || 0)),
+    );
+    geometry.push({ key, left, width, right: left + width });
+    left += width;
+  }
+  return geometry;
+}
+
 export function parseInlineOptionLabels(value, maximum = 50) {
   const labels = String(value ?? "")
     .split(/[,\n]+/)

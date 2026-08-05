@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   applyInlineOptionLabels,
+  buildFrozenColumnGeometry,
   DEFAULT_TABLE_COLUMN_ORDER,
   frozenColumnKeys,
   moveColumn,
@@ -33,6 +34,23 @@ test("열 드래그 이동과 선택 열까지 고정 범위를 계산한다", (
     moved.slice(0, moved.indexOf("modelNumber") + 1),
   );
   assert.deepEqual(frozenColumnKeys(moved, ""), []);
+});
+
+test("고정 열은 헤더와 행 중 가장 넓은 폭으로 빈틈 없는 좌표를 만든다", () => {
+  const geometry = buildFrozenColumnGeometry([
+    { key: "select", widths: [42, 42] },
+    { key: "workBatch", widths: [78, 92] },
+    { key: "barcode", widths: [120, 240] },
+    { key: "modelNumber", widths: [90, 168] },
+    { key: "productName", widths: [64, 176] },
+  ]);
+  assert.deepEqual(geometry, [
+    { key: "select", left: 0, width: 42, right: 42 },
+    { key: "workBatch", left: 42, width: 92, right: 134 },
+    { key: "barcode", left: 134, width: 240, right: 374 },
+    { key: "modelNumber", left: 374, width: 168, right: 542 },
+    { key: "productName", left: 542, width: 176, right: 718 },
+  ]);
 });
 
 test("표 옵션 입력은 쉼표 구분·중복 제거 후 기존 가격과 바코드를 순서대로 유지한다", () => {
@@ -83,6 +101,13 @@ test("진행관리 표 UI는 직접입력·열 드래그·열 고정·선택 일
     ),
     "utf8",
   );
+  const frozenFix = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/table-frozen-columns-fix.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   const app = await readFile(
     new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
     "utf8",
@@ -96,5 +121,12 @@ test("진행관리 표 UI는 직접입력·열 드래그·열 고정·선택 일
   assert.match(source, /TRACKER_STATE_ENDPOINT/);
   assert.match(loader, /safeObserver\.disconnect/);
   assert.match(loader, /dispatchEvent\(new Event\("resize"\)\)/);
+  assert.match(frozenFix, /buildFrozenColumnGeometry/);
+  assert.match(frozenFix, /cell\.offsetWidth/);
+  assert.match(frozenFix, /cell\.style\.minWidth = width/);
+  assert.match(frozenFix, /cell\.style\.maxWidth = width/);
+  assert.match(frozenFix, /background-clip: border-box !important/);
+  assert.match(frozenFix, /z-index: 40 !important/);
   assert.match(app, /table-inline-ops-loader\.js/);
+  assert.match(app, /table-frozen-columns-fix\.js/);
 });
