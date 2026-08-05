@@ -469,7 +469,7 @@ function renderRow(item) {
       <td data-column-key="readiness"><button class="readiness-badge ${item.readiness?.ready ? "is-ready" : "needs-work"}" type="button" data-action="preview">${item.readiness?.ready ? "준비완료" : `준비필요 ${number(item.readiness?.errorCount ?? 0)}`}</button></td>
       ${STAGES.map(({ key }) => statusSelect(stages[key]?.status, key, item.modelNumber)).join("")}
       <td class="next-stage" data-column-key="nextStage">${escapeHtml(item.nextStage)}<span class="progress-text">${number(item.progress?.completed ?? 0)}/${number(item.progress?.total ?? STAGES.length)} 완료</span></td>
-      <td class="row-actions" data-column-key="actions"><button class="row-action" type="button" data-action="detail">${item.archivedAt ? "복구·수정" : "상세"}</button></td>
+      <td class="row-actions" data-column-key="manage"><button class="row-action" type="button" data-action="detail">${item.archivedAt ? "복구·수정" : "상품 상세"}</button></td>
     </tr>
   `;
 }

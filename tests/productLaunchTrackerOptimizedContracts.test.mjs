@@ -8,8 +8,11 @@ const appPath = fileURLToPath(new URL("../public/product-launch-tracker-app/opti
 const entryPath = fileURLToPath(new URL("../public/product-launch-tracker-app/app.js", import.meta.url));
 const routePath = fileURLToPath(new URL("../src/app/api/product-launch-tracker/optimized/route.ts", import.meta.url));
 const stateRoutePath = fileURLToPath(new URL("../src/app/api/product-launch-tracker/state/route.ts", import.meta.url));
-const [app, entry, route, stateRoute] = await Promise.all(
-  [appPath, entryPath, routePath, stateRoutePath].map((path) => readFile(path, "utf8")),
+const dockPath = fileURLToPath(new URL("../public/product-launch-tracker-app/detail-page-dock.js", import.meta.url));
+const [app, entry, route, stateRoute, dock] = await Promise.all(
+  [appPath, entryPath, routePath, stateRoutePath, dockPath].map((path) =>
+    readFile(path, "utf8"),
+  ),
 );
 
 test("optimized browser modules remain valid JavaScript", () => {
@@ -60,4 +63,20 @@ test("legacy partial-page writes merge into the canonical full state", () => {
   assert.match(stateRoute, /mergePartialPage\(existing, incoming\)/);
   assert.match(stateRoute, /items: mergedItems/);
   assert.match(stateRoute, /delete merged\.partialPage/);
+});
+
+
+test("optimized table keeps the product detail action aligned with the manage column", () => {
+  assert.match(app, /data-column-key="manage"/);
+  assert.doesNotMatch(app, /data-column-key="actions"/);
+  assert.match(app, /상품 상세/);
+});
+
+test("detail-page generation resolves full selected items when local cache is partial", () => {
+  assert.match(route, /mode === "items"/);
+  assert.match(route, /requestedIds.length > 100/);
+  assert.match(dock, /loadAuthoritativeSelectedItems/);
+  assert.ok(dock.includes("state?.partialPage !== true"));
+  assert.match(dock, /mode: "items"/);
+  assert.match(dock, /cache: "no-store"/);
 });

@@ -40,7 +40,7 @@ export type ProductLaunchTrackerSummary = {
   trackerRowNumber: number | null;
   source: UnknownRecord;
   shoplingProducts: UnknownRecord;
-  chinaProductLinks: unknown[];
+  chinaProductLinks: string[];
   detailPageAsset: UnknownRecord;
   readiness: { ready: boolean; errorCount: number; warningCount: number };
   stages: Record<string, { status: string; assignee: string }>;
@@ -282,9 +282,23 @@ export function summarizeProductLaunchTrackerItem(
       : [],
     syncedAt: nullableText(detailPageAssetSource.syncedAt),
   };
-  const chinaProductLinks = Array.isArray(item.chinaProductLinks)
-    ? item.chinaProductLinks.filter(isRecord).map((entry) => ({ ...entry }))
-    : [];
+  const detailPageSource = asRecord(item.detailPageSource);
+  const rawChinaProductLinks = [
+    item.primaryChinaProductLink,
+    detailPageSource.primaryUrl,
+    ...(Array.isArray(item.chinaProductLinks) ? item.chinaProductLinks : []),
+    ...(Array.isArray(detailPageSource.urls) ? detailPageSource.urls : []),
+  ];
+  const chinaProductLinks = [
+    ...new Set(
+      rawChinaProductLinks
+        .map((entry) => {
+          if (!isRecord(entry)) return text(entry);
+          return text(entry.url ?? entry.href ?? entry.value);
+        })
+        .filter(Boolean),
+    ),
+  ].slice(0, 5);
   const goodsKeys = Object.values(shoplingProducts)
     .map((value) => text(asRecord(value).goodsKey))
     .filter(Boolean);

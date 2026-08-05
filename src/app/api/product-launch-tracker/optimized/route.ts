@@ -61,6 +61,63 @@ export async function GET(request: NextRequest) {
     }
 
     const mode = request.nextUrl.searchParams.get("mode") || "page";
+    if (mode === "items") {
+      const requestedIds = [
+        ...new Set(
+          request.nextUrl.searchParams
+            .getAll("id")
+            .flatMap((value) => value.split(","))
+            .map((value) => value.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (!requestedIds.length) {
+        return Response.json(
+          {
+            ok: false,
+            code: "PRODUCT_LAUNCH_TRACKER_ITEM_IDS_REQUIRED",
+            message: "불러올 상품 ID가 필요합니다.",
+          },
+          { status: 400 },
+        );
+      }
+      if (requestedIds.length > 100) {
+        return Response.json(
+          {
+            ok: false,
+            code: "PRODUCT_LAUNCH_TRACKER_ITEM_LIMIT_EXCEEDED",
+            message: "한 번에 최대 100개 상품까지 불러올 수 있습니다.",
+          },
+          { status: 400 },
+        );
+      }
+      const items: unknown[] = [];
+      const missingIds: string[] = [];
+      for (const itemId of requestedIds) {
+        const item = getProductLaunchTrackerItem(loaded.index, itemId);
+        if (item) items.push(item);
+        else missingIds.push(itemId);
+      }
+      if (missingIds.length) {
+        return Response.json(
+          {
+            ok: false,
+            code: "PRODUCT_LAUNCH_TRACKER_ITEMS_NOT_FOUND",
+            message: "일부 상품 기록을 찾지 못했습니다. 목록을 새로고침한 뒤 다시 선택하세요.",
+            missingIds,
+          },
+          { status: 404 },
+        );
+      }
+      return Response.json({
+        ok: true,
+        stateExists: true,
+        items,
+        updatedAt: loaded.updatedAt,
+        schemaVersion: loaded.schemaVersion,
+      });
+    }
+
     if (mode === "item") {
       const item = getProductLaunchTrackerItem(
         loaded.index,
