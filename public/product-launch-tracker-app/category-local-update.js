@@ -501,7 +501,7 @@ async function localJson(path, options = {}) {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
     },
     cache: "no-store",
-    targetAddressSpace: "local",
+    targetAddressSpace: "loopback",
     ...(options.body ? { body: JSON.stringify(options.body) } : {}),
   };
   let response;

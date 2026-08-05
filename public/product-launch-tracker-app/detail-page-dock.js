@@ -584,7 +584,7 @@ async function relayLocalBridgeRequest(payload) {
       credentials: "omit",
       headers: method === "POST" ? { "Content-Type": "application/json" } : {},
       body: method === "POST" ? body : undefined,
-      targetAddressSpace: "local",
+      targetAddressSpace: "loopback",
     });
     const responseBody = await response.arrayBuffer();
     respond(
@@ -1199,7 +1199,7 @@ async function probeLocalCollectorReady(timeoutMs = LOCAL_BRIDGE_TIMEOUT_MS) {
       cache: "no-store",
       credentials: "omit",
       signal: controller.signal,
-      targetAddressSpace: "local",
+      targetAddressSpace: "loopback",
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`status=${response.status}`);
