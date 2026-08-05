@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest } from "next/server";
 import {
   mergePriceAdjustmentReceiptCachePage,
@@ -64,6 +65,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function secureEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
 function authorize(request: NextRequest):
   | { ok: true }
   | {
@@ -71,7 +81,6 @@ function authorize(request: NextRequest):
       status: number;
       body: { ok: false; code: string; message: string };
     } {
-  const expected = process.env.PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET?.trim();
   const custom = request.headers
     .get("x-commerce-os-integration-secret")
     ?.trim() ?? "";
@@ -79,7 +88,16 @@ function authorize(request: NextRequest):
   const bearer = authorization.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length).trim()
     : "";
-  if (!expected) {
+  const supplied = custom || bearer;
+  const candidates = [
+    process.env.PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET,
+    process.env.PRODUCT_MASTER_INTEGRATION_SECRET,
+    process.env.CHINA_ORDER_MANAGER_INTEGRATION_SECRET,
+  ]
+    .map((value) => value?.trim() ?? "")
+    .filter(Boolean);
+
+  if (!candidates.length) {
     return {
       ok: false,
       status: 503,
@@ -90,7 +108,7 @@ function authorize(request: NextRequest):
       },
     };
   }
-  if ((custom || bearer) !== expected) {
+  if (!supplied || !candidates.some((expected) => secureEqual(expected, supplied))) {
     return {
       ok: false,
       status: 401,
