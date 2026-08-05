@@ -65,16 +65,16 @@ export const productDecisionAgentModule: CommerceModule = {
   description:
     "같은 바코드 상품을 하나로 합쳐 실행 시점의 최신 판매, 상품마스터 확인재고, 중국 주문 중 미입고 수량을 반영해 신규 주문 필요량을 다시 계산합니다.",
   status: "available",
-  route: "https://commerce-os-product-decision-agent.andy123df23.chatgpt.site",
+  route: "/product-decision-agent",
   category: "발주·입고 관리",
   inputType: "샵플링 최신 판매, 상품마스터 확인재고, 중국 주문초안·실주문·미입고 수량",
   outputType: "바코드별 신규 주문 필요량, 예산·MOQ·박스입수 반영 발주안",
   historySupport: true,
-  externalProject: true,
-  note: "단종과 상품등급 판단은 상품등급·가격조정에서 담당합니다. 이 기능의 확정은 중국 주문 준비 단계이며 실제 1688 결제와는 다릅니다.",
-  helperNote: "요청 시 최신 수요 재계산",
-  actionLabel: "최신 발주안 보기",
-  safetyBadge: "실제 주문·결제 별도",
+  externalProject: false,
+  note: "Ops Center 내부 이전 1단계입니다. 기존 발주 추천 엔진의 최신 계산 결과를 서버에서 읽기만 하며 승인·중국 주문 전송·실제 주문은 차단합니다.",
+  helperNote: "Ops Center 내부 · 조회 전용",
+  actionLabel: "내부 발주 추천 보기",
+  safetyBadge: "이전 1단계 · 쓰기 차단",
 };
 
 export const shoplingCategoryReviewQueueModule: CommerceModule = {
