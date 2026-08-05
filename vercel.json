@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/product-decision-live-refresh",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
