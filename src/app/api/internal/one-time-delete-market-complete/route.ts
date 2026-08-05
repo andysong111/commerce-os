@@ -23,6 +23,7 @@ type TrackerState = {
   schemaVersion?: unknown;
   savedAt?: unknown;
   items?: unknown;
+  serverDeletedItemIds?: unknown;
   [key: string]: unknown;
 };
 
@@ -101,12 +102,21 @@ export async function GET(request: Request) {
     );
   }
 
-  const nextItems = items.filter((item) => !isMarketRegistrationComplete(item));
+  const deletedIds = new Set(stringArray(state.serverDeletedItemIds));
+  for (const item of completedItems) {
+    const id = String(item.id ?? "").trim();
+    if (id) deletedIds.add(id);
+  }
+  const nextItems = items.filter((item) => {
+    const id = String(item.id ?? "").trim();
+    return !isMarketRegistrationComplete(item) && (!id || !deletedIds.has(id));
+  });
   const updatedAt = new Date().toISOString();
   const nextState = {
     ...state,
     schemaVersion: Number(state.schemaVersion ?? row?.schema_version ?? 3),
     savedAt: updatedAt,
+    serverDeletedItemIds: [...deletedIds],
     items: nextItems,
   };
 
@@ -142,6 +152,7 @@ export async function GET(request: Request) {
     deleted: completedItems.length,
     totalBefore: items.length,
     totalAfter: nextItems.length,
+    protectedDeletedIds: deletedIds.size,
     updatedAt,
     deletedItems: report.targets,
   });
@@ -149,6 +160,11 @@ export async function GET(request: Request) {
 
 function isMarketRegistrationComplete(item: TrackerItem) {
   return String(item.stages?.marketRegistration?.status ?? "").trim() === "완료";
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
 }
 
 function getAdminConfig():
