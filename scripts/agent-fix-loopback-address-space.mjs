@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
+// 127.0.0.1 belongs to the loopback address space in current LNA implementations.
 const files = [
   "public/product-launch-tracker-app/detail-page-dock.js",
   "public/product-launch-tracker-app/category-local-update.js",
