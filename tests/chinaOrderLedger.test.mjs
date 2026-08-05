@@ -29,6 +29,7 @@ async function loadLedgerModule() {
 
 const ledger = await loadLedgerModule();
 const {
+  CHINA_ORDER_EVENT_OPERATION_TYPE,
   normalizeChinaOrderCommitmentEvent,
   reduceChinaOrderCommitmentEvents,
   buildChinaOrderLedgerSummary,
@@ -141,9 +142,10 @@ test("event API is idempotent, same-origin guarded and never executes external w
     "src/app/api/china-order-ledger/events/route.ts",
     "utf8",
   );
+  assert.equal(CHINA_ORDER_EVENT_OPERATION_TYPE, "CHINA_ORDER_COMMITMENT_EVENT");
+  assert.match(route, /CHINA_ORDER_EVENT_OPERATION_TYPE/);
   assert.match(route, /isSameOriginOpsRequest/);
   assert.match(route, /x-commerce-os-integration-secret/);
-  assert.match(route, /CHINA_ORDER_COMMITMENT_EVENT/);
   assert.match(route, /on_conflict=source_event_id/);
   assert.match(route, /resolution=ignore-duplicates/);
   assert.doesNotMatch(route, /shopling/i);
