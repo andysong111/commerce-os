@@ -34,8 +34,8 @@ test("신규 상품 진행관리의 업무 헤더 14개가 서버 정렬 버튼�
     /elements\.tableHead\?\.addEventListener\("click", handleSortClick\)/,
   );
   assert.match(optimizedSource, /header\.setAttribute\([\s\S]*"aria-sort"/);
-  assert.match(optimizedSource, /sortKey/);
-  assert.match(optimizedSource, /sortDirection/);
+  assert.match(optimizedSource, /sort: state\.sort\.key/);
+  assert.match(optimizedSource, /direction: state\.sort\.direction/);
 });
 
 test("바코드는 모델번호 왼쪽에서 직접 입력하고 상품 1건만 저장한다", () => {
