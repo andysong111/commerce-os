@@ -35,7 +35,7 @@ test("상품출시플로우는 실재고 입력 화면 대신 진행관리 연�
 
 test("진행관리 표에 행번호와 체크 선택 일괄 전달 기능이 연결된다", () => {
   assert.match(trackerAppSource, /product-launch-flow-batch-handoff\.js/);
-  assert.match(batchHandoffSource, /dataTrackerRowNumberHeader/);
+  assert.match(batchHandoffSource, /trackerRowNumberHeader/);
   assert.match(batchHandoffSource, /선택 상품을 출시플로우로 등록 진행/);
   assert.match(batchHandoffSource, /productLaunchFlow\.trackerBatchSelection\.v1/);
   assert.match(batchHandoffSource, /MAX_SELECTION = 20/);
