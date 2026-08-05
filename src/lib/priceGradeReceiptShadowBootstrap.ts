@@ -18,6 +18,7 @@ export type PriceGradeReceiptShadowBootstrapResult = {
   processed: boolean;
   reason: "ALREADY_BOOTSTRAPPED" | "BOOTSTRAPPED";
   runId: string | null;
+  contentFingerprint: string | null;
   inputCount: number;
   blockedCount: number;
   unexplainedCount: number;
@@ -40,6 +41,7 @@ export async function runPriceGradeReceiptShadowBootstrap(): Promise<PriceGradeR
       processed: false,
       reason: "ALREADY_BOOTSTRAPPED",
       runId: latest.runId,
+      contentFingerprint: latest.contentFingerprint,
       inputCount: latest.summary.inputCount,
       blockedCount: latest.summary.blockedCount,
       unexplainedCount: latest.summary.unexplainedCount,
@@ -58,6 +60,7 @@ export async function runPriceGradeReceiptShadowBootstrap(): Promise<PriceGradeR
     processed: true,
     reason: "BOOTSTRAPPED",
     runId: result.runId,
+    contentFingerprint: result.contentFingerprint,
     inputCount: result.summary.inputCount,
     blockedCount: result.summary.blockedCount,
     unexplainedCount: result.summary.unexplainedCount,
