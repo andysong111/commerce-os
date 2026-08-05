@@ -1,0 +1,46 @@
+name: Price Lifecycle Overlay CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/integrations/priceAdjustmentEngine.ts"
+      - "src/app/price-adjustment-engine/page.tsx"
+      - "tests/priceLifecycleOverlay.test.mjs"
+      - ".github/workflows/price-lifecycle-overlay-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: price-lifecycle-overlay-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle-overlay-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint lifecycle overlay
+        run: >-
+          npx eslint
+          src/lib/integrations/priceAdjustmentEngine.ts
+          src/app/price-adjustment-engine/page.tsx
+          tests/priceLifecycleOverlay.test.mjs
+      - name: Run lifecycle overlay tests
+        run: >-
+          node --experimental-strip-types --test
+          tests/priceLifecycleOverlay.test.mjs
+      - name: Build Ops Center
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-lifecycle-overlay-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_lifecycle_overlay_build_check
+          PRODUCT_MASTER_BASE_URL: https://commerce-os-product-master.vercel.app
+          PRODUCT_MASTER_INTEGRATION_SECRET: ci-product-master-secret
