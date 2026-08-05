@@ -113,6 +113,7 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, and bound
   assert.deepEqual(config.crons, [
     { path: "/api/cron/shopling-price-bulk-auto", schedule: "* * * * *" },
     { path: "/api/cron/detail-page-jobs", schedule: "* * * * *" },
+    { path: "/api/cron/product-decision-live-refresh", schedule: "* * * * *" },
   ]);
 });
 
