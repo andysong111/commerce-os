@@ -59,6 +59,18 @@ test("Vercel target is fixed and every imported value is sensitive Production da
   assert.match(importer, /"--target=production"/);
 });
 
+test("Vercel command comes before global scope and cwd options", () => {
+  assert.match(importer, /const command = \["--yes", "vercel@latest", \.\.\.args\]/);
+  assert.match(importer, /command\.push\(\s*"--scope"/);
+  assert.match(importer, /runNpxVercel\(\["whoami"\]\)/);
+  const runner = importer.slice(
+    importer.indexOf("function runNpxVercel"),
+    importer.indexOf("const encryptedPath"),
+  );
+  assert.ok(runner.indexOf("...args") < runner.indexOf('"--scope"'));
+  assert.doesNotMatch(importer, /runNpxVercel\(tempProject, \["whoami"\]\)/);
+});
+
 test("secret values use stdin, are never printed or written, and buffers are cleared", () => {
   assert.match(importer, /input,/);
   assert.match(importer, /variables\[name\] = ""/);
@@ -70,12 +82,13 @@ test("secret values use stdin, are never printed or written, and buffers are cle
   assert.doesNotMatch(importer, /\.env(?:\.local)?/);
 });
 
-test("PowerShell wrapper finds the existing encrypted file and hides the passphrase", () => {
+test("PowerShell wrapper finds the encrypted file, hides the passphrase and uses ASCII prompts", () => {
   assert.match(powershell, /Commerce-OS-Migration\\purchase/);
   assert.match(powershell, /commerce-os-purchase-env-\*\.enc\.json/);
-  assert.match(powershell, /Read-Host .* -AsSecureString/);
+  assert.match(powershell, /Read-Host "Encrypted file passphrase" -AsSecureString/);
   assert.match(powershell, /SecureStringToBSTR/);
   assert.match(powershell, /ZeroFreeBSTR/);
   assert.match(powershell, /Remove-Item Env:MIGRATION_ENV_EXPORT_PASSPHRASE/);
   assert.doesNotMatch(powershell, /Write-Host[^\n]*plainPassphrase/);
+  assert.doesNotMatch(powershell, /[^\x00-\x7F]/);
 });
