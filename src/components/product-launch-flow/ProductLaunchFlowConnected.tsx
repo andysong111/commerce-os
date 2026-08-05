@@ -199,11 +199,14 @@ export function ProductLaunchFlowConnected() {
   }, [busy, rowExpression]);
 
   useEffect(() => {
-    const session = readProductLaunchSimpleSession(window.localStorage);
-    setActiveFlow(hasActiveSession(session));
-    const pending = readJson<PendingSelection>(PENDING_SELECTION_KEY);
-    if (pending?.rowExpression) setRowExpression(pending.rowExpression);
-    setHydrated(true);
+    const timer = window.setTimeout(() => {
+      const session = readProductLaunchSimpleSession(window.localStorage);
+      setActiveFlow(hasActiveSession(session));
+      const pending = readJson<PendingSelection>(PENDING_SELECTION_KEY);
+      if (pending?.rowExpression) setRowExpression(pending.rowExpression);
+      setHydrated(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -211,10 +214,13 @@ export function ProductLaunchFlowConnected() {
     const pending = readJson<PendingSelection>(PENDING_SELECTION_KEY);
     if (!pending?.autoStart || (!pending.rowExpression && !pending.itemIds?.length)) return;
     autoStarted.current = true;
-    void startConnectedFlow({
-      rowExpression: pending.rowExpression,
-      itemIds: pending.itemIds,
-    });
+    const timer = window.setTimeout(() => {
+      void startConnectedFlow({
+        rowExpression: pending.rowExpression,
+        itemIds: pending.itemIds,
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [activeFlow, busy, hydrated, startConnectedFlow]);
 
   useEffect(() => {
