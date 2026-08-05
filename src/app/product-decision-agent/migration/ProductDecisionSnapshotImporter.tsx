@@ -13,13 +13,24 @@ import {
   type PortableD1Manifest,
   type ProductDecisionRawTables,
 } from "@/lib/productDecisionSnapshot";
+import {
+  replayAndCompareProductDecisionD1,
+  type ProductDecisionShadowReport,
+} from "@/lib/productDecisionEngine/shadowComparison";
+import { validateVerifiedProductDecisionShadow } from "@/lib/productDecisionEngine/verifiedShadow";
+import type { PortableD1ProductDecisionTables } from "@/lib/productDecisionEngine/d1SourceAdapter";
 
 const REQUIRED_TABLES = [
-  "decision_runs",
-  "decision_items",
+  "app_settings",
   "canonical_products",
+  "claims",
   "decision_evidence",
+  "decision_items",
+  "decision_runs",
+  "inventory_positions",
+  "order_lines",
   "product_planning_profiles",
+  "purchase_commitments",
 ] as const;
 
 export function ProductDecisionSnapshotImporter() {
@@ -29,39 +40,54 @@ export function ProductDecisionSnapshotImporter() {
     "검증 완료된 commerce-os-d1-2026-08-05T09-58-00-019Z.zip 파일을 선택하세요.",
   );
   const [done, setDone] = useState(false);
+  const [shadowReport, setShadowReport] =
+    useState<ProductDecisionShadowReport | null>(null);
 
   async function importBackup(file?: File) {
     if (!file || busy) return;
     setBusy(true);
     setDone(false);
+    setShadowReport(null);
     setProgress(5);
     setMessage("ZIP 파일 지문을 확인하고 있습니다.");
 
     try {
       const buffer = await file.arrayBuffer();
       const zipSha256 = await sha256Hex(buffer);
-      setProgress(20);
+      setProgress(15);
       const files = await unzipArchive(new Uint8Array(buffer));
       setMessage("D1 백업 완료표식과 18개 테이블 행 수를 확인하고 있습니다.");
 
       const manifest = parseJsonFile<PortableD1Manifest>(files, "/manifest.json");
       const completed = parseJsonFile<PortableD1Completed>(files, "/completed.json");
       validateProductDecisionBackupMetadata(manifest, completed, zipSha256);
-      setProgress(45);
+      setProgress(30);
 
-      const tables = Object.fromEntries(
+      const parsedTables = Object.fromEntries(
         REQUIRED_TABLES.map((table) => [table, parseTable(files, table)]),
-      ) as unknown as ProductDecisionRawTables;
-      setMessage("최신 발주 계산 316개를 Ops Center 형식으로 재구성하고 있습니다.");
-      const snapshot = buildProductDecisionSnapshot(tables);
+      ) as PortableD1ProductDecisionTables;
+      setMessage("기존 최신 발주 계산 316개를 Ops Center 스냅샷으로 복원하고 있습니다.");
+      const snapshot = buildProductDecisionSnapshot(
+        parsedTables as unknown as ProductDecisionRawTables,
+      );
       const dashboardSha256 = await sha256Hex(stableStringify(snapshot));
       if (dashboardSha256 !== VERIFIED_PRODUCT_DECISION_BACKUP.dashboardSha256) {
         throw new Error(
           "재구성한 발주 계산 결과가 검증된 백업 결과와 일치하지 않습니다.",
         );
       }
+      setProgress(50);
+      setMessage(
+        "원시 주문·클레임·상품·재고 원장으로 Ops Center 자체 엔진을 그림자 재계산하고 있습니다.",
+      );
+
+      const shadow = replayAndCompareProductDecisionD1(parsedTables);
+      validateVerifiedProductDecisionShadow(shadow.report);
+      setShadowReport(shadow.report);
       setProgress(75);
-      setMessage("검증된 발주 스냅샷을 Ops Center 운영 원장에 저장하고 있습니다.");
+      setMessage(
+        "검증된 스냅샷과 그림자 재계산 보고서를 Ops Center 운영 원장에 보존하고 있습니다.",
+      );
 
       const response = await fetch(
         "/api/product-decision-agent/migration/import",
@@ -74,6 +100,7 @@ export function ProductDecisionSnapshotImporter() {
             manifest,
             completed,
             snapshot,
+            shadowReport: shadow.report,
           }),
         },
       );
@@ -81,6 +108,8 @@ export function ProductDecisionSnapshotImporter() {
         ok?: boolean;
         message?: string;
         productCount?: number;
+        shadowExactCount?: number;
+        shadowMismatchCount?: number;
       };
       if (!response.ok || body.ok !== true) {
         throw new Error(body.message || "Ops Center 스냅샷 저장에 실패했습니다.");
@@ -89,7 +118,7 @@ export function ProductDecisionSnapshotImporter() {
       setProgress(100);
       setDone(true);
       setMessage(
-        `복원 완료 · 최신 발주 계산 ${Number(body.productCount ?? 0).toLocaleString("ko-KR")}개를 내부 원장에 저장했습니다.`,
+        `검증 완료 · 내부 스냅샷 ${Number(body.productCount ?? 0).toLocaleString("ko-KR")}개 · 그림자 최종 일치 ${Number(body.shadowExactCount ?? 0).toLocaleString("ko-KR")}개 · 시점차이 ${Number(body.shadowMismatchCount ?? 0).toLocaleString("ko-KR")}개 · 원인불명 0개`,
       );
     } catch (error) {
       setProgress(0);
@@ -108,8 +137,8 @@ export function ProductDecisionSnapshotImporter() {
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-950">
         <strong className="block text-base">검증 백업만 허용</strong>
         <p className="mt-2 leading-6">
-          ZIP 지문, 원본 주소, 백업 시각, 18개 테이블의 67,260행, 최신 발주안
-          316개의 계산 지문이 모두 일치할 때만 저장합니다.
+          ZIP 지문, 원본 주소, 백업 시각, 18개 테이블의 67,260행과 기존 발주안
+          316개를 검증한 뒤 Ops Center 자체 엔진으로 한 번 더 계산합니다.
         </p>
         <p className="mt-2 text-xs text-emerald-700">
           실제 주문·결제·입고·재고·샵플링 변경과 기존 D1 수정은 실행하지 않습니다.
@@ -142,6 +171,20 @@ export function ProductDecisionSnapshotImporter() {
           </p>
         </div>
 
+        {shadowReport ? (
+          <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <ShadowMetric label="전체 상품" value={shadowReport.productCount} />
+            <ShadowMetric label="최종 일치" value={shadowReport.exactFinalCount} />
+            <ShadowMetric label="원장 시점차이" value={shadowReport.sourceInputDriftCount} />
+            <ShadowMetric label="최종 차이" value={shadowReport.finalMismatchCount} />
+            <ShadowMetric
+              label="원인불명"
+              value={shadowReport.unexplainedMismatchCount}
+              danger={shadowReport.unexplainedMismatchCount > 0}
+            />
+          </section>
+        ) : null}
+
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
             href="/product-decision-agent"
@@ -151,11 +194,36 @@ export function ProductDecisionSnapshotImporter() {
                 : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            {done ? "복원된 발주 추천 확인" : "발주 추천으로 돌아가기"}
+            {done ? "검증된 발주 추천 확인" : "발주 추천으로 돌아가기"}
           </Link>
         </div>
       </section>
     </div>
+  );
+}
+
+function ShadowMetric({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: number;
+  danger?: boolean;
+}) {
+  return (
+    <article
+      className={`rounded-xl border p-4 ${
+        danger
+          ? "border-rose-200 bg-rose-50 text-rose-900"
+          : "border-slate-200 bg-white text-slate-900"
+      }`}
+    >
+      <p className="text-xs font-bold text-slate-500">{label}</p>
+      <strong className="mt-1 block text-2xl font-black">
+        {value.toLocaleString("ko-KR")}
+      </strong>
+    </article>
   );
 }
 

@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - "src/lib/productDecisionEngine/**"
+      - "src/app/product-decision-agent/migration/**"
+      - "src/app/api/product-decision-agent/migration/**"
       - "tests/productDecisionEngine.test.mjs"
+      - "tests/productDecisionShadowReplay.test.mjs"
       - ".github/workflows/product-decision-engine-ci.yml"
   workflow_dispatch:
 
@@ -26,15 +29,19 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint product decision engine
+      - name: Lint product decision engine and migration bridge
         run: >-
           npx eslint
           src/lib/productDecisionEngine/*.ts
+          src/app/product-decision-agent/migration/*.tsx
+          src/app/api/product-decision-agent/migration/import/route.ts
           tests/productDecisionEngine.test.mjs
-      - name: Run product decision engine parity tests
+          tests/productDecisionShadowReplay.test.mjs
+      - name: Run product decision engine and shadow replay tests
         run: >-
           node --experimental-strip-types --test
           tests/productDecisionEngine.test.mjs
+          tests/productDecisionShadowReplay.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
