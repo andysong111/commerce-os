@@ -23,6 +23,7 @@ type TrackerStatePayload = {
   savedAt?: unknown;
   policy?: unknown;
   items?: unknown;
+  serverDeletedItemIds?: unknown;
   [key: string]: unknown;
 };
 
@@ -99,6 +100,23 @@ export async function PUT(request: NextRequest) {
     );
   }
 
+  const existing = await readExistingState(
+    config.supabaseUrl,
+    config.secretKey,
+    identity.value.userId,
+  );
+  if (!existing.ok) {
+    return Response.json(
+      {
+        ok: false,
+        code: "PRODUCT_LAUNCH_TRACKER_READ_BEFORE_WRITE_FAILED",
+        message: existing.message,
+      },
+      { status: 500 },
+    );
+  }
+  state = preserveServerDeletedItems(state, existing.state);
+
   const schemaVersion = Number(state.schemaVersion ?? 3);
   const row = {
     owner_id: identity.value.userId,
@@ -155,6 +173,71 @@ function normalizeStatePayload(value: unknown): TrackerStatePayload {
     throw new Error("진행관리 데이터 크기가 8MB를 초과했습니다. 상세페이지 원본 이미지는 URL로 연결하세요.");
   }
   return JSON.parse(serialized) as TrackerStatePayload;
+}
+
+function preserveServerDeletedItems(
+  incoming: TrackerStatePayload,
+  existing: TrackerStatePayload | null,
+) {
+  const deletedIds = new Set([
+    ...stringArray(existing?.serverDeletedItemIds),
+    ...stringArray(incoming.serverDeletedItemIds),
+  ]);
+  if (!deletedIds.size) return incoming;
+
+  const items = Array.isArray(incoming.items)
+    ? incoming.items.filter((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return true;
+        const id = String((item as { id?: unknown }).id ?? "").trim();
+        return !id || !deletedIds.has(id);
+      })
+    : [];
+
+  return normalizeStatePayload({
+    ...incoming,
+    serverDeletedItemIds: [...deletedIds],
+    items,
+  });
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => String(entry ?? "").trim()).filter(Boolean))];
+}
+
+async function readExistingState(
+  supabaseUrl: string,
+  secretKey: string,
+  ownerId: string,
+): Promise<
+  | { ok: true; state: TrackerStatePayload | null }
+  | { ok: false; message: string }
+> {
+  const params = new URLSearchParams({
+    select: "state_payload",
+    owner_id: `eq.${ownerId}`,
+    limit: "1",
+  });
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/${TABLE_NAME}?${params.toString()}`,
+    {
+      headers: createSupabaseAdminHeaders(secretKey),
+      cache: "no-store",
+    },
+  );
+  const body = await readJson(response);
+  if (!response.ok) {
+    return { ok: false, message: readErrorMessage(body, response.status) };
+  }
+  const row = Array.isArray(body) ? body[0] : null;
+  const state = row?.state_payload;
+  return {
+    ok: true,
+    state:
+      state && typeof state === "object" && !Array.isArray(state)
+        ? (state as TrackerStatePayload)
+        : null,
+  };
 }
 
 async function resolveTrackerIdentity(
