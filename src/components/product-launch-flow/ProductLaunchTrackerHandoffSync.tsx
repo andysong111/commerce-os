@@ -204,10 +204,7 @@ export function ProductLaunchTrackerHandoffSync() {
 }
 
 async function completeTrackerStages(handoff: Handoff, session: unknown) {
-  const trackerState = readJson<Record<string, unknown>>(TRACKER_STORAGE_KEY);
-  if (!trackerState) {
-    throw new Error("상품출시진행관리 저장본을 찾지 못했습니다.");
-  }
+  const trackerState = await readLatestTrackerState();
   const items = Array.isArray(trackerState.items)
     ? (trackerState.items as Array<Record<string, unknown>>)
     : [];
@@ -309,6 +306,29 @@ async function completeTrackerStages(handoff: Handoff, session: unknown) {
   };
   window.localStorage.setItem(HANDOFF_KEY, JSON.stringify(completed));
   return completed;
+}
+
+async function readLatestTrackerState() {
+  const response = await fetch(TRACKER_STATE_ENDPOINT, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    message?: string;
+    state?: unknown;
+  };
+  const state = record(body.state);
+  if (!response.ok || body.ok !== true || !Array.isArray(state.items)) {
+    throw new Error(
+      body.message ||
+        "최신 상품출시진행관리 상태를 서버에서 불러오지 못했습니다. 완료 처리를 중단했습니다.",
+    );
+  }
+  window.localStorage.setItem(TRACKER_STORAGE_KEY, JSON.stringify(state));
+  return state;
 }
 
 function formatHandoffTitle(handoff: Handoff | null) {
