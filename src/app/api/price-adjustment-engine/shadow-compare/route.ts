@@ -1,8 +1,6 @@
-import {
-  loadLatestPriceGradeShadowComparison,
-  runPriceGradeShadowComparison,
-} from "@/lib/priceGradeShadowComparison";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import { runPriceGradeShadowComparisonWithReceiptCache } from "@/lib/priceGradeReceiptCacheShadow";
+import { loadLatestPriceGradeShadowComparison } from "@/lib/priceGradeShadowComparison";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,14 +56,14 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const result = await runPriceGradeShadowComparison();
+    const result = await runPriceGradeShadowComparisonWithReceiptCache();
     return Response.json(
       {
         ok: true,
         accepted: true,
         result,
         message:
-          "Product Master 원장을 자체 가격등급 엔진으로 재계산하고 비교 결과를 불변 원장에 저장했습니다.",
+          "Product Master 원장과 Ops Center 최근 입고 3회 캐시를 자체 가격등급 엔진으로 재계산하고 비교 결과를 불변 원장에 저장했습니다.",
       },
       { status: 201, headers: { "cache-control": "no-store" } },
     );
