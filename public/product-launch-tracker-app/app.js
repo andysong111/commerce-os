@@ -33,6 +33,7 @@ if (detailPageMode === "worker") {
   await import("./table-horizontal-scroll.js");
   await import("./dialog-close-fix.js");
   await import("./table-inline-ops-loader.js");
+  await import("./table-frozen-columns-fix.js");
   await import("./detail-page-dock.js");
   await import("./detail-page-option-guard.js");
   await import("./empty-cell-placeholder-cleanup.js");
