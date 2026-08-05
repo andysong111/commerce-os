@@ -95,17 +95,25 @@ export function buildProductLaunchShoplingPayload(
   const modelName = text(item.productName);
   const category = text(item.shoplingCategory);
   const selfCodeBase = normalizeCode(item.selfCodeBase);
+  const mainBarcode = normalizeCode(item.barcode);
   const detailPage = asRecord(item.detailPageAsset);
   const detailHtml = text(detailPage.html);
   const mainImage = text(detailPage.mainImageUrl);
   const additionalImages = stringList(detailPage.additionalImageUrls).slice(0, 10);
   const rawOptions = Array.isArray(item.orderOptions) ? item.orderOptions : [];
+  const singleOptionBarcode =
+    rawOptions.length === 1
+      ? mainBarcode || normalizeCode(asRecord(rawOptions[0]).barcode)
+      : "";
   const options = rawOptions.map((value, index) => {
     const option = asRecord(value);
     return {
       optionName: text(option.optionName) || "옵션",
       saleOption: text(option.saleOption),
-      barcode: normalizeCode(option.barcode),
+      barcode:
+        rawOptions.length === 1
+          ? singleOptionBarcode
+          : normalizeCode(option.barcode),
       baseSalePriceKrw: nonNegativeInteger(option.baseSalePriceKrw),
       unitCostKrw: nonNegativeInteger(option.unitCostKrw),
       index,
@@ -174,7 +182,10 @@ export function buildProductLaunchShoplingPayload(
       ptnGoodsCd: `${selfCodeBase}${channel.suffix}`,
       productName: `${modelName} ${channel.label}`,
       productAbbreviation: modelName,
-      brandName: channel.key === "retail1" ? text(policy.retail1BrandName) || "동네일등" : "",
+      brandName:
+        channel.key === "retail1"
+          ? text(policy.retail1BrandName) || "동네일등"
+          : "",
       orgPrice,
       salePrice,
       listPrice: Math.ceil(salePrice * listPriceMultiplier),
