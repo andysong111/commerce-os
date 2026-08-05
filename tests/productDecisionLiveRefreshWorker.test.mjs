@@ -6,6 +6,10 @@ const workflow = await readFile(
   "src/lib/productDecisionLiveRefresh.ts",
   "utf8",
 );
+const shoplingClient = await readFile(
+  "src/lib/shopling/shoplingReadClient.ts",
+  "utf8",
+);
 const api = await readFile(
   "src/app/api/product-decision-agent/live-refresh/route.ts",
   "utf8",
@@ -50,11 +54,31 @@ test("orders and claims are split into bounded chunks and one step is processed 
   assert.match(workflow, /MAX_STEP_ATTEMPTS = 3/);
 });
 
-test("planning snapshot is frozen and drift fails closed", () => {
-  assert.match(workflow, /planning\.generatedAt !== request\.planningGeneratedAt/);
+test("planning snapshot is frozen by deterministic content fingerprint and drift fails closed", () => {
+  assert.match(workflow, /contentFingerprint\?: string/);
+  assert.match(workflow, /planningContentFingerprint: string/);
+  assert.match(workflow, /\^sha256:\[a-f0-9\]\{64\}\$/);
+  assert.match(
+    workflow,
+    /planning\.contentFingerprint !== request\.planningContentFingerprint/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /planning\.generatedAt !== request\.planningGeneratedAt/,
+  );
   assert.match(workflow, /PRODUCT_MASTER_PLANNING_CHANGED/);
   assert.match(workflow, /planning\.products\.length !== request\.planningProductCount/);
   assert.match(workflow, /storeTerminalFailure\(request, "planning"/);
+});
+
+test("each Shopling chunk performs one bounded HTTP attempt and worker retries are the only retry layer", () => {
+  assert.match(shoplingClient, /AbortSignal\.timeout\(45_000\)/);
+  assert.doesNotMatch(shoplingClient, /for \(let attempt/);
+  assert.doesNotMatch(shoplingClient, /await delay\(/);
+  assert.equal(
+    (shoplingClient.match(/await fetch\(this\.url\(resource\)/g) ?? []).length,
+    1,
+  );
 });
 
 test("final live result remains a shadow snapshot and compares against the verified baseline", () => {
