@@ -6,11 +6,7 @@ $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($EncryptedFile)) {
   $purchaseDirectory = Join-Path $HOME "Commerce-OS-Migration\purchase"
-  $candidate = Get-ChildItem \
-    -Path $purchaseDirectory \
-    -Filter "commerce-os-purchase-env-*.enc.json" \
-    -File \
-    -ErrorAction SilentlyContinue |
+  $candidate = Get-ChildItem -Path $purchaseDirectory -Filter "commerce-os-purchase-env-*.enc.json" -File -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
@@ -26,9 +22,12 @@ if (-not (Test-Path -LiteralPath $nodeScript -PathType Leaf)) {
   throw "환경변수 이전 스크립트를 찾지 못했습니다."
 }
 
-$securePassphrase = Read-Host "암호화 파일 비밀번호" -AsSecureString
-$passphrasePointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassphrase)
+$securePassphrase = $null
+$plainPassphrase = $null
+$passphrasePointer = [IntPtr]::Zero
 try {
+  $securePassphrase = Read-Host "암호화 파일 비밀번호" -AsSecureString
+  $passphrasePointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassphrase)
   $plainPassphrase = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passphrasePointer)
   if ([string]::IsNullOrEmpty($plainPassphrase)) {
     throw "암호화 파일 비밀번호가 비어 있습니다."
