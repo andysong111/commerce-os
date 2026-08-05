@@ -2,6 +2,7 @@ import {
   createDecipheriv,
   pbkdf2Sync,
 } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -10,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const SOURCE_KEYS = [
@@ -55,8 +56,37 @@ function fail(code) {
   throw new Error(code);
 }
 
+function npxInvocation(command) {
+  if (process.platform !== "win32") {
+    return {
+      executable: "npx",
+      args: command,
+      errorCode: "",
+    };
+  }
+
+  const npxCli = join(
+    dirname(process.execPath),
+    "node_modules",
+    "npm",
+    "bin",
+    "npx-cli.js",
+  );
+  if (!existsSync(npxCli)) {
+    return {
+      executable: process.execPath,
+      args: [],
+      errorCode: "NPX_CLI_NOT_FOUND",
+    };
+  }
+  return {
+    executable: process.execPath,
+    args: [npxCli, ...command],
+    errorCode: "",
+  };
+}
+
 function runNpxVercel(args, { tempProject = null, input } = {}) {
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
   const command = ["--yes", "vercel@latest", ...args];
   if (tempProject) {
     command.push(
@@ -68,7 +98,17 @@ function runNpxVercel(args, { tempProject = null, input } = {}) {
   }
   command.push("--no-color");
 
-  const result = spawnSync(npx, command, {
+  const invocation = npxInvocation(command);
+  if (invocation.errorCode) {
+    return {
+      ok: false,
+      status: -1,
+      stdout: "",
+      errorCode: invocation.errorCode,
+    };
+  }
+
+  const result = spawnSync(invocation.executable, invocation.args, {
     input,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -161,9 +201,6 @@ try {
     "utf8",
   );
 
-  // Run the same command the operator just used successfully. `whoami` must
-  // precede global options; placing --scope/--cwd before the command makes
-  // newer Vercel CLI versions exit as though no authenticated command ran.
   const whoami = runNpxVercel(["whoami"]);
   if (!whoami.ok) {
     fail(
@@ -188,7 +225,11 @@ try {
       },
     );
     variables[name] = "";
-    if (!result.ok) fail(`VERCEL_ENV_SET_FAILED:${name}:${result.status}`);
+    if (!result.ok) {
+      fail(
+        `VERCEL_ENV_SET_FAILED:${name}:${result.status}:${result.errorCode || "CLI"}`,
+      );
+    }
   }
 
   const listed = runNpxVercel(["env", "ls", "production"], {
@@ -198,7 +239,9 @@ try {
     !listed.ok ||
     TARGET_KEYS.some((name) => !listed.stdout.includes(name))
   ) {
-    fail("VERCEL_ENV_VERIFY_FAILED");
+    fail(
+      `VERCEL_ENV_VERIFY_FAILED:${listed.status}:${listed.errorCode || "CLI"}`,
+    );
   }
 
   const redeploy = runNpxVercel(
@@ -210,7 +253,11 @@ try {
     ],
     { tempProject },
   );
-  if (!redeploy.ok) fail(`VERCEL_REDEPLOY_FAILED:${redeploy.status}`);
+  if (!redeploy.ok) {
+    fail(
+      `VERCEL_REDEPLOY_FAILED:${redeploy.status}:${redeploy.errorCode || "CLI"}`,
+    );
+  }
 
   console.log(
     `[runtime-env-vercel-import] ${TARGET_KEYS.length} sensitive Production variables updated`,

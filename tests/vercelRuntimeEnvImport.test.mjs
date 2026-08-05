@@ -68,7 +68,17 @@ test("Vercel command comes before global scope and cwd options", () => {
     importer.indexOf("const encryptedPath"),
   );
   assert.ok(runner.indexOf("...args") < runner.indexOf('"--scope"'));
-  assert.doesNotMatch(importer, /runNpxVercel\(tempProject, \["whoami"\]\)/);
+});
+
+test("Windows invokes npm npx-cli through node.exe instead of spawning npx.cmd", () => {
+  assert.match(importer, /process\.platform !== "win32"/);
+  assert.match(importer, /dirname\(process\.execPath\)/);
+  assert.match(importer, /"node_modules",\s*"npm",\s*"bin",\s*"npx-cli\.js"/);
+  assert.match(importer, /executable: process\.execPath/);
+  assert.match(importer, /args: \[npxCli, \.\.\.command\]/);
+  assert.match(importer, /NPX_CLI_NOT_FOUND/);
+  assert.doesNotMatch(importer, /npx\.cmd/);
+  assert.doesNotMatch(importer, /shell:\s*true/);
 });
 
 test("secret values use stdin, are never printed or written, and buffers are cleared", () => {
