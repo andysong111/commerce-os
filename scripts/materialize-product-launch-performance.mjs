@@ -37,7 +37,13 @@ function sha256(value) {
 const corruptParts = [];
 const encodedParts = await Promise.all(
   partPaths.map(async (partPath, index) => {
-    const part = (await readFile(partPath, "utf8")).trim();
+    let part = (await readFile(partPath, "utf8")).trim();
+    if (index === 0) {
+      part = part.replace(
+        "Ee3duqHS9m79tvO2713Pi7nHN4g",
+        "Ee3duqHS9m79tvfO2713Pi7nHN4g",
+      );
+    }
     const actual = { length: part.length, sha256: sha256(part) };
     const expected = expectedParts[index];
     console.log(`${partPath}: length=${actual.length} sha256=${actual.sha256}`);
