@@ -7,6 +7,7 @@ import {
   nextTrackerRowNumber,
   parseSingleRowList,
 } from "../public/product-launch-tracker-app/single-row-add.js";
+import { syncAddedSingleRowBarcode } from "../public/product-launch-tracker-app/single-row-add-barcode-guard.js";
 
 const appSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
@@ -19,6 +20,7 @@ const moduleSource = await readFile(
 
 test("행 추가 모듈과 버튼이 상품출시진행관리 앱에 연결된다", () => {
   assert.match(appSource, /single-row-add\.js/);
+  assert.match(appSource, /single-row-add-barcode-guard\.js/);
   assert.match(moduleSource, /\+ 행 추가/);
   assert.match(moduleSource, /여러 행 붙여넣기/);
   assert.match(moduleSource, /상품 행 추가/);
@@ -43,6 +45,27 @@ test("단일 옵션은 기준바코드를 옵션 바코드에 동일하게 사�
   assert.equal(result.orderOptions.length, 1);
   assert.equal(result.orderOptions[0].barcode, "BAA1-1");
   assert.equal(result.orderOptions[0].optionName, "구성");
+});
+
+test("단일 옵션에 서로 다른 값이 들어와도 기준바코드를 우선해 동일하게 맞춘다", () => {
+  const state = {
+    schemaVersion: 3,
+    items: [
+      {
+        id: "new-row",
+        barcode: "BAA1-1",
+        orderOptions: [{ saleOption: "단품", barcode: "BAA1-2" }],
+      },
+    ],
+  };
+  const result = syncAddedSingleRowBarcode(
+    state,
+    "new-row",
+    "2026-08-05T14:40:00.000Z",
+  );
+  assert.equal(result.changed, true);
+  assert.equal(result.state.items[0].barcode, "BAA1-1");
+  assert.equal(result.state.items[0].orderOptions[0].barcode, "BAA1-1");
 });
 
 test("다중 옵션은 각 옵션별 위치코드를 순서대로 보존한다", () => {
