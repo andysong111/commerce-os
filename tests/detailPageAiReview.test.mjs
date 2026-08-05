@@ -100,6 +100,40 @@ function job(overrides = {}) {
   };
 }
 
+test("full asset review recognizes every versioned Studio assessment", () => {
+  for (const version of [
+    "full_generated_asset_identity_v1",
+    "full_generated_asset_identity_v2",
+    "full_generated_asset_identity_v3",
+  ]) {
+    assert.equal(
+      hasFullAssetDetailPageAssessment(
+        job({
+          result: {
+            ...job().result,
+            setAssessment: {
+              ...job().result.setAssessment,
+              assessment_version: version,
+            },
+          },
+        }),
+      ),
+      true,
+    );
+  }
+  assert.equal(
+    hasFullAssetDetailPageAssessment(
+      job({
+        result: {
+          ...job().result,
+          setAssessment: { assessment_version: "legacy_set_review" },
+        },
+      }),
+    ),
+    false,
+  );
+});
+
 test("dashboard exposes a dedicated internal detail-page AI review card", () => {
   const registryModule = moduleRegistry.find(
     (item) => item.id === "detail-page-ai-review",
