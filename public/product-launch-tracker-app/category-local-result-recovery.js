@@ -152,7 +152,7 @@ async function localJson(path) {
       method: "GET",
       headers: { Accept: "application/json" },
       cache: "no-store",
-      targetAddressSpace: "local",
+      targetAddressSpace: "loopback",
     });
   } catch {
     return Promise.reject(new Error("로컬 실행기에 연결할 수 없습니다."));

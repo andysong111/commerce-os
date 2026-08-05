@@ -50,8 +50,8 @@ test("카테고리 업데이트 버튼은 GitHub Actions보다 로컬 실행기�
       app.indexOf("category-update-progress.js"),
   );
   assert.match(local, /http:\/\/127\.0\.0\.1:8776/);
-  assert.match(local, /targetAddressSpace:\s*"local"/);
-  assert.doesNotMatch(local, /targetAddressSpace:\s*"loopback"/);
+  assert.match(local, /targetAddressSpace:\s*"loopback"/);
+  assert.doesNotMatch(local, /targetAddressSpace:\s*"local"/);
   assert.match(local, /stopImmediatePropagation/);
   assert.match(local, /category-update\/start/);
   assert.match(local, /category-update\/status/);
@@ -100,7 +100,7 @@ test("실시간 작업 도우미 취소는 로컬 실행기 취소 API를 사용
   assert.match(cancelControl, /mode === "local"/);
   assert.match(cancelControl, /127\.0\.0\.1:8776/);
   assert.match(cancelControl, /category-update\/cancel/);
-  assert.match(cancelControl, /targetAddressSpace: "local"/);
+  assert.match(cancelControl, /targetAddressSpace: "loopback"/);
   assert.match(cancelControl, /category-local-update-cancel/);
 });
 
@@ -148,6 +148,6 @@ test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 �
   assert.match(recovery, /category-update\/result/);
   assert.match(recovery, /shopling-categories\/local-result/);
   assert.match(recovery, /재수집 없이 결과 저장 중/);
-  assert.match(recovery, /targetAddressSpace: "local"/);
+  assert.match(recovery, /targetAddressSpace: "loopback"/);
   assert.match(recovery, /category-update-task-changed/);
 });
