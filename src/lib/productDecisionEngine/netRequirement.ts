@@ -1,7 +1,7 @@
 import {
   roundOrderQuantity,
   type SalesOrderGroup,
-} from "@/lib/productDecisionEngine/salesOrder";
+} from "./salesOrder.ts";
 
 export type NetRequirementInput = {
   demandTarget: number;
