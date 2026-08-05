@@ -33,6 +33,7 @@ if (detailPageMode === "worker") {
   await import("./relaunch-reset-fixed.js");
   await import("./china-product-links.js");
   await import("./table-inline-ops-loader.js");
+  await import("./option-location-inline-editor.js");
   await import("./category-ai.js");
   await import("./category-ai-reliable.js");
   await import("./category-review-queue-link.js");
