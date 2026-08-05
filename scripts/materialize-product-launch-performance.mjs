@@ -97,6 +97,34 @@ execFileSync("tar", ["-xzf", archivePath, "-C", root], {
   stdio: "inherit",
 });
 
+const contractTestPath = path.join(
+  root,
+  "tests/productLaunchTrackerOptimizedContracts.test.mjs",
+);
+let contractTest = await readFile(contractTestPath, "utf8");
+contractTest = contractTest
+  .replace(
+    'import test from "node:test";',
+    'import test from "node:test";\nimport { fileURLToPath } from "node:url";',
+  )
+  .replace(
+    'const appPath = "/tmp/optimized-app.js";',
+    'const appPath = fileURLToPath(new URL("../public/product-launch-tracker-app/optimized-app.js", import.meta.url));',
+  )
+  .replace(
+    'const entryPath = "/tmp/app.js";',
+    'const entryPath = fileURLToPath(new URL("../public/product-launch-tracker-app/app.js", import.meta.url));',
+  )
+  .replace(
+    'const routePath = "/tmp/optimized-route/route.ts";',
+    'const routePath = fileURLToPath(new URL("../src/app/api/product-launch-tracker/optimized/route.ts", import.meta.url));',
+  )
+  .replace(
+    'const stateRoutePath = "/tmp/state-route.ts";',
+    'const stateRoutePath = fileURLToPath(new URL("../src/app/api/product-launch-tracker/state/route.ts", import.meta.url));',
+  );
+await writeFile(contractTestPath, contractTest);
+
 for (const expectedFile of expectedFiles) {
   await access(path.join(root, expectedFile));
 }
