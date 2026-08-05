@@ -11,6 +11,9 @@ const LOCAL_BRIDGE_HEALTH_URL = "http://127.0.0.1:8765/health";
 const LOCAL_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
 const LOCAL_BRIDGE_TIMEOUT_MS = 5 * 1000;
 const LOCAL_BRIDGE_RELAY_BODY_LIMIT = 16 * 1024;
+const LOCAL_BRIDGE_START_PROTOCOL = "seungjun-ops-bridge://start";
+const LOCAL_BRIDGE_START_WAIT_MS = 12 * 1000;
+const LOCAL_BRIDGE_RETRY_INTERVAL_MS = 1000;
 const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
@@ -581,7 +584,7 @@ async function relayLocalBridgeRequest(payload) {
       credentials: "omit",
       headers: method === "POST" ? { "Content-Type": "application/json" } : {},
       body: method === "POST" ? body : undefined,
-      targetAddressSpace: "loopback",
+      targetAddressSpace: "local",
     });
     const responseBody = await response.arrayBuffer();
     respond(
@@ -1188,15 +1191,15 @@ async function ensureDetailPageDependencies() {
   await Promise.all([getEngineConfig(), ensureLocalCollectorReady()]);
 }
 
-async function ensureLocalCollectorReady() {
+async function probeLocalCollectorReady(timeoutMs = LOCAL_BRIDGE_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), LOCAL_BRIDGE_TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(LOCAL_BRIDGE_HEALTH_URL, {
       cache: "no-store",
       credentials: "omit",
       signal: controller.signal,
-      targetAddressSpace: "loopback",
+      targetAddressSpace: "local",
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(`status=${response.status}`);
@@ -1211,14 +1214,52 @@ async function ensureLocalCollectorReady() {
         "로컬 수집기 업데이트가 필요합니다. 최신 수집기를 실행한 뒤 다시 시도하세요.",
       );
     }
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("업데이트")) throw error;
-    throw new Error(
-      "로컬 수집기에 연결하지 못했습니다. Chrome 주소창 왼쪽 사이트 설정에서 ‘로컬 네트워크 액세스’를 허용하고, 수집기 PowerShell 창을 켠 뒤 다시 누르세요.",
-    );
+    return payload;
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+function requestLocalCollectorStart() {
+  window.location.href = LOCAL_BRIDGE_START_PROTOCOL;
+}
+
+async function waitForLocalCollectorReady() {
+  const deadline = Date.now() + LOCAL_BRIDGE_START_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => window.setTimeout(resolve, LOCAL_BRIDGE_RETRY_INTERVAL_MS));
+    try {
+      await probeLocalCollectorReady(2_000);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("업데이트")) throw error;
+    }
+  }
+  return false;
+}
+
+async function ensureLocalCollectorReady() {
+  try {
+    await probeLocalCollectorReady();
+    return;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("업데이트")) throw error;
+  }
+
+  const shouldStart = window.confirm(
+    "승준컴 로컬 수집기가 꺼져 있거나 Chrome 연결 권한이 아직 허용되지 않았습니다.\n\n확인을 누르면 수집기를 자동 실행하고 약 12초 동안 다시 연결합니다.",
+  );
+  if (shouldStart) {
+    showRunStatus("승준컴 로컬 수집기 자동 실행 요청 · 연결을 다시 확인하고 있습니다.", "progress");
+    requestLocalCollectorStart();
+    if (await waitForLocalCollectorReady()) return;
+  }
+
+  throw new Error(
+    shouldStart
+      ? "수집기 자동 실행 후에도 연결되지 않았습니다. Chrome 주소창 왼쪽 사이트 설정에서 ‘로컬 네트워크 액세스’를 허용한 뒤 다시 누르세요. 권한이 이미 허용되어 있다면 승준컴 브릿지 프로토콜 설치 또는 PowerShell 수집기 실행 상태를 확인하세요."
+      : "상세페이지 생성에는 승준컴 로컬 수집기가 필요합니다. 다시 실행할 때 자동 실행 확인창에서 ‘확인’을 누르거나 수집기 PowerShell 창을 켜주세요.",
+  );
 }
 
 function markFrameConnected() {

@@ -144,8 +144,12 @@ test("Chrome local network permission is delegated through both nested detail-pa
     dockSource,
     /activeFrame\.allow = "local-network; loopback-network; local-network-access"/,
   );
-  assert.match(dockSource, /targetAddressSpace: "loopback"/);
+  assert.match(dockSource, /targetAddressSpace: "local"/);
   assert.match(dockSource, /Chrome 주소창 왼쪽 사이트 설정/);
+  assert.match(dockSource, /seungjun-ops-bridge:\/\/start/);
+  assert.match(dockSource, /waitForLocalCollectorReady/);
+  assert.match(dockSource, /수집기를 자동 실행하고 약 12초 동안 다시 연결합니다/);
+  assert.doesNotMatch(dockSource, /targetAddressSpace: "loopback"/);
   assert.match(nextConfig, /Permissions-Policy/);
   assert.match(nextConfig, /local-network=/);
   assert.match(nextConfig, /loopback-network=/);
@@ -159,7 +163,7 @@ test("OPS origin relays only the evidence collector routes for the hidden Studio
   assert.match(dockSource, /ops-dock-local-bridge-response/);
   assert.match(dockSource, /postMessage\(message, targetOrigin, \[body\]\)/);
   assert.match(dockSource, /body\.length > LOCAL_BRIDGE_RELAY_BODY_LIMIT/);
-  assert.match(dockSource, /targetAddressSpace: "loopback"/);
+  assert.match(dockSource, /targetAddressSpace: "local"/);
   assert.doesNotMatch(dockSource, /LOCAL_BRIDGE_BASE_URL\}\$\{path\}`[\s\S]*credentials: "include"/);
 });
 
