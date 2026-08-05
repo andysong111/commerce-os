@@ -125,6 +125,7 @@ test("snapshot builder selects the latest run and creates exactly 316 read-only 
   });
 
   assert.equal(snapshot.runId, "latest-run");
+  assert.equal(snapshot.generatedAt, "2026-08-04T09:45:20.591Z");
   assert.equal(snapshot.products.length, 316);
   assert.equal(snapshot.products[0].barcode, "BTEST-315");
   assert.equal(snapshot.expectedSpend, 2_000);
@@ -142,7 +143,8 @@ test("migration writes only the verified snapshot to the existing operation ledg
   assert.match(importRoute, /VERIFIED_PRODUCT_DECISION_BACKUP\.dashboardSha256/);
   assert.match(importRoute, /commerce_operation_runs/);
   assert.match(importRoute, /PRODUCT_DECISION_SNAPSHOT_IMPORT/);
-  assert.match(importRoute, /resolution=merge-duplicates/);
+  assert.match(importRoute, /resolution=ignore-duplicates/);
+  assert.doesNotMatch(importRoute, /resolution=merge-duplicates/);
   assert.doesNotMatch(importRoute, /shopling/i);
   assert.doesNotMatch(importRoute, /1688/);
   assert.doesNotMatch(importRoute, /DELETE/);
