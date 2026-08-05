@@ -1,4 +1,7 @@
-import { runPriceGradeShadowComparisonWithReceiptCache } from "@/lib/priceGradeReceiptCacheShadow";
+import {
+  loadPriceGradeReceiptAugmentedSnapshot,
+  runPriceGradeShadowComparisonWithReceiptCache,
+} from "@/lib/priceGradeReceiptCacheShadow";
 import {
   loadLatestPriceGradeShadowComparison,
   type PriceGradeShadowResult,
@@ -35,8 +38,14 @@ function hasCurrentReceiptEvidence(
 }
 
 export async function runPriceGradeReceiptShadowBootstrap(): Promise<PriceGradeReceiptShadowBootstrapResult> {
-  const latest = await loadLatestPriceGradeShadowComparison();
-  if (hasCurrentReceiptEvidence(latest)) {
+  const [latest, current] = await Promise.all([
+    loadLatestPriceGradeShadowComparison(),
+    loadPriceGradeReceiptAugmentedSnapshot(),
+  ]);
+  if (
+    hasCurrentReceiptEvidence(latest) &&
+    latest.contentFingerprint === current.snapshot.contentFingerprint
+  ) {
     return {
       processed: false,
       reason: "ALREADY_BOOTSTRAPPED",

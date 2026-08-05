@@ -11,15 +11,20 @@ const [bootstrap, cron, vercel] = await Promise.all([
   readFile("vercel.json", "utf8").then(JSON.parse),
 ]);
 
-test("bootstrap runs the receipt-cache comparison only when the current evidence is absent", () => {
+test("bootstrap reuses only a result whose receipt-augmented content fingerprint is current", () => {
   assert.match(bootstrap, /receipt-cache-fallback-v1/);
   assert.match(bootstrap, /loadLatestPriceGradeShadowComparison/);
+  assert.match(bootstrap, /loadPriceGradeReceiptAugmentedSnapshot/);
   assert.match(bootstrap, /hasCurrentReceiptEvidence\(latest\)/);
+  assert.match(
+    bootstrap,
+    /latest\.contentFingerprint === current\.snapshot\.contentFingerprint/,
+  );
   assert.match(bootstrap, /reason: "ALREADY_BOOTSTRAPPED"/);
   assert.match(bootstrap, /runPriceGradeShadowComparisonWithReceiptCache/);
   assert.match(bootstrap, /reason: "BOOTSTRAPPED"/);
   assert.ok(
-    bootstrap.indexOf("hasCurrentReceiptEvidence(latest)") <
+    bootstrap.indexOf("latest.contentFingerprint ===") <
       bootstrap.indexOf("runPriceGradeShadowComparisonWithReceiptCache()"),
   );
 });
