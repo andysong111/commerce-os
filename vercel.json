@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/detail-page-jobs",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/product-decision-live-refresh",
+      "schedule": "* * * * *"
     }
   ]
 }

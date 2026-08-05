@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const workflow = await readFile(
+  "src/lib/productDecisionLiveRefresh.ts",
+  "utf8",
+);
+const shoplingClient = await readFile(
+  "src/lib/shopling/shoplingReadClient.ts",
+  "utf8",
+);
+const api = await readFile(
+  "src/app/api/product-decision-agent/live-refresh/route.ts",
+  "utf8",
+);
+const cron = await readFile(
+  "src/app/api/cron/product-decision-live-refresh/route.ts",
+  "utf8",
+);
+const page = await readFile(
+  "src/app/product-decision-agent/live-refresh/page.tsx",
+  "utf8",
+);
+const control = await readFile(
+  "src/app/product-decision-agent/live-refresh/LiveRefreshControl.tsx",
+  "utf8",
+);
+const vercel = JSON.parse(await readFile("vercel.json", "utf8"));
+
+test("live refresh stores immutable request, chunk, failure and final operation types", () => {
+  for (const operation of [
+    "PRODUCT_DECISION_LIVE_REFRESH_REQUEST",
+    "PRODUCT_DECISION_LIVE_ORDER_CHUNK",
+    "PRODUCT_DECISION_LIVE_CLAIM_CHUNK",
+    "PRODUCT_DECISION_LIVE_STEP_FAILURE",
+    "PRODUCT_DECISION_LIVE_FAILED",
+    "PRODUCT_DECISION_LIVE_SHADOW",
+  ]) {
+    assert.match(workflow, new RegExp(operation));
+  }
+  assert.match(workflow, /on_conflict=source_event_id/);
+  assert.match(workflow, /resolution=ignore-duplicates/);
+  assert.doesNotMatch(workflow, /resolution=merge-duplicates/);
+});
+
+test("orders and claims are split into bounded chunks and one step is processed per worker call", () => {
+  assert.match(workflow, /splitShoplingDateRange\([\s\S]*?7,/);
+  assert.match(workflow, /splitShoplingDateRange\([\s\S]*?90,/);
+  assert.match(workflow, /request\.orderRanges\.find/);
+  assert.match(workflow, /request\.claimRanges\.find/);
+  assert.match(workflow, /executeOrderStep/);
+  assert.match(workflow, /executeClaimStep/);
+  assert.match(workflow, /MAX_STEP_ATTEMPTS = 3/);
+});
+
+test("planning snapshot is frozen by deterministic content fingerprint and drift fails closed", () => {
+  assert.match(workflow, /contentFingerprint\?: string/);
+  assert.match(workflow, /planningContentFingerprint: string/);
+  assert.match(workflow, /\^sha256:\[a-f0-9\]\{64\}\$/);
+  assert.match(
+    workflow,
+    /planning\.contentFingerprint !== request\.planningContentFingerprint/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /planning\.generatedAt !== request\.planningGeneratedAt/,
+  );
+  assert.match(workflow, /PRODUCT_MASTER_PLANNING_CHANGED/);
+  assert.match(workflow, /planning\.products\.length !== request\.planningProductCount/);
+  assert.match(workflow, /storeTerminalFailure\(request, "planning"/);
+});
+
+test("each Shopling chunk performs one bounded HTTP attempt and worker retries are the only retry layer", () => {
+  assert.match(shoplingClient, /AbortSignal\.timeout\(45_000\)/);
+  assert.doesNotMatch(shoplingClient, /for \(let attempt/);
+  assert.doesNotMatch(shoplingClient, /await delay\(/);
+  assert.equal(
+    (shoplingClient.match(/await fetch\(this\.url\(resource\)/g) ?? []).length,
+    1,
+  );
+});
+
+test("final live result remains a shadow snapshot and compares against the verified baseline", () => {
+  assert.match(workflow, /PRODUCT_DECISION_LIVE_SHADOW/);
+  assert.match(workflow, /PRODUCT_DECISION_SNAPSHOT_IMPORT/);
+  assert.match(workflow, /compareLiveProductDecision/);
+  assert.match(workflow, /resultSnapshot: \{ snapshot, comparison \}/);
+  assert.doesNotMatch(workflow, /PRODUCT_DECISION_LIVE_ACTIVE/);
+});
+
+test("same-origin operator API creates requests and exposes a manual one-step fallback", () => {
+  assert.match(api, /isSameOriginOpsRequest/);
+  assert.match(api, /createProductDecisionLiveRefreshRequest/);
+  assert.match(api, /action.*run-next/s);
+  assert.match(api, /runProductDecisionLiveRefreshStep/);
+  assert.match(api, /alreadyActive/);
+  assert.doesNotMatch(api, /x-commerce-os-integration-secret/);
+});
+
+test("cron is bearer protected, idles when credentials are missing and is scheduled once per minute", () => {
+  assert.match(cron, /Bearer \$\{expected\}/);
+  assert.match(cron, /productDecisionLiveRefreshConfigured/);
+  assert.match(cron, /configured: false/);
+  assert.ok(
+    vercel.crons.some(
+      (entry) =>
+        entry.path === "/api/cron/product-decision-live-refresh" &&
+        entry.schedule === "* * * * *",
+    ),
+  );
+});
+
+test("operator UI can be closed while the worker continues and never claims to place orders", () => {
+  assert.match(page, /운영 전환 전 그림자 계산/);
+  assert.match(page, /실제 1688 주문·결제·중국 전송·재고변경은 실행하지 않습니다/);
+  assert.match(control, /화면을 닫아도 1분 예약 Worker/);
+  assert.match(control, /실제 주문 쓰기 차단/);
+  assert.match(control, /최신 판매로 그림자 발주안 만들기/);
+});
+
+test("workflow has no Shopling write, inventory mutation or actual order path", () => {
+  assert.doesNotMatch(workflow, /shopling.*(?:update|modify|write)/i);
+  assert.doesNotMatch(workflow, /1688/i);
+  assert.doesNotMatch(workflow, /inventory.*(?:update|write)/i);
+  assert.doesNotMatch(workflow, /method:\s*"PUT"|method:\s*"PATCH"|method:\s*"DELETE"/);
+});
