@@ -5,7 +5,8 @@ import { TestStudioBridge } from "./TestStudioBridge";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const DEFAULT_TEST_STUDIO_URL = "https://new-product-detail-ai.vercel.app/";
+const DEFAULT_TEST_STUDIO_URL =
+  "https://new-product-detail-ai-a2bsangsa.vercel.app/";
 
 export default function DetailPageStudioTestPage() {
   const studioBaseUrl =
