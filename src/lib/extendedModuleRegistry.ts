@@ -75,6 +75,25 @@ export const priceGradeShadowComparisonModule: CommerceModule = {
   safetyBadge: "가격·등급 쓰기 차단",
 };
 
+export const productMasterShoplingDiagnosticModule: CommerceModule = {
+  id: "product-master-shopling-diagnostic",
+  title: "상품마스터 Shopling 전수진단",
+  navigationLabel: "상품마스터 연결 진단",
+  description:
+    "실제 Shopling 상품·옵션을 기간별로 읽어 상품마스터 위치코드와 대조하고, 미연결 goods_key·옵션 후보와 1+1·N개입의 재고 환산수량을 계산합니다.",
+  status: "check_mode",
+  route: "/product-master/shopling-diagnostic",
+  category: "상품 출시 관리",
+  inputType: "상품마스터 안정 SKU, Shopling 상품·옵션·옵션바코드·옵션자체관리코드",
+  outputType: "정확한 기존 연결, 새 연결 후보, 오래된 연결, 환산수량 차이, 코드 충돌",
+  historySupport: true,
+  externalProject: false,
+  note: "진단 결과만 불변 실행원장에 저장합니다. 상품마스터 연결값과 Shopling 상품·옵션은 변경하지 않습니다.",
+  helperNote: "전수 읽기 · 실제 미반영",
+  actionLabel: "Shopling 연결 전수진단",
+  safetyBadge: "상품·재고·가격 쓰기 차단",
+};
+
 export const productDecisionAgentModule: CommerceModule = {
   id: "product-decision-agent",
   title: "발주 추천",
@@ -142,6 +161,7 @@ export const extendedModuleRegistry: readonly CommerceModule[] = [
   commerceOperationsModule,
   ...renamedModuleRegistry,
   shoplingCategoryReviewQueueModule,
+  productMasterShoplingDiagnosticModule,
   productDecisionAgentModule,
   priceAdjustmentEngineModule,
   priceGradeShadowComparisonModule,
