@@ -11,7 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS = 1;
+// Recent 24 calendar months produce fewer than 500 immutable chunk rows at
+// two days per range, staying inside the diagnostic reader's bounded ledger.
+const PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS = 2;
 
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
@@ -79,7 +81,7 @@ export async function GET(request: Request) {
             ? "30일 조회 구간 실패를 종료하고 최근 24개월을 최대 7일 단위로 한 번 더 안전하게 접수했습니다."
             : fallbackChunkDays ===
                 PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS
-              ? "7일 조회 구간 실패를 종료하고 최근 24개월을 하루 단위로 최종 안전 재접수했습니다."
+              ? "7일 조회 구간 실패를 종료하고 최근 24개월을 최대 2일 단위로 최종 안전 재접수했습니다."
               : "최초 상품마스터 Shopling 전수진단을 최근 24개월·최대 30일 단위로 자동 접수했습니다.";
       return Response.json(
         {
