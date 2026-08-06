@@ -1,4 +1,6 @@
 import {
+  createProductMasterShoplingDiagnosticRequest,
+  loadProductMasterShoplingDiagnosticStatus,
   productMasterShoplingDiagnosticConfigured,
   runProductMasterShoplingDiagnosticStep,
 } from "@/lib/productMasterShoplingDiagnostic";
@@ -35,6 +37,24 @@ export async function GET(request: Request) {
   }
 
   try {
+    const current = await loadProductMasterShoplingDiagnosticStatus();
+    if (current.state === "IDLE") {
+      const created = await createProductMasterShoplingDiagnosticRequest();
+      return Response.json(
+        {
+          ok: true,
+          configured: true,
+          processed: true,
+          state: "QUEUED",
+          requestId: created.requestId,
+          totalRanges: created.ranges.length,
+          message:
+            "최초 상품마스터 Shopling 전수진단을 자동 접수했습니다. 다음 1분 Worker부터 기간별 조회를 시작합니다.",
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
     return Response.json(
       {
         ok: true,
