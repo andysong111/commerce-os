@@ -1,7 +1,8 @@
-import { detailPageTestStudioModule } from "@/lib/detailPageTestStudioModule";
+import { detailPageSaasTestModule } from "@/lib/detailPageSaasTestModule";
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
+import type { CommerceModule } from "@/lib/moduleRegistry";
 
-export const opsModuleRegistry = [
+export const opsModuleRegistry: readonly CommerceModule[] = [
   ...extendedModuleRegistry,
-  detailPageTestStudioModule,
-] as const;
+  detailPageSaasTestModule,
+];
