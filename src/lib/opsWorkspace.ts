@@ -76,8 +76,13 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
     shortLabel: "콘텐츠·키워드",
     iconLabel: "콘",
     description: "상세페이지와 키워드·상품명 생성, 결과 검토를 관리합니다.",
-    moduleIds: ["detail-page-studio", "keyword-engine", "keyword-review-queue"],
-    searchTerms: ["상세페이지", "이미지", "키워드", "검색어", "상품명", "콘텐츠"],
+    moduleIds: [
+      "detail-page-studio",
+      "detail-page-studio-test",
+      "keyword-engine",
+      "keyword-review-queue",
+    ],
+    searchTerms: ["상세페이지", "이미지", "키워드", "검색어", "상품명", "콘텐츠", "테스트버전"],
   },
   {
     id: "sales-price",
@@ -109,6 +114,7 @@ export const DEFAULT_FAVORITE_MODULE_IDS = [
   "china-order-cost",
   "product-launch-tracker",
   "detail-page-studio",
+  "detail-page-studio-test",
   "shopling-price-adjustment-runner",
 ] as const;
 
@@ -173,7 +179,12 @@ const COMMAND_INTENTS: readonly (OpsCommandIntent & { patterns: readonly RegExp[
   {
     label: "상세페이지",
     reason: "상세페이지·상품 이미지 제작 관련 표현을 인식했습니다.",
-    moduleIds: ["detail-page-studio", "detail-page-studio-launch-connector", "detail-page-ai-review"],
+    moduleIds: [
+      "detail-page-studio-test",
+      "detail-page-studio",
+      "detail-page-studio-launch-connector",
+      "detail-page-ai-review",
+    ],
     patterns: [/상세페이지/, /상세.*이미지/, /이미지.*제작/],
   },
   {

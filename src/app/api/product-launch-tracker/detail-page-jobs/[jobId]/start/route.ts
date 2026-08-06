@@ -17,6 +17,7 @@ import {
   buildProtectedOpsCallbackUrl,
   resolveDetailPageStudioConnection,
 } from "@/lib/detailPageStudioConnection";
+import { isDetailPageTestJob } from "@/lib/detailPageTestStudio";
 
 export async function POST(
   request: NextRequest,
@@ -39,6 +40,17 @@ export async function POST(
       return Response.json(
         { ok: false, code: "DETAIL_PAGE_JOB_NOT_FOUND", message: "상세페이지 작업을 찾지 못했습니다." },
         { status: 404 },
+      );
+    }
+    if (isDetailPageTestJob(job.payload)) {
+      return Response.json(
+        {
+          ok: false,
+          code: "DETAIL_PAGE_TEST_ENGINE_REQUIRED",
+          message:
+            "상세페이지 스튜디오 테스트버전 작업은 새 테스트 엔진 전용입니다. 기존 운영 상세페이지 Worker 실행을 차단했습니다.",
+        },
+        { status: 409 },
       );
     }
     const recoverableFinalAssembly = isRecoverableServerFinalAssemblyJob({
