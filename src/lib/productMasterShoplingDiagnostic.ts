@@ -31,9 +31,14 @@ export const PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_FAILED =
 export const PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_REPORT =
   "PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_REPORT";
 
-const DEFAULT_CATALOG_START_DATE = "2000-01-01";
+export const PRODUCT_MASTER_SHOPLING_DEFAULT_CHUNK_DAYS = 30;
+export const PRODUCT_MASTER_SHOPLING_FALLBACK_CHUNK_DAYS = 7;
+
+const DEFAULT_CATALOG_MONTHS = 24;
+const MAX_CONFIGURED_CHUNK_DAYS = 31;
 const MAX_STEP_ATTEMPTS = 3;
 const OPERATION_LIMIT = 500;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const MANAGED_BARCODE = /^[A-Z]{3}\d+-\d+$/;
 
 export type ProductMasterShoplingDiagnosticRequest = {
@@ -43,6 +48,8 @@ export type ProductMasterShoplingDiagnosticRequest = {
   planningGeneratedAt: string;
   planningContentFingerprint: string;
   planningSkuCount: number;
+  chunkDays: number;
+  supersedesRequestId: string | null;
   ranges: ShoplingDateRange[];
   createdAt: string;
 };
@@ -58,6 +65,10 @@ export type ProductMasterShoplingDiagnosticStatus = {
   progress: number;
   fetchedRows: number;
   managedOptions: number;
+  chunkDays: number;
+  latestFailureRange: string | null;
+  latestFailureAttempt: number;
+  latestFailureMessage: string | null;
   report: ProductMasterShoplingDiagnosticReport | null;
   error: string | null;
 };
@@ -93,6 +104,18 @@ type DiagnosticChunkResult = {
   options: DiagnosticShoplingOption[];
 };
 
+type CreateDiagnosticRequestOptions = {
+  chunkDays?: number;
+  supersedesRequestId?: string | null;
+  now?: Date;
+};
+
+type DiagnosticFailureAttempt = {
+  rangeKey: string;
+  attempt: number;
+  message: string;
+};
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -119,15 +142,62 @@ function dateOnly(value: Date) {
 
 function validDateOnly(value: string) {
   const parsed = Date.parse(`${value}T00:00:00.000Z`);
-  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+  return (
+    Number.isFinite(parsed) &&
+    new Date(parsed).toISOString().slice(0, 10) === value
+  );
 }
 
 function rangeKey(range: ShoplingDateRange) {
   return `${range.start}:${range.end}`;
 }
 
+function inclusiveRangeDays(range: ShoplingDateRange) {
+  const start = Date.parse(`${range.start}T00:00:00.000Z`);
+  const end = Date.parse(`${range.end}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.floor((end - start) / DAY_MS) + 1;
+}
+
+function derivedChunkDays(ranges: ShoplingDateRange[]) {
+  return Math.max(1, ...ranges.map(inclusiveRangeDays));
+}
+
 function correlationId(requestId: string) {
   return `product-master-shopling-diagnostic:${requestId}`;
+}
+
+function safeDiagnosticMessage(value: unknown) {
+  return text(value)
+    .slice(0, 500)
+    .replace(
+      /<(?:login_id|company_id|api_auth_key)>[\s\S]*?<\/(?:login_id|company_id|api_auth_key)>/gi,
+      "[redacted]",
+    )
+    .replace(/[A-Za-z0-9+/=_-]{48,}/g, "[redacted]");
+}
+
+function safeErrorMessage(error: unknown) {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (current instanceof Error) {
+      const candidate = current as Error & { code?: unknown; cause?: unknown };
+      const message = safeDiagnosticMessage(candidate.message);
+      const code = safeDiagnosticMessage(candidate.code);
+      if (message && !parts.includes(message)) parts.push(message);
+      if (code && !parts.includes(code)) parts.push(code);
+      current = candidate.cause;
+      continue;
+    }
+    const candidate = object(current);
+    const message = safeDiagnosticMessage(candidate.message);
+    const code = safeDiagnosticMessage(candidate.code);
+    if (message && !parts.includes(message)) parts.push(message);
+    if (code && !parts.includes(code)) parts.push(code);
+    current = candidate.cause;
+  }
+  return parts.join(" · ") || "Shopling 상품 조회에 실패했습니다.";
 }
 
 function shoplingEnvironment() {
@@ -150,17 +220,45 @@ export function productMasterShoplingDiagnosticConfigured() {
   }
 }
 
-function catalogStartDate() {
+function catalogStartDate(now: Date) {
   const configured = text(process.env.SHOPLING_CATALOG_START_DATE);
-  if (!configured) return DEFAULT_CATALOG_START_DATE;
-  if (!validDateOnly(configured)) {
-    throw new Error("SHOPLING_CATALOG_START_DATE_INVALID");
+  if (configured) {
+    if (!validDateOnly(configured)) {
+      throw new Error("SHOPLING_CATALOG_START_DATE_INVALID");
+    }
+    return configured;
   }
-  return configured;
+  const start = new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() - (DEFAULT_CATALOG_MONTHS - 1),
+      1,
+    ),
+  );
+  return dateOnly(start);
+}
+
+function requestedChunkDays(value: unknown) {
+  const parsed = Math.trunc(number(value));
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_CONFIGURED_CHUNK_DAYS) {
+    throw new Error("SHOPLING_CATALOG_CHUNK_DAYS_INVALID");
+  }
+  return parsed;
+}
+
+function catalogChunkDays(explicit?: number) {
+  if (explicit !== undefined) return requestedChunkDays(explicit);
+  const configured = text(process.env.SHOPLING_CATALOG_CHUNK_DAYS);
+  return configured
+    ? requestedChunkDays(configured)
+    : PRODUCT_MASTER_SHOPLING_DEFAULT_CHUNK_DAYS;
 }
 
 function supabaseConnection() {
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(/\/$/, "");
+  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(
+    /\/$/,
+    "",
+  );
   const secret = (
     process.env.SUPABASE_SECRET_KEY ||
     process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -230,7 +328,9 @@ async function readOperations(
   );
 }
 
-function requestFromRow(row: OperationRow): ProductMasterShoplingDiagnosticRequest | null {
+function requestFromRow(
+  row: OperationRow,
+): ProductMasterShoplingDiagnosticRequest | null {
   const value = object(row.input_snapshot);
   const requestId = text(value.requestId);
   const createdAt = iso(value.createdAt);
@@ -251,6 +351,7 @@ function requestFromRow(row: OperationRow): ProductMasterShoplingDiagnosticReque
   ) {
     return null;
   }
+  const storedChunkDays = Math.trunc(number(value.chunkDays));
   return {
     requestId,
     catalogStartDate: text(value.catalogStartDate),
@@ -258,6 +359,9 @@ function requestFromRow(row: OperationRow): ProductMasterShoplingDiagnosticReque
     planningGeneratedAt,
     planningContentFingerprint: fingerprint,
     planningSkuCount: Math.max(0, Math.round(number(value.planningSkuCount))),
+    chunkDays:
+      storedChunkDays >= 1 ? storedChunkDays : derivedChunkDays(ranges),
+    supersedesRequestId: text(value.supersedesRequestId) || null,
     ranges,
     createdAt,
   };
@@ -310,18 +414,38 @@ function chunkFromRow(row: OperationRow): DiagnosticChunkResult | null {
 
 function reportFromRow(row: OperationRow) {
   const value = object(row.result_snapshot);
-  return value.report && typeof value.report === "object" && !Array.isArray(value.report)
+  return value.report &&
+    typeof value.report === "object" &&
+    !Array.isArray(value.report)
     ? (value.report as ProductMasterShoplingDiagnosticReport)
     : null;
 }
 
-function failureAttempt(row: OperationRow) {
+function failureAttempt(row: OperationRow): DiagnosticFailureAttempt {
   const value = object(row.input_snapshot);
+  const range = object(value.range);
+  const storedRangeKey = text(value.rangeKey);
+  const parsedRangeKey =
+    validDateOnly(text(range.start)) && validDateOnly(text(range.end))
+      ? rangeKey({ start: text(range.start), end: text(range.end) })
+      : "";
   return {
-    rangeKey: text(value.rangeKey),
+    rangeKey: storedRangeKey || parsedRangeKey,
     attempt: Math.max(0, Math.round(number(value.attempt))),
-    message: text(row.error_message) || text(object(row.result_snapshot).message),
+    message: safeDiagnosticMessage(
+      text(row.error_message) || text(object(row.result_snapshot).message),
+    ),
   };
+}
+
+function latestFailure(
+  rows: OperationRow[],
+): DiagnosticFailureAttempt | null {
+  for (const row of rows) {
+    const failure = failureAttempt(row);
+    if (failure.message) return failure;
+  }
+  return null;
 }
 
 function managedCode(value: unknown) {
@@ -345,11 +469,15 @@ function safeOptions(rows: ShoplingRawRow[]): DiagnosticChunkResult["options"] {
     .filter((option) => Boolean(option.barcode || option.partnerOptionCode));
 }
 
-export async function createProductMasterShoplingDiagnosticRequest() {
+export async function createProductMasterShoplingDiagnosticRequest(
+  options: CreateDiagnosticRequestOptions = {},
+) {
   shoplingReadConfigFromEnv(shoplingEnvironment());
   const planning = await loadProductPlanningSnapshot();
-  const end = dateOnly(new Date());
-  const start = catalogStartDate();
+  const now = options.now ?? new Date();
+  const end = dateOnly(now);
+  const start = catalogStartDate(now);
+  const chunkDays = catalogChunkDays(options.chunkDays);
   if (start > end) throw new Error("SHOPLING_CATALOG_DATE_RANGE_INVALID");
   const request: ProductMasterShoplingDiagnosticRequest = {
     requestId: crypto.randomUUID(),
@@ -358,8 +486,10 @@ export async function createProductMasterShoplingDiagnosticRequest() {
     planningGeneratedAt: planning.generatedAt,
     planningContentFingerprint: planning.contentFingerprint,
     planningSkuCount: planning.products.length,
-    ranges: splitShoplingDateRange(start, end, 365),
-    createdAt: new Date().toISOString(),
+    chunkDays,
+    supersedesRequestId: text(options.supersedesRequestId) || null,
+    ranges: splitShoplingDateRange(start, end, chunkDays),
+    createdAt: now.toISOString(),
   };
   await storeOperation({
     operationType: PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_REQUEST,
@@ -369,8 +499,9 @@ export async function createProductMasterShoplingDiagnosticRequest() {
     resultSnapshot: {
       accepted: true,
       state: "QUEUED",
-      message:
-        "Shopling 상품·옵션을 기간별로 읽어 위치코드 연결과 세트 환산수량을 전수 진단합니다.",
+      chunkDays,
+      supersedesRequestId: request.supersedesRequestId,
+      message: `Shopling 상품·옵션을 최대 ${chunkDays}일 구간으로 읽어 위치코드 연결과 세트 환산수량을 전수 진단합니다.`,
     },
     occurredAt: request.createdAt,
   });
@@ -401,40 +532,76 @@ async function activeRequestContext() {
       5,
     ),
   ]);
-  return { request, requestCorrelationId, chunks, failures, reports, failedRuns };
+  return {
+    request,
+    requestCorrelationId,
+    chunks,
+    failures,
+    reports,
+    failedRuns,
+  };
 }
 
 export async function runProductMasterShoplingDiagnosticStep() {
   const context = await activeRequestContext();
   if (!context) {
-    return { processed: false, state: "IDLE", message: "진행 중인 전수진단이 없습니다." };
+    return {
+      processed: false,
+      state: "IDLE",
+      message: "진행 중인 전수진단이 없습니다.",
+    };
   }
   const { request, requestCorrelationId } = context;
   if (context.reports.some(reportFromRow)) {
-    return { processed: false, state: "COMPLETED", message: "전수진단이 이미 완료되었습니다." };
+    return {
+      processed: false,
+      state: "COMPLETED",
+      message: "전수진단이 이미 완료되었습니다.",
+    };
   }
   if (context.failedRuns.length) {
-    return { processed: false, state: "FAILED", message: "전수진단이 실패 종료되었습니다." };
+    return {
+      processed: false,
+      state: "FAILED",
+      message: "전수진단이 실패 종료되었습니다.",
+    };
   }
 
-  const chunkResults = context.chunks.map(chunkFromRow).filter(Boolean) as DiagnosticChunkResult[];
-  const completed = new Set(chunkResults.map((chunk) => rangeKey(chunk.range)));
-  const nextRange = request.ranges.find((range) => !completed.has(rangeKey(range)));
+  const chunkResults = context.chunks
+    .map(chunkFromRow)
+    .filter(Boolean) as DiagnosticChunkResult[];
+  const completed = new Set(
+    chunkResults.map((chunk) => rangeKey(chunk.range)),
+  );
+  const nextRange = request.ranges.find(
+    (range) => !completed.has(rangeKey(range)),
+  );
 
   if (nextRange) {
     const key = rangeKey(nextRange);
-    const previousAttempts = context.failures
+    const previousFailures = context.failures
       .map(failureAttempt)
-      .filter((failure) => failure.rangeKey === key).length;
+      .filter((failure) => failure.rangeKey === key);
+    const previousAttempts = previousFailures.length;
     if (previousAttempts >= MAX_STEP_ATTEMPTS) {
-      const message = `${key} Shopling 상품 조회가 ${MAX_STEP_ATTEMPTS}회 실패했습니다.`;
+      const reason = previousFailures[0]?.message || "";
+      const message = `${key} Shopling 상품 조회가 ${MAX_STEP_ATTEMPTS}회 실패했습니다.${reason ? ` 최종 원인: ${reason}` : ""}`;
       await storeOperation({
         operationType: PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_FAILED,
         sourceEventId: `product-master-shopling-diagnostic-failed:${request.requestId}`,
         correlationId: requestCorrelationId,
         status: "FAILED",
-        inputSnapshot: { requestId: request.requestId, rangeKey: key },
-        resultSnapshot: { state: "FAILED", message },
+        inputSnapshot: {
+          requestId: request.requestId,
+          rangeKey: key,
+          chunkDays: request.chunkDays,
+          attempts: previousAttempts,
+        },
+        resultSnapshot: {
+          state: "FAILED",
+          message,
+          failureReason: reason || null,
+        },
         errorMessage: message,
       });
       return { processed: false, state: "FAILED", message };
@@ -442,7 +609,10 @@ export async function runProductMasterShoplingDiagnosticStep() {
 
     try {
       const config = shoplingReadConfigFromEnv(shoplingEnvironment());
-      const rows = await new ShoplingReadClient(config).read("products", nextRange);
+      const rows = await new ShoplingReadClient(config).read(
+        "products",
+        nextRange,
+      );
       const normalized = rows.map(normalizeShoplingProduct);
       const active = normalized.filter((option) => option.isActive);
       const options = safeOptions(rows);
@@ -458,7 +628,12 @@ export async function runProductMasterShoplingDiagnosticStep() {
         operationType: PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_CHUNK,
         sourceEventId: `product-master-shopling-diagnostic-chunk:${request.requestId}:${key}`,
         correlationId: requestCorrelationId,
-        inputSnapshot: { requestId: request.requestId, range: nextRange, rangeKey: key },
+        inputSnapshot: {
+          requestId: request.requestId,
+          range: nextRange,
+          rangeKey: key,
+          chunkDays: request.chunkDays,
+        },
         resultSnapshot: result,
       });
       return {
@@ -471,13 +646,19 @@ export async function runProductMasterShoplingDiagnosticStep() {
       };
     } catch (error) {
       const attempt = previousAttempts + 1;
-      const message = error instanceof Error ? error.message : "Shopling 상품 조회에 실패했습니다.";
+      const message = safeErrorMessage(error);
       await storeOperation({
         operationType: PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_STEP_FAILURE,
         sourceEventId: `product-master-shopling-diagnostic-step-failure:${request.requestId}:${key}:${attempt}`,
         correlationId: requestCorrelationId,
         status: "FAILED",
-        inputSnapshot: { requestId: request.requestId, range: nextRange, rangeKey: key, attempt },
+        inputSnapshot: {
+          requestId: request.requestId,
+          range: nextRange,
+          rangeKey: key,
+          chunkDays: request.chunkDays,
+          attempt,
+        },
         resultSnapshot: { state: "RETRY_PENDING", message },
         errorMessage: message,
       });
@@ -539,6 +720,7 @@ export async function runProductMasterShoplingDiagnosticStep() {
       requestId: request.requestId,
       planningContentFingerprint: request.planningContentFingerprint,
       rangeCount: request.ranges.length,
+      chunkDays: request.chunkDays,
       optionCount: optionMap.size,
     },
     resultSnapshot: { report },
@@ -547,7 +729,8 @@ export async function runProductMasterShoplingDiagnosticStep() {
     processed: true,
     state: "COMPLETED",
     summary: report.summary,
-    message: "상품마스터와 Shopling 위치코드·옵션·세트수량 전수진단을 완료했습니다.",
+    message:
+      "상품마스터와 Shopling 위치코드·옵션·세트수량 전수진단을 완료했습니다.",
   };
 }
 
@@ -566,14 +749,23 @@ export async function loadProductMasterShoplingDiagnosticStatus(): Promise<Produ
       progress: 0,
       fetchedRows: 0,
       managedOptions: 0,
+      chunkDays: 0,
+      latestFailureRange: null,
+      latestFailureAttempt: 0,
+      latestFailureMessage: null,
       report: null,
       error: null,
     };
   }
-  const chunks = context.chunks.map(chunkFromRow).filter(Boolean) as DiagnosticChunkResult[];
+  const chunks = context.chunks
+    .map(chunkFromRow)
+    .filter(Boolean) as DiagnosticChunkResult[];
   const report = context.reports.map(reportFromRow).find(Boolean) ?? null;
   const failed = context.failedRuns[0];
-  const completedRanges = new Set(chunks.map((chunk) => rangeKey(chunk.range))).size;
+  const recentFailure = latestFailure(context.failures);
+  const completedRanges = new Set(
+    chunks.map((chunk) => rangeKey(chunk.range)),
+  ).size;
   const totalRanges = context.request.ranges.length;
   const progress = totalRanges
     ? Math.min(100, Math.round((completedRanges / totalRanges) * 100))
@@ -583,51 +775,56 @@ export async function loadProductMasterShoplingDiagnosticStatus(): Promise<Produ
     (sum, chunk) => sum + chunk.managedOptionCount,
     0,
   );
-
-  if (report) {
-    return {
-      configured,
-      requestId: context.request.requestId,
-      state: "COMPLETED",
-      stage: "진단 완료",
-      message: "전수진단 결과가 준비되었습니다. 아직 상품마스터 연결값은 변경하지 않았습니다.",
-      completedRanges: totalRanges,
-      totalRanges,
-      progress: 100,
-      fetchedRows,
-      managedOptions,
-      report,
-      error: null,
-    };
-  }
-  if (failed) {
-    const error = text(failed.error_message) || text(object(failed.result_snapshot).message);
-    return {
-      configured,
-      requestId: context.request.requestId,
-      state: "FAILED",
-      stage: "실패",
-      message: error || "전수진단이 실패했습니다.",
-      completedRanges,
-      totalRanges,
-      progress,
-      fetchedRows,
-      managedOptions,
-      report: null,
-      error: error || "전수진단 실패",
-    };
-  }
-  return {
+  const common = {
     configured,
     requestId: context.request.requestId,
-    state: completedRanges ? "RUNNING" : "QUEUED",
-    stage: completedRanges ? "Shopling 상품 구간 수집 중" : "예약 Worker 대기",
-    message: `${completedRanges}/${totalRanges}개 기간 구간을 읽었습니다.`,
     completedRanges,
     totalRanges,
     progress,
     fetchedRows,
     managedOptions,
+    chunkDays: context.request.chunkDays,
+    latestFailureRange: recentFailure?.rangeKey || null,
+    latestFailureAttempt: recentFailure?.attempt || 0,
+    latestFailureMessage: recentFailure?.message || null,
+  };
+
+  if (report) {
+    return {
+      ...common,
+      state: "COMPLETED",
+      stage: "진단 완료",
+      message:
+        "전수진단 결과가 준비되었습니다. 아직 상품마스터 연결값은 변경하지 않았습니다.",
+      completedRanges: totalRanges,
+      progress: 100,
+      report,
+      error: null,
+    };
+  }
+  if (failed) {
+    const storedError = safeDiagnosticMessage(
+      text(failed.error_message) || text(object(failed.result_snapshot).message),
+    );
+    const error = recentFailure?.message
+      ? `${storedError || "전수진단이 실패했습니다."} 최근 실제 원인: ${recentFailure.message}`
+      : storedError || "전수진단 실패";
+    return {
+      ...common,
+      state: "FAILED",
+      stage: "실패",
+      message: error,
+      report: null,
+      error,
+    };
+  }
+  return {
+    ...common,
+    state: completedRanges ? "RUNNING" : "QUEUED",
+    stage: completedRanges ? "Shopling 상품 구간 수집 중" : "예약 Worker 대기",
+    message: recentFailure
+      ? `${completedRanges}/${totalRanges}개 기간 구간을 읽었습니다. ${recentFailure.rangeKey} 구간은 ${recentFailure.attempt}차 재시도 대기 중입니다.`
+      : `${completedRanges}/${totalRanges}개 기간 구간을 읽었습니다.`,
     report: null,
     error: null,
   };
