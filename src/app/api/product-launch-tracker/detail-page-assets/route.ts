@@ -18,12 +18,15 @@ import {
   DETAIL_PAGE_STAGED_PIPELINE_VERSION,
   matchesDetailPageExecution,
 } from "@/lib/detailPageJobRecovery";
+import {
+  isAllowedDetailPageAssetRole,
+  normalizeDetailPageAssetRole,
+} from "@/lib/detailPageAssetRole";
 
 const BUCKET_NAME = "product-launch-assets";
 // Vercel 함수 요청 본문 한도보다 여유를 두고, 상세페이지 엔진도 같은
 // 상한에 맞춰 JPEG 품질을 단계적으로 조정합니다.
 const MAX_FILE_BYTES = 4_000_000;
-const ROLE_PATTERN = /^(detail-page|main|additional-[1-4]|evidence-(?:[1-9]|[1-5][0-9]|60)|panel-[1-8])$/;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
 
 type TrackerIdentity = {
@@ -45,10 +48,16 @@ export async function POST(request: NextRequest) {
   const file = form.get("file");
   const itemId = safeSegment(form.get("item_id"));
   const jobId = safeSegment(form.get("job_id"));
-  const role = String(form.get("role") ?? "").trim();
+  const requestedRole = String(form.get("role") ?? "").trim();
+  const role = normalizeDetailPageAssetRole(requestedRole);
   const revision = String(form.get("revision") ?? "").trim().toLowerCase();
   const executionId = String(form.get("execution_id") ?? "").trim();
-  if (!(file instanceof File) || !itemId || !jobId || !ROLE_PATTERN.test(role)) {
+  if (
+    !(file instanceof File) ||
+    !itemId ||
+    !jobId ||
+    !isAllowedDetailPageAssetRole(role)
+  ) {
     return invalid("상품·작업·이미지 역할 또는 파일 값이 올바르지 않습니다.");
   }
   if (revision && !REVISION_PATTERN.test(revision)) {
