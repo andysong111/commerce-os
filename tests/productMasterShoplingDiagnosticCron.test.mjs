@@ -22,7 +22,10 @@ test("Product Master Shopling cron auto-starts only the initial read-only diagno
   assert.match(route, /runProductMasterShoplingDiagnosticStep/);
   assert.doesNotMatch(route, /setInterval|setTimeout/);
 
-  assert.match(worker, /new ShoplingReadClient\(config\)\.read\("products", nextRange\)/);
+  assert.match(
+    worker,
+    /new ShoplingReadClient\(config\)\.read\(\s*"products",\s*nextRange,?\s*\)/,
+  );
   assert.match(worker, /planning\.contentFingerprint !== request\.planningContentFingerprint/);
   assert.match(worker, /PRODUCT_MASTER_SHOPLING_DIAGNOSTIC_REPORT/);
   assert.doesNotMatch(worker, /method:\s*"(?:PUT|PATCH|DELETE)"/);
