@@ -190,7 +190,7 @@ async function uploadTestEvidence(options: {
       {
         method: "POST",
         headers,
-        body: image.bytes,
+        body: Uint8Array.from(image.bytes),
         cache: "no-store",
         signal: AbortSignal.timeout(30_000),
       },
@@ -259,7 +259,12 @@ function normalizeImages(value: unknown): TestInputImage[] {
     if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) {
       throw new Error(`${index + 1}번 테스트 이미지는 900KB 이하여야 합니다.`);
     }
-    if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9) {
+    if (
+      bytes[0] !== 0xff ||
+      bytes[1] !== 0xd8 ||
+      bytes.at(-2) !== 0xff ||
+      bytes.at(-1) !== 0xd9
+    ) {
       throw new Error(`${index + 1}번 테스트 이미지가 올바른 JPG가 아닙니다.`);
     }
     return {
