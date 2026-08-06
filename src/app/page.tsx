@@ -1,7 +1,7 @@
 import { OpsDashboard } from "@/components/dashboard/OpsDashboard";
 import { PageHeader } from "@/components/PageHeader";
 import { isDetailPageCostAdmin } from "@/lib/detailPageCostAdmin";
-import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
+import { opsModuleRegistry } from "@/lib/opsModuleRegistry";
 import { getWorkspaceGroupById } from "@/lib/opsWorkspace";
 import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
@@ -12,7 +12,7 @@ export default async function DashboardPage({
 }) {
   const { user } = await getOpsCurrentUser();
   const showDetailPageCosts = isDetailPageCostAdmin(user?.email);
-  const visibleModules = extendedModuleRegistry.filter(
+  const visibleModules = opsModuleRegistry.filter(
     (module) =>
       module.id !== "detail-page-cost-admin" || showDetailPageCosts,
   );
