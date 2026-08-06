@@ -25,7 +25,7 @@ test("SaaS test card uses the production Studio with an isolated test mode", () 
   assert.match(moduleFile, /1688 링크 입력의 모델명은 선택한 문구 언어/);
 });
 
-test("dated SaaS test card opens the frozen 260807 code line", () => {
+test("dated SaaS test card opens the isolated 260807 production variant", () => {
   assert.match(
     datedModuleFile,
     /id: "detail-page-studio-saas-test-260807"/,
@@ -36,9 +36,9 @@ test("dated SaaS test card opens the frozen 260807 code line", () => {
   );
   assert.match(
     datedModuleFile,
-    /commerce-os-detail-page-studio-git-saas-test-260807-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
+    /route:\s*\n\s*"https:\/\/commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test-260807"/,
   );
-  assert.match(datedModuleFile, /2026-08-07 스냅샷/);
+  assert.match(datedModuleFile, /saas-test-260807 스냅샷 브랜치/);
 });
 
 test("content workspace renders original, current test, and dated test cards together", () => {
