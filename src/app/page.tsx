@@ -1,4 +1,4 @@
-import { OpsDashboard } from "@/components/dashboard/OpsDashboard";
+import { OpsDashboardWithSaasTestClone } from "@/components/dashboard/OpsDashboardWithSaasTestClone";
 import { PageHeader } from "@/components/PageHeader";
 import { isDetailPageCostAdmin } from "@/lib/detailPageCostAdmin";
 import { opsModuleRegistry } from "@/lib/opsModuleRegistry";
@@ -28,7 +28,7 @@ export default async function DashboardPage({
         title="운영 대시보드"
         description="오늘 처리할 일과 핵심 업무 흐름을 먼저 확인하고, 기능명·모델번호·자연어 명령으로 필요한 도구를 바로 여세요."
       />
-      <OpsDashboard
+      <OpsDashboardWithSaasTestClone
         modules={visibleModules}
         selectedGroupId={selectedGroupId}
       />
