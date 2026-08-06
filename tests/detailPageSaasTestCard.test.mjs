@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [moduleFile, registryFile, dashboardFile, pageFile] = await Promise.all([
-  readFile("src/lib/detailPageSaasTestModule.ts", "utf8"),
-  readFile("src/lib/opsModuleRegistry.ts", "utf8"),
-  readFile("src/components/dashboard/OpsDashboardWithSaasTestClone.tsx", "utf8"),
-  readFile("src/app/page.tsx", "utf8"),
-]);
+const [moduleFile, datedModuleFile, registryFile, dashboardFile, pageFile] =
+  await Promise.all([
+    readFile("src/lib/detailPageSaasTestModule.ts", "utf8"),
+    readFile("src/lib/detailPageSaasTest260807Module.ts", "utf8"),
+    readFile("src/lib/opsModuleRegistry.ts", "utf8"),
+    readFile("src/components/dashboard/OpsDashboardWithSaasTestClone.tsx", "utf8"),
+    readFile("src/app/page.tsx", "utf8"),
+  ]);
 
 test("SaaS test card uses the production Studio with an isolated test mode", () => {
   assert.match(moduleFile, /id: "detail-page-studio-saas-test"/);
@@ -23,11 +25,29 @@ test("SaaS test card uses the production Studio with an isolated test mode", () 
   assert.match(moduleFile, /1688 링크 입력의 모델명은 선택한 문구 언어/);
 });
 
-test("content workspace renders original and SaaS test cards together", () => {
+test("dated SaaS test card opens the isolated 260807 production variant", () => {
+  assert.match(
+    datedModuleFile,
+    /id: "detail-page-studio-saas-test-260807"/,
+  );
+  assert.match(
+    datedModuleFile,
+    /title: "Commerce OS Detail Page Studio · SaaS\(테스트버전260807\)"/,
+  );
+  assert.match(
+    datedModuleFile,
+    /route:\s*\n\s*"https:\/\/commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test-260807"/,
+  );
+  assert.match(datedModuleFile, /saas-test-260807 스냅샷 브랜치/);
+});
+
+test("content workspace renders original, current test, and dated test cards together", () => {
   assert.match(registryFile, /detailPageSaasTestModule/);
+  assert.match(registryFile, /detailPageSaasTest260807Module/);
   assert.doesNotMatch(registryFile, /detailPageTestStudioModule/);
   assert.match(dashboardFile, /"detail-page-studio"/);
   assert.match(dashboardFile, /"detail-page-studio-saas-test"/);
+  assert.match(dashboardFile, /"detail-page-studio-saas-test-260807"/);
   assert.match(dashboardFile, /selectedGroupId !== "content-keyword"/);
   assert.match(pageFile, /OpsDashboardWithSaasTestClone/);
   assert.match(pageFile, /opsModuleRegistry/);

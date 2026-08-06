@@ -10,6 +10,7 @@ const FAVORITES_KEY = "opsCenter.dashboard.favorites.v1";
 const CONTENT_MODULE_IDS = [
   "detail-page-studio",
   "detail-page-studio-saas-test",
+  "detail-page-studio-saas-test-260807",
   "keyword-engine",
   "keyword-review-queue",
 ] as const;
