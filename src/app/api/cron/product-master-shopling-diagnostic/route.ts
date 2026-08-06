@@ -11,6 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS = 1;
+
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
   const authorization = request.headers.get("authorization")?.trim();
@@ -29,6 +31,12 @@ function recoveryChunkDays(
     state.chunkDays <= PRODUCT_MASTER_SHOPLING_DEFAULT_CHUNK_DAYS
   ) {
     return PRODUCT_MASTER_SHOPLING_FALLBACK_CHUNK_DAYS;
+  }
+  if (
+    state.chunkDays > PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS &&
+    state.chunkDays <= PRODUCT_MASTER_SHOPLING_FALLBACK_CHUNK_DAYS
+  ) {
+    return PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS;
   }
   return null;
 }
@@ -69,7 +77,10 @@ export async function GET(request: Request) {
           ? "기존 장기 조회 구간 실패를 종료하고 최근 24개월을 최대 30일 단위로 다시 접수했습니다."
           : fallbackChunkDays === PRODUCT_MASTER_SHOPLING_FALLBACK_CHUNK_DAYS
             ? "30일 조회 구간 실패를 종료하고 최근 24개월을 최대 7일 단위로 한 번 더 안전하게 접수했습니다."
-            : "최초 상품마스터 Shopling 전수진단을 최근 24개월·최대 30일 단위로 자동 접수했습니다.";
+            : fallbackChunkDays ===
+                PRODUCT_MASTER_SHOPLING_MINIMUM_CHUNK_DAYS
+              ? "7일 조회 구간 실패를 종료하고 최근 24개월을 하루 단위로 최종 안전 재접수했습니다."
+              : "최초 상품마스터 Shopling 전수진단을 최근 24개월·최대 30일 단위로 자동 접수했습니다.";
       return Response.json(
         {
           ok: true,
