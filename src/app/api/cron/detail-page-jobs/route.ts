@@ -15,7 +15,6 @@ import {
   buildProtectedOpsCallbackUrl,
   resolveDetailPageStudioConnection,
 } from "@/lib/detailPageStudioConnection";
-import { isDetailPageTestJob } from "@/lib/detailPageTestStudio";
 
 export const runtime = "nodejs";
 export const maxDuration = 50;
@@ -61,11 +60,7 @@ export async function GET(request: Request) {
       repaired: Object.keys(repair).length > 0,
     });
   }
-  const allRecoverableJobs = await listRecoverableDetailPageJobs(config.value, 50);
-  const jobs = allRecoverableJobs.filter(
-    (job) => !isDetailPageTestJob(job.payload),
-  );
-  const skippedTestJobs = allRecoverableJobs.length - jobs.length;
+  const jobs = await listRecoverableDetailPageJobs(config.value, 50);
   const now = Date.now();
   const stale = jobs
     .filter((job) => now - Date.parse(job.updated_at || job.created_at) >= RECOVERY_AFTER_MS)
@@ -158,7 +153,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     checked: jobs.length,
-    skipped_test_jobs: skippedTestJobs,
     repaired,
     recovered: results.filter((item) => item.accepted).length,
     stopped: results.filter((item) => item.stopped).length,
