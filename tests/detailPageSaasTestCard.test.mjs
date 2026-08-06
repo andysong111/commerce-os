@@ -9,7 +9,7 @@ const [moduleFile, registryFile, dashboardFile, pageFile] = await Promise.all([
   readFile("src/app/page.tsx", "utf8"),
 ]);
 
-test("SaaS test card reuses the exact production Studio route and contract", () => {
+test("SaaS test card uses the production Studio with an isolated test mode", () => {
   assert.match(moduleFile, /id: "detail-page-studio-saas-test"/);
   assert.match(
     moduleFile,
@@ -17,13 +17,13 @@ test("SaaS test card reuses the exact production Studio route and contract", () 
   );
   assert.match(
     moduleFile,
-    /route: "https:\/\/commerce-os-detail-page-studio\.vercel\.app\/"/,
+    /route:\s*\n\s*"https:\/\/commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test"/,
   );
   assert.match(moduleFile, /표준 생성 프로필에 따라 8개 섹션/);
-  assert.match(moduleFile, /AI 검수된 8개 섹션 상세페이지/);
+  assert.match(moduleFile, /1688 링크 입력의 모델명은 선택한 문구 언어/);
 });
 
-test("content workspace renders original and duplicated SaaS cards together", () => {
+test("content workspace renders original and SaaS test cards together", () => {
   assert.match(registryFile, /detailPageSaasTestModule/);
   assert.doesNotMatch(registryFile, /detailPageTestStudioModule/);
   assert.match(dashboardFile, /"detail-page-studio"/);
