@@ -19,6 +19,10 @@ import {
 } from "@/lib/detailPageStudioConnection";
 import { isDetailPageTestJob } from "@/lib/detailPageTestStudio";
 
+const COMPILER_CANARY_ACTION = "compiler_v1_canary";
+const COMPILER_CANARY_PARAMETER = "compiler_v1_canary";
+const TERMINAL_STATUSES = new Set(["success", "failed", "cancelled"]);
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ jobId: string }> },
@@ -53,14 +57,16 @@ export async function POST(
         { status: 409 },
       );
     }
+
+    const command = (await request.json().catch(() => ({}))) as {
+      action?: string;
+    };
+    const compilerCanary = command.action === COMPILER_CANARY_ACTION;
     const recoverableFinalAssembly = isRecoverableServerFinalAssemblyJob({
       status: job.status,
       stage: job.stage,
       result: job.result,
     });
-    const command = (await request.json().catch(() => ({}))) as {
-      action?: string;
-    };
     const finalAssemblyOnly = command.action === "reassemble_final_only";
     const completedFinalReassembly =
       finalAssemblyOnly &&
@@ -79,17 +85,92 @@ export async function POST(
         { status: 409 },
       );
     }
+
+    let runnableJob = job;
+    if (compilerCanary && TERMINAL_STATUSES.has(job.status)) {
+      const evidenceReady =
+        Array.isArray(job.payload.evidence_urls) &&
+        job.payload.evidence_urls.length >= 1;
+      const resultRecord =
+        job.result && typeof job.result === "object" && !Array.isArray(job.result)
+          ? (job.result as Record<string, unknown>)
+          : {};
+      const analysisRecord =
+        resultRecord.analysis &&
+        typeof resultRecord.analysis === "object" &&
+        !Array.isArray(resultRecord.analysis)
+          ? (resultRecord.analysis as Record<string, unknown>)
+          : {};
+      if (!evidenceReady || !analysisRecord.product) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_COMPILER_CANARY_EVIDENCE_REQUIRED",
+            message:
+              "Evidence Compiler 카나리는 기존 1688 원본과 상품 분석 결과가 저장된 작업에서만 실행할 수 있습니다.",
+          },
+          { status: 409 },
+        );
+      }
+      const restartedAt = new Date().toISOString();
+      const executionId = randomUUID();
+      const restarted = await patchDetailPageJob(config.value, job.id, {
+        status: "queued",
+        stage: "compiler_v1_canary",
+        message:
+          "기존 1688 원본·상품 분석을 재사용하여 Evidence Compiler v1 카나리를 시작합니다.",
+        progress: 20,
+        qa_status: "pending",
+        payload: {
+          execution_id: executionId,
+          compiler_canary: true,
+          compiler_canary_started_at: restartedAt,
+          worker_dispatch_id: "",
+          worker_dispatch_execution_id: "",
+          worker_dispatch_started_at: "",
+          worker_dispatch_until: "",
+        },
+        result: {
+          compilerProfile: null,
+          compilerProductPack: null,
+          compilerBlueprint: null,
+          compilerPreflight: null,
+          compilerRasterGate: null,
+          compilerArtifactState: null,
+          compilerDebugDetailImageUrl: null,
+          compilerDebugCommerceImageUrls: null,
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      });
+      if (!restarted) {
+        return Response.json(
+          {
+            ok: false,
+            code: "DETAIL_PAGE_JOB_NOT_FOUND",
+            message: "카나리로 다시 실행할 상세페이지 작업을 찾지 못했습니다.",
+          },
+          { status: 404 },
+        );
+      }
+      runnableJob = restarted;
+    }
+
     if (
-      ["success", "failed", "cancelled"].includes(job.status) &&
+      TERMINAL_STATUSES.has(job.status) &&
+      !compilerCanary &&
       !recoverableFinalAssembly &&
       !completedFinalReassembly
     ) {
       return Response.json({ ok: true, accepted: false, terminal: true, status: job.status });
     }
-    let runnableJob = job;
+
     if (
-      (job.status === "failed" && recoverableFinalAssembly) ||
-      completedFinalReassembly
+      !compilerCanary &&
+      ((job.status === "failed" && recoverableFinalAssembly) ||
+        completedFinalReassembly)
     ) {
       const restartedAt = new Date().toISOString();
       const finalizerAttempt =
@@ -142,6 +223,7 @@ export async function POST(
       }
       runnableJob = repaired;
     }
+
     if (
       runnableJob.status !== "render_pending" &&
       (!Array.isArray(runnableJob.payload.evidence_urls) ||
@@ -153,6 +235,10 @@ export async function POST(
       );
     }
     const connection = resolveDetailPageStudioConnection();
+    const workerUrl = new URL(connection.workerUrl);
+    if (compilerCanary) {
+      workerUrl.searchParams.set(COMPILER_CANARY_PARAMETER, "1");
+    }
     const dispatchId = randomUUID();
     const reservation = await reserveDetailPageJobDispatch(
       config.value,
@@ -163,6 +249,7 @@ export async function POST(
       console.info("[detail-page-start] duplicate dispatch skipped", {
         jobId: runnableJob.id,
         executionId: String(runnableJob.payload.execution_id ?? ""),
+        compilerCanary,
         reason: reservation.reason,
       });
       if (reservation.reason === "missing") {
@@ -195,12 +282,13 @@ export async function POST(
       jobId: runnableJob.id,
       dispatchId,
       executionId: String(runnableJob.payload.execution_id ?? ""),
+      compilerCanary,
     });
     const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
       `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
     );
-    const response = await fetch(connection.workerUrl, {
+    const response = await fetch(workerUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -208,7 +296,8 @@ export async function POST(
       },
       body: JSON.stringify({
         callbackUrl: callbackUrl.toString(),
-        workerUrl: connection.workerUrl.toString(),
+        compilerCanary: compilerCanary || undefined,
+        workerUrl: workerUrl.toString(),
         executionId: String(runnableJob.payload.execution_id ?? "").trim() || undefined,
         token: createDetailPageJobToken(
           config.value,
@@ -239,6 +328,11 @@ export async function POST(
       accepted: true,
       workerId: body.workerId,
       dispatchId,
+      engineProfile:
+        compilerCanary && body?.engineProfile
+          ? body.engineProfile
+          : body?.engineProfile || "source-first-v3",
+      compilerCanary,
     });
   } catch (error) {
     return Response.json(
