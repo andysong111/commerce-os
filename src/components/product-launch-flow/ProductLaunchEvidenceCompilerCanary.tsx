@@ -6,7 +6,17 @@ const STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const OPTIMIZED_TRACKER_API = "/api/product-launch-tracker/optimized";
 
-type LaunchItem = Record<string, any>;
+type LaunchItem = {
+  id?: unknown;
+  productName?: unknown;
+  modelNumber?: unknown;
+  primaryChinaProductLink?: unknown;
+  detailPageSource?: unknown;
+  chinaProductLinks?: unknown;
+  orderOptions?: unknown;
+  detailPageAutomation?: unknown;
+  [key: string]: unknown;
+};
 type LaunchState = {
   items?: LaunchItem[];
   partialPage?: boolean;
@@ -105,10 +115,7 @@ export function ProductLaunchEvidenceCompilerCanary() {
 
       setMessage("Evidence Compiler 신규 job을 등록하고 있습니다.");
       const jobId = crypto.randomUUID();
-      const attempt = Math.max(
-        1,
-        Number(localItem.detailPageAutomation?.attempt || 0) + 1,
-      );
+      const attempt = Math.max(1, automationAttempt(localItem) + 1);
       const response = await fetch(JOBS_API, {
         method: "POST",
         credentials: "same-origin",
@@ -249,20 +256,25 @@ async function authoritativeItem(
 }
 
 function primaryChinaLink(item: LaunchItem) {
+  const source = record(item.detailPageSource);
+  const links = Array.isArray(item.chinaProductLinks) ? item.chinaProductLinks : [];
   return String(
-    item?.primaryChinaProductLink ||
-      item?.detailPageSource?.primaryUrl ||
-      item?.chinaProductLinks?.[0] ||
-      "",
+    item.primaryChinaProductLink || source.primaryUrl || links[0] || "",
   ).trim();
 }
 
 function saleOptions(item: LaunchItem) {
-  return (Array.isArray(item?.orderOptions) ? item.orderOptions : [])
-    .map((option: any) => String(option?.saleOption || "").trim())
+  const options = Array.isArray(item.orderOptions) ? item.orderOptions : [];
+  return options
+    .map((option) => String(record(option).saleOption || "").trim())
     .filter(Boolean)
     .join(" / ")
     .slice(0, 2_000);
+}
+
+function automationAttempt(item: LaunchItem) {
+  const automation = record(item.detailPageAutomation);
+  return Math.max(0, Number(automation.attempt) || 0);
 }
 
 function writeAutomationState(
@@ -284,4 +296,10 @@ function writeAutomationState(
   state.savedAt = now;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   window.dispatchEvent(new CustomEvent("product-launch-tracker:external-state"));
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
