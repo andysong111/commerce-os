@@ -1,36 +1,79 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
-async function read(path) {
-  return readFile(path, "utf8");
-}
+const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("006 migration adds bounded leases and recoverable unattended claims", async () => {
-  const sql = await read("supabase/migrations/006_shopling_price_bulk_auto.sql");
-  assert.match(sql, /shopling_price_bulk_auto_jobs/);
-  assert.match(sql, /p_owner_id/);
-  assert.match(sql, /lease_owner/);
-  assert.match(sql, /lease_expires_at/);
-  assert.match(sql, /shopling_price_bulk_auto_retry_approvals/);
-  assert.match(sql, /approve_shopling_price_bulk_failed_retry/);
-  assert.match(sql, /enable_shopling_price_bulk_auto_execution/);
-  assert.match(sql, /release_shopling_price_bulk_auto_job/);
-  assert.match(sql, /archive_shopling_price_bulk_auto_job/);
-  assert.match(sql, /reserve_shopling_price_bulk_canary/);
-  assert.match(sql, /reserve_next_shopling_price_bulk_normal_chunk/);
+  const sql = await read("supabase/migrations/202607280002_shopling_price_bulk_one_click_auto.sql");
+  for (const phrase of [
+    "automation_mode text not null default 'manual'",
+    "automation_started_at",
+    "automation_last_tick_at",
+    "automation_finished_at",
+    "automation_lease_until",
+    "automation_worker_id",
+    "automation_stop_reason",
+    "enable_shopling_price_bulk_auto_execution",
+    "claim_next_shopling_price_bulk_auto_job",
+    "release_shopling_price_bulk_auto_job",
+    "finish_shopling_price_bulk_auto_job",
+    "stop_shopling_price_bulk_auto_job",
+    "approve_shopling_price_bulk_failed_retry_auto",
+    "for update skip locked",
+    "service_role",
+  ]) assert.match(sql.toLowerCase(), new RegExp(phrase.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  assert.match(sql, /execution_mode\s*<>\s*'validation_only'/);
+  assert.match(sql, /job\.archived_at is null/);
+  assert.match(sql, /'normal_succeeded'/);
+  assert.match(sql, /job\.automation_stop_reason is null[\s\S]*?or exists \([\s\S]*?active_chunk\.status in \('dispatching','running','dispatch_uncertain'\)/);
+  assert.match(sql, /not job\.pause_requested[\s\S]*?or job\.status in \('normal_running','retry_running','dispatch_uncertain'\)/);
+  assert.match(sql, /automation_lease_until is null or job\.automation_lease_until <= now\(\)/);
+  assert.match(sql, /p_lease_seconds < 15 or p_lease_seconds > 120/);
+  assert.doesNotMatch(sql, /delete\s+from\s+public\.shopling_price_bulk_/i);
 });
 
 test("default operator screen is simple, clears stale input, and locks every unfinished auto job", async () => {
-  const [page, control] = await Promise.all([
-    read("src/app/shopling-price-modify/bulk/page.tsx"),
-    read("src/app/shopling-price-modify/bulk/ShoplingPriceBulkClient.tsx"),
+  const [page, simple, advanced] = await Promise.all([
+    read("src/app/shopling-price-modify-runner/page.tsx"),
+    read("src/components/shopling-price-modify-runner/ShoplingPriceModifySimpleAutoRunner.tsx"),
+    read("src/app/shopling-price-modify-runner/advanced/page.tsx"),
   ]);
-  assert.match(page, /Shopling 가격변경/);
-  assert.match(control, /기존 입력 지우기/);
-  assert.match(control, /activeAutoJob/);
-  assert.match(control, /unattendedState/);
-  assert.match(control, /진행 중인 자동 작업/);
+
+  assert.match(page, /ShoplingPriceModifySimpleAutoRunner/);
+  assert.doesNotMatch(page, /ShoplingPriceModifyBulkInputPreview|ShoplingPriceModifyBulkOperations/);
+  assert.doesNotMatch(page, /from "@\/components\/shopling-price-modify-runner\/ShoplingPriceModifyRunner"|<ShoplingPriceModifyRunner\s*\/>/);
+  assert.equal((simple.match(/전체 가격 자동 변경 시작/g) ?? []).length, 1);
+  for (const phrase of [
+    "상품번호 넣기",
+    "쉼표, 공백, 줄바꿈이 섞여 있어도 자동으로 구분합니다.",
+    "변경할 상품",
+    "제외된 중복",
+    "잘못된 번호",
+    "실행 묶음",
+    "1. 입력 확인",
+    "2. 첫 10개 시험",
+    "3. 나머지 자동 실행",
+    "4. 완료",
+    "현재 묶음 후 멈추기",
+    "계속 실행",
+    "실패 상품만 다시 실행",
+    "결과 파일 받기",
+    "고급 관리 열기",
+  ]) assert.match(simple, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(simple, /const onFile[\s\S]*?setSelection\(null\)[\s\S]*?parseShoplingPriceBulkFile/);
+  assert.match(simple, /const onPaste[\s\S]*?setSelection\(null\)[\s\S]*?parseShoplingPriceBulkPaste/);
+  assert.match(simple, /function isUnfinishedAutoJob[\s\S]*?automation_finished_at[\s\S]*?archived_at/);
+  assert.match(simple, /disabled=\{busy \|\| preview\.validCount === 0 \|\| unfinishedAutoExists\}/);
+  assert.match(simple, /고급 관리에서 보관한 뒤 새 작업을 시작/);
+  assert.doesNotMatch(simple, /setInterval/);
+
+  for (const component of [
+    "ShoplingPriceModifyBulkInputPreview",
+    "ShoplingPriceModifyBulkOperations",
+    "ShoplingPriceModifyRunner",
+  ]) assert.match(advanced, new RegExp(component));
 });
 
 test("one-click creation API is Production-only, session-owned, confirmation-gated, and starts one safe step", async () => {
@@ -86,26 +129,59 @@ test("orchestrator reconciles same request IDs, honors pause, and never auto-app
   assert.match(source, /reserve_shopling_price_bulk_canary/);
   assert.match(source, /approve_shopling_price_bulk_normal_execution/);
   assert.match(source, /reserve_next_shopling_price_bulk_normal_chunk/);
+  assert.match(source, /finish_shopling_price_bulk_normal_chunk/);
+  assert.match(source, /resultPersistencePending/);
+  assert.match(source, /state\.status === "normal_paused"/);
+  assert.match(source, /\["normal_paused", "retry_paused"\]/);
+  assert.match(source, /if \(stopped\)[\s\S]*?return \{ outcome: "noop"/);
+  assert.doesNotMatch(source, /if \(job\.pause_requested \|\|/);
   assert.doesNotMatch(source, /approve_shopling_price_bulk_failed_retry/);
+  assert.doesNotMatch(source, /setInterval|setTimeout/);
 });
 
 test("explicit failed-item retry approval and auto reconnection are one database transaction", async () => {
-  const route = await read("src/app/api/shopling-price-modify/bulk/auto-jobs/[jobId]/retry/route.ts");
-  assert.match(route, /approve_shopling_price_bulk_failed_retry/);
-  assert.match(route, /normalSession\(\)/);
-  assert.match(route, /p_job_id/);
-  assert.match(route, /p_owner_id/);
+  const [route, sql] = await Promise.all([
+    read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/retry/approve/route.ts"),
+    read("supabase/migrations/202607280002_shopling_price_bulk_one_click_auto.sql"),
+  ]);
+  assert.match(route, /approve_shopling_price_bulk_failed_retry_auto/);
+  assert.doesNotMatch(route, /resume_shopling_price_bulk_auto_execution/);
+  assert.doesNotMatch(route, /rpc\("approve_shopling_price_bulk_failed_retry"/);
+  assert.match(sql, /create or replace function public\.approve_shopling_price_bulk_failed_retry_auto/);
+  assert.match(sql, /v_result := public\.approve_shopling_price_bulk_failed_retry\(p_job_id, p_owner_id\)/);
+  assert.match(sql, /if v_auto then[\s\S]*?automation_stop_reason = null[\s\S]*?automation_worker_id = null/);
+  assert.match(sql, /'auto_resumed', v_auto/);
 });
 
 test("stopped or paused unattended jobs can be archived only when no active chunk exists", async () => {
-  const route = await read("src/app/api/shopling-price-modify/bulk/auto-jobs/[jobId]/archive/route.ts");
-  assert.match(route, /archive_shopling_price_bulk_auto_job/);
-  assert.match(route, /normalSession\(\)/);
+  const [sql, report, ui] = await Promise.all([
+    read("supabase/migrations/202607280002_shopling_price_bulk_one_click_auto.sql"),
+    read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/report/route.ts"),
+    read("src/components/shopling-price-modify-runner/ShoplingPriceModifyBulkOperations.tsx"),
+  ]);
+  assert.match(sql, /create or replace function public\.archive_shopling_price_bulk_job/);
+  assert.match(sql, /status in \('dispatching','running','dispatch_uncertain'\)[\s\S]*?raise exception 'active chunk exists'/);
+  assert.match(sql, /v_stopped_auto/);
+  assert.match(sql, /v_paused_auto/);
+  assert.match(report, /automation_mode,automation_started_at,automation_last_tick_at,automation_finished_at,automation_lease_until,automation_stop_reason/);
+  assert.match(ui, /const activeChunk/);
+  assert.match(ui, /const stoppedAuto/);
+  assert.match(ui, /const pausedAuto/);
+  assert.match(ui, /&& !activeChunk/);
 });
 
 test("detail API exposes auto state while validation-only remains structurally excluded", async () => {
-  const route = await read("src/app/api/shopling-price-modify/bulk/requests/[requestId]/route.ts");
-  assert.match(route, /autoJob/);
-  assert.match(route, /unattendedState/);
-  assert.match(route, /validationOnly/);
+  const route = await read("src/app/api/shopling-price-modify/bulk/jobs/[jobId]/route.ts");
+  for (const field of [
+    "automation_mode",
+    "automation_started_at",
+    "automation_last_tick_at",
+    "automation_finished_at",
+    "automation_lease_until",
+    "automation_worker_id",
+    "automation_stop_reason",
+  ]) assert.match(route, new RegExp(field));
+  const migration = await read("supabase/migrations/202607280002_shopling_price_bulk_one_click_auto.sql");
+  assert.match(migration, /job\.execution_mode = 'live'/);
+  assert.match(migration, /execution_mode <> 'validation_only' or automation_mode = 'manual'/);
 });
