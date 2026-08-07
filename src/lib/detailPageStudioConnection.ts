@@ -2,7 +2,7 @@ const PRODUCTION_STUDIO_URL =
   "https://commerce-os-detail-page-studio.vercel.app/";
 
 const OPS_CENTER_V260807_STUDIO_URL =
-  "https://commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa.vercel.app/";
+  "https://commerce-os-detail-page-studio-pzxe.vercel.app/";
 
 // Stable Vercel Preview retained only as a legacy recovery reference.
 const PREVIEW_STUDIO_URL =
@@ -29,8 +29,9 @@ export function resolveDetailPageStudioConnection(): DetailPageStudioConnection 
   const environment = process.env.VERCEL_ENV?.trim();
   const isPreview = environment === "preview";
   const isProduction = environment === "production";
-  // Product Launch Tracker always uses the isolated OPS Center v260807 engine line.
-  // Local development may still provide an explicit override.
+  // Product Launch Tracker always uses the dedicated, protection-free
+  // OPS Center v260807 Production deployment. Local development may still
+  // provide an explicit override.
   const engineUrl = validateStudioUrl(
     isPreview || isProduction
       ? OPS_CENTER_V260807_STUDIO_URL
@@ -81,7 +82,7 @@ export async function probeDetailPageStudio(
         ok: false as const,
         code: "DETAIL_PAGE_STUDIO_PREVIEW_PROTECTED",
         message:
-          "상세페이지 Studio Preview 보호 인증이 연결되지 않았습니다. Studio 자동화 우회 설정을 확인하세요.",
+          "상세페이지 Studio 보호 인증이 연결되지 않았습니다. OPS 전용 Production 연결을 확인하세요.",
       };
     }
     const body = await response.json().catch(() => ({}));
@@ -97,7 +98,7 @@ export async function probeDetailPageStudio(
         code: "DETAIL_PAGE_STUDIO_INCOMPATIBLE",
         message:
           response.status === 404
-            ? "연결된 상세페이지 Studio에 OPS 자동생성 기능이 없습니다. PR #55 Preview 연결을 확인하세요."
+            ? "연결된 상세페이지 Studio에 OPS 자동생성 기능이 없습니다. OPS 전용 v260807 Production 연결을 확인하세요."
             : "상세페이지 Studio 연결 규격을 확인하지 못했습니다.",
       };
     }
