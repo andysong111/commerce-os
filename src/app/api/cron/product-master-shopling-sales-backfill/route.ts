@@ -7,6 +7,11 @@ import {
   productMasterShoplingSalesConfigured,
   runProductMasterShoplingSalesStep,
 } from "@/lib/productMasterShoplingSalesBackfill";
+import {
+  createProductMasterShoplingSalesHistoricalShadowRequest,
+  loadProductMasterShoplingSalesHistoricalShadowStatus,
+  runProductMasterShoplingSalesHistoricalShadowStep,
+} from "@/lib/productMasterShoplingSalesHistoricalShadow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +26,9 @@ function authorized(request: Request) {
   return Boolean(expected && supplied === `Bearer ${expected}`);
 }
 
-function recoveryChunkDays(state: Awaited<ReturnType<typeof loadProductMasterShoplingSalesStatus>>) {
+function recoveryChunkDays(
+  state: Awaited<ReturnType<typeof loadProductMasterShoplingSalesStatus>>,
+) {
   if (state.state !== "FAILED") return null;
   if (state.chunkDays > PRODUCT_MASTER_SHOPLING_SALES_DEFAULT_CHUNK_DAYS) {
     return PRODUCT_MASTER_SHOPLING_SALES_DEFAULT_CHUNK_DAYS;
@@ -64,6 +71,29 @@ async function runBoundedBurst() {
   };
 }
 
+async function runHistoricalShadowBoundedBurst() {
+  const startedAt = Date.now();
+  let stepCount = 0;
+  let result = await runProductMasterShoplingSalesHistoricalShadowStep();
+  stepCount += 1;
+
+  while (
+    stepCount < MAX_STEPS_PER_INVOCATION &&
+    result.processed === true &&
+    result.state === "RUNNING" &&
+    Date.now() - startedAt < EXTRA_STEP_START_BUDGET_MS
+  ) {
+    result = await runProductMasterShoplingSalesHistoricalShadowStep();
+    stepCount += 1;
+  }
+
+  return {
+    ...result,
+    stepCount,
+    burstElapsedMs: Date.now() - startedAt,
+  };
+}
+
 export async function GET(request: Request) {
   if (!authorized(request)) {
     return Response.json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
@@ -82,7 +112,8 @@ export async function GET(request: Request) {
     const current = await loadProductMasterShoplingSalesStatus();
     const fallback = recoveryChunkDays(current);
     if (current.state === "IDLE" || fallback !== null) {
-      const chunkDays = fallback ?? PRODUCT_MASTER_SHOPLING_SALES_DEFAULT_CHUNK_DAYS;
+      const chunkDays =
+        fallback ?? PRODUCT_MASTER_SHOPLING_SALES_DEFAULT_CHUNK_DAYS;
       const created = await createProductMasterShoplingSalesRequest({
         chunkDays,
         supersedesRequestId: current.requestId,
@@ -109,6 +140,66 @@ export async function GET(request: Request) {
         ok: true,
         configured: true,
         ...(await runBoundedBurst()),
+      });
+    }
+
+    if (current.state === "BLOCKED") {
+      const shadow = await loadProductMasterShoplingSalesHistoricalShadowStatus();
+      if (shadow.state === "IDLE") {
+        try {
+          const created =
+            await createProductMasterShoplingSalesHistoricalShadowRequest();
+          return Response.json({
+            ok: true,
+            configured: true,
+            processed: true,
+            state: "SHADOW_QUEUED",
+            requestId: created.requestId,
+            baselineRequestId: created.baselineRequestId,
+            totalRanges: created.ranges.length,
+            message:
+              "미연결 주문 중 과거 optionId 고신뢰 증거가 있어 동일 주문범위 그림자 재계산을 자동 접수했습니다. 실제 판매원장 쓰기는 없습니다.",
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "historical shadow 접수 실패";
+          if (
+            /SHADOW_NO_EVIDENCE|SHADOW_NO_SAFE_RESOLVER/.test(message)
+          ) {
+            return Response.json({
+              ok: true,
+              configured: true,
+              processed: false,
+              state: current.state,
+              shadowState: "NOT_APPLICABLE",
+              message:
+                "현재 보존 증거만으로 자동 해결 가능한 과거 optionId가 확인되지 않아 기존 BLOCKED 상태를 유지합니다.",
+            });
+          }
+          throw error;
+        }
+      }
+
+      if (shadow.state === "QUEUED" || shadow.state === "RUNNING") {
+        const shadowResult = await runHistoricalShadowBoundedBurst();
+        return Response.json({
+          ok: true,
+          configured: true,
+          shadowState: "RUNNING",
+          ...shadowResult,
+        });
+      }
+
+      return Response.json({
+        ok: true,
+        configured: true,
+        processed: false,
+        state: current.state,
+        shadowState: shadow.state,
+        shadowSafeToPromote: shadow.report?.safeToPromote ?? false,
+        shadowFallbackResolvedRows:
+          shadow.report?.shadow.fallbackResolvedRows ?? shadow.fallbackResolvedRows,
+        message: shadow.message || current.message,
       });
     }
 
