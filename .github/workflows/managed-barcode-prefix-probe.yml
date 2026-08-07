@@ -1,0 +1,49 @@
+name: Managed Barcode Prefix Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-prefixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Count production managed-code prefixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import collections
+          import html
+          import re
+          import subprocess
+          from pathlib import Path
+
+          pages = [
+              'https://commerce-os-ops-center.vercel.app/product-master/shopling-diagnostic',
+              'https://commerce-os-ops-center.vercel.app/product-master/shopling-diagnostic/apply',
+          ]
+          text = ''
+          for i, url in enumerate(pages):
+              out = Path(f'/tmp/p{i}.html')
+              p = subprocess.run(['curl','-L','-sS','--connect-timeout','10','--max-time','30','-o',str(out),'-w','%{http_code}',url],capture_output=True,text=True)
+              print('HTTP', i, p.stdout.strip())
+              if p.stdout.strip() == '200':
+                  raw=out.read_text(encoding='utf-8',errors='ignore')
+                  raw=re.sub(r'<script[\s\S]*?</script>',' ',raw,flags=re.I)
+                  raw=re.sub(r'<style[\s\S]*?</style>',' ',raw,flags=re.I)
+                  raw=re.sub(r'<[^>]+>',' ',raw)
+                  text += ' ' + html.unescape(raw)
+          codes=re.findall(r'\b[A-Z]{3}\d+-\d+\b', text)
+          unique=sorted(set(codes))
+          print('TOTAL_MATCHES', len(codes))
+          print('UNIQUE_CODES', len(unique))
+          print('PREFIX_COUNTS', dict(collections.Counter(code[:3] for code in unique).most_common()))
+          print('B_PREFIX_UNIQUE', sum(1 for code in unique if code.startswith('B')))
+          print('NON_B_UNIQUE', sum(1 for code in unique if not code.startswith('B')))
+          print('NON_B_SAMPLES', [code for code in unique if not code.startswith('B')][:100])
+          print('B_SAMPLES', [code for code in unique if code.startswith('B')][:30])
+          PY
