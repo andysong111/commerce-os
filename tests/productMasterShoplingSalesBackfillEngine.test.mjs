@@ -98,6 +98,44 @@ test("cancelled and refunded orders never enter canonical sales", () => {
   assert.equal(result.monthlyRows.length, 0);
 });
 
+test("historical consignment orders outside managed barcode catalog are ignored instead of blocking", () => {
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD-CONSIGNMENT", prod_id: "900000", mall_prod_key: "900000" })],
+    planning(),
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.ignoredRows, 1);
+  assert.equal(result.monthlyRows.length, 0);
+});
+
+test("managed catalog identities stay in scope even when an exact mapping is ambiguous", () => {
+  const ambiguous = planning({
+    products: [
+      {
+        skuId: "sku-1",
+        barcode: "BAA1-1",
+        productName: "상품",
+        optionName: "단품",
+        skuActive: true,
+        listings: [
+          { goodsKey: "1001", optionId: "O1", unitsPerOrder: 1, active: true },
+          { goodsKey: "1001", optionId: "O2", unitsPerOrder: 2, active: true },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD", prod_id: "1001" })],
+    ambiguous,
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 1);
+  assert.equal(result.ignoredRows, 0);
+});
+
 test("managed partner code can recover an order when historical option identity is absent", () => {
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "OLD", ptn_goods_cd: "BAA1-1" })],

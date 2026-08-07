@@ -50,6 +50,8 @@ type PlanningIndex = {
   byOptionId: Map<string, ListingIdentity>;
   byGoodsKey: Map<string, ListingIdentity>;
   byBarcode: Map<string, ListingIdentity>;
+  managedOptionIds: Set<string>;
+  managedGoodsKeys: Set<string>;
 };
 
 const MANAGED_BARCODE = /^[A-Z]{3}\d+-\d+$/;
@@ -114,6 +116,8 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
   const ambiguousOptionIds = new Set<string>();
   const ambiguousGoodsKeys = new Set<string>();
   const unitsByBarcode = new Map<string, Set<number>>();
+  const managedOptionIds = new Set<string>();
+  const managedGoodsKeys = new Set<string>();
 
   for (const product of planning.products ?? []) {
     const barcode = managedBarcode(product.barcode);
@@ -127,6 +131,10 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
       continue;
     }
     for (const listing of activeListings) {
+      const optionId = text(listing.optionId);
+      const goodsKey = text(listing.goodsKey);
+      if (optionId) managedOptionIds.add(optionId);
+      if (goodsKey) managedGoodsKeys.add(goodsKey);
       const identity = {
         barcode,
         unitsPerOrder: safeUnits(listing.unitsPerOrder),
@@ -134,13 +142,13 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
       registerUnique(
         byOptionId,
         ambiguousOptionIds,
-        text(listing.optionId),
+        optionId,
         identity,
       );
       registerUnique(
         byGoodsKey,
         ambiguousGoodsKeys,
-        text(listing.goodsKey),
+        goodsKey,
         identity,
       );
       const units = unitsByBarcode.get(barcode) ?? new Set<number>();
@@ -157,7 +165,14 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
       unitsPerOrder: [...units][0] ?? 1,
     });
   }
-  return { products, byOptionId, byGoodsKey, byBarcode };
+  return {
+    products,
+    byOptionId,
+    byGoodsKey,
+    byBarcode,
+    managedOptionIds,
+    managedGoodsKeys,
+  };
 }
 
 function rawValue(row: ShoplingRawRow, keys: string[]) {
@@ -189,6 +204,23 @@ function rawManagedCode(row: ShoplingRawRow) {
     if (barcode) return barcode;
   }
   return "";
+}
+
+function isManagedSalesScope(
+  index: PlanningIndex,
+  order: ReturnType<typeof normalizeShoplingOrder>,
+  raw: ShoplingRawRow,
+) {
+  const directCode = rawManagedCode(raw) || managedBarcode(order.barcode);
+  if (directCode) return true;
+
+  const optionId = text(order.optionId);
+  if (optionId && index.managedOptionIds.has(optionId)) return true;
+
+  for (const key of [text(order.productId), text(order.mallProductKey)]) {
+    if (key && index.managedGoodsKeys.has(key)) return true;
+  }
+  return false;
 }
 
 function resolveIdentity(
@@ -260,6 +292,16 @@ export function aggregateProductMasterShoplingSalesChunk(
       !validSaleStatus(order.status) ||
       quantity <= 0
     ) {
+      ignoredRows += 1;
+      continue;
+    }
+
+    // Commerce OS canonical sales intentionally includes only the managed
+    // location-code catalog (for example BAA1-1). Historical consignment
+    // orders that have no direct managed code and no identity in the current
+    // managed Shopling listing set are outside Product Master scope and must
+    // not block the canonical ledger.
+    if (!isManagedSalesScope(index, order, raw)) {
       ignoredRows += 1;
       continue;
     }
