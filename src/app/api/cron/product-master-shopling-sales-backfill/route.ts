@@ -181,11 +181,12 @@ export async function GET(request: Request) {
       }
 
       if (shadow.state === "QUEUED" || shadow.state === "RUNNING") {
+        const shadowResult = await runHistoricalShadowBoundedBurst();
         return Response.json({
           ok: true,
           configured: true,
-          state: "SHADOW_RUNNING",
-          ...(await runHistoricalShadowBoundedBurst()),
+          shadowState: "RUNNING",
+          ...shadowResult,
         });
       }
 
