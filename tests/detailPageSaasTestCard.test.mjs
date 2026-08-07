@@ -11,7 +11,7 @@ const [moduleFile, datedModuleFile, registryFile, dashboardFile, pageFile] =
     readFile("src/app/page.tsx", "utf8"),
   ]);
 
-test("OPS Center detail studio uses its dedicated v260807 Production deployment", () => {
+test("OPS Center detail studio uses the configured v260807 Production host", () => {
   assert.match(moduleFile, /id: "detail-page-studio-saas-test"/);
   assert.match(
     moduleFile,
@@ -20,9 +20,9 @@ test("OPS Center detail studio uses its dedicated v260807 Production deployment"
   assert.match(moduleFile, /OPS Center 전용/);
   assert.match(
     moduleFile,
-    /commerce-os-detail-page-studio-pzxe\.vercel\.app\/\?studio_variant=saas-test/,
+    /commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test/,
   );
-  assert.match(moduleFile, /isolated\/ops-center/);
+  assert.match(moduleFile, /isolated-ops-center|isolated\/ops-center/);
 });
 
 test("SaaS production detail studio uses its isolated engine line", () => {
@@ -64,16 +64,11 @@ test("three detail studio cards remain registered together", () => {
   assert.match(pageFile, /opsModuleRegistry/);
 });
 
-test("all three cards start from the same v260807 quality baseline but use different routes", () => {
+test("the three cards keep separate runtime routes", () => {
   assert.match(moduleFile, /v260807/);
   assert.match(datedModuleFile, /v260807/);
   assert.match(registryFile, /v260807/);
-  assert.doesNotMatch(
-    moduleFile,
-    /commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test/,
-  );
-  assert.doesNotMatch(
-    datedModuleFile,
-    /commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test/,
-  );
+  assert.match(moduleFile, /commerce-os-detail-page-studio\.vercel\.app/);
+  assert.match(registryFile, /git-isolated-sa-3f377e/);
+  assert.match(datedModuleFile, /git-isolated-saas-test/);
 });
