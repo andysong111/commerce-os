@@ -32,6 +32,15 @@ test("sales backfill requires mapping stability, unmapped zero, one-row canary a
   assert.match(workflow, /LEGACY_MONTH_OVERLAP/);
 });
 
+test("inactive B-code SKU identity is pinned and remains eligible for historical ledger apply", () => {
+  assert.match(workflow, /MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}/);
+  assert.match(workflow, /skuActive: product\.skuActive !== false/);
+  assert.match(workflow, /active: listing\.active !== false/);
+  assert.match(workflow, /uniqueSkuByManagedBarcode/);
+  assert.match(workflow, /Historical B-code sales remain attached to their stable SKU/);
+  assert.doesNotMatch(workflow, /\.filter\(\(product\) => product\.skuActive !== false\)\s*\.map\(\(product\) => \[text\(product\.barcode\)/);
+});
+
 test("sales writes are deterministic, idempotent and bounded", () => {
   assert.match(workflow, /shopling_orders_24m_v1/);
   assert.match(workflow, /APPLY_BATCH_SIZE = 500/);
