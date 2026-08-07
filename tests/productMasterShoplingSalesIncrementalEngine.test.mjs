@@ -142,6 +142,32 @@ test("blocks fresh row whose barcode is no longer a current sku", () => {
   assert.equal(plan.blockers[0].code, "SKU_NOT_CURRENT");
 });
 
+test("blocks an implausible rolling collapse before zeroing a large canonical ledger", () => {
+  const plan = buildShoplingIncrementalReconcilePlan({
+    freshRows: [sales("BAA1-1", "2026-08", 10)],
+    existingRows: [existing("sku-a", "BAA1-1", "2026-08", 100)],
+    planningRows: planning,
+    months: ["2026-08"],
+  });
+  assert.equal(
+    plan.blockers.some((blocker) => blocker.code === "UNEXPECTED_ROLLING_DROP"),
+    true,
+  );
+});
+
+test("does not block normal rolling corrections below the collapse threshold", () => {
+  const plan = buildShoplingIncrementalReconcilePlan({
+    freshRows: [sales("BAA1-1", "2026-08", 70)],
+    existingRows: [existing("sku-a", "BAA1-1", "2026-08", 100)],
+    planningRows: planning,
+    months: ["2026-08"],
+  });
+  assert.equal(
+    plan.blockers.some((blocker) => blocker.code === "UNEXPECTED_ROLLING_DROP"),
+    false,
+  );
+});
+
 test("verification compares full canonical values", () => {
   const expected = {
     ...sales("BAA1-1", "2026-08", 8),
