@@ -11,40 +11,51 @@ const [moduleFile, datedModuleFile, registryFile, dashboardFile, pageFile] =
     readFile("src/app/page.tsx", "utf8"),
   ]);
 
-test("SaaS test card uses the production Studio with an isolated test mode", () => {
+test("OPS Center detail studio uses its isolated engine line", () => {
   assert.match(moduleFile, /id: "detail-page-studio-saas-test"/);
   assert.match(
     moduleFile,
-    /title: "Commerce OS Detail Page Studio · SaaS\(테스트버전\)"/,
+    /title: "Commerce OS Detail Page Studio · v260807"/,
   );
+  assert.match(moduleFile, /OPS Center 전용/);
   assert.match(
     moduleFile,
-    /route:\s*\n\s*"https:\/\/commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test"/,
+    /commerce-os-detail-page-studio-git-isolated-ops-center-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
   );
-  assert.match(moduleFile, /표준 생성 프로필에 따라 8개 섹션/);
-  assert.match(moduleFile, /1688 링크 입력의 모델명은 선택한 문구 언어/);
+  assert.match(moduleFile, /isolated\/ops-center/);
 });
 
-test("dated SaaS test card opens the isolated 260807 production variant", () => {
+test("SaaS production detail studio uses its isolated engine line", () => {
+  assert.match(
+    registryFile,
+    /title: "Commerce OS Detail Page Studio · SaaS 전용 · v260807"/,
+  );
+  assert.match(
+    registryFile,
+    /commerce-os-detail-page-studio-git-isolated-saas-production-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
+  );
+  assert.match(registryFile, /isolated\/saas-production/);
+});
+
+test("SaaS test detail studio uses its isolated engine line", () => {
   assert.match(
     datedModuleFile,
     /id: "detail-page-studio-saas-test-260807"/,
   );
   assert.match(
     datedModuleFile,
-    /title: "Commerce OS Detail Page Studio · SaaS\(테스트버전260807\)"/,
+    /title: "Commerce OS Detail Page Studio · SaaS\(테스트버전\) · v260807"/,
   );
   assert.match(
     datedModuleFile,
-    /route:\s*\n\s*"https:\/\/commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test-260807"/,
+    /commerce-os-detail-page-studio-git-isolated-saas-test-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
   );
-  assert.match(datedModuleFile, /saas-test-260807 스냅샷 브랜치/);
+  assert.match(datedModuleFile, /isolated\/saas-test/);
 });
 
-test("content workspace renders original, current test, and dated test cards together", () => {
+test("three detail studio cards remain registered together", () => {
   assert.match(registryFile, /detailPageSaasTestModule/);
   assert.match(registryFile, /detailPageSaasTest260807Module/);
-  assert.doesNotMatch(registryFile, /detailPageTestStudioModule/);
   assert.match(dashboardFile, /"detail-page-studio"/);
   assert.match(dashboardFile, /"detail-page-studio-saas-test"/);
   assert.match(dashboardFile, /"detail-page-studio-saas-test-260807"/);
@@ -53,8 +64,16 @@ test("content workspace renders original, current test, and dated test cards tog
   assert.match(pageFile, /opsModuleRegistry/);
 });
 
-test("obsolete custom test card is no longer registered", () => {
-  assert.doesNotMatch(moduleFile, /id: "detail-page-studio-test"/);
-  assert.doesNotMatch(moduleFile, /상세페이지 스튜디오 테스트버전/);
-  assert.doesNotMatch(registryFile, /detailPageTestStudioModule/);
+test("all three cards start from the same v260807 quality baseline but use different routes", () => {
+  assert.match(moduleFile, /v260807/);
+  assert.match(datedModuleFile, /v260807/);
+  assert.match(registryFile, /v260807/);
+  assert.doesNotMatch(
+    moduleFile,
+    /commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test/,
+  );
+  assert.doesNotMatch(
+    datedModuleFile,
+    /commerce-os-detail-page-studio\.vercel\.app\/\?studio_variant=saas-test/,
+  );
 });
