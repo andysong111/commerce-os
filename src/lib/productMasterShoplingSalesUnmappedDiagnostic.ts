@@ -7,7 +7,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const MANAGED_BARCODE = /^[A-Z]{3}\d+-\d+$/;
 const MAX_OPERATION_ROWS = 500;
-const MAX_SAFE_SAMPLES = 100;
+const MAX_SAFE_SAMPLES = 5_000;
+const MAX_CANDIDATES_PER_SAMPLE = 10;
 
 export type ShoplingSalesUnmappedCategory =
   | "CURRENT_MANAGED_CODE_UNRESOLVED"
@@ -17,6 +18,16 @@ export type ShoplingSalesUnmappedCategory =
   | "NO_CURRENT_IDENTITY"
   | "MISSING_IDENTIFIERS";
 
+export type ShoplingSalesUnmappedCandidate = {
+  skuId: string;
+  barcode: string;
+  productName: string;
+  optionName: string | null;
+  goodsKey: string | null;
+  optionId: string | null;
+  unitsPerOrder: number;
+};
+
 export type ShoplingSalesUnmappedSafeSample = {
   category: ShoplingSalesUnmappedCategory;
   orderedAt: string | null;
@@ -25,6 +36,7 @@ export type ShoplingSalesUnmappedSafeSample = {
   mallProductKey: string | null;
   managedCode: string | null;
   status: string | null;
+  currentCandidates: ShoplingSalesUnmappedCandidate[];
 };
 
 export type ShoplingSalesUnmappedDiagnostic = {
@@ -37,6 +49,8 @@ export type ShoplingSalesUnmappedDiagnostic = {
   totalUnmappedRows: number;
   sampledUnmappedRows: number;
   sampleCoverage: number;
+  truncatedChunkCount: number;
+  storedSamplesExhausted: boolean;
   categories: Array<{
     category: ShoplingSalesUnmappedCategory;
     sampleCount: number;
@@ -109,7 +123,7 @@ function categoryMeaning(category: ShoplingSalesUnmappedCategory) {
     case "CURRENT_OPTION_ID_UNRESOLVED":
       return "현재 Product Master listing에 존재하는 Shopling 옵션 ID인데 판매원장 엔진이 연결하지 못했습니다. 현재 SKU 판매 누락 가능성이 높습니다.";
     case "CURRENT_GOODS_KEY_UNRESOLVED":
-      return "현재 Product Master listing의 goods_key와 관련된 주문이지만 옵션 단위로 안전하게 결정되지 않았습니다.";
+      return "현재 Product Master listing의 goods_key와 관련된 주문이지만 옵션 단위로 안전하게 결정되지 않았습니다. 현재 goods_key 아래 후보 SKU를 함께 표시합니다.";
     case "OUTSIDE_CURRENT_PRODUCT_MASTER":
       return "위치코드 형식은 맞지만 현재 Product Master 활성 SKU에는 없는 코드입니다. 과거/폐기 SKU인지 확인 후 현재 SKU 판매에서 제외할 수 있습니다.";
     case "NO_CURRENT_IDENTITY":
@@ -160,6 +174,8 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
       totalUnmappedRows: 0,
       sampledUnmappedRows: 0,
       sampleCoverage: 0,
+      truncatedChunkCount: 0,
+      storedSamplesExhausted: true,
       categories: [],
       safeSamples: [],
       sourceReadsPerformed: false,
@@ -183,16 +199,20 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
   let fetchedRows = 0;
   let acceptedRows = 0;
   let totalUnmappedRows = 0;
+  let truncatedChunkCount = 0;
   for (const chunk of chunks) {
     const result = object(chunk.result_snapshot);
+    const chunkUnmappedRows = integer(result.unmappedRows);
+    const chunkSamples = Array.isArray(result.unmappedSamples)
+      ? result.unmappedSamples
+      : [];
     fetchedRows += integer(result.fetchedRows);
     acceptedRows += integer(result.acceptedRows);
-    totalUnmappedRows += integer(result.unmappedRows);
-    if (Array.isArray(result.unmappedSamples)) {
-      for (const sample of result.unmappedSamples) {
-        if (rawSamples.length >= MAX_SAFE_SAMPLES) break;
-        rawSamples.push(sampleFrom(sample));
-      }
+    totalUnmappedRows += chunkUnmappedRows;
+    if (chunkUnmappedRows > chunkSamples.length) truncatedChunkCount += 1;
+    for (const sample of chunkSamples) {
+      if (rawSamples.length >= MAX_SAFE_SAMPLES) break;
+      rawSamples.push(sampleFrom(sample));
     }
   }
 
@@ -200,6 +220,29 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
   const currentBarcodes = new Set<string>();
   const currentOptionIds = new Set<string>();
   const currentGoodsKeys = new Set<string>();
+  const candidatesByBarcode = new Map<string, ShoplingSalesUnmappedCandidate[]>();
+  const candidatesByOptionId = new Map<string, ShoplingSalesUnmappedCandidate[]>();
+  const candidatesByGoodsKey = new Map<string, ShoplingSalesUnmappedCandidate[]>();
+
+  function addCandidate(
+    target: Map<string, ShoplingSalesUnmappedCandidate[]>,
+    key: string,
+    candidate: ShoplingSalesUnmappedCandidate,
+  ) {
+    if (!key) return;
+    const existing = target.get(key) ?? [];
+    const identity = `${candidate.skuId}\u0000${candidate.barcode}\u0000${candidate.optionId ?? ""}\u0000${candidate.goodsKey ?? ""}\u0000${candidate.unitsPerOrder}`;
+    if (
+      existing.some(
+        (row) =>
+          `${row.skuId}\u0000${row.barcode}\u0000${row.optionId ?? ""}\u0000${row.goodsKey ?? ""}\u0000${row.unitsPerOrder}` === identity,
+      )
+    ) {
+      return;
+    }
+    target.set(key, [...existing, candidate].slice(0, MAX_CANDIDATES_PER_SAMPLE));
+  }
+
   for (const product of planning.products ?? []) {
     if (product.skuActive === false) continue;
     const currentBarcode = barcode(product.barcode);
@@ -208,8 +251,24 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
       if (listing.active === false) continue;
       const optionId = text(listing.optionId);
       const goodsKey = text(listing.goodsKey);
-      if (optionId) currentOptionIds.add(optionId);
-      if (goodsKey) currentGoodsKeys.add(goodsKey);
+      const candidate: ShoplingSalesUnmappedCandidate = {
+        skuId: text(product.skuId),
+        barcode: currentBarcode || text(product.barcode),
+        productName: text(product.productName),
+        optionName: nullable(product.optionName),
+        goodsKey: goodsKey || null,
+        optionId: optionId || null,
+        unitsPerOrder: Math.max(1, integer(listing.unitsPerOrder) || 1),
+      };
+      if (optionId) {
+        currentOptionIds.add(optionId);
+        addCandidate(candidatesByOptionId, optionId, candidate);
+      }
+      if (goodsKey) {
+        currentGoodsKeys.add(goodsKey);
+        addCandidate(candidatesByGoodsKey, goodsKey, candidate);
+      }
+      if (currentBarcode) addCandidate(candidatesByBarcode, currentBarcode, candidate);
     }
   }
 
@@ -234,9 +293,34 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
     return "MISSING_IDENTIFIERS";
   }
 
+  function currentCandidates(sample: RawSample) {
+    const managedCode = barcode(sample.managedCode);
+    const merged: ShoplingSalesUnmappedCandidate[] = [];
+    const seen = new Set<string>();
+    const lists = [
+      managedCode ? candidatesByBarcode.get(managedCode) ?? [] : [],
+      sample.optionId ? candidatesByOptionId.get(sample.optionId) ?? [] : [],
+      sample.productId ? candidatesByGoodsKey.get(sample.productId) ?? [] : [],
+      sample.mallProductKey
+        ? candidatesByGoodsKey.get(sample.mallProductKey) ?? []
+        : [],
+    ];
+    for (const list of lists) {
+      for (const candidate of list) {
+        const key = `${candidate.skuId}\u0000${candidate.barcode}\u0000${candidate.optionId ?? ""}\u0000${candidate.goodsKey ?? ""}\u0000${candidate.unitsPerOrder}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(candidate);
+        if (merged.length >= MAX_CANDIDATES_PER_SAMPLE) return merged;
+      }
+    }
+    return merged;
+  }
+
   const safeSamples = rawSamples.map((sample) => ({
     category: classify(sample),
     ...sample,
+    currentCandidates: currentCandidates(sample),
   }));
   const categoryCounts = new Map<ShoplingSalesUnmappedCategory, number>();
   for (const sample of safeSamples) {
@@ -272,8 +356,14 @@ export async function loadProductMasterShoplingSalesUnmappedDiagnostic(): Promis
     totalUnmappedRows,
     sampledUnmappedRows: safeSamples.length,
     sampleCoverage: totalUnmappedRows
-      ? Math.round((safeSamples.length / totalUnmappedRows) * 10_000) / 100
+      ? Math.min(
+          100,
+          Math.round((safeSamples.length / totalUnmappedRows) * 10_000) / 100,
+        )
       : 100,
+    truncatedChunkCount,
+    storedSamplesExhausted:
+      rawSamples.length < MAX_SAFE_SAMPLES && truncatedChunkCount === 0,
     categories,
     safeSamples,
     sourceReadsPerformed: false,
