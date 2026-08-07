@@ -1,0 +1,21 @@
+name: Unmapped Context API Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production unmapped Product Master context
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L -sS --connect-timeout 10 --max-time 30 \
+            -H 'Origin: https://commerce-os-ops-center.vercel.app' \
+            'https://commerce-os-ops-center.vercel.app/api/product-master/shopling-sales-backfill/unmapped-context' \
+            | python -m json.tool
