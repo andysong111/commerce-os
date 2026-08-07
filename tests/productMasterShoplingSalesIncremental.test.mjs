@@ -43,6 +43,10 @@ test("incremental reconciliation keeps inactive B-code SKUs addressable for hist
   assert.match(engine, /MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}/);
   assert.match(engine, /Inactive B-prefixed SKUs still own real historical sales/);
   assert.doesNotMatch(engine, /if \(row\.skuActive === false\) continue/);
+  assert.match(workflow, /MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}/);
+  assert.match(workflow, /skuActive: product\.skuActive !== false/);
+  assert.match(workflow, /active: listing\.active !== false/);
+  assert.doesNotMatch(workflow, /\.filter\(\(product\) => product\.skuActive !== false\)/);
 });
 
 test("incremental writes are bounded, idempotent and fully reverified", () => {
