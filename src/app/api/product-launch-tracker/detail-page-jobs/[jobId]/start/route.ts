@@ -19,6 +19,9 @@ import {
 } from "@/lib/detailPageStudioConnection";
 import { isDetailPageTestJob } from "@/lib/detailPageTestStudio";
 
+const COMPILER_CANARY_ACTION = "compiler_v1_canary";
+const COMPILER_CANARY_PARAMETER = "compiler_v1_canary";
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ jobId: string }> },
@@ -61,6 +64,7 @@ export async function POST(
     const command = (await request.json().catch(() => ({}))) as {
       action?: string;
     };
+    const compilerCanary = command.action === COMPILER_CANARY_ACTION;
     const finalAssemblyOnly = command.action === "reassemble_final_only";
     const completedFinalReassembly =
       finalAssemblyOnly &&
@@ -153,6 +157,10 @@ export async function POST(
       );
     }
     const connection = resolveDetailPageStudioConnection();
+    const workerUrl = new URL(connection.workerUrl);
+    if (compilerCanary) {
+      workerUrl.searchParams.set(COMPILER_CANARY_PARAMETER, "1");
+    }
     const dispatchId = randomUUID();
     const reservation = await reserveDetailPageJobDispatch(
       config.value,
@@ -163,6 +171,7 @@ export async function POST(
       console.info("[detail-page-start] duplicate dispatch skipped", {
         jobId: runnableJob.id,
         executionId: String(runnableJob.payload.execution_id ?? ""),
+        compilerCanary,
         reason: reservation.reason,
       });
       if (reservation.reason === "missing") {
@@ -195,12 +204,13 @@ export async function POST(
       jobId: runnableJob.id,
       dispatchId,
       executionId: String(runnableJob.payload.execution_id ?? ""),
+      compilerCanary,
     });
     const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
       `/api/product-launch-tracker/detail-page-jobs/${job.id}`,
     );
-    const response = await fetch(connection.workerUrl, {
+    const response = await fetch(workerUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -208,7 +218,8 @@ export async function POST(
       },
       body: JSON.stringify({
         callbackUrl: callbackUrl.toString(),
-        workerUrl: connection.workerUrl.toString(),
+        compilerCanary: compilerCanary || undefined,
+        workerUrl: workerUrl.toString(),
         executionId: String(runnableJob.payload.execution_id ?? "").trim() || undefined,
         token: createDetailPageJobToken(
           config.value,
@@ -239,6 +250,11 @@ export async function POST(
       accepted: true,
       workerId: body.workerId,
       dispatchId,
+      engineProfile:
+        compilerCanary && body?.engineProfile
+          ? body.engineProfile
+          : body?.engineProfile || "source-first-v3",
+      compilerCanary,
     });
   } catch (error) {
     return Response.json(
