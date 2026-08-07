@@ -20,7 +20,7 @@ test("OPS Center detail studio uses its isolated engine line", () => {
   assert.match(moduleFile, /OPS Center 전용/);
   assert.match(
     moduleFile,
-    /commerce-os-detail-page-studio-git-isolated-ops-center-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
+    /commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
   );
   assert.match(moduleFile, /isolated\/ops-center/);
 });
@@ -32,7 +32,7 @@ test("SaaS production detail studio uses its isolated engine line", () => {
   );
   assert.match(
     registryFile,
-    /commerce-os-detail-page-studio-git-isolated-saas-production-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
+    /commerce-os-detail-page-studio-git-isolated-sa-3f377e-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
   );
   assert.match(registryFile, /isolated\/saas-production/);
 });
