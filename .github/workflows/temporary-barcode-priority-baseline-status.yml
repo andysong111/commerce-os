@@ -9,24 +9,18 @@ permissions:
 jobs:
   production-status:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
-      - name: Run guarded Product Master full sales apply
+      - name: Read baseline and incremental production status
         shell: bash
         run: |
           set -euo pipefail
           base='https://commerce-os-ops-center.vercel.app'
-          echo 'FULL_BEGIN'
-          curl -L -sS --connect-timeout 10 --max-time 240 \
-            -H 'Origin: https://commerce-os-ops-center.vercel.app' \
-            -H 'Content-Type: application/json' \
-            -X POST \
-            --data '{"action":"full"}' \
-            "$base/api/product-master/shopling-sales-backfill" \
-            | python -c 'import json,sys; p=json.load(sys.stdin); r=p.get("result") or {}; print(json.dumps({"ok":p.get("ok"),"message":p.get("message"),"applied":r.get("applied"),"verified":r.get("verified"),"resultMessage":r.get("message")},ensure_ascii=False))'
-          echo 'FULL_END'
-          sleep 2
-          curl -L -sS --connect-timeout 10 --max-time 45 \
-            -H 'Origin: https://commerce-os-ops-center.vercel.app' \
-            "$base/api/product-master/shopling-sales-backfill" \
-            | python -c 'import json,sys; p=json.load(sys.stdin); s=p.get("status") or {}; keys=["requestId","state","stage","progress","completedRanges","totalRanges","fetchedRows","acceptedRows","unmappedRows","monthlyRowCount","safeRowCount","alreadyAppliedCount","pendingCount","blockerCount","canaryVerified","chunkDays"]; print("FINAL_STATUS",json.dumps({k:s.get(k) for k in keys},ensure_ascii=False))'
+          for path in \
+            '/product-master/shopling-sales-backfill' \
+            '/product-master/shopling-sales-incremental'; do
+            echo "PAGE_${path}_BEGIN"
+            curl -L -sS --connect-timeout 10 --max-time 30 "$base$path" \
+              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:7000])'
+            echo "PAGE_${path}_END"
+          done
