@@ -23,6 +23,12 @@ export default async function ProductMasterShoplingSalesBackfillPage() {
               Shopling 연결값
             </Link>
             <Link
+              href="/product-master/shopling-sales-incremental"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              증분 자동동기화
+            </Link>
+            <Link
               href="/product-master"
               className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
             >

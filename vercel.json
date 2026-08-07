@@ -21,6 +21,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/product-master-shopling-sales-incremental",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }

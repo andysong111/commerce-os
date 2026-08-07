@@ -116,6 +116,7 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, and bound
     { path: "/api/cron/product-decision-live-refresh", schedule: "* * * * *" },
     { path: "/api/cron/product-master-shopling-diagnostic", schedule: "* * * * *" },
     { path: "/api/cron/product-master-shopling-sales-backfill", schedule: "* * * * *" },
+    { path: "/api/cron/product-master-shopling-sales-incremental", schedule: "* * * * *" },
     { path: "/api/cron/price-grade-receipt-shadow-bootstrap", schedule: "*/5 * * * *" },
   ]);
 });
