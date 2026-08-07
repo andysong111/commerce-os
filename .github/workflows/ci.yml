@@ -64,3 +64,40 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+      - name: Probe production historical shadow
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/product-master/shopling-sales-backfill/historical-shadow'
+          code='000'
+          for attempt in $(seq 1 12); do
+            code=$(curl -L -sS --connect-timeout 10 --max-time 30 -o /tmp/historical-shadow.html -w '%{http_code}' "$url" || true)
+            echo "shadow probe attempt=$attempt http=$code"
+            if [ "$code" = '200' ]; then
+              python - <<'PY'
+          import html
+          import re
+          from pathlib import Path
+          raw = Path('/tmp/historical-shadow.html').read_text(encoding='utf-8', errors='ignore')
+          clean = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
+          clean = re.sub(r'<style[\s\S]*?</style>', ' ', clean, flags=re.I)
+          clean = re.sub(r'<!--.*?-->', '', clean, flags=re.S)
+          clean = re.sub(r'<[^>]+>', ' ', clean)
+          clean = html.unescape(clean)
+          clean = re.sub(r'\s+', ' ', clean).strip()
+          print('SHADOW_TEXT_BEGIN')
+          print(clean[:6000])
+          print('SHADOW_TEXT_END')
+          for needle in ['현재 상태', '추가 연결 관측', 'PROMOTION GATE', '그림자 미연결', 'fallback 해결', '원천 형태 일치', '증감식 일치']:
+              idx = clean.find(needle)
+              if idx >= 0:
+                  print(f'SHADOW_MATCH {needle}: {clean[max(0, idx-120):idx+420]}')
+          PY
+              exit 0
+            fi
+            sleep 8
+          done
+          echo "production shadow page did not return 200; final=$code"
+          test -f /tmp/historical-shadow.html && head -c 3000 /tmp/historical-shadow.html || true
+          exit 1
