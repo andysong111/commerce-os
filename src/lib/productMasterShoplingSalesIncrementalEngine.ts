@@ -1,0 +1,276 @@
+import type { ProductMasterSalesMonthlyRow } from "@/lib/productMasterShoplingSalesBackfillEngine";
+
+export const SHOPLING_CANONICAL_SALES_SOURCE = "shopling_orders_24m_v1";
+
+export type IncrementalSalesSnapshotRow = {
+  id: string;
+  skuId: string;
+  month: string;
+  quantity: number;
+  revenue: number;
+  lastSaleAt: string | null;
+  source: string;
+  syncedAt?: string | null;
+};
+
+export type IncrementalPlanningRow = {
+  skuId: string;
+  barcode: string;
+  skuActive?: boolean;
+};
+
+export type IncrementalWriteRow = ProductMasterSalesMonthlyRow & {
+  skuId: string;
+};
+
+export type IncrementalBlocker = {
+  code:
+    | "SKU_NOT_CURRENT"
+    | "TARGET_ROW_CONFLICT"
+    | "LEGACY_MONTH_OVERLAP";
+  barcode: string;
+  skuId: string | null;
+  month: string;
+  message: string;
+};
+
+export type IncrementalReconcilePlan = {
+  months: string[];
+  freshRows: IncrementalWriteRow[];
+  zeroRows: IncrementalWriteRow[];
+  writeRows: IncrementalWriteRow[];
+  blockers: IncrementalBlocker[];
+};
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function integer(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function normalizeBarcode(value: unknown) {
+  return text(value).normalize("NFKC").toUpperCase().replace(/\s+/g, "");
+}
+
+function dateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function monthOnly(value: Date) {
+  return value.toISOString().slice(0, 7);
+}
+
+function validDate(value: Date) {
+  return Number.isFinite(value.valueOf());
+}
+
+export function buildShoplingIncrementalWindow(
+  now = new Date(),
+  previousMonths = 3,
+) {
+  if (!validDate(now)) throw new Error("SHOPLING_INCREMENTAL_NOW_INVALID");
+  const boundedMonths = Math.max(1, Math.min(12, Math.trunc(previousMonths)));
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - boundedMonths, 1),
+  );
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const months: string[] = [];
+  for (
+    let cursor = new Date(start);
+    cursor <= end;
+    cursor = new Date(
+      Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1),
+    )
+  ) {
+    months.push(monthOnly(cursor));
+  }
+  return {
+    startDate: dateOnly(start),
+    endDate: dateOnly(end),
+    months,
+  };
+}
+
+function planningIndexes(planningRows: IncrementalPlanningRow[]) {
+  const skuByBarcode = new Map<string, string>();
+  const barcodeBySku = new Map<string, string>();
+  const ambiguousBarcodes = new Set<string>();
+  const ambiguousSkus = new Set<string>();
+
+  for (const row of planningRows) {
+    if (row.skuActive === false) continue;
+    const skuId = text(row.skuId);
+    const barcode = normalizeBarcode(row.barcode);
+    if (!skuId || !barcode) continue;
+
+    const existingSku = skuByBarcode.get(barcode);
+    if (existingSku && existingSku !== skuId) ambiguousBarcodes.add(barcode);
+    else skuByBarcode.set(barcode, skuId);
+
+    const existingBarcode = barcodeBySku.get(skuId);
+    if (existingBarcode && existingBarcode !== barcode) ambiguousSkus.add(skuId);
+    else barcodeBySku.set(skuId, barcode);
+  }
+
+  for (const barcode of ambiguousBarcodes) skuByBarcode.delete(barcode);
+  for (const skuId of ambiguousSkus) barcodeBySku.delete(skuId);
+  return { skuByBarcode, barcodeBySku };
+}
+
+function sameTargetIdentity(
+  fresh: IncrementalWriteRow,
+  existing: IncrementalSalesSnapshotRow,
+) {
+  return (
+    existing.id === fresh.id &&
+    existing.skuId === fresh.skuId &&
+    existing.month === fresh.month &&
+    existing.source === SHOPLING_CANONICAL_SALES_SOURCE
+  );
+}
+
+function canonicalRow(
+  row: ProductMasterSalesMonthlyRow,
+  skuId: string,
+): IncrementalWriteRow {
+  return {
+    id: text(row.id),
+    barcode: normalizeBarcode(row.barcode),
+    skuId,
+    month: text(row.month),
+    quantity: integer(row.quantity),
+    revenue: integer(row.revenue),
+    lastSaleAt: row.lastSaleAt ?? null,
+    source: SHOPLING_CANONICAL_SALES_SOURCE,
+  };
+}
+
+export function buildShoplingIncrementalReconcilePlan(input: {
+  freshRows: ProductMasterSalesMonthlyRow[];
+  existingRows: IncrementalSalesSnapshotRow[];
+  planningRows: IncrementalPlanningRow[];
+  months: string[];
+}): IncrementalReconcilePlan {
+  const months = [...new Set(input.months.map(text).filter(Boolean))].sort();
+  const monthSet = new Set(months);
+  const { skuByBarcode, barcodeBySku } = planningIndexes(input.planningRows);
+  const existingById = new Map(input.existingRows.map((row) => [text(row.id), row]));
+  const otherBySkuMonth = new Map<string, IncrementalSalesSnapshotRow[]>();
+  for (const row of input.existingRows) {
+    if (row.source === SHOPLING_CANONICAL_SALES_SOURCE) continue;
+    const key = `${text(row.skuId)}\u0000${text(row.month)}`;
+    otherBySkuMonth.set(key, [...(otherBySkuMonth.get(key) ?? []), row]);
+  }
+
+  const blockers: IncrementalBlocker[] = [];
+  const freshRows: IncrementalWriteRow[] = [];
+  const freshIds = new Set<string>();
+
+  for (const raw of input.freshRows) {
+    const barcode = normalizeBarcode(raw.barcode);
+    const month = text(raw.month);
+    if (!monthSet.has(month)) continue;
+    const skuId = skuByBarcode.get(barcode);
+    if (!skuId) {
+      blockers.push({
+        code: "SKU_NOT_CURRENT",
+        barcode,
+        skuId: null,
+        month,
+        message: "증분 판매원장 위치코드를 현재 상품마스터 SKU에서 찾지 못했습니다.",
+      });
+      continue;
+    }
+    const row = canonicalRow(raw, skuId);
+    freshIds.add(row.id);
+    const target = existingById.get(row.id);
+    if (target && !sameTargetIdentity(row, target)) {
+      blockers.push({
+        code: "TARGET_ROW_CONFLICT",
+        barcode,
+        skuId,
+        month,
+        message: "같은 Shopling 판매원장 ID가 다른 SKU·월·원천에 연결되어 있어 자동 갱신을 차단했습니다.",
+      });
+      continue;
+    }
+    const overlaps = otherBySkuMonth.get(`${skuId}\u0000${month}`) ?? [];
+    if (overlaps.some((existing) => integer(existing.quantity) > 0 || integer(existing.revenue) > 0)) {
+      blockers.push({
+        code: "LEGACY_MONTH_OVERLAP",
+        barcode,
+        skuId,
+        month,
+        message: "같은 SKU·월에 다른 원천의 판매원장이 있어 이중계상 위험 때문에 증분 갱신을 차단했습니다.",
+      });
+      continue;
+    }
+    freshRows.push(row);
+  }
+
+  const zeroRows: IncrementalWriteRow[] = [];
+  for (const existing of input.existingRows) {
+    if (existing.source !== SHOPLING_CANONICAL_SALES_SOURCE) continue;
+    if (!monthSet.has(text(existing.month))) continue;
+    if (freshIds.has(text(existing.id))) continue;
+    const barcode = barcodeBySku.get(text(existing.skuId));
+    if (!barcode) {
+      blockers.push({
+        code: "SKU_NOT_CURRENT",
+        barcode: "",
+        skuId: text(existing.skuId) || null,
+        month: text(existing.month),
+        message: "기존 Shopling 월 판매원장의 SKU를 현재 상품마스터 위치코드로 되돌릴 수 없어 0 보정을 차단했습니다.",
+      });
+      continue;
+    }
+    const expectedId = `shopling-sales-v1:${barcode}:${text(existing.month)}`;
+    if (text(existing.id) !== expectedId) {
+      blockers.push({
+        code: "TARGET_ROW_CONFLICT",
+        barcode,
+        skuId: text(existing.skuId),
+        month: text(existing.month),
+        message: "기존 Shopling 판매원장 ID가 현재 결정적 ID 규칙과 달라 자동 0 보정을 차단했습니다.",
+      });
+      continue;
+    }
+    zeroRows.push({
+      id: expectedId,
+      barcode,
+      skuId: text(existing.skuId),
+      month: text(existing.month),
+      quantity: 0,
+      revenue: 0,
+      lastSaleAt: null,
+      source: SHOPLING_CANONICAL_SALES_SOURCE,
+    });
+  }
+
+  const writeRows = [...freshRows, ...zeroRows].sort((left, right) =>
+    `${left.month}\u0000${left.barcode}`.localeCompare(
+      `${right.month}\u0000${right.barcode}`,
+    ),
+  );
+  return { months, freshRows, zeroRows, writeRows, blockers };
+}
+
+export function exactShoplingIncrementalSales(
+  expected: IncrementalWriteRow,
+  actual: IncrementalSalesSnapshotRow,
+) {
+  return (
+    text(actual.id) === expected.id &&
+    text(actual.skuId) === expected.skuId &&
+    text(actual.month) === expected.month &&
+    integer(actual.quantity) === expected.quantity &&
+    integer(actual.revenue) === expected.revenue &&
+    (actual.lastSaleAt ?? null) === (expected.lastSaleAt ?? null) &&
+    actual.source === SHOPLING_CANONICAL_SALES_SOURCE
+  );
+}
