@@ -64,40 +64,74 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
-      - name: Probe production historical shadow
+      - name: Probe production sales evidence
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          url='https://commerce-os-ops-center.vercel.app/product-master/shopling-sales-backfill/historical-shadow'
-          code='000'
-          for attempt in $(seq 1 12); do
-            code=$(curl -L -sS --connect-timeout 10 --max-time 30 -o /tmp/historical-shadow.html -w '%{http_code}' "$url" || true)
-            echo "shadow probe attempt=$attempt http=$code"
-            if [ "$code" = '200' ]; then
-              python - <<'PY'
+          python - <<'PY'
           import html
           import re
+          import subprocess
+          import time
           from pathlib import Path
-          raw = Path('/tmp/historical-shadow.html').read_text(encoding='utf-8', errors='ignore')
-          clean = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
-          clean = re.sub(r'<style[\s\S]*?</style>', ' ', clean, flags=re.I)
-          clean = re.sub(r'<!--.*?-->', '', clean, flags=re.S)
-          clean = re.sub(r'<[^>]+>', ' ', clean)
-          clean = html.unescape(clean)
-          clean = re.sub(r'\s+', ' ', clean).strip()
-          print('SHADOW_TEXT_BEGIN')
-          print(clean[:6000])
-          print('SHADOW_TEXT_END')
-          for needle in ['현재 상태', '추가 연결 관측', 'PROMOTION GATE', '그림자 미연결', 'fallback 해결', '원천 형태 일치', '증감식 일치']:
-              idx = clean.find(needle)
-              if idx >= 0:
-                  print(f'SHADOW_MATCH {needle}: {clean[max(0, idx-120):idx+420]}')
+
+          base = 'https://commerce-os-ops-center.vercel.app'
+          pages = [
+              ('BASELINE', '/product-master/shopling-sales-backfill', [
+                  '기간 구간', 'Shopling 조회행', '연결된 유효 주문', '미연결 주문',
+                  '자동 적재 차단', '과거 주문 연결 검토 필요'
+              ]),
+              ('CATALOG', '/product-master/shopling-sales-backfill/unmapped-diagnostic/catalog-evidence', [
+                  '과거 Catalog', '고신뢰', '자동해결', '현재 SKU', '과거 위치코드',
+                  '안전', 'CATALOG_EXACT_OPTION_CURRENT_BARCODE_SAFE_UNITS'
+              ]),
+              ('SHADOW', '/product-master/shopling-sales-backfill/historical-shadow', [
+                  '현재 상태', '추가 연결 관측', 'PROMOTION GATE', '그림자 미연결',
+                  'fallback 해결', '원천 형태 일치', '증감식 일치'
+              ]),
+          ]
+
+          def clean_html(raw: str) -> str:
+              value = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
+              value = re.sub(r'<style[\s\S]*?</style>', ' ', value, flags=re.I)
+              value = re.sub(r'<!--.*?-->', '', value, flags=re.S)
+              value = re.sub(r'<[^>]+>', ' ', value)
+              value = html.unescape(value)
+              return re.sub(r'\s+', ' ', value).strip()
+
+          failed = []
+          for label, path, needles in pages:
+              target = base + path
+              output = Path(f'/tmp/{label.lower()}.html')
+              code = '000'
+              for attempt in range(1, 5):
+                  completed = subprocess.run(
+                      [
+                          'curl', '-L', '-sS', '--connect-timeout', '10', '--max-time', '30',
+                          '-o', str(output), '-w', '%{http_code}', target,
+                      ],
+                      capture_output=True,
+                      text=True,
+                  )
+                  code = completed.stdout.strip() or '000'
+                  print(f'{label}_PROBE attempt={attempt} http={code}')
+                  if code == '200':
+                      break
+                  time.sleep(5)
+              if code != '200':
+                  failed.append((label, code))
+                  continue
+              clean = clean_html(output.read_text(encoding='utf-8', errors='ignore'))
+              print(f'{label}_TEXT_BEGIN')
+              print(clean[:12000])
+              print(f'{label}_TEXT_END')
+              for needle in needles:
+                  idx = clean.find(needle)
+                  if idx >= 0:
+                      print(f'{label}_MATCH {needle}: {clean[max(0, idx-180):idx+620]}')
+
+          if failed:
+              print('PROBE_FAILED', failed)
+              raise SystemExit(1)
           PY
-              exit 0
-            fi
-            sleep 8
-          done
-          echo "production shadow page did not return 200; final=$code"
-          test -f /tmp/historical-shadow.html && head -c 3000 /tmp/historical-shadow.html || true
-          exit 1
