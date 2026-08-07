@@ -67,6 +67,43 @@ function planning(overrides = {}) {
   };
 }
 
+function planningWithAmbiguousGoodsKey() {
+  return planning({
+    products: [
+      {
+        skuId: "sku-1",
+        barcode: "BAA1-1",
+        productName: "현재 상품 A",
+        optionName: "현재 옵션 A",
+        skuActive: true,
+        listings: [
+          {
+            goodsKey: "1001",
+            optionId: "NEW-1",
+            unitsPerOrder: 2,
+            active: true,
+          },
+        ],
+      },
+      {
+        skuId: "sku-2",
+        barcode: "BCC1-1",
+        productName: "현재 상품 B",
+        optionName: "현재 옵션 B",
+        skuActive: true,
+        listings: [
+          {
+            goodsKey: "1001",
+            optionId: "NEW-2",
+            unitsPerOrder: 1,
+            active: true,
+          },
+        ],
+      },
+    ],
+  });
+}
+
 function catalog(overrides = {}) {
   return {
     goodsKey: "1001",
@@ -104,11 +141,12 @@ test("exact historical option becomes safe only with one current barcode and one
   assert.match(index.fingerprint, /^sha256:[a-f0-9]{64}$/);
 });
 
-test("historical option fallback resolves only after current resolver fails", () => {
-  const fallback = buildHistoricalOptionFallbackIndex(planning(), [catalog()]);
+test("historical option fallback resolves only after current goods identity is ambiguous", () => {
+  const ambiguousPlanning = planningWithAmbiguousGoodsKey();
+  const fallback = buildHistoricalOptionFallbackIndex(ambiguousPlanning, [catalog()]);
   const result = aggregateProductMasterShoplingSalesHistoricalShadowChunk(
     [order()],
-    planning(),
+    ambiguousPlanning,
     range,
     fallback,
   );
@@ -150,11 +188,12 @@ test("goods_key mismatch blocks historical fallback even when optionId matches",
   assert.equal(result.fallbackRejectedGoodsKeyMismatch, 1);
 });
 
-test("conflicting managed code blocks historical fallback", () => {
-  const fallback = buildHistoricalOptionFallbackIndex(planning(), [catalog()]);
+test("conflicting managed code blocks historical fallback after current resolver fails", () => {
+  const ambiguousPlanning = planningWithAmbiguousGoodsKey();
+  const fallback = buildHistoricalOptionFallbackIndex(ambiguousPlanning, [catalog()]);
   const result = aggregateProductMasterShoplingSalesHistoricalShadowChunk(
-    [order({ ptn_goods_cd: "BBB1-1" })],
-    planning(),
+    [order({ ptn_goods_cd: "ZZZ9-9" })],
+    ambiguousPlanning,
     range,
     fallback,
   );
