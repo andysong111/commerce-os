@@ -51,10 +51,10 @@ type PlanningIndex = {
   byGoodsKey: Map<string, ListingIdentity>;
   byBarcode: Map<string, ListingIdentity>;
   managedOptionIds: Set<string>;
-  managedGoodsKeys: Set<string>;
 };
 
-const MANAGED_BARCODE = /^[A-Z]{3}\d+-\d+$/;
+const MANAGED_BARCODE = /^B[A-Z]{2}\d+-\d+$/;
+const STRUCTURED_LEGACY_CODE = /^[A-Z]{3}\d+-\d+$/;
 const MAX_UNMAPPED_SAMPLES = 50;
 
 function text(value: unknown) {
@@ -64,6 +64,11 @@ function text(value: unknown) {
 function number(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizedStructuredCode(value: unknown) {
+  const barcode = normalizeShoplingBarcode(value);
+  return STRUCTURED_LEGACY_CODE.test(barcode) ? barcode : "";
 }
 
 function managedBarcode(value: unknown) {
@@ -117,7 +122,6 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
   const ambiguousGoodsKeys = new Set<string>();
   const unitsByBarcode = new Map<string, Set<number>>();
   const managedOptionIds = new Set<string>();
-  const managedGoodsKeys = new Set<string>();
 
   for (const product of planning.products ?? []) {
     const barcode = managedBarcode(product.barcode);
@@ -134,7 +138,6 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
       const optionId = text(listing.optionId);
       const goodsKey = text(listing.goodsKey);
       if (optionId) managedOptionIds.add(optionId);
-      if (goodsKey) managedGoodsKeys.add(goodsKey);
       const identity = {
         barcode,
         unitsPerOrder: safeUnits(listing.unitsPerOrder),
@@ -171,7 +174,6 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
     byGoodsKey,
     byBarcode,
     managedOptionIds,
-    managedGoodsKeys,
   };
 }
 
@@ -191,7 +193,7 @@ function rawValue(row: ShoplingRawRow, keys: string[]) {
   return "";
 }
 
-function rawManagedCode(row: ShoplingRawRow) {
+function rawStructuredCode(row: ShoplingRawRow) {
   for (const key of [
     "ptn_goods_cd",
     "buying_cd",
@@ -200,10 +202,15 @@ function rawManagedCode(row: ShoplingRawRow) {
     "opt_barcode",
     "barcode",
   ]) {
-    const barcode = managedBarcode(rawValue(row, [key]));
-    if (barcode) return barcode;
+    const code = normalizedStructuredCode(rawValue(row, [key]));
+    if (code) return code;
   }
   return "";
+}
+
+function rawManagedCode(row: ShoplingRawRow) {
+  const structured = rawStructuredCode(row);
+  return managedBarcode(structured);
 }
 
 function isManagedSalesScope(
@@ -211,14 +218,14 @@ function isManagedSalesScope(
   order: ReturnType<typeof normalizeShoplingOrder>,
   raw: ShoplingRawRow,
 ) {
-  const directCode = rawManagedCode(raw) || managedBarcode(order.barcode);
-  if (directCode) return true;
+  const rawCode = rawStructuredCode(raw) || normalizedStructuredCode(order.barcode);
+  if (rawCode) return Boolean(managedBarcode(rawCode));
 
   const optionId = text(order.optionId);
   if (optionId && index.managedOptionIds.has(optionId)) return true;
 
   for (const key of [text(order.productId), text(order.mallProductKey)]) {
-    if (key && index.managedGoodsKeys.has(key)) return true;
+    if (key && index.byGoodsKey.has(key)) return true;
   }
   return false;
 }
@@ -296,11 +303,12 @@ export function aggregateProductMasterShoplingSalesChunk(
       continue;
     }
 
-    // Commerce OS canonical sales intentionally includes only the managed
-    // location-code catalog (for example BAA1-1). Historical consignment
-    // orders that have no direct managed code and no identity in the current
-    // managed Shopling listing set are outside Product Master scope and must
-    // not block the canonical ledger.
+    // Canonical sales are limited to the current warehouse location-code
+    // catalog (BAA1-1, BEC4-2, ...). A structured non-B code such as AAA385-2
+    // is explicit legacy evidence and is excluded even when its goods_key was
+    // later reused by a managed product. Historical rows without a code are
+    // accepted only when the current optionId or a uniquely resolvable
+    // goods_key proves a current B-prefixed managed SKU.
     if (!isManagedSalesScope(index, order, raw)) {
       ignoredRows += 1;
       continue;
