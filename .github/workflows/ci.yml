@@ -32,6 +32,7 @@ jobs:
           src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
           src/lib/productMasterShoplingSalesHistoricalShadowEngine.ts
           src/lib/productMasterShoplingSalesHistoricalShadow.ts
+          src/lib/productMasterShoplingSalesCatalogEvidence.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
       - name: Test existing bulk safety and new engine integration
@@ -49,6 +50,7 @@ jobs:
       - name: Test historical option shadow safety
         run: >-
           node --experimental-strip-types --test
+          tests/productMasterShoplingSalesCatalogEvidence.test.mjs
           tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
           tests/productMasterShoplingSalesHistoricalShadow.test.mjs
       - name: Test tracker-connected product launch flow
