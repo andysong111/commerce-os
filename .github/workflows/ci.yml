@@ -64,7 +64,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
-      - name: Probe production sales evidence
+      - name: Monitor production direct-code evidence
         if: always()
         shell: bash
         run: |
@@ -77,20 +77,7 @@ jobs:
           from pathlib import Path
 
           base = 'https://commerce-os-ops-center.vercel.app'
-          pages = [
-              ('BASELINE', '/product-master/shopling-sales-backfill', [
-                  '기간 구간', 'Shopling 조회행', '연결된 유효 주문', '미연결 주문',
-                  '자동 적재 차단', '과거 주문 연결 검토 필요'
-              ]),
-              ('CATALOG', '/product-master/shopling-sales-backfill/unmapped-diagnostic/catalog-evidence', [
-                  '과거 Catalog', '고신뢰', '자동해결', '현재 SKU', '과거 위치코드',
-                  '안전', 'CATALOG_EXACT_OPTION_CURRENT_BARCODE_SAFE_UNITS'
-              ]),
-              ('SHADOW', '/product-master/shopling-sales-backfill/historical-shadow', [
-                  '현재 상태', '추가 연결 관측', 'PROMOTION GATE', '그림자 미연결',
-                  'fallback 해결', '원천 형태 일치', '증감식 일치'
-              ]),
-          ]
+          direct_path = '/product-master/shopling-sales-backfill/direct-code-evidence'
 
           def clean_html(raw: str) -> str:
               value = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
@@ -100,38 +87,61 @@ jobs:
               value = html.unescape(value)
               return re.sub(r'\s+', ' ', value).strip()
 
-          failed = []
-          for label, path, needles in pages:
-              target = base + path
-              output = Path(f'/tmp/{label.lower()}.html')
-              code = '000'
-              for attempt in range(1, 5):
-                  completed = subprocess.run(
-                      [
-                          'curl', '-L', '-sS', '--connect-timeout', '10', '--max-time', '30',
-                          '-o', str(output), '-w', '%{http_code}', target,
-                      ],
-                      capture_output=True,
-                      text=True,
-                  )
-                  code = completed.stdout.strip() or '000'
-                  print(f'{label}_PROBE attempt={attempt} http={code}')
-                  if code == '200':
-                      break
-                  time.sleep(5)
+          def fetch(path: str, output: Path):
+              completed = subprocess.run(
+                  [
+                      'curl', '-L', '-sS', '--connect-timeout', '10', '--max-time', '30',
+                      '-o', str(output), '-w', '%{http_code}', base + path,
+                  ],
+                  capture_output=True,
+                  text=True,
+              )
+              return completed.stdout.strip() or '000'
+
+          # Wait for the newly merged deployment/route to become live.
+          direct_file = Path('/tmp/direct.html')
+          code = '000'
+          for attempt in range(1, 13):
+              code = fetch(direct_path, direct_file)
+              print(f'DIRECT_ROUTE attempt={attempt} http={code}')
+              if code == '200':
+                  break
+              time.sleep(10)
+          if code != '200':
+              raise SystemExit(f'direct evidence route never became ready: {code}')
+
+          # Observe the existing 1-minute worker. This is GET-only monitoring;
+          # the page itself does not start or mutate the scan.
+          for observation in range(1, 20):
+              code = fetch(direct_path, direct_file)
               if code != '200':
-                  failed.append((label, code))
+                  print(f'DIRECT_OBSERVATION {observation} http={code}')
+                  time.sleep(55)
                   continue
-              clean = clean_html(output.read_text(encoding='utf-8', errors='ignore'))
-              print(f'{label}_TEXT_BEGIN')
-              print(clean[:12000])
-              print(f'{label}_TEXT_END')
-              for needle in needles:
+              clean = clean_html(direct_file.read_text(encoding='utf-8', errors='ignore'))
+              print(f'DIRECT_OBSERVATION {observation}: {clean[:4500]}')
+              for needle in [
+                  '현재 상태', '완료 구간', '진행률', '직접코드 증거행',
+                  '안전 optionId', '저장샘플 복원후보', 'COMPLETED', 'FAILED'
+              ]:
                   idx = clean.find(needle)
                   if idx >= 0:
-                      print(f'{label}_MATCH {needle}: {clean[max(0, idx-180):idx+620]}')
+                      print(f'DIRECT_MATCH {needle}: {clean[max(0, idx-140):idx+520]}')
+              if ' COMPLETED ' in f' {clean} ' or ' FAILED ' in f' {clean} ':
+                  print('DIRECT_TERMINAL_STATE_REACHED')
+                  break
+              time.sleep(55)
 
-          if failed:
-              print('PROBE_FAILED', failed)
-              raise SystemExit(1)
+          # Final compact snapshots of the canonical and catalog pages.
+          for label, path in [
+              ('BASELINE', '/product-master/shopling-sales-backfill'),
+              ('CATALOG', '/product-master/shopling-sales-backfill/unmapped-diagnostic/catalog-evidence'),
+              ('SHADOW', '/product-master/shopling-sales-backfill/historical-shadow'),
+          ]:
+              output = Path(f'/tmp/{label.lower()}.html')
+              code = fetch(path, output)
+              print(f'{label}_FINAL http={code}')
+              if code == '200':
+                  clean = clean_html(output.read_text(encoding='utf-8', errors='ignore'))
+                  print(f'{label}_FINAL_TEXT {clean[:5000]}')
           PY
