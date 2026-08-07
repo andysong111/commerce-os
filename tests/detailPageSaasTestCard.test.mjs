@@ -11,7 +11,7 @@ const [moduleFile, datedModuleFile, registryFile, dashboardFile, pageFile] =
     readFile("src/app/page.tsx", "utf8"),
   ]);
 
-test("OPS Center detail studio uses its isolated engine line", () => {
+test("OPS Center detail studio uses its dedicated v260807 Production deployment", () => {
   assert.match(moduleFile, /id: "detail-page-studio-saas-test"/);
   assert.match(
     moduleFile,
@@ -20,7 +20,7 @@ test("OPS Center detail studio uses its isolated engine line", () => {
   assert.match(moduleFile, /OPS Center 전용/);
   assert.match(
     moduleFile,
-    /commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa\.vercel\.app\/\?studio_variant=saas-test/,
+    /commerce-os-detail-page-studio-pzxe\.vercel\.app\/\?studio_variant=saas-test/,
   );
   assert.match(moduleFile, /isolated\/ops-center/);
 });
