@@ -31,6 +31,9 @@ jobs:
           src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
           src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
           src/lib/productMasterShoplingSalesBackfillEngine.ts
+          src/lib/productMasterShoplingSalesBackfill.ts
+          src/lib/productMasterShoplingSalesIncrementalEngine.ts
+          src/lib/productMasterShoplingSalesIncremental.ts
           src/lib/productMasterShoplingSalesHistoricalShadowEngine.ts
           src/lib/productMasterShoplingSalesHistoricalShadow.ts
           src/lib/productMasterShoplingSalesDirectCodeEvidenceEngine.ts
@@ -56,6 +59,7 @@ jobs:
           node --experimental-strip-types --test
           tests/productMasterShoplingSalesBackfillEngine.test.mjs
           tests/productMasterShoplingSalesUnmappedContext.test.mjs
+          tests/productMasterShoplingSalesIncremental.test.mjs
           tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
           tests/productMasterShoplingSalesHistoricalShadow.test.mjs
           tests/productMasterShoplingSalesDirectCodeEvidenceEngine.test.mjs

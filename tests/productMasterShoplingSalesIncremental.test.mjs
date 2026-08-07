@@ -39,6 +39,16 @@ test("incremental sync preserves mapping stability and blocks unmapped or confli
   assert.match(engine, /LEGACY_MONTH_OVERLAP/);
 });
 
+test("incremental reconciliation keeps inactive B-code SKUs addressable for historical sales", () => {
+  assert.match(engine, /MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}/);
+  assert.match(engine, /Inactive B-prefixed SKUs still own real historical sales/);
+  assert.doesNotMatch(engine, /if \(row\.skuActive === false\) continue/);
+  assert.match(workflow, /MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}/);
+  assert.match(workflow, /skuActive: product\.skuActive !== false/);
+  assert.match(workflow, /active: listing\.active !== false/);
+  assert.doesNotMatch(workflow, /\.filter\(\(product\) => product\.skuActive !== false\)/);
+});
+
 test("incremental writes are bounded, idempotent and fully reverified", () => {
   assert.match(workflow, /APPLY_BATCH_SIZE = 500/);
   assert.match(workflow, /pending\.slice\(0, APPLY_BATCH_SIZE\)/);

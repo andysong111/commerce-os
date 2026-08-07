@@ -74,12 +74,10 @@ function order(overrides = {}) {
   };
 }
 
+const range = { start: "2026-08-01", end: "2026-08-07" };
+
 test("monthly backfill converts order quantity through unitsPerOrder", () => {
-  const result = aggregateProductMasterShoplingSalesChunk(
-    [order()],
-    planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
-  );
+  const result = aggregateProductMasterShoplingSalesChunk([order()], planning(), range);
   assert.equal(result.acceptedRows, 1);
   assert.equal(result.unmappedRows, 0);
   assert.equal(result.monthlyRows[0].quantity, 6);
@@ -91,7 +89,7 @@ test("cancelled and refunded orders never enter canonical sales", () => {
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ ord_status: "취소완료" }), order({ ord_no: "ORD-2", ord_status: "refund" })],
     planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.ignoredRows, 2);
@@ -102,7 +100,7 @@ test("historical consignment orders outside managed barcode catalog are ignored 
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD-CONSIGNMENT", prod_id: "900000", mall_prod_key: "900000" })],
     planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 0);
@@ -114,7 +112,7 @@ test("explicit AAA legacy codes are excluded even when the goods key is now a ma
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "1001", ptn_goods_cd: "AAA385-2" })],
     planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 0);
@@ -125,7 +123,7 @@ test("a unique current managed goods key can recover a no-code historical order"
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "1001", mall_prod_key: "OLD-MALL" })],
     planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 1);
   assert.equal(result.unmappedRows, 0);
@@ -152,7 +150,7 @@ test("ambiguous goods-key-only historical orders are ignored without stronger B-
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "1001" })],
     ambiguous,
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 0);
@@ -187,7 +185,7 @@ test("an ambiguous exact current option stays fail-closed", () => {
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "SAME", prod_id: "UNKNOWN", mall_prod_key: "UNKNOWN" })],
     ambiguous,
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 1);
@@ -209,11 +207,7 @@ test("non-B Product Master codes are never canonical managed inventory", () => {
       },
     ],
   });
-  const result = aggregateProductMasterShoplingSalesChunk(
-    [order()],
-    legacyPlanning,
-    { start: "2026-08-01", end: "2026-08-07" },
-  );
+  const result = aggregateProductMasterShoplingSalesChunk([order()], legacyPlanning, range);
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 0);
   assert.equal(result.ignoredRows, 1);
@@ -223,7 +217,7 @@ test("managed partner code can recover an order when historical option identity 
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "OLD", ptn_goods_cd: "BAA1-1" })],
     planning(),
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
   );
   assert.equal(result.acceptedRows, 1);
   assert.equal(result.monthlyRows[0].quantity, 6);
@@ -248,7 +242,167 @@ test("ambiguous barcode pack ratios are never guessed from the barcode alone", (
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "OLD", prod_id: "OLD", ptn_goods_cd: "BAA1-1" })],
     ambiguous,
-    { start: "2026-08-01", end: "2026-08-07" },
+    range,
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 1);
+});
+
+test("inactive exact B-code sales use their own deterministic pack ratio", () => {
+  const historical = planning({
+    products: [
+      {
+        skuId: "inactive-white",
+        barcode: "BBA4-1",
+        productName: "과거 관리상품",
+        optionName: "화이트",
+        skuActive: false,
+        listings: [
+          { goodsKey: "120097", optionId: "OLD-WHITE", unitsPerOrder: 2, active: false },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD", prod_id: "120097", ptn_goods_cd: "BBA4-1", mall_ord_cnt: "3" })],
+    historical,
+    range,
+  );
+  assert.equal(result.acceptedRows, 1);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.monthlyRows[0].barcode, "BBA4-1");
+  assert.equal(result.monthlyRows[0].quantity, 6);
+});
+
+test("inactive exact B-code can use one agreed current goods pack ratio", () => {
+  const historical = planning({
+    products: [
+      {
+        skuId: "inactive-white",
+        barcode: "BBA4-1",
+        productName: "목도리",
+        optionName: "화이트",
+        skuActive: false,
+        listings: [],
+      },
+      {
+        skuId: "gray",
+        barcode: "BBA4-3",
+        productName: "목도리",
+        optionName: "그레이",
+        skuActive: true,
+        listings: [
+          { goodsKey: "120097", optionId: "28162745", unitsPerOrder: 1, active: true },
+        ],
+      },
+      {
+        skuId: "pink",
+        barcode: "BBA5-3",
+        productName: "목도리",
+        optionName: "핑크",
+        skuActive: true,
+        listings: [
+          { goodsKey: "120097", optionId: "28162746", unitsPerOrder: 1, active: true },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [
+      order({
+        opt_id: "28162748",
+        prod_id: "120097",
+        mall_prod_key: "12270335574",
+        ptn_goods_cd: "BBA4-1",
+        mall_ord_cnt: "1",
+      }),
+    ],
+    historical,
+    range,
+  );
+  assert.equal(result.acceptedRows, 1);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.monthlyRows[0].barcode, "BBA4-1");
+  assert.equal(result.monthlyRows[0].quantity, 1);
+});
+
+test("inactive exact B-code stays blocked when compatible pack evidence disagrees", () => {
+  const historical = planning({
+    products: [
+      {
+        skuId: "inactive-white",
+        barcode: "BBA4-1",
+        productName: "목도리",
+        optionName: "화이트",
+        skuActive: false,
+        listings: [],
+      },
+      {
+        skuId: "gray",
+        barcode: "BBA4-3",
+        productName: "목도리",
+        optionName: "그레이",
+        skuActive: true,
+        listings: [
+          { goodsKey: "120097", optionId: "G", unitsPerOrder: 1, active: true },
+        ],
+      },
+      {
+        skuId: "pink",
+        barcode: "BBA5-3",
+        productName: "목도리",
+        optionName: "핑크",
+        skuActive: true,
+        listings: [
+          { goodsKey: "120097", optionId: "P", unitsPerOrder: 2, active: true },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD", prod_id: "120097", ptn_goods_cd: "BBA4-1" })],
+    historical,
+    range,
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 1);
+});
+
+test("explicit B-code conflict with a current exact option never guesses", () => {
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "O1", prod_id: "1001", ptn_goods_cd: "BBA4-1" })],
+    planning(),
+    range,
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 1);
+});
+
+test("duplicate Product Master ownership of one B-code stays fail-closed", () => {
+  const duplicate = planning({
+    products: [
+      {
+        skuId: "one",
+        barcode: "BBA4-1",
+        productName: "A",
+        optionName: "A",
+        skuActive: false,
+        listings: [{ goodsKey: "120097", optionId: "OLD", unitsPerOrder: 1, active: false }],
+      },
+      {
+        skuId: "two",
+        barcode: "BBA4-1",
+        productName: "B",
+        optionName: "B",
+        skuActive: true,
+        listings: [{ goodsKey: "120098", optionId: "NEW", unitsPerOrder: 1, active: true }],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "UNKNOWN", prod_id: "120097", ptn_goods_cd: "BBA4-1" })],
+    duplicate,
+    range,
   );
   assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 1);

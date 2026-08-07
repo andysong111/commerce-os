@@ -45,11 +45,18 @@ type ListingIdentity = {
   unitsPerOrder: number;
 };
 
+type HistoricalBarcodeEvidence = {
+  barcode: string;
+  ownUnits: Set<number>;
+};
+
 type PlanningIndex = {
   products: Set<string>;
   byOptionId: Map<string, ListingIdentity>;
   byGoodsKey: Map<string, ListingIdentity>;
   byBarcode: Map<string, ListingIdentity>;
+  historicalByBarcode: Map<string, HistoricalBarcodeEvidence>;
+  unitsByGoodsKey: Map<string, Set<number>>;
   managedOptionIds: Set<string>;
 };
 
@@ -93,6 +100,13 @@ function safeUnits(value: unknown) {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
+function addUnits(target: Map<string, Set<number>>, key: string, units: number) {
+  if (!key) return;
+  const values = target.get(key) ?? new Set<number>();
+  values.add(units);
+  target.set(key, values);
+}
+
 function registerUnique(
   target: Map<string, ListingIdentity>,
   ambiguous: Set<string>,
@@ -120,28 +134,40 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
   const byGoodsKey = new Map<string, ListingIdentity>();
   const ambiguousOptionIds = new Set<string>();
   const ambiguousGoodsKeys = new Set<string>();
-  const unitsByBarcode = new Map<string, Set<number>>();
+  const activeUnitsByBarcode = new Map<string, Set<number>>();
+  const unitsByGoodsKey = new Map<string, Set<number>>();
   const managedOptionIds = new Set<string>();
+  const barcodeOwnerCount = new Map<string, number>();
+  const historicalCandidates = new Map<string, HistoricalBarcodeEvidence>();
 
   for (const product of planning.products ?? []) {
     const barcode = managedBarcode(product.barcode);
-    if (!barcode || product.skuActive === false) continue;
+    if (!barcode) continue;
+
     products.add(barcode);
-    const activeListings = (product.listings ?? []).filter(
-      (listing) => listing.active !== false,
-    );
-    if (!activeListings.length) {
-      unitsByBarcode.set(barcode, new Set([1]));
+    barcodeOwnerCount.set(barcode, (barcodeOwnerCount.get(barcode) ?? 0) + 1);
+    const allListings = product.listings ?? [];
+
+    if (product.skuActive === false) {
+      historicalCandidates.set(barcode, {
+        barcode,
+        ownUnits: new Set(allListings.map((listing) => safeUnits(listing.unitsPerOrder))),
+      });
       continue;
     }
+
+    const activeListings = allListings.filter((listing) => listing.active !== false);
+    if (!activeListings.length) {
+      activeUnitsByBarcode.set(barcode, new Set([1]));
+      continue;
+    }
+
     for (const listing of activeListings) {
       const optionId = text(listing.optionId);
       const goodsKey = text(listing.goodsKey);
+      const unitsPerOrder = safeUnits(listing.unitsPerOrder);
       if (optionId) managedOptionIds.add(optionId);
-      const identity = {
-        barcode,
-        unitsPerOrder: safeUnits(listing.unitsPerOrder),
-      };
+      const identity = { barcode, unitsPerOrder };
       registerUnique(
         byOptionId,
         ambiguousOptionIds,
@@ -154,25 +180,46 @@ function buildPlanningIndex(planning: ProductPlanningSnapshot): PlanningIndex {
         goodsKey,
         identity,
       );
-      const units = unitsByBarcode.get(barcode) ?? new Set<number>();
-      units.add(identity.unitsPerOrder);
-      unitsByBarcode.set(barcode, units);
+      addUnits(unitsByGoodsKey, goodsKey, unitsPerOrder);
+      addUnits(activeUnitsByBarcode, barcode, unitsPerOrder);
     }
   }
 
+  const ambiguousBarcodes = new Set(
+    [...barcodeOwnerCount.entries()]
+      .filter(([, count]) => count !== 1)
+      .map(([barcode]) => barcode),
+  );
+  for (const barcode of ambiguousBarcodes) products.delete(barcode);
+  for (const [key, identity] of [...byOptionId.entries()]) {
+    if (ambiguousBarcodes.has(identity.barcode)) byOptionId.delete(key);
+  }
+  for (const [key, identity] of [...byGoodsKey.entries()]) {
+    if (ambiguousBarcodes.has(identity.barcode)) byGoodsKey.delete(key);
+  }
+
   const byBarcode = new Map<string, ListingIdentity>();
-  for (const [barcode, units] of unitsByBarcode) {
-    if (units.size !== 1) continue;
+  for (const [barcode, units] of activeUnitsByBarcode) {
+    if (ambiguousBarcodes.has(barcode) || units.size !== 1) continue;
     byBarcode.set(barcode, {
       barcode,
       unitsPerOrder: [...units][0] ?? 1,
     });
   }
+
+  const historicalByBarcode = new Map<string, HistoricalBarcodeEvidence>();
+  for (const [barcode, evidence] of historicalCandidates) {
+    if (ambiguousBarcodes.has(barcode)) continue;
+    historicalByBarcode.set(barcode, evidence);
+  }
+
   return {
     products,
     byOptionId,
     byGoodsKey,
     byBarcode,
+    historicalByBarcode,
+    unitsByGoodsKey,
     managedOptionIds,
   };
 }
@@ -230,21 +277,66 @@ function isManagedSalesScope(
   return false;
 }
 
+function historicalDirectIdentity(
+  index: PlanningIndex,
+  directCode: string,
+  order: ReturnType<typeof normalizeShoplingOrder>,
+): ListingIdentity | null {
+  const evidence = index.historicalByBarcode.get(directCode);
+  if (!evidence) return null;
+
+  if (evidence.ownUnits.size === 1) {
+    return {
+      barcode: directCode,
+      unitsPerOrder: [...evidence.ownUnits][0] ?? 1,
+    };
+  }
+  if (evidence.ownUnits.size > 1) return null;
+
+  const compatibleUnits = new Set<number>();
+  let foundEvidence = false;
+  for (const key of new Set([text(order.productId), text(order.mallProductKey)])) {
+    if (!key) continue;
+    const units = index.unitsByGoodsKey.get(key);
+    if (!units?.size) continue;
+    foundEvidence = true;
+    for (const value of units) compatibleUnits.add(value);
+  }
+  if (!foundEvidence || compatibleUnits.size !== 1) return null;
+  return {
+    barcode: directCode,
+    unitsPerOrder: [...compatibleUnits][0] ?? 1,
+  };
+}
+
 function resolveIdentity(
   index: PlanningIndex,
   order: ReturnType<typeof normalizeShoplingOrder>,
   raw: ShoplingRawRow,
 ) {
   const optionId = text(order.optionId);
-  if (optionId && index.byOptionId.has(optionId)) {
-    return index.byOptionId.get(optionId)!;
-  }
-
+  const optionIdentity = optionId ? index.byOptionId.get(optionId) ?? null : null;
   const directCode = rawManagedCode(raw) || managedBarcode(order.barcode);
-  if (directCode && index.byBarcode.has(directCode)) {
-    return index.byBarcode.get(directCode)!;
+
+  if (directCode) {
+    if (optionIdentity) {
+      return optionIdentity.barcode === directCode ? optionIdentity : null;
+    }
+
+    const currentDirect = index.byBarcode.get(directCode);
+    if (currentDirect) return currentDirect;
+
+    const historicalDirect = historicalDirectIdentity(index, directCode, order);
+    if (historicalDirect) return historicalDirect;
+
+    for (const key of [text(order.productId), text(order.mallProductKey)]) {
+      const identity = key ? index.byGoodsKey.get(key) : null;
+      if (identity?.barcode === directCode) return identity;
+    }
+    return null;
   }
 
+  if (optionIdentity) return optionIdentity;
   for (const key of [text(order.productId), text(order.mallProductKey)]) {
     if (key && index.byGoodsKey.has(key)) return index.byGoodsKey.get(key)!;
   }
@@ -303,12 +395,11 @@ export function aggregateProductMasterShoplingSalesChunk(
       continue;
     }
 
-    // Canonical sales are limited to the current warehouse location-code
-    // catalog (BAA1-1, BEC4-2, ...). A structured non-B code such as AAA385-2
-    // is explicit legacy evidence and is excluded even when its goods_key was
-    // later reused by a managed product. Historical rows without a code are
-    // accepted only when the current optionId or a uniquely resolvable
-    // goods_key proves a current B-prefixed managed SKU.
+    // Canonical sales include only B-prefixed warehouse-managed products.
+    // An exact B-code can remain valid historical sales evidence even when
+    // that SKU is now inactive. Inactive exact barcodes are accepted only
+    // when the base-unit ratio is deterministic from their own listing or
+    // compatible current listings for the same Shopling goods identity.
     if (!isManagedSalesScope(index, order, raw)) {
       ignoredRows += 1;
       continue;

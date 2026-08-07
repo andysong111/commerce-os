@@ -51,6 +51,7 @@ const DEFAULT_PRODUCT_MASTER_URL =
 const MAX_STEP_ATTEMPTS = 3;
 const OPERATION_LIMIT = 500;
 const APPLY_BATCH_SIZE = 500;
+const MANAGED_BARCODE = /^B[A-Z]{2}\d+-\d+$/;
 
 type OperationRow = {
   operation_type?: unknown;
@@ -152,6 +153,14 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function managedBarcode(value: unknown) {
+  const barcode = text(value)
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  return MANAGED_BARCODE.test(barcode) ? barcode : "";
+}
+
 function iso(value: unknown) {
   const parsed = Date.parse(text(value));
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
@@ -227,12 +236,12 @@ function mappingFingerprint(
   products: Awaited<ReturnType<typeof loadProductPlanningSnapshot>>["products"],
 ) {
   const normalized = products
-    .filter((product) => product.skuActive !== false)
+    .filter((product) => Boolean(managedBarcode(product.barcode)))
     .map((product) => ({
       skuId: text(product.skuId),
-      barcode: text(product.barcode).toUpperCase(),
+      barcode: managedBarcode(product.barcode),
+      skuActive: product.skuActive !== false,
       listings: (product.listings ?? [])
-        .filter((listing) => listing.active !== false)
         .map((listing) => ({
           goodsKey: text(listing.goodsKey),
           optionId: text(listing.optionId),
@@ -240,14 +249,19 @@ function mappingFingerprint(
             1,
             Math.round(numeric(listing.unitsPerOrder)) || 1,
           ),
+          active: listing.active !== false,
         }))
         .sort((left, right) =>
-          `${left.goodsKey}\u0000${left.optionId}\u0000${left.unitsPerOrder}`.localeCompare(
-            `${right.goodsKey}\u0000${right.optionId}\u0000${right.unitsPerOrder}`,
+          `${left.goodsKey}\u0000${left.optionId}\u0000${left.unitsPerOrder}\u0000${left.active}`.localeCompare(
+            `${right.goodsKey}\u0000${right.optionId}\u0000${right.unitsPerOrder}\u0000${right.active}`,
           ),
         ),
     }))
-    .sort((left, right) => left.skuId.localeCompare(right.skuId));
+    .sort((left, right) =>
+      `${left.barcode}\u0000${left.skuId}`.localeCompare(
+        `${right.barcode}\u0000${right.skuId}`,
+      ),
+    );
   return `sha256:${createHash("sha256")
     .update(JSON.stringify(normalized))
     .digest("hex")}`;
@@ -330,7 +344,9 @@ export async function createProductMasterShoplingSalesIncrementalRequest(options
 } = {}) {
   const baseline = await loadProductMasterShoplingSalesStatus();
   if (baseline.state !== "COMPLETED") {
-    throw new Error(`PRODUCT_MASTER_SALES_INCREMENTAL_BASELINE_REQUIRED:${baseline.state}`);
+    throw new Error(
+      `PRODUCT_MASTER_SALES_INCREMENTAL_BASELINE_REQUIRED:${baseline.state}`,
+    );
   }
   shoplingReadConfigFromEnv(shoplingEnvironment());
   productMasterConnection();
@@ -469,7 +485,10 @@ async function activeContext() {
   const cid = correlationId(request.requestId);
   const [chunks, failures, failed, successes] = await Promise.all([
     readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_CHUNK, cid),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_STEP_FAILURE, cid),
+    readOperations(
+      PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_STEP_FAILURE,
+      cid,
+    ),
     readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_FAILED, cid, 5),
     readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_SUCCESS, cid, 5),
   ]);
@@ -481,7 +500,9 @@ function failureAttempt(row: OperationRow) {
   return {
     rangeKey: text(value.rangeKey),
     attempt: Math.max(0, Math.round(numeric(value.attempt))),
-    message: safeMessage(row.error_message || object(row.result_snapshot).message),
+    message: safeMessage(
+      row.error_message || object(row.result_snapshot).message,
+    ),
   };
 }
 
@@ -505,8 +526,16 @@ function failureKind(row: OperationRow): IncrementalFailureKind {
 
 async function latestTerminal(): Promise<IncrementalTerminal | null> {
   const [successes, failures] = await Promise.all([
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_SUCCESS, undefined, 1),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_FAILED, undefined, 1),
+    readOperations(
+      PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_SUCCESS,
+      undefined,
+      1,
+    ),
+    readOperations(
+      PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_FAILED,
+      undefined,
+      1,
+    ),
   ]);
   const candidates: IncrementalTerminal[] = [];
   const success = successes[0];
@@ -516,10 +545,13 @@ async function latestTerminal(): Promise<IncrementalTerminal | null> {
     if (occurredAt) {
       candidates.push({
         kind: "SUCCESS",
-        requestId: text(result.requestId || object(success.input_snapshot).requestId),
+        requestId: text(
+          result.requestId || object(success.input_snapshot).requestId,
+        ),
         occurredAt,
         failureKind: null,
-        message: text(result.message) || "증분 판매원장 동기화를 완료했습니다.",
+        message:
+          text(result.message) || "증분 판매원장 동기화를 완료했습니다.",
       });
     }
   }
@@ -540,7 +572,8 @@ async function latestTerminal(): Promise<IncrementalTerminal | null> {
   }
   return (
     candidates.sort(
-      (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
+      (left, right) =>
+        Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
     )[0] ?? null
   );
 }
@@ -691,7 +724,8 @@ export async function runProductMasterShoplingSalesIncrementalStep() {
     try {
       const planning = await loadProductPlanningSnapshot();
       if (
-        mappingFingerprint(planning.products) !== context.request.mappingFingerprint
+        mappingFingerprint(planning.products) !==
+        context.request.mappingFingerprint
       ) {
         return failRequest({
           context,
@@ -760,7 +794,9 @@ export async function runProductMasterShoplingSalesIncrementalStep() {
   }
 
   const planning = await loadProductPlanningSnapshot();
-  if (mappingFingerprint(planning.products) !== context.request.mappingFingerprint) {
+  if (
+    mappingFingerprint(planning.products) !== context.request.mappingFingerprint
+  ) {
     return failRequest({
       context,
       failureKind: "MAPPING_CHANGED",
@@ -910,12 +946,16 @@ export async function ensureProductMasterShoplingSalesIncrementalRequest(options
   const terminal = await latestTerminal();
   if (terminal) {
     const age = now.getTime() - Date.parse(terminal.occurredAt);
-    if (terminal.kind === "SUCCESS" && age < PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_SUCCESS_INTERVAL_MS) {
+    if (
+      terminal.kind === "SUCCESS" &&
+      age < PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_SUCCESS_INTERVAL_MS
+    ) {
       return {
         created: false,
         state: "IDLE" as const,
         lastSuccessAt: terminal.occurredAt,
-        message: "최근 증분 동기화 후 6시간이 지나지 않아 새 전수 재계산을 생략합니다.",
+        message:
+          "최근 증분 동기화 후 6시간이 지나지 않아 새 전수 재계산을 생략합니다.",
       };
     }
     if (terminal.kind === "FAILED") {
@@ -935,10 +975,13 @@ export async function ensureProductMasterShoplingSalesIncrementalRequest(options
           created: true,
           state: "QUEUED" as const,
           requestId: created.requestId,
-          message: "7일 증분 주문 조회 실패를 종료하고 2일 단위로 안전 재접수했습니다.",
+          message:
+            "7일 증분 주문 조회 실패를 종료하고 2일 단위로 안전 재접수했습니다.",
         };
       }
-      if (age < PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_FAILURE_RETRY_MS) {
+      if (
+        age < PRODUCT_MASTER_SHOPLING_SALES_INCREMENTAL_FAILURE_RETRY_MS
+      ) {
         return {
           created: false,
           state: "FAILED" as const,
@@ -977,7 +1020,9 @@ export async function loadProductMasterShoplingSalesIncrementalStatus(): Promise
     requestId: null,
     state: baseline.state === "COMPLETED" ? "IDLE" : "WAITING_BASELINE",
     stage:
-      baseline.state === "COMPLETED" ? "증분 동기화 대기" : "최초 판매원장 대기",
+      baseline.state === "COMPLETED"
+        ? "증분 동기화 대기"
+        : "최초 판매원장 대기",
     message:
       baseline.state === "COMPLETED"
         ? "최초 24개월 판매원장이 완료되었습니다. 증분 동기화 주기를 기다립니다."
@@ -1002,7 +1047,9 @@ export async function loadProductMasterShoplingSalesIncrementalStatus(): Promise
   const chunks = context.chunks
     .map(chunkFromRow)
     .filter(Boolean) as ProductMasterShoplingSalesChunk[];
-  const completedRanges = new Set(chunks.map((chunk) => rangeKey(chunk.range))).size;
+  const completedRanges = new Set(
+    chunks.map((chunk) => rangeKey(chunk.range)),
+  ).size;
   const totalRanges = context.request.ranges.length;
   const combined = combineProductMasterShoplingSalesChunks(chunks);
   const common = {
