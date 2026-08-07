@@ -17,23 +17,20 @@ jobs:
           set -euo pipefail
           base='https://commerce-os-ops-center.vercel.app'
           for i in $(seq 1 6); do
-            echo "RUN_NEXT_${i}_BEGIN"
             output=$(curl -L -sS --connect-timeout 10 --max-time 75 \
               -H 'Origin: https://commerce-os-ops-center.vercel.app' \
               -H 'Content-Type: application/json' \
               -X POST \
               --data '{"action":"run-next"}' \
               "$base/api/product-master/shopling-sales-backfill")
-            echo "$output"
-            echo "RUN_NEXT_${i}_END"
+            printf '%s' "$output" | python -c 'import json,sys; p=json.load(sys.stdin); r=p.get("result") or {}; print("STEP", json.dumps({"ok":p.get("ok"),"processed":r.get("processed"),"state":r.get("state"),"range":r.get("range"),"fetchedRows":r.get("fetchedRows"),"acceptedRows":r.get("acceptedRows"),"unmappedRows":r.get("unmappedRows"),"retryPending":r.get("retryPending")},ensure_ascii=False))'
             keep_going=$(printf '%s' "$output" | python -c 'import json,sys; p=json.load(sys.stdin); r=p.get("result") or {}; print("yes" if p.get("ok") is True and r.get("processed") is True and r.get("state") == "RUNNING" else "no")')
             if [ "$keep_going" != 'yes' ]; then
               break
             fi
             sleep 1
           done
-          echo 'STATUS_BEGIN'
           curl -L -sS --connect-timeout 10 --max-time 30 \
-            "$base/product-master/shopling-sales-backfill" \
-            | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:6000])'
-          echo 'STATUS_END'
+            -H 'Origin: https://commerce-os-ops-center.vercel.app' \
+            "$base/api/product-master/shopling-sales-backfill" \
+            | python -c 'import json,sys; p=json.load(sys.stdin); s=p.get("status") or {}; keys=["requestId","state","stage","progress","completedRanges","totalRanges","fetchedRows","acceptedRows","unmappedRows","monthlyRowCount","safeRowCount","alreadyAppliedCount","pendingCount","blockerCount","canaryVerified","chunkDays"]; print("FINAL_STATUS",json.dumps({k:s.get(k) for k in keys},ensure_ascii=False))'
