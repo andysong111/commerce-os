@@ -102,13 +102,15 @@ function parseCatalogOption(value: unknown): DiagnosticShoplingOption | null {
   const row = object(value);
   const goodsKey = text(row.goodsKey);
   const optionId = text(row.optionId);
-  const barcode = normalizeBarcode(row.barcode);
+  const directBarcode = normalizeBarcode(row.barcode);
+  const partnerOptionCode = normalizeBarcode(row.partnerOptionCode);
+  const barcode = directBarcode || partnerOptionCode;
   if (!goodsKey && !optionId && !barcode) return null;
   return {
     goodsKey,
     optionId,
     barcode,
-    partnerOptionCode: text(row.partnerOptionCode),
+    partnerOptionCode,
     productName: text(row.productName),
     optionName: text(row.optionName),
     isActive: row.isActive !== false,
