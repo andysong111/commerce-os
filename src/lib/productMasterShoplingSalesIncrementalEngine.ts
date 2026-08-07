@@ -1,6 +1,6 @@
 import type { ProductMasterSalesMonthlyRow } from "@/lib/productMasterShoplingSalesBackfillEngine";
 
-export const SHOPLING_CANONICAL_SALES_SOURCE = "shopling_orders_24m_v1";
+export const SHOPLING_CANONICAL_SALES_SOURCE = "shopling_orders_24m_v1" as const;
 
 export type IncrementalSalesSnapshotRow = {
   id: string;
