@@ -58,6 +58,20 @@ describe("Product Launch Evidence Compiler canary", () => {
     expect(startRoute).toContain("execution_id: executionId");
   });
 
+  it("clears every Compiler-only checkpoint before a repeated canary while preserving evidence and analysis", () => {
+    expect(startRoute).toContain("compilerV1PreflightReady: null");
+    expect(startRoute).toContain("compilerProductPack: null");
+    expect(startRoute).toContain("compilerBlueprint: null");
+    expect(startRoute).toContain("compilerPreflight: null");
+    expect(startRoute).toContain("compilerRasterGate: null");
+    expect(startRoute).toContain("compilerRasterTileCount: null");
+    expect(startRoute).toContain("compilerArtifactState: null");
+    expect(startRoute).toContain("compilerFinalSize: null");
+    expect(startRoute).toContain("compilerSelectedSourceIndexes: null");
+    expect(startRoute).not.toContain("evidence_urls: null");
+    expect(startRoute).not.toContain("analysis: null");
+  });
+
   it("does not replace the shared worker URL or Studio origin", () => {
     expect(startRoute).toContain(
       "const connection = resolveDetailPageStudioConnection()",
