@@ -1,5 +1,6 @@
 import { DetailPageActiveJobControlsV2 } from "@/components/detail-page-ai-review/DetailPageActiveJobControlsV2";
 import { DetailPageAiReviewWorkspace } from "@/components/detail-page-ai-review/DetailPageAiReviewWorkspace";
+import { DetailPageTerminalJobControls } from "@/components/detail-page-ai-review/DetailPageTerminalJobControls";
 import { PageHeader } from "@/components/PageHeader";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default function DetailPageAiReviewPage() {
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">전체 재생성은 확인 후 실행</span>
       </div>
       <DetailPageActiveJobControlsV2 />
+      <DetailPageTerminalJobControls />
       <DetailPageAiReviewWorkspace />
     </>
   );
