@@ -21,11 +21,25 @@ function unauthorized() {
   );
 }
 
+function zeroSourceBlocked(status: Awaited<ReturnType<typeof loadProductMasterShoplingSalesStatus>>) {
+  return (
+    status.completedRanges > 0 &&
+    status.fetchedRows === 0 &&
+    status.acceptedRows === 0 &&
+    status.monthlyRowCount === 0
+  );
+}
+
 export async function GET(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   try {
+    const status = await loadProductMasterShoplingSalesStatus();
     return Response.json(
-      { ok: true, status: await loadProductMasterShoplingSalesStatus() },
+      {
+        ok: true,
+        status,
+        zeroSourceBlocked: zeroSourceBlocked(status),
+      },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
@@ -72,6 +86,18 @@ export async function POST(request: Request) {
       );
     }
     if (action === "canary" || action === "full") {
+      const current = await loadProductMasterShoplingSalesStatus();
+      if (zeroSourceBlocked(current)) {
+        return Response.json(
+          {
+            ok: false,
+            code: "PRODUCT_MASTER_SHOPLING_SALES_ZERO_SOURCE_ROWS",
+            message:
+              "Shopling 주문 API에서 원시 주문행을 0건 읽은 상태이므로 빈 판매이력을 정상값으로 상품마스터에 적재하지 않습니다. 주문 응답구조 진단을 먼저 통과해야 합니다.",
+          },
+          { status: 409, headers: { "cache-control": "no-store" } },
+        );
+      }
       const result = await applyProductMasterShoplingSales(
         action === "canary" ? "CANARY" : "FULL",
       );
@@ -93,7 +119,7 @@ export async function POST(request: Request) {
       error instanceof Error
         ? error.message
         : "Shopling 판매원장 작업에 실패했습니다.";
-    const blocked = /BLOCKED|CANARY_REQUIRED|DIAGNOSTIC_NOT_COMPLETED|MAPPING_CHANGED/.test(
+    const blocked = /BLOCKED|CANARY_REQUIRED|DIAGNOSTIC_NOT_COMPLETED|MAPPING_CHANGED|ZERO_SOURCE_ROWS/.test(
       message,
     );
     const configuration = /INTEGRATION_SECRET|BASE_URL|SUPABASE_ADMIN|CREDENTIAL/.test(
