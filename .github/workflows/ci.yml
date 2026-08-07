@@ -30,6 +30,7 @@ jobs:
           src/app/api/product-launch-tracker/flow-selection/route.ts
           src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
           src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
+          src/lib/productMasterShoplingSalesBackfillEngine.ts
           src/lib/productMasterShoplingSalesHistoricalShadowEngine.ts
           src/lib/productMasterShoplingSalesHistoricalShadow.ts
           src/lib/productMasterShoplingSalesDirectCodeEvidenceEngine.ts
@@ -49,9 +50,10 @@ jobs:
           tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
           tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
           tests/priceAdjustmentEngineIntegration.test.mjs
-      - name: Test Shopling historical evidence safety
+      - name: Test managed Shopling sales scope and historical evidence safety
         run: >-
           node --experimental-strip-types --test
+          tests/productMasterShoplingSalesBackfillEngine.test.mjs
           tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
           tests/productMasterShoplingSalesHistoricalShadow.test.mjs
           tests/productMasterShoplingSalesDirectCodeEvidenceEngine.test.mjs
