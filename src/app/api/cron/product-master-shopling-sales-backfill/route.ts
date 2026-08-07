@@ -7,6 +7,7 @@ import {
   productMasterShoplingSalesConfigured,
   runProductMasterShoplingSalesStep,
 } from "@/lib/productMasterShoplingSalesBackfill";
+import { ensureProductMasterShoplingOrderProbe } from "@/lib/productMasterShoplingOrderProbe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export const maxDuration = 60;
 
 const MAX_STEPS_PER_INVOCATION = 6;
 const EXTRA_STEP_START_BUDGET_MS = 10_000;
+const ZERO_ROW_PROBE_MIN_COMPLETED_RANGES = 3;
 
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
@@ -102,6 +104,29 @@ export async function GET(request: Request) {
               ? "7일 주문 조회 실패를 종료하고 2일 단위로 최종 안전 재접수했습니다."
               : "최근 24개월 Shopling 판매원장 읽기 작업을 접수했습니다.",
       });
+    }
+
+    if (
+      (current.state === "QUEUED" || current.state === "RUNNING") &&
+      current.completedRanges >= ZERO_ROW_PROBE_MIN_COMPLETED_RANGES &&
+      current.fetchedRows === 0
+    ) {
+      const probe = await ensureProductMasterShoplingOrderProbe();
+      if (probe.executed) {
+        return Response.json({
+          ok: true,
+          configured: true,
+          processed: false,
+          state: current.state,
+          requestId: current.requestId,
+          diagnosticProbeExecuted: true,
+          diagnosticCategory: probe.result.category,
+          diagnosticParsedRows: probe.result.parsedRowCount,
+          diagnosticResponseBytes: probe.result.responseBytes,
+          message:
+            "여러 Shopling 주문 구간에서 원시 주문행이 0건이라 이번 Worker 호출은 판매원장 진행 대신 읽기 전용 응답구조 진단을 실행했습니다.",
+        });
+      }
     }
 
     if (current.state === "QUEUED" || current.state === "RUNNING") {
