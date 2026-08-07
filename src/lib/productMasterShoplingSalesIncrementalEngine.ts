@@ -27,7 +27,8 @@ export type IncrementalBlocker = {
   code:
     | "SKU_NOT_CURRENT"
     | "TARGET_ROW_CONFLICT"
-    | "LEGACY_MONTH_OVERLAP";
+    | "LEGACY_MONTH_OVERLAP"
+    | "UNEXPECTED_ROLLING_DROP";
   barcode: string;
   skuId: string | null;
   month: string;
@@ -150,6 +151,39 @@ function canonicalRow(
   };
 }
 
+function rollingVolumeGuard(input: {
+  freshRows: IncrementalWriteRow[];
+  existingRows: IncrementalSalesSnapshotRow[];
+  monthSet: Set<string>;
+  months: string[];
+}): IncrementalBlocker | null {
+  const existingQuantity = input.existingRows
+    .filter(
+      (row) =>
+        row.source === SHOPLING_CANONICAL_SALES_SOURCE &&
+        input.monthSet.has(text(row.month)),
+    )
+    .reduce((sum, row) => sum + integer(row.quantity), 0);
+  const freshQuantity = input.freshRows.reduce(
+    (sum, row) => sum + integer(row.quantity),
+    0,
+  );
+
+  if (existingQuantity >= 20 && freshQuantity * 2 < existingQuantity) {
+    return {
+      code: "UNEXPECTED_ROLLING_DROP",
+      barcode: "",
+      skuId: null,
+      month:
+        input.months.length > 1
+          ? `${input.months[0]}..${input.months.at(-1)}`
+          : (input.months[0] ?? ""),
+      message: `최근 증분 재계산 수량 ${freshQuantity}개가 기존 동일 기간 ${existingQuantity}개의 절반 미만이라 Shopling 부분응답 가능성을 배제할 수 없어 자동 갱신을 차단했습니다.`,
+    };
+  }
+  return null;
+}
+
 export function buildShoplingIncrementalReconcilePlan(input: {
   freshRows: ProductMasterSalesMonthlyRow[];
   existingRows: IncrementalSalesSnapshotRow[];
@@ -212,6 +246,14 @@ export function buildShoplingIncrementalReconcilePlan(input: {
     }
     freshRows.push(row);
   }
+
+  const volumeBlocker = rollingVolumeGuard({
+    freshRows,
+    existingRows: input.existingRows,
+    monthSet,
+    months,
+  });
+  if (volumeBlocker) blockers.push(volumeBlocker);
 
   const zeroRows: IncrementalWriteRow[] = [];
   for (const existing of input.existingRows) {
