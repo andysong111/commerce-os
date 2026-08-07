@@ -8,6 +8,8 @@ import {
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
 
+const DELETABLE_STATUSES = new Set(["cancelled", "failed", "success"]);
+
 export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ jobId: string }> },
@@ -33,12 +35,22 @@ export async function DELETE(
         { status: 404 },
       );
     }
-    if (job.status !== "cancelled") {
+    if (!DELETABLE_STATUSES.has(job.status)) {
       return Response.json(
         {
           ok: false,
-          code: "DETAIL_PAGE_JOB_DELETE_REQUIRES_CANCEL",
+          code: "DETAIL_PAGE_JOB_DELETE_REQUIRES_STOP",
           message: "진행 중 작업은 먼저 취소한 뒤 삭제할 수 있습니다.",
+        },
+        { status: 409 },
+      );
+    }
+    if (job.status === "success" && job.qa_status !== "passed") {
+      return Response.json(
+        {
+          ok: false,
+          code: "DETAIL_PAGE_JOB_COMPLETED_DELETE_NOT_ALLOWED",
+          message: "최종 검수 통과 완료 작업만 완료 목록에서 삭제할 수 있습니다.",
         },
         { status: 409 },
       );
@@ -67,7 +79,9 @@ export async function DELETE(
     return Response.json({
       ok: true,
       deletedJobId: job.id,
+      deletedStatus: job.status,
       preservedProductAssets: true,
+      preservedStorageAssets: true,
     });
   } catch (error) {
     return Response.json(
