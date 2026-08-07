@@ -14,6 +14,10 @@ const cron = await readFile(
   "src/app/api/cron/product-master-shopling-sales-incremental/route.ts",
   "utf8",
 );
+const recoveryApi = await readFile(
+  "src/app/api/product-master/shopling-sales-incremental/route.ts",
+  "utf8",
+);
 const vercel = await readFile("vercel.json", "utf8");
 
 test("incremental sync cannot start before the initial 24-month ledger is completed", () => {
@@ -81,4 +85,14 @@ test("cron is secret-protected, bounded, and registered every minute", () => {
   assert.match(cron, /runProductMasterShoplingSalesIncrementalStep/);
   assert.match(vercel, /product-master-shopling-sales-incremental/);
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+});
+
+test("same-origin recovery API can advance only an already-created incremental request", () => {
+  assert.match(recoveryApi, /isSameOriginOpsRequest/);
+  assert.match(recoveryApi, /runProductMasterShoplingSalesIncrementalStep/);
+  assert.match(recoveryApi, /action !== "run-next"/);
+  assert.doesNotMatch(
+    recoveryApi,
+    /createProductMasterShoplingSalesIncrementalRequest|ensureProductMasterShoplingSalesIncrementalRequest/,
+  );
 });
