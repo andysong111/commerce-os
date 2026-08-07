@@ -186,3 +186,30 @@ test("verification compares full canonical values", () => {
     false,
   );
 });
+
+
+test("verification treats equivalent timestamptz representations as the same instant", () => {
+  const expected = {
+    ...sales("BAA1-1", "2026-08", 8),
+    skuId: "sku-a",
+    lastSaleAt: "2026-08-20T10:00:00.000Z",
+  };
+  const actual = {
+    ...existing("sku-a", "BAA1-1", "2026-08", 8),
+    lastSaleAt: "2026-08-20T10:00:00+00:00",
+  };
+  assert.equal(exactShoplingIncrementalSales(expected, actual), true);
+});
+
+test("verification still rejects a genuinely different sale timestamp", () => {
+  const expected = {
+    ...sales("BAA1-1", "2026-08", 8),
+    skuId: "sku-a",
+    lastSaleAt: "2026-08-20T10:00:00.000Z",
+  };
+  const actual = {
+    ...existing("sku-a", "BAA1-1", "2026-08", 8),
+    lastSaleAt: "2026-08-20T10:00:01+00:00",
+  };
+  assert.equal(exactShoplingIncrementalSales(expected, actual), false);
+});

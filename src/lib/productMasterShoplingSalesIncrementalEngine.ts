@@ -54,6 +54,13 @@ function integer(value: unknown) {
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
 }
 
+function normalizedIso(value: unknown) {
+  const raw = text(value);
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : raw;
+}
+
 function normalizeBarcode(value: unknown) {
   return text(value).normalize("NFKC").toUpperCase().replace(/\s+/g, "");
 }
@@ -316,7 +323,7 @@ export function exactShoplingIncrementalSales(
     text(actual.month) === expected.month &&
     integer(actual.quantity) === expected.quantity &&
     integer(actual.revenue) === expected.revenue &&
-    (actual.lastSaleAt ?? null) === (expected.lastSaleAt ?? null) &&
+    normalizedIso(actual.lastSaleAt) === normalizedIso(expected.lastSaleAt) &&
     actual.source === SHOPLING_CANONICAL_SALES_SOURCE
   );
 }
