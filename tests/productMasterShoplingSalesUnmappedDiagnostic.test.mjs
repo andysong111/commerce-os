@@ -44,9 +44,25 @@ test("diagnostic never exposes stored order numbers or buyer data on the page", 
   assert.match(page, /Product Master\/Shopling 쓰기 0회/);
 });
 
-test("sampling is bounded and reports sample coverage instead of pretending to classify all rows", () => {
-  assert.match(service, /MAX_SAFE_SAMPLES = 100/);
-  assert.match(service, /sampledUnmappedRows/);
+test("sampling spans all persisted safe samples while preserving truncation evidence", () => {
+  assert.match(service, /MAX_SAFE_SAMPLES = 5_000/);
+  assert.match(service, /truncatedChunkCount/);
+  assert.match(service, /chunkUnmappedRows > chunkSamples\.length/);
+  assert.match(service, /storedSamplesExhausted/);
   assert.match(service, /sampleCoverage/);
-  assert.match(page, /샘플 커버리지/);
+  assert.match(page, /샘플 잘린 구간/);
+  assert.match(page, /저장샘플 완전성/);
+  assert.match(page, /저장된 샘플 분포/);
+});
+
+test("current identity blockers expose only current Product Master candidate metadata", () => {
+  assert.match(service, /ShoplingSalesUnmappedCandidate/);
+  assert.match(service, /candidatesByBarcode/);
+  assert.match(service, /candidatesByOptionId/);
+  assert.match(service, /candidatesByGoodsKey/);
+  assert.match(service, /unitsPerOrder/);
+  assert.match(service, /MAX_CANDIDATES_PER_SAMPLE = 10/);
+  assert.match(page, /현재 후보 위치코드/);
+  assert.match(page, /현재 optionId/);
+  assert.match(page, /주문당 재고수량/);
 });
