@@ -1,7 +1,10 @@
 const PRODUCTION_STUDIO_URL =
   "https://commerce-os-detail-page-studio.vercel.app/";
 
-// Stable Vercel Preview for bounded final assembly recovery in Detail Page Studio PR #55.
+const OPS_CENTER_V260807_STUDIO_URL =
+  "https://commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa.vercel.app/";
+
+// Stable Vercel Preview retained only as a legacy recovery reference.
 const PREVIEW_STUDIO_URL =
   "https://commerce-os-detail-page-studio-git-agent-final-96809d-a2bsangsa.vercel.app/";
 const FINALIZER_PROTOCOL_VERSION = "server-finalizer-v1";
@@ -26,14 +29,12 @@ export function resolveDetailPageStudioConnection(): DetailPageStudioConnection 
   const environment = process.env.VERCEL_ENV?.trim();
   const isPreview = environment === "preview";
   const isProduction = environment === "production";
-  // Production must never inherit a stale protected PR Preview override.
-  // Explicit overrides remain available for local development.
+  // Product Launch Tracker always uses the isolated OPS Center v260807 engine line.
+  // Local development may still provide an explicit override.
   const engineUrl = validateStudioUrl(
-    isPreview
-      ? PREVIEW_STUDIO_URL
-      : isProduction
-        ? PRODUCTION_STUDIO_URL
-        : configured || PRODUCTION_STUDIO_URL,
+    isPreview || isProduction
+      ? OPS_CENTER_V260807_STUDIO_URL
+      : configured || OPS_CENTER_V260807_STUDIO_URL,
   );
   const bypassSecret =
     process.env.DETAIL_PAGE_STUDIO_AUTOMATION_BYPASS_SECRET?.trim() || "";
