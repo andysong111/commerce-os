@@ -1,3 +1,4 @@
+import { loadProductMasterShoplingSalesStatus } from "@/lib/productMasterShoplingSalesBackfill";
 import {
   ensureProductMasterShoplingSalesIncrementalRequest,
   productMasterShoplingSalesIncrementalConfigured,
@@ -55,6 +56,23 @@ export async function GET(request: Request) {
   }
 
   try {
+    const baseline = await loadProductMasterShoplingSalesStatus();
+    if (
+      baseline.state === "COMPLETED" &&
+      baseline.completedRanges > 0 &&
+      baseline.fetchedRows === 0
+    ) {
+      return Response.json({
+        ok: true,
+        configured: true,
+        processed: false,
+        state: "WAITING_BASELINE",
+        code: "PRODUCT_MASTER_SHOPLING_SALES_ZERO_SOURCE_BASELINE",
+        message:
+          "최초 24개월 판매원장이 원시 Shopling 주문행 0건으로 끝난 상태라 증분 동기화를 시작하지 않습니다. 주문 응답구조 진단이 먼저 정상화되어야 합니다.",
+      });
+    }
+
     const ensured = await ensureProductMasterShoplingSalesIncrementalRequest();
     if (ensured.state === "WAITING_BASELINE") {
       return Response.json({
