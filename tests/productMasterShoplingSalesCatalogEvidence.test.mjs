@@ -22,6 +22,16 @@ test("catalog evidence reads only immutable product diagnostic chunks and existi
   assert.doesNotMatch(service, /method:\s*"POST"|method:\s*"PUT"|method:\s*"PATCH"|method:\s*"DELETE"/);
 });
 
+test("catalog evidence uses the same managed-code fallback as immutable catalog chunks", () => {
+  assert.match(service, /const directBarcode = normalizeBarcode\(row\.barcode\)/);
+  assert.match(
+    service,
+    /const partnerOptionCode = normalizeBarcode\(row\.partnerOptionCode\)/,
+  );
+  assert.match(service, /const barcode = directBarcode \|\| partnerOptionCode/);
+  assert.match(service, /partnerOptionCode,/);
+});
+
 test("only exact historical option, current barcode and unique current units becomes an auto-resolve candidate", () => {
   assert.match(service, /CATALOG_EXACT_OPTION_CURRENT_BARCODE_SAFE_UNITS/);
   assert.match(service, /barcodes\.size !== 1/);
