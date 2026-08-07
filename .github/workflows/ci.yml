@@ -30,6 +30,10 @@ jobs:
           src/app/api/product-launch-tracker/flow-selection/route.ts
           src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
           src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
+          src/lib/productMasterShoplingSalesHistoricalShadowEngine.ts
+          src/lib/productMasterShoplingSalesHistoricalShadow.ts
+          src/app/api/cron/product-master-shopling-sales-backfill/route.ts
+          src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -42,6 +46,11 @@ jobs:
           tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
           tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
           tests/priceAdjustmentEngineIntegration.test.mjs
+      - name: Test historical option shadow safety
+        run: >-
+          node --experimental-strip-types --test
+          tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
+          tests/productMasterShoplingSalesHistoricalShadow.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
