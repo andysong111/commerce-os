@@ -1,4 +1,4 @@
-import { DetailPageActiveJobControls } from "@/components/detail-page-ai-review/DetailPageActiveJobControls";
+import { DetailPageActiveJobControlsV2 } from "@/components/detail-page-ai-review/DetailPageActiveJobControlsV2";
 import { DetailPageAiReviewWorkspace } from "@/components/detail-page-ai-review/DetailPageAiReviewWorkspace";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -16,7 +16,7 @@ export default function DetailPageAiReviewPage() {
         <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">정상 체크포인트 보존</span>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">전체 재생성은 확인 후 실행</span>
       </div>
-      <DetailPageActiveJobControls />
+      <DetailPageActiveJobControlsV2 />
       <DetailPageAiReviewWorkspace />
     </>
   );
