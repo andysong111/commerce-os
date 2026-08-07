@@ -1,0 +1,47 @@
+name: BBA4-1 Raw RSC Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-raw-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Search raw production RSC for BBA4-1
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import html
+          import subprocess
+          from pathlib import Path
+
+          pages = [
+              ('MASTER','https://commerce-os-ops-center.vercel.app/product-master'),
+              ('DIAG','https://commerce-os-ops-center.vercel.app/product-master/shopling-diagnostic'),
+              ('APPLY','https://commerce-os-ops-center.vercel.app/product-master/shopling-diagnostic/apply'),
+              ('DIRECT','https://commerce-os-ops-center.vercel.app/product-master/shopling-sales-backfill/direct-code-evidence'),
+          ]
+          needles=['BBA4-1','28162748','120097']
+          for label,url in pages:
+              out=Path(f'/tmp/{label}.raw')
+              p=subprocess.run(['curl','-L','-sS','--connect-timeout','10','--max-time','30','-o',str(out),'-w','%{http_code}',url],capture_output=True,text=True)
+              print(f'{label}_HTTP={p.stdout.strip()}')
+              if p.stdout.strip()!='200': continue
+              raw=html.unescape(out.read_text(encoding='utf-8',errors='ignore'))
+              for needle in needles:
+                  pos=0
+                  count=0
+                  while count<20:
+                      idx=raw.find(needle,pos)
+                      if idx<0: break
+                      count+=1
+                      snippet=raw[max(0,idx-900):idx+2200].replace('\n',' ')
+                      print(f'{label}_{needle}_{count}: {snippet}')
+                      pos=idx+len(needle)
+                  print(f'{label}_{needle}_COUNT={count}')
+          PY
