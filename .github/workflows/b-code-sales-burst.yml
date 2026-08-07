@@ -1,0 +1,39 @@
+name: B-code Sales Baseline Burst
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-burst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Advance active B-code baseline safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import subprocess
+          import time
+
+          url='https://commerce-os-ops-center.vercel.app/api/product-master/shopling-sales-backfill'
+          headers=['-H','Origin: https://commerce-os-ops-center.vercel.app','-H','Content-Type: application/json']
+          for i in range(1, 21):
+              completed=subprocess.run([
+                  'curl','-L','-sS','--connect-timeout','10','--max-time','60',
+                  *headers,'-X','POST','--data','{"action":"run-next"}',url
+              ],capture_output=True,text=True)
+              body=completed.stdout.strip()
+              print(f'STEP {i}: {body}')
+              payload=json.loads(body)
+              result=payload.get('result') or {}
+              state=result.get('state') or ''
+              processed=result.get('processed')
+              if state not in ('RUNNING','QUEUED') or processed is False:
+                  break
+              time.sleep(0.5)
+          PY
