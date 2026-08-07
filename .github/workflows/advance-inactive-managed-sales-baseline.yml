@@ -1,0 +1,61 @@
+name: Advance Inactive Managed Sales Baseline
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-burst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Advance active read-only baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import subprocess
+          import time
+
+          base='https://commerce-os-ops-center.vercel.app'
+          api=base + '/api/product-master/shopling-sales-backfill'
+          headers=['-H','Origin: https://commerce-os-ops-center.vercel.app','-H','Content-Type: application/json']
+
+          failed_seen = False
+          for i in range(1, 31):
+              p=subprocess.run([
+                  'curl','-L','-sS','--connect-timeout','10','--max-time','60',
+                  *headers,'-X','POST','--data','{"action":"run-next"}',api
+              ],capture_output=True,text=True)
+              body=p.stdout.strip()
+              print(f'STEP {i}: {body}')
+              try:
+                  payload=json.loads(body)
+              except Exception:
+                  raise SystemExit(1)
+              result=payload.get('result') or {}
+              state=result.get('state') or ''
+              retry=result.get('retryPending') is True
+              processed=result.get('processed')
+              if state in ('COMPLETED','BLOCKED','READY_CANARY','READY_FULL'):
+                  break
+              if state == 'FAILED':
+                  failed_seen = True
+                  print('FAILED_RANGE_SERIES_REACHED; waiting for scheduled 7-day fallback')
+                  time.sleep(75)
+                  continue
+              if processed is False and not retry:
+                  break
+              time.sleep(0.5)
+
+          print('STATUS_PAGE_BEGIN')
+          p=subprocess.run([
+              'curl','-L','-sS','--connect-timeout','10','--max-time','30',
+              base + '/product-master/shopling-sales-backfill'
+          ],capture_output=True,text=True)
+          print(p.stdout[:12000])
+          print('STATUS_PAGE_END')
+          PY
