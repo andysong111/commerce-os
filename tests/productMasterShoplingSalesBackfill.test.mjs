@@ -54,3 +54,12 @@ test("one-minute worker auto-starts and adaptively reduces failed Shopling range
   assert.match(vercel, /product-master-shopling-sales-backfill/);
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
 });
+
+test("successful Shopling chunks may burst only inside a strict serverless time budget", () => {
+  assert.match(cron, /MAX_STEPS_PER_INVOCATION = 6/);
+  assert.match(cron, /EXTRA_STEP_START_BUDGET_MS = 10_000/);
+  assert.match(cron, /result\.processed === true/);
+  assert.match(cron, /result\.state === "RUNNING"/);
+  assert.match(cron, /Date\.now\(\) - startedAt < EXTRA_STEP_START_BUDGET_MS/);
+  assert.match(cron, /burstElapsedMs/);
+});

@@ -12,6 +12,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const MAX_STEPS_PER_INVOCATION = 6;
+const EXTRA_STEP_START_BUDGET_MS = 10_000;
+
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
   const supplied = request.headers.get("authorization")?.trim();
@@ -36,6 +39,29 @@ function recoveryChunkDays(state: Awaited<ReturnType<typeof loadProductMasterSho
     return PRODUCT_MASTER_SHOPLING_SALES_MINIMUM_CHUNK_DAYS;
   }
   return null;
+}
+
+async function runBoundedBurst() {
+  const startedAt = Date.now();
+  let stepCount = 0;
+  let result = await runProductMasterShoplingSalesStep();
+  stepCount += 1;
+
+  while (
+    stepCount < MAX_STEPS_PER_INVOCATION &&
+    result.processed === true &&
+    result.state === "RUNNING" &&
+    Date.now() - startedAt < EXTRA_STEP_START_BUDGET_MS
+  ) {
+    result = await runProductMasterShoplingSalesStep();
+    stepCount += 1;
+  }
+
+  return {
+    ...result,
+    stepCount,
+    burstElapsedMs: Date.now() - startedAt,
+  };
 }
 
 export async function GET(request: Request) {
@@ -82,7 +108,7 @@ export async function GET(request: Request) {
       return Response.json({
         ok: true,
         configured: true,
-        ...(await runProductMasterShoplingSalesStep()),
+        ...(await runBoundedBurst()),
       });
     }
 
