@@ -9,24 +9,24 @@ permissions:
 jobs:
   production-status:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
-      - name: Run one guarded Product Master sales canary
+      - name: Run guarded Product Master full sales apply
         shell: bash
         run: |
           set -euo pipefail
           base='https://commerce-os-ops-center.vercel.app'
-          echo 'CANARY_BEGIN'
-          curl -L -sS --connect-timeout 10 --max-time 75 \
+          echo 'FULL_BEGIN'
+          curl -L -sS --connect-timeout 10 --max-time 240 \
             -H 'Origin: https://commerce-os-ops-center.vercel.app' \
             -H 'Content-Type: application/json' \
             -X POST \
-            --data '{"action":"canary"}' \
+            --data '{"action":"full"}' \
             "$base/api/product-master/shopling-sales-backfill" \
             | python -c 'import json,sys; p=json.load(sys.stdin); r=p.get("result") or {}; print(json.dumps({"ok":p.get("ok"),"message":p.get("message"),"applied":r.get("applied"),"verified":r.get("verified"),"resultMessage":r.get("message")},ensure_ascii=False))'
-          echo 'CANARY_END'
+          echo 'FULL_END'
           sleep 2
-          curl -L -sS --connect-timeout 10 --max-time 30 \
+          curl -L -sS --connect-timeout 10 --max-time 45 \
             -H 'Origin: https://commerce-os-ops-center.vercel.app' \
             "$base/api/product-master/shopling-sales-backfill" \
             | python -c 'import json,sys; p=json.load(sys.stdin); s=p.get("status") or {}; keys=["requestId","state","stage","progress","completedRanges","totalRanges","fetchedRows","acceptedRows","unmappedRows","monthlyRowCount","safeRowCount","alreadyAppliedCount","pendingCount","blockerCount","canaryVerified","chunkDays"]; print("FINAL_STATUS",json.dumps({k:s.get(k) for k in keys},ensure_ascii=False))'
