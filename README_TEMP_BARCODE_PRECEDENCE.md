@@ -1,1 +1,0 @@
-Temporary branch marker for the Shopling managed-sales barcode precedence fix. Remove before merge.
