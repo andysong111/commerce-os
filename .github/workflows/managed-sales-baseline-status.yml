@@ -1,0 +1,50 @@
+name: Managed Sales Baseline Status Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production managed sales baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import html
+          import re
+          import subprocess
+          from pathlib import Path
+
+          url = 'https://commerce-os-ops-center.vercel.app/product-master/shopling-sales-backfill'
+          output = Path('/tmp/status.html')
+          completed = subprocess.run([
+              'curl','-L','-sS','--connect-timeout','10','--max-time','30',
+              '-o',str(output),'-w','%{http_code}',url,
+          ], capture_output=True, text=True)
+          code = completed.stdout.strip() or '000'
+          print(f'HTTP={code}')
+          if code != '200':
+              raise SystemExit(1)
+          raw = output.read_text(encoding='utf-8', errors='ignore')
+          raw = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
+          raw = re.sub(r'<style[\s\S]*?</style>', ' ', raw, flags=re.I)
+          raw = re.sub(r'<[^>]+>', ' ', raw)
+          clean = re.sub(r'\s+', ' ', html.unescape(raw)).strip()
+          print('STATUS_TEXT_BEGIN')
+          print(clean[:9000])
+          print('STATUS_TEXT_END')
+          for needle in [
+              'QUEUED','RUNNING','BLOCKED','READY_CANARY','READY_FULL','COMPLETED','FAILED',
+              '기간 구간','Shopling 조회행','연결된 유효 주문','월 판매원장 후보','미연결 주문',
+              '기본수량 환산 판매','판매매출 합계','판매 SKU','카나리','판매원장 적재 완료'
+          ]:
+              idx = clean.find(needle)
+              if idx >= 0:
+                  print(f'MATCH {needle}: {clean[max(0, idx-180):idx+900]}')
+          PY
