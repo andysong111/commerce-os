@@ -8,6 +8,11 @@ import {
   runProductMasterShoplingSalesStep,
 } from "@/lib/productMasterShoplingSalesBackfill";
 import {
+  createProductMasterShoplingSalesDirectCodeEvidenceRequest,
+  loadProductMasterShoplingSalesDirectCodeEvidenceStatus,
+  runProductMasterShoplingSalesDirectCodeEvidenceStep,
+} from "@/lib/productMasterShoplingSalesDirectCodeEvidence";
+import {
   createProductMasterShoplingSalesHistoricalShadowRequest,
   loadProductMasterShoplingSalesHistoricalShadowStatus,
   runProductMasterShoplingSalesHistoricalShadowStep,
@@ -94,6 +99,29 @@ async function runHistoricalShadowBoundedBurst() {
   };
 }
 
+async function runDirectCodeEvidenceBoundedBurst() {
+  const startedAt = Date.now();
+  let stepCount = 0;
+  let result = await runProductMasterShoplingSalesDirectCodeEvidenceStep();
+  stepCount += 1;
+
+  while (
+    stepCount < MAX_STEPS_PER_INVOCATION &&
+    result.processed === true &&
+    result.state === "RUNNING" &&
+    Date.now() - startedAt < EXTRA_STEP_START_BUDGET_MS
+  ) {
+    result = await runProductMasterShoplingSalesDirectCodeEvidenceStep();
+    stepCount += 1;
+  }
+
+  return {
+    ...result,
+    stepCount,
+    burstElapsedMs: Date.now() - startedAt,
+  };
+}
+
 export async function GET(request: Request) {
   if (!authorized(request)) {
     return Response.json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
@@ -144,6 +172,38 @@ export async function GET(request: Request) {
     }
 
     if (current.state === "BLOCKED") {
+      const directEvidence =
+        await loadProductMasterShoplingSalesDirectCodeEvidenceStatus();
+      if (
+        directEvidence.state === "QUEUED" ||
+        directEvidence.state === "RUNNING"
+      ) {
+        const evidenceResult = await runDirectCodeEvidenceBoundedBurst();
+        return Response.json({
+          ok: true,
+          configured: true,
+          evidenceState: "RUNNING",
+          ...evidenceResult,
+        });
+      }
+      if (
+        directEvidence.state === "COMPLETED" ||
+        directEvidence.state === "FAILED"
+      ) {
+        return Response.json({
+          ok: true,
+          configured: true,
+          processed: false,
+          state: current.state,
+          evidenceState: directEvidence.state,
+          directEvidenceRows: directEvidence.directEvidenceRows,
+          safeOptionIdCount: directEvidence.safeOptionIdCount,
+          highConfidenceStoredSampleCandidates:
+            directEvidence.highConfidenceStoredSampleCandidates,
+          message: directEvidence.message,
+        });
+      }
+
       const shadow = await loadProductMasterShoplingSalesHistoricalShadowStatus();
       if (shadow.state === "IDLE") {
         try {
@@ -166,14 +226,18 @@ export async function GET(request: Request) {
           if (
             /SHADOW_NO_EVIDENCE|SHADOW_NO_SAFE_RESOLVER/.test(message)
           ) {
+            const created =
+              await createProductMasterShoplingSalesDirectCodeEvidenceRequest();
             return Response.json({
               ok: true,
               configured: true,
-              processed: false,
-              state: current.state,
-              shadowState: "NOT_APPLICABLE",
+              processed: true,
+              state: "DIRECT_CODE_EVIDENCE_QUEUED",
+              requestId: created.requestId,
+              baselineRequestId: created.baselineRequestId,
+              totalRanges: created.ranges.length,
               message:
-                "현재 보존 증거만으로 자동 해결 가능한 과거 optionId가 확인되지 않아 기존 BLOCKED 상태를 유지합니다.",
+                "과거 상품 catalog에 exact optionId가 없어, 동일 optionId의 다른 주문행에 직접 위치코드가 남아 있는지 읽기 전용 전수 스캔을 자동 접수했습니다.",
             });
           }
           throw error;
