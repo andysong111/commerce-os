@@ -8,10 +8,9 @@ const [connection, nextConfig, dock] = await Promise.all([
   readFile("public/product-launch-tracker-app/detail-page-dock.js", "utf8"),
 ]);
 
-const OPS_V260807_HOST =
-  "commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa.vercel.app";
+const OPS_V260807_HOST = "commerce-os-detail-page-studio-pzxe.vercel.app";
 
-test("product launch tracker is pinned to the isolated OPS v260807 Studio", () => {
+test("product launch tracker is pinned to the dedicated OPS v260807 Production Studio", () => {
   assert.match(connection, /OPS_CENTER_V260807_STUDIO_URL/);
   assert.ok(connection.includes(OPS_V260807_HOST));
   assert.match(
@@ -19,6 +18,10 @@ test("product launch tracker is pinned to the isolated OPS v260807 Studio", () =
     /isPreview \|\| isProduction[\s\S]*OPS_CENTER_V260807_STUDIO_URL/,
   );
   assert.ok(nextConfig.includes(OPS_V260807_HOST));
+  assert.doesNotMatch(
+    connection,
+    /OPS_CENTER_V260807_STUDIO_URL\s*=\s*[\s\S]*git-isolated-op-4a07df/,
+  );
 });
 
 test("selected product launch rows force 1688 link mode and pass seller options", () => {
