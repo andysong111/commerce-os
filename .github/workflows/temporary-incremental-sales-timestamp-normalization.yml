@@ -1,0 +1,39 @@
+name: Temporary Incremental Sales Timestamp Normalization
+
+on:
+  push:
+    branches:
+      - fix/incremental-sales-timestamp-normalization
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.event_name == 'pull_request' || !contains(github.event.head_commit.message, '[incremental-ts-patched]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/incremental-sales-timestamp-normalization
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - run: node scripts/patch-incremental-sales-timestamp-normalization.mjs
+      - name: Test incremental engine
+        run: node --experimental-strip-types --test tests/productMasterShoplingSalesIncrementalEngine.test.mjs tests/productMasterShoplingSalesIncremental.test.mjs
+      - name: Lint changed files
+        run: npx eslint src/lib/productMasterShoplingSalesIncrementalEngine.ts tests/productMasterShoplingSalesIncrementalEngine.test.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Normalize incremental sales verification timestamps [incremental-ts-patched]"
+          git push origin HEAD:fix/incremental-sales-timestamp-normalization
