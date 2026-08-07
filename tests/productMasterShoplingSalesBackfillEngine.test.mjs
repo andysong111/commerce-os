@@ -110,7 +110,30 @@ test("historical consignment orders outside managed barcode catalog are ignored 
   assert.equal(result.monthlyRows.length, 0);
 });
 
-test("managed catalog identities stay in scope even when an exact mapping is ambiguous", () => {
+test("explicit AAA legacy codes are excluded even when the goods key is now a managed B-code product", () => {
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD", prod_id: "1001", ptn_goods_cd: "AAA385-2" })],
+    planning(),
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.ignoredRows, 1);
+});
+
+test("a unique current managed goods key can recover a no-code historical order", () => {
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "OLD", prod_id: "1001", mall_prod_key: "OLD-MALL" })],
+    planning(),
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 1);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.ignoredRows, 0);
+  assert.equal(result.monthlyRows[0].barcode, "BAA1-1");
+});
+
+test("ambiguous goods-key-only historical orders are ignored without stronger B-code evidence", () => {
   const ambiguous = planning({
     products: [
       {
@@ -132,8 +155,68 @@ test("managed catalog identities stay in scope even when an exact mapping is amb
     { start: "2026-08-01", end: "2026-08-07" },
   );
   assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.ignoredRows, 1);
+});
+
+test("an ambiguous exact current option stays fail-closed", () => {
+  const ambiguous = planning({
+    products: [
+      {
+        skuId: "sku-1",
+        barcode: "BAA1-1",
+        productName: "상품A",
+        optionName: "옵션A",
+        skuActive: true,
+        listings: [
+          { goodsKey: "1001", optionId: "SAME", unitsPerOrder: 1, active: true },
+        ],
+      },
+      {
+        skuId: "sku-2",
+        barcode: "BAA1-2",
+        productName: "상품B",
+        optionName: "옵션B",
+        skuActive: true,
+        listings: [
+          { goodsKey: "1002", optionId: "SAME", unitsPerOrder: 1, active: true },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order({ opt_id: "SAME", prod_id: "UNKNOWN", mall_prod_key: "UNKNOWN" })],
+    ambiguous,
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 0);
   assert.equal(result.unmappedRows, 1);
   assert.equal(result.ignoredRows, 0);
+});
+
+test("non-B Product Master codes are never canonical managed inventory", () => {
+  const legacyPlanning = planning({
+    products: [
+      {
+        skuId: "legacy",
+        barcode: "AAA385-2",
+        productName: "과거상품",
+        optionName: "과거옵션",
+        skuActive: true,
+        listings: [
+          { goodsKey: "1001", optionId: "O1", unitsPerOrder: 1, active: true },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [order()],
+    legacyPlanning,
+    { start: "2026-08-01", end: "2026-08-07" },
+  );
+  assert.equal(result.acceptedRows, 0);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.ignoredRows, 1);
 });
 
 test("managed partner code can recover an order when historical option identity is absent", () => {
