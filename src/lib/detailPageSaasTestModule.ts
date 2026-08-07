@@ -8,7 +8,7 @@ export const detailPageSaasTestModule: CommerceModule = {
     "SaaS 테스트버전에서 검증된 동일 엔진 기준을 OPS Center 전용 독립 개발선으로 복제했습니다. 상품 이미지와 정보를 입력하면 표준 생성 프로필에 따라 8개 섹션을 만들고, AI 검수·문제 패널 자동보정 후 최종 상세페이지를 제공합니다.",
   status: "available",
   route:
-    "https://commerce-os-detail-page-studio-git-isolated-ops-center-a2bsangsa.vercel.app/?studio_variant=saas-test",
+    "https://commerce-os-detail-page-studio-git-isolated-op-4a07df-a2bsangsa.vercel.app/?studio_variant=saas-test",
   category: "detail-page",
   inputType:
     "상품 이미지 최대 3장, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
