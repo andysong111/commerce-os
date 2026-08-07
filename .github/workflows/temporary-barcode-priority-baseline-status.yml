@@ -9,23 +9,29 @@ permissions:
 jobs:
   production-status:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - name: Advance one read-only production baseline step
+      - name: Run bounded read-only production baseline burst
         shell: bash
         run: |
           set -euo pipefail
           base='https://commerce-os-ops-center.vercel.app'
-          echo 'RUN_NEXT_BEGIN'
-          curl -L -sS --connect-timeout 10 --max-time 75 \
-            -H 'Origin: https://commerce-os-ops-center.vercel.app' \
-            -H 'Content-Type: application/json' \
-            -X POST \
-            --data '{"action":"run-next"}' \
-            "$base/api/product-master/shopling-sales-backfill"
-          echo
-          echo 'RUN_NEXT_END'
-          sleep 2
+          for i in $(seq 1 6); do
+            echo "RUN_NEXT_${i}_BEGIN"
+            output=$(curl -L -sS --connect-timeout 10 --max-time 75 \
+              -H 'Origin: https://commerce-os-ops-center.vercel.app' \
+              -H 'Content-Type: application/json' \
+              -X POST \
+              --data '{"action":"run-next"}' \
+              "$base/api/product-master/shopling-sales-backfill")
+            echo "$output"
+            echo "RUN_NEXT_${i}_END"
+            keep_going=$(printf '%s' "$output" | python -c 'import json,sys; p=json.load(sys.stdin); r=p.get("result") or {}; print("yes" if p.get("ok") is True and r.get("processed") is True and r.get("state") == "RUNNING" else "no")')
+            if [ "$keep_going" != 'yes' ]; then
+              break
+            fi
+            sleep 1
+          done
           echo 'STATUS_BEGIN'
           curl -L -sS --connect-timeout 10 --max-time 30 \
             "$base/product-master/shopling-sales-backfill" \
