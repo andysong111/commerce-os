@@ -1,0 +1,1 @@
+Temporary read-only production probe for the managed-barcode Shopling sales baseline. Do not merge this branch; close after reading the production status.
