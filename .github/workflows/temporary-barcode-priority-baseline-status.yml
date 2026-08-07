@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Advance one guarded incremental recovery step
+      - name: Advance one guarded incremental recovery step after verification fix
         shell: bash
         run: |
           set -euo pipefail
