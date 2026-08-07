@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
-import { isActiveDetailPageJob } from "@/lib/detailPageAiReview";
 import {
   getDetailPageJobConfig,
   isValidDetailPageJobId,
@@ -8,7 +7,10 @@ import {
   publicDetailPageJob,
   readDetailPageJob,
   resolveDetailPageJobIdentity,
+  type DetailPageJobRow,
 } from "@/lib/detailPageJobServer";
+
+const ACTIVE_STATUSES = new Set(["collecting", "queued", "running", "render_pending"]);
 
 export async function POST(
   request: NextRequest,
@@ -38,7 +40,7 @@ export async function POST(
     if (job.status === "cancelled") {
       return Response.json({ ok: true, job: publicDetailPageJob(job) });
     }
-    if (!isActiveDetailPageJob(job)) {
+    if (!isCancellable(job)) {
       return Response.json(
         {
           ok: false,
@@ -89,4 +91,9 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function isCancellable(job: DetailPageJobRow) {
+  if (ACTIVE_STATUSES.has(job.status)) return true;
+  return job.status === "failed" && job.stage === "server_final_assembly";
 }
