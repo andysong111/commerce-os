@@ -36,6 +36,7 @@ jobs:
           src/lib/productMasterShoplingSalesDirectCodeEvidenceEngine.ts
           src/lib/productMasterShoplingSalesDirectCodeEvidence.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
+          src/app/api/product-master/shopling-sales-backfill/unmapped-context/route.ts
           src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
           src/app/product-master/shopling-sales-backfill/direct-code-evidence/page.tsx
       - name: Test existing bulk safety and new engine integration
@@ -54,6 +55,7 @@ jobs:
         run: >-
           node --experimental-strip-types --test
           tests/productMasterShoplingSalesBackfillEngine.test.mjs
+          tests/productMasterShoplingSalesUnmappedContext.test.mjs
           tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
           tests/productMasterShoplingSalesHistoricalShadow.test.mjs
           tests/productMasterShoplingSalesDirectCodeEvidenceEngine.test.mjs
