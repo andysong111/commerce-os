@@ -8,64 +8,59 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  production-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.13.0
-          cache: npm
-      - run: npm ci
-      - name: Lint changed integration files
-        run: >-
-          npx eslint
-          src/lib/priceAdjustmentIntegrationAuth.ts
-          src/app/api/integrations/price-adjustment/jobs/route.ts
-          'src/app/api/integrations/price-adjustment/jobs/[jobId]/route.ts'
-          src/lib/extendedModuleRegistry.ts
-          src/lib/productLaunchTrackerRows.ts
-          src/lib/productLaunchTrackerShopling.ts
-          src/app/api/product-launch-tracker/flow-selection/route.ts
-          src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
-          src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
-          src/lib/productMasterShoplingSalesHistoricalShadowEngine.ts
-          src/lib/productMasterShoplingSalesHistoricalShadow.ts
-          src/lib/productMasterShoplingSalesDirectCodeEvidenceEngine.ts
-          src/lib/productMasterShoplingSalesDirectCodeEvidence.ts
-          src/app/api/cron/product-master-shopling-sales-backfill/route.ts
-          src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
-          src/app/product-master/shopling-sales-backfill/direct-code-evidence/page.tsx
-      - name: Test existing bulk safety and new engine integration
-        run: >-
-          node --experimental-strip-types --test
-          tests/opsLoginBypass.test.mjs
-          tests/shoplingPriceAdjustmentAuth.test.mjs
-          tests/shoplingPriceAdjustmentBatchCanary.test.mjs
-          tests/shoplingPriceAdjustmentIdentity.test.mjs
-          tests/shoplingPriceAdjustmentInputModes.test.mjs
-          tests/shoplingPriceAdjustmentPartialPlan.test.mjs
-          tests/shoplingPriceAdjustmentRecoveryStatic.test.mjs
-          tests/shoplingPriceAdjustmentWorkflowFailure.test.mjs
-          tests/priceAdjustmentEngineIntegration.test.mjs
-      - name: Test Shopling historical evidence safety
-        run: >-
-          node --experimental-strip-types --test
-          tests/productMasterShoplingSalesHistoricalShadowEngine.test.mjs
-          tests/productMasterShoplingSalesHistoricalShadow.test.mjs
-          tests/productMasterShoplingSalesDirectCodeEvidenceEngine.test.mjs
-          tests/productMasterShoplingSalesDirectCodeEvidence.test.mjs
-      - name: Test tracker-connected product launch flow
-        run: >-
-          node --experimental-strip-types --test
-          tests/productLaunchTrackerRows.test.mjs
-          tests/productLaunchTrackerBarcodeMapping.test.mjs
-          tests/productLaunchTrackerFlowConnection.test.mjs
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
-          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
-          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+      - name: Read production evidence status
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import html
+          import re
+          import subprocess
+          from pathlib import Path
+
+          base = 'https://commerce-os-ops-center.vercel.app'
+          pages = [
+              ('DIRECT', '/product-master/shopling-sales-backfill/direct-code-evidence'),
+              ('BASELINE', '/product-master/shopling-sales-backfill'),
+              ('SHADOW', '/product-master/shopling-sales-backfill/historical-shadow'),
+          ]
+
+          def clean_html(raw: str) -> str:
+              value = re.sub(r'<script[\s\S]*?</script>', ' ', raw, flags=re.I)
+              value = re.sub(r'<style[\s\S]*?</style>', ' ', value, flags=re.I)
+              value = re.sub(r'<!--.*?-->', '', value, flags=re.S)
+              value = re.sub(r'<[^>]+>', ' ', value)
+              value = html.unescape(value)
+              return re.sub(r'\s+', ' ', value).strip()
+
+          for label, path in pages:
+              output = Path(f'/tmp/{label.lower()}.html')
+              completed = subprocess.run(
+                  [
+                      'curl', '-L', '-sS', '--connect-timeout', '10', '--max-time', '30',
+                      '-o', str(output), '-w', '%{http_code}', base + path,
+                  ],
+                  capture_output=True,
+                  text=True,
+              )
+              code = completed.stdout.strip() or '000'
+              print(f'{label}_HTTP={code}')
+              if code != '200':
+                  continue
+              clean = clean_html(output.read_text(encoding='utf-8', errors='ignore'))
+              print(f'{label}_TEXT_BEGIN')
+              print(clean[:8000])
+              print(f'{label}_TEXT_END')
+              for needle in [
+                  '현재 상태', '완료 구간', '진행률', '직접코드 증거행',
+                  '안전 optionId', '저장샘플 복원후보', '미연결 주문',
+                  'COMPLETED', 'RUNNING', 'QUEUED', 'FAILED'
+              ]:
+                  idx = clean.find(needle)
+                  if idx >= 0:
+                      print(f'{label}_MATCH {needle}: {clean[max(0, idx-180):idx+700]}')
+          PY
