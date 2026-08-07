@@ -43,6 +43,8 @@ export type IncrementalReconcilePlan = {
   blockers: IncrementalBlocker[];
 };
 
+const MANAGED_BARCODE = /^B[A-Z]{2}\d+-\d+$/;
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -104,11 +106,13 @@ function planningIndexes(planningRows: IncrementalPlanningRow[]) {
   const ambiguousSkus = new Set<string>();
 
   for (const row of planningRows) {
-    if (row.skuActive === false) continue;
     const skuId = text(row.skuId);
     const barcode = normalizeBarcode(row.barcode);
-    if (!skuId || !barcode) continue;
+    if (!skuId || !MANAGED_BARCODE.test(barcode)) continue;
 
+    // Inactive B-prefixed SKUs still own real historical sales. They remain
+    // addressable for canonical monthly history even though downstream active
+    // inventory/price/order decisions can separately ignore inactive SKUs.
     const existingSku = skuByBarcode.get(barcode);
     if (existingSku && existingSku !== skuId) ambiguousBarcodes.add(barcode);
     else skuByBarcode.set(barcode, skuId);
@@ -216,7 +220,7 @@ export function buildShoplingIncrementalReconcilePlan(input: {
         barcode,
         skuId: null,
         month,
-        message: "증분 판매원장 위치코드를 현재 상품마스터 SKU에서 찾지 못했습니다.",
+        message: "증분 판매원장 위치코드를 상품마스터의 고유 B코드 SKU에서 찾지 못했습니다.",
       });
       continue;
     }
@@ -267,7 +271,7 @@ export function buildShoplingIncrementalReconcilePlan(input: {
         barcode: "",
         skuId: text(existing.skuId) || null,
         month: text(existing.month),
-        message: "기존 Shopling 월 판매원장의 SKU를 현재 상품마스터 위치코드로 되돌릴 수 없어 0 보정을 차단했습니다.",
+        message: "기존 Shopling 월 판매원장의 SKU를 상품마스터 고유 B코드로 되돌릴 수 없어 0 보정을 차단했습니다.",
       });
       continue;
     }
