@@ -72,3 +72,20 @@ test("successful Shopling chunks may burst only inside a strict serverless time 
   assert.match(cron, /Date\.now\(\) - startedAt < EXTRA_STEP_START_BUDGET_MS/);
   assert.match(cron, /burstElapsedMs/);
 });
+
+
+test("verified full baseline remains completed after rolling incremental values change", () => {
+  assert.match(workflow, /readOperations\(PRODUCT_MASTER_SHOPLING_SALES_FULL, cid, 5\)/);
+  assert.match(workflow, /function fullApplyVerified/);
+  assert.match(workflow, /result\.verified === true/);
+  assert.match(workflow, /result\.pendingCount/);
+  assert.match(workflow, /result\.blockerCount/);
+  assert.match(workflow, /if \(fullApplyVerified\(context\)\)/);
+  assert.match(workflow, /이후 증분 동기화가 같은 원장 ID를 최신값으로 갱신해도 기준선 완료 상태는 유지됩니다/);
+});
+
+test("zero-pending full apply still records the immutable completion milestone", () => {
+  assert.match(workflow, /mode === \"FULL\" && canaryVerified\(context\)/);
+  assert.match(workflow, /selectedCount: 0/);
+  assert.match(workflow, /operationType: PRODUCT_MASTER_SHOPLING_SALES_FULL/);
+});

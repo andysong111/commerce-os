@@ -501,14 +501,25 @@ async function activeContext() {
   const request = await latestRequest();
   if (!request) return null;
   const cid = correlationId(request.requestId);
-  const [chunks, failures, failedRuns, reports, canaries] = await Promise.all([
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_CHUNK, cid),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_STEP_FAILURE, cid),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_FAILED, cid, 5),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_REPORT, cid, 5),
-    readOperations(PRODUCT_MASTER_SHOPLING_SALES_CANARY, cid, 5),
-  ]);
-  return { request, cid, chunks, failures, failedRuns, reports, canaries };
+  const [chunks, failures, failedRuns, reports, canaries, fullRuns] =
+    await Promise.all([
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_CHUNK, cid),
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_STEP_FAILURE, cid),
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_FAILED, cid, 5),
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_REPORT, cid, 5),
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_CANARY, cid, 5),
+      readOperations(PRODUCT_MASTER_SHOPLING_SALES_FULL, cid, 5),
+    ]);
+  return {
+    request,
+    cid,
+    chunks,
+    failures,
+    failedRuns,
+    reports,
+    canaries,
+    fullRuns,
+  };
 }
 
 function failureAttempt(row: OperationRow) {
@@ -857,6 +868,20 @@ function canaryVerified(
   );
 }
 
+function fullApplyVerified(
+  context: NonNullable<Awaited<ReturnType<typeof activeContext>>>,
+) {
+  return context.fullRuns.some((row) => {
+    const result = object(row.result_snapshot);
+    return (
+      text(row.status) === "SUCCEEDED" &&
+      result.verified === true &&
+      Math.max(0, Math.round(number(result.pendingCount))) === 0 &&
+      Math.max(0, Math.round(number(result.blockerCount))) === 0
+    );
+  });
+}
+
 async function pushSales(rows: ApplyRow[]) {
   if (!rows.length) return;
   const { baseUrl, secret } = productMasterConnection();
@@ -939,6 +964,24 @@ export async function applyProductMasterShoplingSales(
   }
   const selected = mode === "CANARY" ? plan.pending.slice(0, 1) : plan.pending;
   if (!selected.length) {
+    if (mode === "FULL" && canaryVerified(context)) {
+      await storeOperation({
+        operationType: PRODUCT_MASTER_SHOPLING_SALES_FULL,
+        sourceEventId: `product-master-shopling-sales-full:${context.request.requestId}`,
+        correlationId: context.cid,
+        inputSnapshot: {
+          requestId: context.request.requestId,
+          mode,
+          selectedCount: 0,
+        },
+        resultSnapshot: {
+          verified: true,
+          written: 0,
+          pendingCount: 0,
+          blockerCount: 0,
+        },
+      });
+    }
     return {
       mode,
       applied: 0,
@@ -1111,9 +1154,27 @@ export async function loadProductMasterShoplingSalesStatus(): Promise<ProductMas
     };
   }
 
+  const verified = canaryVerified(context);
+  if (fullApplyVerified(context)) {
+    return {
+      ...empty,
+      ...common,
+      progress: 100,
+      completedRanges: totalRanges,
+      report,
+      state: "COMPLETED",
+      stage: "판매원장 기준선 적재 완료",
+      message: `최초 Shopling 월 판매원장 ${report.monthlyRowCount}건은 전수 적재·재검증이 완료되었습니다. 이후 증분 동기화가 같은 원장 ID를 최신값으로 갱신해도 기준선 완료 상태는 유지됩니다.`,
+      safeRowCount: report.monthlyRowCount,
+      alreadyAppliedCount: report.monthlyRowCount,
+      pendingCount: 0,
+      blockerCount: 0,
+      canaryVerified: verified,
+    };
+  }
+
   try {
     const plan = await currentApplyPlan(context);
-    const verified = canaryVerified(context);
     if (plan.blockers.length) {
       return {
         ...empty,
