@@ -1,8 +1,7 @@
 const PRODUCTION_STUDIO_URL =
   "https://commerce-os-detail-page-studio.vercel.app/";
 
-const OPS_CENTER_V260807_STUDIO_URL =
-  "https://commerce-os-detail-page-studio-pzxe.vercel.app/";
+const OPS_CENTER_V260807_STUDIO_URL = PRODUCTION_STUDIO_URL;
 
 // Stable Vercel Preview retained only as a legacy recovery reference.
 const PREVIEW_STUDIO_URL =
@@ -29,9 +28,10 @@ export function resolveDetailPageStudioConnection(): DetailPageStudioConnection 
   const environment = process.env.VERCEL_ENV?.trim();
   const isPreview = environment === "preview";
   const isProduction = environment === "production";
-  // Product Launch Tracker always uses the dedicated, protection-free
-  // OPS Center v260807 Production deployment. Local development may still
-  // provide an explicit override.
+  // Product Launch Tracker uses the OPS v260807 code promoted on the original
+  // Studio Production project, where the existing OpenAI server configuration
+  // is already available. SaaS production/test cards remain on their own
+  // isolated branch deployments.
   const engineUrl = validateStudioUrl(
     isPreview || isProduction
       ? OPS_CENTER_V260807_STUDIO_URL
@@ -100,6 +100,14 @@ export async function probeDetailPageStudio(
           response.status === 404
             ? "연결된 상세페이지 Studio에 OPS 자동생성 기능이 없습니다. OPS 전용 v260807 Production 연결을 확인하세요."
             : "상세페이지 Studio 연결 규격을 확인하지 못했습니다.",
+      };
+    }
+    if (body?.openaiConfigured !== true) {
+      return {
+        ok: false as const,
+        code: "DETAIL_PAGE_STUDIO_OPENAI_NOT_CONFIGURED",
+        message:
+          "상세페이지 Studio 서버의 OpenAI 설정이 준비되지 않았습니다. 생성 작업은 시작하지 않았습니다.",
       };
     }
     return { ok: true as const };
