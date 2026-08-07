@@ -1,2 +1,3 @@
 Temporary read-only production probe for the managed-barcode Shopling sales baseline. Do not merge this branch; close after reading the production status.
 Second safe burst requested to advance the read-only baseline toward completion.
+Final safe burst requested to finish the remaining read-only ranges and surface the managed-only unmapped count.
