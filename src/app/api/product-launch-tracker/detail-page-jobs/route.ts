@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
     salesOptions: string;
     productName: string;
     attempt: number;
+    compilerCanary: boolean;
   };
   try {
     const body = await request.json();
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest) {
       salesOptions: safeText(body?.salesOptions, 2_000),
       productName: safeText(body?.productName, 250) || "상품",
       attempt: Math.max(1, Math.min(100, Number(body?.attempt) || 1)),
+      compilerCanary: body?.compilerCanary === true,
     };
   } catch (error) {
     return Response.json(
@@ -120,7 +122,9 @@ export async function POST(request: NextRequest) {
         schema_version: 1,
         logical_status: "collecting",
         stage: "source_collection",
-        message: "1688 상품정보·이미지 수집 준비 중",
+        message: input.compilerCanary
+          ? "Evidence Compiler 신규 카나리 · 1688 상품정보·이미지 수집 준비 중"
+          : "1688 상품정보·이미지 수집 준비 중",
         progress: 3,
         qa_status: "pending",
         attempt: input.attempt,
@@ -128,6 +132,8 @@ export async function POST(request: NextRequest) {
         sales_options: input.salesOptions,
         product_name_hint: input.productName,
         source_run_id: "",
+        compiler_canary: input.compilerCanary,
+        compiler_canary_created_at: input.compilerCanary ? now : null,
         step_version: 0,
         lease_owner: "",
         lease_until: null,

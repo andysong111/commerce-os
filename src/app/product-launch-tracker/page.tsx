@@ -1,3 +1,4 @@
+import { ProductLaunchEvidenceCompilerCanary } from "@/components/product-launch-flow/ProductLaunchEvidenceCompilerCanary";
 import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
@@ -28,6 +29,8 @@ export default async function ProductLaunchTrackerPage({
         </div>
         <ProductMasterSyncButton />
       </div>
+
+      <ProductLaunchEvidenceCompilerCanary />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <iframe

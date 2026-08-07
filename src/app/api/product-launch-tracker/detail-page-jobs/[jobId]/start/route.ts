@@ -61,7 +61,10 @@ export async function POST(
     const command = (await request.json().catch(() => ({}))) as {
       action?: string;
     };
-    const compilerCanary = command.action === COMPILER_CANARY_ACTION;
+    const explicitCompilerCanary = command.action === COMPILER_CANARY_ACTION;
+    const persistedCompilerCanary =
+      job.payload.compiler_canary === true && !TERMINAL_STATUSES.has(job.status);
+    const compilerCanary = explicitCompilerCanary || persistedCompilerCanary;
     const recoverableFinalAssembly = isRecoverableServerFinalAssemblyJob({
       status: job.status,
       stage: job.stage,
@@ -87,7 +90,7 @@ export async function POST(
     }
 
     let runnableJob = job;
-    if (compilerCanary && TERMINAL_STATUSES.has(job.status)) {
+    if (explicitCompilerCanary && TERMINAL_STATUSES.has(job.status)) {
       const evidenceReady =
         Array.isArray(job.payload.evidence_urls) &&
         job.payload.evidence_urls.length >= 1;
@@ -164,7 +167,7 @@ export async function POST(
 
     if (
       TERMINAL_STATUSES.has(job.status) &&
-      !compilerCanary &&
+      !explicitCompilerCanary &&
       !recoverableFinalAssembly &&
       !completedFinalReassembly
     ) {
