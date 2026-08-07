@@ -368,14 +368,60 @@ test("inactive exact B-code stays blocked when compatible pack evidence disagree
   assert.equal(result.unmappedRows, 1);
 });
 
-test("explicit B-code conflict with a current exact option never guesses", () => {
+test("product-level partner B-code never overrides an exact current option identity", () => {
   const result = aggregateProductMasterShoplingSalesChunk(
     [order({ opt_id: "O1", prod_id: "1001", ptn_goods_cd: "BBA4-1" })],
     planning(),
     range,
   );
-  assert.equal(result.acceptedRows, 0);
-  assert.equal(result.unmappedRows, 1);
+  assert.equal(result.acceptedRows, 1);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.monthlyRows[0].barcode, "BAA1-1");
+  assert.equal(result.monthlyRows[0].quantity, 6);
+});
+
+test("actual option barcode remains authoritative over a later current option mapping", () => {
+  const historical = planning({
+    products: [
+      {
+        skuId: "current",
+        barcode: "BAA1-1",
+        productName: "현재상품",
+        optionName: "현재옵션",
+        skuActive: true,
+        listings: [
+          { goodsKey: "1001", optionId: "O1", unitsPerOrder: 2, active: true },
+        ],
+      },
+      {
+        skuId: "historical",
+        barcode: "BBA4-1",
+        productName: "과거상품",
+        optionName: "과거옵션",
+        skuActive: false,
+        listings: [
+          { goodsKey: "OLD", optionId: "OLD", unitsPerOrder: 1, active: false },
+        ],
+      },
+    ],
+  });
+  const result = aggregateProductMasterShoplingSalesChunk(
+    [
+      order({
+        opt_id: "O1",
+        prod_id: "1001",
+        opt_barcode: "BBA4-1",
+        ptn_goods_cd: "BAA1-1",
+        mall_ord_cnt: "3",
+      }),
+    ],
+    historical,
+    range,
+  );
+  assert.equal(result.acceptedRows, 1);
+  assert.equal(result.unmappedRows, 0);
+  assert.equal(result.monthlyRows[0].barcode, "BBA4-1");
+  assert.equal(result.monthlyRows[0].quantity, 3);
 });
 
 test("duplicate Product Master ownership of one B-code stays fail-closed", () => {

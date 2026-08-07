@@ -240,24 +240,31 @@ function rawValue(row: ShoplingRawRow, keys: string[]) {
   return "";
 }
 
-function rawStructuredCode(row: ShoplingRawRow) {
-  for (const key of [
-    "ptn_goods_cd",
-    "buying_cd",
-    "mall_ptn_goods_cd",
-    "mall_opt_cd",
-    "opt_barcode",
-    "barcode",
-  ]) {
+function firstStructuredCode(row: ShoplingRawRow, keys: string[]) {
+  for (const key of keys) {
     const code = normalizedStructuredCode(rawValue(row, [key]));
     if (code) return code;
   }
   return "";
 }
 
+function rawOptionStructuredCode(row: ShoplingRawRow) {
+  return firstStructuredCode(row, ["optBarcode", "opt_barcode", "barcode"]);
+}
+
+function rawPartnerStructuredCode(row: ShoplingRawRow) {
+  return firstStructuredCode(row, [
+    "ptn_goods_cd",
+    "buying_cd",
+    "mall_ptn_goods_cd",
+    "mall_opt_cd",
+  ]);
+}
+
 function rawManagedCode(row: ShoplingRawRow) {
-  const structured = rawStructuredCode(row);
-  return managedBarcode(structured);
+  return managedBarcode(
+    rawOptionStructuredCode(row) || rawPartnerStructuredCode(row),
+  );
 }
 
 function isManagedSalesScope(
@@ -265,11 +272,18 @@ function isManagedSalesScope(
   order: ReturnType<typeof normalizeShoplingOrder>,
   raw: ShoplingRawRow,
 ) {
-  const rawCode = rawStructuredCode(raw) || normalizedStructuredCode(order.barcode);
-  if (rawCode) return Boolean(managedBarcode(rawCode));
+  // The option barcode is the strongest evidence for whether the historical
+  // order belonged to the warehouse-managed B-code catalog. Product-level
+  // partner codes must not override an exact managed option identity.
+  const optionCode =
+    rawOptionStructuredCode(raw) || normalizedStructuredCode(order.barcode);
+  if (optionCode) return Boolean(managedBarcode(optionCode));
 
   const optionId = text(order.optionId);
   if (optionId && index.managedOptionIds.has(optionId)) return true;
+
+  const partnerCode = rawPartnerStructuredCode(raw);
+  if (partnerCode) return Boolean(managedBarcode(partnerCode));
 
   for (const key of [text(order.productId), text(order.mallProductKey)]) {
     if (key && index.byGoodsKey.has(key)) return true;
@@ -316,27 +330,53 @@ function resolveIdentity(
 ) {
   const optionId = text(order.optionId);
   const optionIdentity = optionId ? index.byOptionId.get(optionId) ?? null : null;
-  const directCode = rawManagedCode(raw) || managedBarcode(order.barcode);
+  const optionBarcode = managedBarcode(
+    rawOptionStructuredCode(raw) || order.barcode,
+  );
 
-  if (directCode) {
-    if (optionIdentity) {
-      return optionIdentity.barcode === directCode ? optionIdentity : null;
-    }
+  // A real option barcode is historical SKU evidence. When it exists we keep
+  // the sale on that B-code even if the same optionId is currently attached to
+  // another SKU after later catalog edits. Pack size must still be deterministic.
+  if (optionBarcode) {
+    if (optionIdentity?.barcode === optionBarcode) return optionIdentity;
 
-    const currentDirect = index.byBarcode.get(directCode);
+    const currentDirect = index.byBarcode.get(optionBarcode);
     if (currentDirect) return currentDirect;
 
-    const historicalDirect = historicalDirectIdentity(index, directCode, order);
+    const historicalDirect = historicalDirectIdentity(
+      index,
+      optionBarcode,
+      order,
+    );
     if (historicalDirect) return historicalDirect;
 
     for (const key of [text(order.productId), text(order.mallProductKey)]) {
       const identity = key ? index.byGoodsKey.get(key) : null;
-      if (identity?.barcode === directCode) return identity;
+      if (identity?.barcode === optionBarcode) return identity;
     }
     return null;
   }
 
+  // Exact current option identity is stronger than product-level partner codes
+  // such as ptn_goods_cd. Those fields frequently carry one representative
+  // product code across several options and must not create false conflicts.
   if (optionIdentity) return optionIdentity;
+
+  const partnerCode = managedBarcode(rawPartnerStructuredCode(raw));
+  if (partnerCode) {
+    const currentDirect = index.byBarcode.get(partnerCode);
+    if (currentDirect) return currentDirect;
+
+    const historicalDirect = historicalDirectIdentity(index, partnerCode, order);
+    if (historicalDirect) return historicalDirect;
+
+    for (const key of [text(order.productId), text(order.mallProductKey)]) {
+      const identity = key ? index.byGoodsKey.get(key) : null;
+      if (identity?.barcode === partnerCode) return identity;
+    }
+    return null;
+  }
+
   for (const key of [text(order.productId), text(order.mallProductKey)]) {
     if (key && index.byGoodsKey.has(key)) return index.byGoodsKey.get(key)!;
   }
