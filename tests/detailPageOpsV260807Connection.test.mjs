@@ -8,20 +8,19 @@ const [connection, nextConfig, dock] = await Promise.all([
   readFile("public/product-launch-tracker-app/detail-page-dock.js", "utf8"),
 ]);
 
-const OPS_V260807_HOST = "commerce-os-detail-page-studio-pzxe.vercel.app";
+const OPS_V260807_HOST = "commerce-os-detail-page-studio.vercel.app";
 
-test("product launch tracker is pinned to the dedicated OPS v260807 Production Studio", () => {
+test("product launch tracker is pinned to the configured OPS v260807 Production Studio", () => {
   assert.match(connection, /OPS_CENTER_V260807_STUDIO_URL/);
   assert.ok(connection.includes(OPS_V260807_HOST));
+  assert.match(connection, /const OPS_CENTER_V260807_STUDIO_URL = PRODUCTION_STUDIO_URL/);
   assert.match(
     connection,
     /isPreview \|\| isProduction[\s\S]*OPS_CENTER_V260807_STUDIO_URL/,
   );
   assert.ok(nextConfig.includes(OPS_V260807_HOST));
-  assert.doesNotMatch(
-    connection,
-    /OPS_CENTER_V260807_STUDIO_URL\s*=\s*[\s\S]*git-isolated-op-4a07df/,
-  );
+  assert.match(connection, /openaiConfigured !== true/);
+  assert.match(connection, /DETAIL_PAGE_STUDIO_OPENAI_NOT_CONFIGURED/);
 });
 
 test("selected product launch rows force 1688 link mode and pass seller options", () => {
