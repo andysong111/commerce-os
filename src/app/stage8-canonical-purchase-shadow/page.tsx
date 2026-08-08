@@ -109,10 +109,10 @@ export default async function Stage8CanonicalPurchaseShadowPage() {
                   <td className="px-3 py-2">{row.name}</td>
                   <td className="px-3 py-2 font-bold">{row.status}</td>
                   <td className="px-3 py-2">{row.trend}</td>
-                  <td className="px-3 py-2 font-black">{number.format(row.recommendedQty)}</td>
-                  <td className="px-3 py-2">{number.format(row.expectedCost)}원</td>
-                  <td className="px-3 py-2">{number.format(row.estimatedStock)}</td>
-                  <td className="px-3 py-2">{number.format(row.openCommitment)}</td>
+                  <td className="px-3 py-2 font-black">{number.format(row.recommendedQty ?? 0)}</td>
+                  <td className="px-3 py-2">{number.format(row.expectedCost ?? 0)}원</td>
+                  <td className="px-3 py-2">{number.format(row.estimatedStock ?? 0)}</td>
+                  <td className="px-3 py-2">{number.format(row.openCommitment ?? 0)}</td>
                   <td className="px-3 py-2">{number.format(Number(row.score?.total ?? 0))}</td>
                 </tr>
               ))}
