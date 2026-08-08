@@ -1,0 +1,40 @@
+name: Temporary Mismatch Evidence Type Patch
+
+on:
+  push:
+    branches:
+      - feat/canonical-event-mismatch-classification
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[mismatch-evidence-type-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/canonical-event-mismatch-classification
+          fetch-depth: 0
+      - name: Patch typed Supabase failure rows
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/lib/canonicalSalesEventMismatchEvidence.ts')
+          s = p.read_text(encoding='utf-8')
+          old = '  const failure = failures.data?.[0] as OperationRow | undefined;'
+          new = '''  const failureRows = (Array.isArray(failures.data) ? failures.data : []) as OperationRow[];\n  const failure = failureRows[0];'''
+          if new not in s:
+              if old not in s:
+                  raise SystemExit('type patch marker missing')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/canonicalSalesEventMismatchEvidence.ts
+          if git diff --cached --quiet; then echo 'No patch needed.'; exit 0; fi
+          git commit -m "Fix mismatch evidence Supabase row type [mismatch-evidence-type-patched]"
+          git push origin HEAD:feat/canonical-event-mismatch-classification
