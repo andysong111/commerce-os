@@ -1,0 +1,79 @@
+name: Temporary Stage8 Mismatch Evidence Runner
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Start and advance read-only mismatch evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          page="$base/stage8-demand-mismatch-evidence"
+          api="$base/api/stage8/demand-mismatch-evidence"
+
+          for i in $(seq 1 24); do
+            code="$(curl -L -sS --connect-timeout 10 --max-time 30 -o /tmp/evidence-page -w '%{http_code}' "$page" || true)"
+            if [ "$code" = '200' ] && grep -q '발주수요 차이 원주문행 진단' /tmp/evidence-page; then
+              break
+            fi
+            echo "evidence route not ready yet: HTTP $code"
+            sleep 5
+          done
+
+          start="$(curl -L -sS --connect-timeout 10 --max-time 90 \
+            -X POST "$api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" \
+            -H "referer: $page" \
+            --data '{"action":"start"}')"
+          echo "START $start"
+          START="$start" python - <<'PY'
+          import json, os, sys
+          data=json.loads(os.environ['START'])
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+          for i in $(seq 1 90); do
+            result="$(curl -L -sS --connect-timeout 10 --max-time 90 \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $base" \
+              -H "referer: $page" \
+              --data '{"action":"run-next"}')"
+            echo "STEP $i $result"
+            STEP="$result" python - <<'PY'
+          import json, os, sys
+          data=json.loads(os.environ['STEP'])
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          result=data.get('result') or {}
+          if result.get('state') == 'FAILED':
+              print(data, file=sys.stderr)
+              raise SystemExit(2)
+          PY
+
+            text="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
+              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:32000])')"
+            if echo "$text" | grep -Eq '상태 COMPLETE|상태 FAILED'; then
+              echo '--- FINAL PAGE ---'
+              echo "$text"
+              if echo "$text" | grep -q '상태 FAILED'; then
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Mismatch evidence runner exhausted before terminal state.' >&2
+          exit 1
