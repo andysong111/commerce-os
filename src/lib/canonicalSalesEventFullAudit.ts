@@ -41,7 +41,8 @@ export const CANONICAL_EVENT_FULL_AUDIT_REPORT =
 export const CANONICAL_EVENT_FULL_AUDIT_FAILURE =
   "CANONICAL_EVENT_FULL_AUDIT_FAILURE";
 
-export const CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS = 30;
+export const CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS = 7;
+export const CANONICAL_EVENT_FULL_AUDIT_POLICY_VERSION = "v2-seven-day-source";
 export const CANONICAL_EVENT_FULL_AUDIT_VERIFY_BATCH_SIZE = 1_000;
 export const CANONICAL_EVENT_FULL_AUDIT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 export const CANONICAL_EVENT_FULL_AUDIT_FAILURE_RETRY_MS = 6 * 60 * 60 * 1000;
@@ -85,6 +86,8 @@ export type CanonicalSalesEventFullAuditRequest = {
   ranges: ShoplingDateRange[];
   planningMappingFingerprint: string;
   baselineReconciliationFingerprint: string;
+  sourcePolicyVersion: string;
+  sourceRangeDays: number;
   createdAt: string;
 };
 
@@ -375,13 +378,17 @@ function requestFromRow(row: OperationRow) {
     : [];
   const planningMappingFingerprint = text(value.planningMappingFingerprint);
   const baselineReconciliationFingerprint = text(value.baselineReconciliationFingerprint);
+  const sourcePolicyVersion = text(value.sourcePolicyVersion);
+  const sourceRangeDays = integer(value.sourceRangeDays);
   if (
     !requestId ||
     !analysisAsOf ||
     !createdAt ||
     !ranges.length ||
     !/^sha256:[a-f0-9]{64}$/.test(planningMappingFingerprint) ||
-    !/^sha256:[a-f0-9]{64}$/.test(baselineReconciliationFingerprint)
+    !/^sha256:[a-f0-9]{64}$/.test(baselineReconciliationFingerprint) ||
+    sourcePolicyVersion !== CANONICAL_EVENT_FULL_AUDIT_POLICY_VERSION ||
+    sourceRangeDays !== CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS
   ) return null;
   return {
     requestId,
@@ -391,6 +398,8 @@ function requestFromRow(row: OperationRow) {
     ranges,
     planningMappingFingerprint,
     baselineReconciliationFingerprint,
+    sourcePolicyVersion,
+    sourceRangeDays,
     createdAt,
   } satisfies CanonicalSalesEventFullAuditRequest;
 }
@@ -664,6 +673,8 @@ export async function createCanonicalSalesEventFullAuditRequest(now = new Date()
     ),
     planningMappingFingerprint: planningMappingFingerprint(planning.products),
     baselineReconciliationFingerprint: reconciliation.reconciliationFingerprint,
+    sourcePolicyVersion: CANONICAL_EVENT_FULL_AUDIT_POLICY_VERSION,
+    sourceRangeDays: CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS,
     createdAt: analysisAsOf,
   };
   await storeOperation({
@@ -675,6 +686,8 @@ export async function createCanonicalSalesEventFullAuditRequest(now = new Date()
       state: "QUEUED",
       accepted: true,
       analysisDays: PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS,
+      sourcePolicyVersion: request.sourcePolicyVersion,
+      sourceRangeDays: request.sourceRangeDays,
       writesEnabled: false,
     },
     occurredAt: request.createdAt,
@@ -1093,7 +1106,7 @@ export async function loadCanonicalSalesEventFullAuditStatus(): Promise<Canonica
       ...common,
       state: completedRanges ? "RUNNING" : "QUEUED",
       stage: completedRanges ? "360일 Shopling source 수집 중" : "예약 Worker 대기",
-      message: `${completedRanges}/${request.ranges.length}개 30일 source range를 읽었습니다.`,
+      message: `${completedRanges}/${request.ranges.length}개 7일 source range를 읽었습니다.`,
     };
   }
   if (combined.unmappedRows || combined.conflictExternalIds.length) {

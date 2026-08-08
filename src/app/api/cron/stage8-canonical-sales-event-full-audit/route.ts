@@ -8,8 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const MAX_STEPS_PER_INVOCATION = 2;
-const EXTRA_STEP_START_BUDGET_MS = 20_000;
+const MAX_STEPS_PER_INVOCATION = 3;
+const EXTRA_STEP_START_BUDGET_MS = 35_000;
 
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
