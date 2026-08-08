@@ -60,10 +60,28 @@ test("failed Shopling requests retry their tier then shrink 30 to 7 to 2 days", 
   assert.match(cron, /7일[\s\S]*2일/);
 });
 
+test("same-tier retry reuses completed chunks only when the pinned source context is identical", () => {
+  assert.match(recovery, /function canReuseChunks/);
+  assert.match(recovery, /child\.chunkDays === parent\.chunkDays/);
+  assert.match(recovery, /child\.analysisAsOf === parent\.analysisAsOf/);
+  assert.match(recovery, /child\.planningContentFingerprint === parent\.planningContentFingerprint/);
+  assert.match(recovery, /reusableParentChunks/);
+  assert.match(recovery, /sales-event-recovery-chunk:/);
+  assert.match(recovery, /reusedFromRequestId/);
+  assert.match(recovery, /reusedChunkCount/);
+  assert.match(cron, /hydrateProductMasterShoplingSalesEventRecovery/);
+});
+
+test("reused chunks remain operation-ledger evidence and never become a hidden business write", () => {
+  assert.match(recovery, /operation_type: SALES_EVENT_CHUNK/);
+  assert.match(recovery, /commerce_operation_runs/);
+  assert.doesNotMatch(recovery, /sku_sales_events|inventory_movements|sku_receipt_costs|1688/i);
+  assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
+});
+
 test("cron only collects or recovers requests and never performs canary or full business writes", () => {
   assert.match(cron, /runProductMasterShoplingSalesEventSyncStep/);
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
-  assert.doesNotMatch(recovery, /sku_sales_events|inventory_movements|1688/i);
   assert.match(vercel, /\/api\/cron\/product-master-shopling-sales-events/);
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
 });
