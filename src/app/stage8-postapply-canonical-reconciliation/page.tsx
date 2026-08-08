@@ -77,6 +77,31 @@ export default async function Stage8PostApplyCanonicalReconciliationPage() {
         <Metric label="추가 persisted 판매보유" value={number.format(result.extraPersistedNonZeroCount)} />
       </section>
 
+      {result.extraPersistedDiagnostics.length ? (
+        <section className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-black text-slate-950">Candidate에 없는 Persisted active SKU 진단</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Product Master는 active인데 frozen planning candidate에는 없었던 SKU를 그대로 펼칩니다. 판매값이 있는 SKU는 planning의 active 상태·중복 여부를 확인하기 전까지 다음 전환을 차단합니다.</p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-[1500px] text-left text-xs">
+              <thead className="text-slate-500"><tr><th className="px-3 py-2">바코드</th><th className="px-3 py-2">판매값</th><th className="px-3 py-2">정상 이벤트</th><th className="px-3 py-2">12구간 수량</th><th className="px-3 py-2">최근판매</th><th className="px-3 py-2">Planning 행</th><th className="px-3 py-2">active Planning 행</th><th className="px-3 py-2">Candidate 제외 이유</th><th className="px-3 py-2">Planning 상세</th></tr></thead>
+              <tbody>{result.extraPersistedDiagnostics.map((row) => (
+                <tr key={row.barcode} className="border-t border-slate-100 align-top">
+                  <td className="px-3 py-2 font-black text-slate-950">{row.barcode}</td>
+                  <td className={`px-3 py-2 font-black ${row.persistedHasDemand ? "text-rose-700" : "text-slate-500"}`}>{row.persistedHasDemand ? "있음" : "0"}</td>
+                  <td className="px-3 py-2">{number.format(row.persistedValidEventCount)}</td>
+                  <td className="px-3 py-2">{row.persistedMonthlyUnits.join(" / ")}</td>
+                  <td className="px-3 py-2">{row.persistedLastSaleAt ?? "-"}</td>
+                  <td className="px-3 py-2">{number.format(row.planningMatchCount)}</td>
+                  <td className="px-3 py-2">{number.format(row.activePlanningMatchCount)}</td>
+                  <td className="px-3 py-2 font-bold">{row.candidateOmissionReason}</td>
+                  <td className="px-3 py-2">{row.planningMatches.length ? row.planningMatches.map((match) => `${match.skuId || "-"} · ${match.modelNo || "-"} · ${match.productName} · skuActive=${String(match.skuActive)} · listing ${match.activeListingCount}/${match.listingCount}`).join(" | ") : "없음"}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
       {result.rowMismatchSamples.length ? (
         <section className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-black text-slate-950">Persisted 배열 불일치 표본</h2>
