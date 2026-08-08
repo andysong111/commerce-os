@@ -34,9 +34,9 @@ const REASON_LABELS: Record<string, string> = {
 export default async function Stage8DemandMismatchEvidencePage() {
   const status = await loadDemandMismatchEvidenceStatus();
   const report = status.report;
-  const reasonCounts = report?.reasonCounts ?? {};
-  const reasonUnitDelta = report?.reasonUnitDelta ?? {};
-  const reasonRevenueDelta = report?.reasonRevenueDelta ?? {};
+  const reasonCounts = (report?.reasonCounts ?? {}) as Record<string, number>;
+  const reasonUnitDelta = (report?.reasonUnitDelta ?? {}) as Record<string, number>;
+  const reasonRevenueDelta = (report?.reasonRevenueDelta ?? {}) as Record<string, number>;
 
   return (
     <div className="space-y-6">
@@ -87,7 +87,7 @@ export default async function Stage8DemandMismatchEvidencePage() {
                     <span className="text-xs font-semibold leading-5 text-slate-600">{REASON_LABELS[reason] ?? reason}</span>
                     <strong className="mt-1 block text-xl text-slate-950">{number.format(count)}행</strong>
                     <p className="mt-2 text-xs text-slate-500">
-                      수량 Δ {number.format(reasonUnitDelta[reason as keyof typeof reasonUnitDelta] ?? 0)} · 매출 Δ {number.format(reasonRevenueDelta[reason as keyof typeof reasonRevenueDelta] ?? 0)}원
+                      수량 Δ {number.format(reasonUnitDelta[reason] ?? 0)} · 매출 Δ {number.format(reasonRevenueDelta[reason] ?? 0)}원
                     </p>
                   </article>
                 ))}
