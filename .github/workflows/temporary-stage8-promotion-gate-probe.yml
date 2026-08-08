@@ -1,0 +1,46 @@
+name: Temporary Stage8 Promotion Gate Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-promotion-gate-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-promotion-gate-probe-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-promotion-gate-probe-20260809')
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production gate and print exact status
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-candidate-promotion-gate'
+          for i in $(seq 1 60); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:32000])')"
+            echo "PROBE $i HTTP $code"
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Canonical 판매원장 적재 승인 게이트'; then
+              echo '--- GATE PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q 'SAFE_CANONICAL_SUPERSET\|EXACT_MATCH'
+              echo "$text" | grep -q 'CANARY 적재 허용'
+              echo "$text" | grep -q 'sales-ready'
+              echo "$text" | grep -q 'evidence-reconciles-parity-delta'
+              echo "$text" | grep -q 'sha256:'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Promotion gate did not become ready in time.' >&2
+          exit 1
