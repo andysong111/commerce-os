@@ -44,12 +44,14 @@ jobs:
           src/lib/stage8CanonicalDemandParity.ts
           src/lib/stage8DemandMismatchEvidenceEngine.ts
           src/lib/stage8DemandMismatchEvidence.ts
+          src/lib/stage8CandidateDemandParity.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/api/cron/product-master-shopling-sales-events/route.ts
           src/app/api/cron/stage8-canonical-demand-parity/route.ts
           src/app/api/product-master/shopling-sales-events/route.ts
           src/app/api/stage8/canonical-demand-parity/route.ts
           src/app/api/stage8/demand-mismatch-evidence/route.ts
+          src/app/api/stage8/candidate-demand-parity/route.ts
           src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
           src/app/product-master/shopling-sales-backfill/direct-code-evidence/page.tsx
           src/app/stage8-sales-events/page.tsx
@@ -57,6 +59,7 @@ jobs:
           src/app/stage8-canonical-sales-audit/page.tsx
           src/app/stage8-demand-parity/page.tsx
           src/app/stage8-demand-mismatch-evidence/page.tsx
+          src/app/stage8-candidate-demand-parity/page.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -84,6 +87,7 @@ jobs:
           tests/productMasterCanonicalSalesAudit.test.mjs
           tests/stage8CanonicalDemandParity.test.mjs
           tests/stage8DemandMismatchEvidence.test.mjs
+          tests/stage8CandidateDemandParity.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
