@@ -8,6 +8,8 @@ import type { ProductPlanningSnapshot } from "@/lib/shopling/shoplingLiveAggrega
 
 export const PRODUCT_MASTER_SALES_EVENT_FORMAT = "commerce-os-sales-events-v1";
 export const PRODUCT_MASTER_SALES_EVENT_SOURCE = "shopling_orders_event_v1";
+export const PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS = 360;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ProductMasterSalesEventRow = {
   externalId: string;
@@ -41,6 +43,11 @@ export type ProductMasterShoplingSalesEventChunk = {
     managedCode: string | null;
     status: string;
   }>;
+};
+
+export type ProductMasterSalesEventAggregationOptions = {
+  syncedAt?: string;
+  analysisAsOf?: string;
 };
 
 type ListingIdentity = {
@@ -330,16 +337,27 @@ function resolveIdentity(
   return null;
 }
 
-function inDateRange(iso: string, range: ShoplingDateRange) {
-  const date = iso.slice(0, 10);
-  return date >= range.start && date <= range.end;
+function insideGlobalAnalysisWindow(occurredAt: string, analysisAsOf?: string) {
+  if (!analysisAsOf) return true;
+  const occurredMs = Date.parse(occurredAt);
+  const endMs = Date.parse(analysisAsOf);
+  if (!Number.isFinite(occurredMs) || !Number.isFinite(endMs)) return false;
+  const startMs = endMs - PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS * DAY_MS;
+  return occurredMs >= startMs && occurredMs < endMs;
 }
 
+/**
+ * `range` is the Shopling source-fetch partition, not an order-date contract.
+ * Shopling can return a row in a later source range after the row was updated;
+ * the canonical ledger must preserve the row by its actual mall_ord_dt and only
+ * apply the one pinned 360-day analysis window. Cross-range duplicates are
+ * collapsed later by externalId in combineProductMasterShoplingSalesEventChunks.
+ */
 export function aggregateProductMasterShoplingSalesEventChunk(
   rows: ShoplingRawRow[],
   planning: ProductPlanningSnapshot,
   range: ShoplingDateRange,
-  syncedAt = new Date().toISOString(),
+  options: ProductMasterSalesEventAggregationOptions = {},
 ): ProductMasterShoplingSalesEventChunk {
   const index = buildPlanningIndex(planning);
   const seen = new Set<string>();
@@ -348,6 +366,7 @@ export function aggregateProductMasterShoplingSalesEventChunk(
   let ignoredRows = 0;
   let unmappedRows = 0;
   let duplicateRows = 0;
+  const syncedAt = options.syncedAt ?? new Date().toISOString();
 
   for (const raw of rows) {
     const order = normalizeShoplingOrder(raw);
@@ -357,7 +376,11 @@ export function aggregateProductMasterShoplingSalesEventChunk(
     }
     seen.add(order.id);
     const orderedAt = validIso(order.orderedAt);
-    if (!order.orderNo || !orderedAt || !inDateRange(orderedAt, range)) {
+    if (!order.orderNo || !orderedAt) {
+      ignoredRows += 1;
+      continue;
+    }
+    if (!insideGlobalAnalysisWindow(orderedAt, options.analysisAsOf)) {
       ignoredRows += 1;
       continue;
     }
