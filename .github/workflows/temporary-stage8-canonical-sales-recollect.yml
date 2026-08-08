@@ -29,56 +29,48 @@ jobs:
           page="$base/stage8-sales-events"
           api="$base/api/product-master/shopling-sales-events"
 
-          ready=0
-          for i in $(seq 1 36); do
-            code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o /tmp/page -w '%{http_code}' "$page" || true)"
-            if [ "$code" = '200' ] && grep -q '정확한 30일 구간 판매 이벤트' /tmp/page; then
-              ready=1
-              break
-            fi
-            echo "waiting for production sales-event page: HTTP $code"
-            sleep 5
-          done
-          test "$ready" = '1'
+          read_status() {
+            local outfile="$1"
+            curl -L -sS --connect-timeout 10 --max-time 60 \
+              -o "$outfile" -w '%{http_code}' "$api" \
+              -H "origin: $base" -H "referer: $page"
+          }
 
-          start_file="$(mktemp)"
-          start_code="$(curl -L -sS --connect-timeout 10 --max-time 120 \
-            -o "$start_file" -w '%{http_code}' \
-            -X POST "$api" \
-            -H 'content-type: application/json' \
-            -H "origin: $base" \
-            -H "referer: $page" \
-            --data '{"action":"start"}')"
-          echo "START HTTP $start_code"
-          cat "$start_file"
-          test "$start_code" = '200' -o "$start_code" = '202'
-          START_FILE="$start_file" python - <<'PY'
-          import json, os
-          with open(os.environ['START_FILE'], encoding='utf-8') as f:
-              data=json.load(f)
-          assert data.get('ok') is True, data
-          if data.get('alreadyActive'):
-              status=data.get('status') or {}
-              if status.get('state') in ('READY_CANARY','READY_FULL','COMPLETED'):
-                  print('Existing terminal candidate:', status.get('requestId'), status.get('state'))
-          PY
+          start_new() {
+            local outfile="$1"
+            curl -L -sS --connect-timeout 10 --max-time 120 \
+              -o "$outfile" -w '%{http_code}' \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $base" -H "referer: $page" \
+              --data '{"action":"start"}'
+          }
 
-          for i in $(seq 1 80); do
+          run_next() {
+            local outfile="$1"
+            curl -L -sS --connect-timeout 10 --max-time 290 \
+              -o "$outfile" -w '%{http_code}' \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $base" -H "referer: $page" \
+              --data '{"action":"run-next"}' || true
+          }
+
+          for i in $(seq 1 100); do
             status_file="$(mktemp)"
-            status_code="$(curl -L -sS --connect-timeout 10 --max-time 60 \
-              -o "$status_file" -w '%{http_code}' "$api" \
-              -H "origin: $base" -H "referer: $page")"
+            status_code="$(read_status "$status_file")"
             test "$status_code" = '200'
-            state="$(STATUS_FILE="$status_file" python - <<'PY'
+            read -r state request_id completed total <<<"$(STATUS_FILE="$status_file" python - <<'PY'
           import json, os
           with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
               data=json.load(f)
-          status=data.get('status') or {}
-          print(status.get('state') or '')
+          s=data.get('status') or {}
+          print(s.get('state') or '', s.get('requestId') or '-', s.get('completedRanges') or 0, s.get('totalRanges') or 0)
           PY
           )"
-            echo "STATUS $i $state"
-            if [ "$state" = 'READY_CANARY' ] || [ "$state" = 'READY_FULL' ] || [ "$state" = 'BLOCKED' ] || [ "$state" = 'FAILED' ]; then
+            echo "STATUS $i $state request=$request_id ranges=$completed/$total"
+
+            if [ "$state" = 'READY_CANARY' ] || [ "$state" = 'READY_FULL' ] || [ "$state" = 'BLOCKED' ]; then
               STATUS_FILE="$status_file" python - <<'PY'
           import json, os, sys
           with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
@@ -105,43 +97,56 @@ jobs:
               'planFingerprint': report.get('planFingerprint'),
           }
           print('FINAL_CANDIDATE', json.dumps(summary, ensure_ascii=False))
-          if status.get('state') in ('BLOCKED','FAILED'):
+          if status.get('state') == 'BLOCKED':
               raise SystemExit(2)
           PY
               exit 0
             fi
-            if [ "$state" = 'COMPLETED' ]; then
-              echo 'Latest request is already fully applied; start did not create a new candidate.' >&2
-              cat "$status_file"
-              exit 3
+
+            if [ "$state" = 'FAILED' ]; then
+              echo 'Transient collection failure recorded. Waiting for the existing one-minute recovery cron; no replacement request is created here.'
+              sleep 65
+              continue
             fi
 
-            step_file="$(mktemp)"
-            step_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
-              -o "$step_file" -w '%{http_code}' \
-              -X POST "$api" \
-              -H 'content-type: application/json' \
-              -H "origin: $base" \
-              -H "referer: $page" \
-              --data '{"action":"run-next"}' || true)"
-            echo "STEP $i HTTP $step_code"
-            if [ "$step_code" != '200' ]; then
-              cat "$step_file"
-              exit 1
+            if [ "$state" = 'IDLE' ] || [ "$state" = 'COMPLETED' ]; then
+              start_file="$(mktemp)"
+              start_code="$(start_new "$start_file")"
+              echo "START HTTP $start_code"
+              cat "$start_file"
+              test "$start_code" = '200' -o "$start_code" = '202'
+              START_FILE="$start_file" python - <<'PY'
+          import json, os
+          with open(os.environ['START_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          assert data.get('ok') is True, data
+          PY
+              sleep 1
+              continue
             fi
-            STEP_FILE="$step_file" python - <<'PY'
-          import json, os, sys
+
+            if [ "$state" = 'QUEUED' ] || [ "$state" = 'RUNNING' ]; then
+              step_file="$(mktemp)"
+              step_code="$(run_next "$step_file")"
+              echo "STEP $i HTTP $step_code"
+              if [ "$step_code" != '200' ]; then
+                cat "$step_file"
+                sleep 65
+                continue
+              fi
+              STEP_FILE="$step_file" python - <<'PY'
+          import json, os
           with open(os.environ['STEP_FILE'], encoding='utf-8') as f:
               data=json.load(f)
-          if data.get('ok') is not True:
-              print(data, file=sys.stderr)
-              raise SystemExit(1)
-          result=data.get('result') or {}
-          print(json.dumps(result, ensure_ascii=False)[:3000])
-          if result.get('state') == 'FAILED':
-              raise SystemExit(2)
+          print(json.dumps(data.get('result') or {}, ensure_ascii=False)[:3000])
           PY
-            sleep 1
+              sleep 1
+              continue
+            fi
+
+            echo "Unexpected state $state" >&2
+            cat "$status_file"
+            exit 4
           done
 
           echo 'Canonical sales recollection exhausted before candidate terminal state.' >&2
