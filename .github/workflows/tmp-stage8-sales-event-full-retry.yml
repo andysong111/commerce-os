@@ -1,0 +1,96 @@
+name: Temporary Stage8 Sales Event Full Retry
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Run exact-plan full apply and verify canonical snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          page="$base/stage8-sales-events"
+          api="$base/api/product-master/shopling-sales-events"
+
+          text="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
+            | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
+          echo "$text"
+          echo "$text" | grep -q 'READY_FULL'
+          plan="$(echo "$text" | grep -oE 'plan sha256:[a-f0-9]{64}' | head -1 | awk '{print $2}')"
+          test "$plan" = 'sha256:7cf82faf84fe4c8d48007e24944f79062374270a30bd6489bdb91cde35ad8908'
+
+          payload="$(printf '{\"action\":\"full\",\"planFingerprint\":\"%s\",\"confirmation\":\"FULL\"}' "$plan")"
+          response_file="$(mktemp)"
+          http_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+            -o "$response_file" -w '%{http_code}' \
+            -X POST "$api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" \
+            -H "referer: $page" \
+            --data "$payload")"
+          test "$http_code" = '200'
+
+          RESPONSE_FILE="$response_file" python - <<'PY'
+          import json, os, sys
+          path=os.environ['RESPONSE_FILE']
+          with open(path, encoding='utf-8') as f:
+              data=json.load(f)
+          result=data.get('result') or {}
+          snapshot=result.get('snapshot') or {}
+          summary={
+              'ok': data.get('ok'),
+              'mode': result.get('mode'),
+              'selected': result.get('selected'),
+              'written': result.get('written'),
+              'planFingerprint': result.get('planFingerprint'),
+              'sourceEventCount': snapshot.get('sourceEventCount'),
+              'validEventCount': snapshot.get('validEventCount'),
+              'tombstoneCount': snapshot.get('tombstoneCount'),
+              'orphanEventCount': snapshot.get('orphanEventCount'),
+              'managedActiveSkuCount': snapshot.get('managedActiveSkuCount'),
+              'bucketDays': snapshot.get('bucketDays'),
+              'bucketCount': snapshot.get('bucketCount'),
+              'contentFingerprint': snapshot.get('contentFingerprint'),
+          }
+          print(json.dumps(summary, ensure_ascii=False))
+          expected={
+              'ok': True,
+              'mode': 'full',
+              'selected': 9386,
+              'written': 9386,
+              'planFingerprint': 'sha256:7cf82faf84fe4c8d48007e24944f79062374270a30bd6489bdb91cde35ad8908',
+              'sourceEventCount': 9386,
+              'validEventCount': 9150,
+              'tombstoneCount': 236,
+              'orphanEventCount': 0,
+              'managedActiveSkuCount': 332,
+              'bucketDays': 30,
+              'bucketCount': 12,
+          }
+          for key,value in expected.items():
+              if summary.get(key) != value:
+                  print(f'{key}: expected {value!r}, got {summary.get(key)!r}', file=sys.stderr)
+                  raise SystemExit(1)
+          PY
+
+          for i in $(seq 1 20); do
+            sleep 3
+            after="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
+              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
+            echo "$after"
+            if echo "$after" | grep -q 'COMPLETED'; then
+              exit 0
+            fi
+            if echo "$after" | grep -Eq 'BLOCKED|FAILED'; then
+              exit 1
+            fi
+          done
+          echo 'Stage8 did not reach COMPLETED after verified full apply.' >&2
+          exit 1
