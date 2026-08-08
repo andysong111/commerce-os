@@ -1,0 +1,74 @@
+name: Patch strict sales-event verification
+
+on:
+  push:
+    branches:
+      - feat/canonical-sales-event-sync
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/canonical-sales-event-sync
+          fetch-depth: 0
+      - name: Require Product Master verifiedRows
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/lib/productMasterShoplingSalesEventSync.ts')
+          text = path.read_text(encoding='utf-8')
+          old = '''function verifiedWriteResult(payload: Record<string, unknown>, expected: number) {
+            const rows = Math.round(number(payload.rows));
+            const verifiedRows = payload.verifiedRows === undefined
+              ? rows
+              : Math.round(number(payload.verifiedRows));
+            return rows === expected && verifiedRows === expected;
+          }'''
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines())
+          new = '''function verifiedWriteResult(payload: Record<string, unknown>, expected: number) {
+            const rows = Math.round(number(payload.rows));
+            const verifiedRows = Math.round(number(payload.verifiedRows));
+            return rows === expected && verifiedRows === expected;
+          }'''
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines())
+          if old not in text:
+            if 'payload.verifiedRows === undefined' in text:
+              raise SystemExit('target verification function shape changed')
+          else:
+            text = text.replace(old, new, 1)
+            path.write_text(text, encoding='utf-8')
+
+          test_path = Path('tests/productMasterShoplingSalesEventSync.test.mjs')
+          test = test_path.read_text(encoding='utf-8')
+          marker = '''test("event source and wire format match Product Master contract", () => {'''
+          addition = '''test("full and canary require explicit Product Master readback counts", () => {
+            assert.match(sync, /const verifiedRows = Math\\.round\\(number\\(payload\\.verifiedRows\\)\\)/);
+            assert.doesNotMatch(sync, /payload\\.verifiedRows === undefined/);
+            assert.match(sync, /rows === expected && verifiedRows === expected/);
+          });
+
+'''
+          if addition not in test:
+            if marker not in test:
+              raise SystemExit('test marker not found')
+            test = test.replace(marker, addition + marker, 1)
+            test_path.write_text(test, encoding='utf-8')
+          PY
+      - name: Commit patch if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No patch needed.'
+            exit 0
+          fi
+          git config user.name 'commerce-os-bot'
+          git config user.email 'commerce-os-bot@users.noreply.github.com'
+          git add src/lib/productMasterShoplingSalesEventSync.ts tests/productMasterShoplingSalesEventSync.test.mjs
+          git commit -m 'Require Product Master readback verification for sales events'
+          git push origin HEAD:feat/canonical-sales-event-sync
