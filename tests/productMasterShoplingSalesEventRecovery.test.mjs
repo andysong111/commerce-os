@@ -26,13 +26,24 @@ test("request lineage preserves the same analysis instant while shrinking 30 to 
 });
 
 test("legacy failed request without chunkDays is safely interpreted as 30 days", () => {
-  assert.match(recovery, /rawChunkDays/);
+  assert.match(recovery, /function normalizeChunkDays/);
   assert.match(recovery, /: SALES_EVENT_DEFAULT_CHUNK_DAYS/);
   assert.match(recovery, /hasTerminalFailure\(latest\.requestId\)/);
 });
 
+test("same-tier retries can hydrate exact prior successful ranges instead of rereading them", () => {
+  assert.match(recovery, /hydrateProductMasterShoplingSalesEventRecovery/);
+  assert.match(recovery, /function exactReuseContext/);
+  assert.match(recovery, /reusableParentChunks/);
+  assert.match(recovery, /reusedFromRequestId/);
+  assert.match(recovery, /sales-event-recovery-chunk:/);
+  assert.match(recovery, /operation_type: SALES_EVENT_CHUNK/);
+  assert.match(recovery, /result_snapshot: chunk\.resultSnapshot/);
+});
+
 test("cron can recover terminal Shopling reads but never runs Product Master canary or full", () => {
   assert.match(cron, /recoverProductMasterShoplingSalesEventRequest/);
+  assert.match(cron, /hydrateProductMasterShoplingSalesEventRecovery/);
   assert.match(cron, /current\.state === "FAILED"/);
   assert.match(cron, /30일[\s\S]*7일/);
   assert.match(cron, /7일[\s\S]*2일/);
@@ -40,8 +51,9 @@ test("cron can recover terminal Shopling reads but never runs Product Master can
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
 });
 
-test("recovery only writes a new durable request operation", () => {
+test("recovery writes only durable request and chunk evidence rows", () => {
   assert.match(recovery, /operation_type: SALES_EVENT_REQUEST/);
+  assert.match(recovery, /operation_type: SALES_EVENT_CHUNK/);
   assert.match(recovery, /source_event_id: `sales-event-recovery-request:/);
-  assert.doesNotMatch(recovery, /sku_sales_events|barcode-ledgers|inventory_movements|1688/i);
+  assert.doesNotMatch(recovery, /sku_sales_events|barcode-ledgers|inventory_movements|sku_receipt_costs|1688/i);
 });
