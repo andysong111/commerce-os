@@ -1,0 +1,36 @@
+name: Temporary Stage8 Canonical Purchase Shadow Check
+
+on:
+  push:
+    branches:
+      - feat/stage8-canonical-purchase-shadow
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'feat/stage8-canonical-purchase-shadow' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Focused safety tests
+        run: node --experimental-strip-types --test tests/stage8CanonicalPurchaseShadow.test.mjs tests/stage8PostApplyCanonicalReconciliation.test.mjs tests/productMasterCanonicalSalesAudit.test.mjs
+      - name: Lint new shadow files
+        run: npx eslint src/lib/stage8CanonicalPurchaseShadow.ts src/app/stage8-canonical-purchase-shadow/page.tsx
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
