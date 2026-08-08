@@ -657,7 +657,8 @@ export async function loadCanonicalEventMismatchEvidenceStatus(): Promise<Canoni
     .order("started_at", { ascending: false })
     .limit(1);
   if (failures.error) throw new Error(failures.error.message);
-  const failure = failures.data?.[0] as OperationRow | undefined;
+  const failureRows = (Array.isArray(failures.data) ? failures.data : []) as OperationRow[];
+  const failure = failureRows[0];
   if (failure) {
     const error = safeMessage(failure.error_message || object(failure.result_snapshot).message);
     return {
