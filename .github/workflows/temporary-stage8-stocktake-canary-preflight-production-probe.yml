@@ -1,0 +1,52 @@
+name: Temporary Stage8 Stocktake Canary Preflight Production Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-stocktake-canary-preflight-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/stage8-stocktake-canary-preflight-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for production stocktake canary preflight
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-stocktake-canary-preflight'
+          ready=0
+          for i in $(seq 1 50); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])')"
+            echo "PROBE $i HTTP $code"
+            echo "$text" | grep -oE '상태 (READY_FOR_PHYSICAL_COUNT|NO_CANDIDATE|BLOCKED)|Canary B-code [A-Z0-9-]+|PM write gate (ON|OFF)|PM 재고상태 [A-Z_]+|PM 기준점 [A-Z_]+' || true
+            if [ "$code" = '200' ] && echo "$text" | grep -q '상태 READY_FOR_PHYSICAL_COUNT'; then
+              echo '--- STOCKTAKE CANARY PREFLIGHT ---'
+              echo "$text"
+              echo "$text" | grep -q 'Canary B-code BGG1-1'
+              echo "$text" | grep -q 'PM 재고상태 UNVERIFIED'
+              echo "$text" | grep -q 'PM 기준점 INITIAL_ZERO'
+              echo "$text" | grep -q 'PM write gate OFF'
+              echo "$text" | grep -q '실제 write 0 · READ ONLY'
+              echo "$text" | grep -q 'STOCKTAKE write false'
+              echo "$text" | grep -q 'PURCHASE write false'
+              echo "$text" | grep -q '입력할 값: 현재 창고에 실제로 있는 개수'
+              ready=1
+              break
+            fi
+            if [ "$code" = '200' ] && echo "$text" | grep -q '상태 BLOCKED'; then
+              echo '--- PREFLIGHT BLOCKED ---'
+              echo "$text"
+              exit 2
+            fi
+            sleep 10
+          done
+          test "$ready" = '1'
