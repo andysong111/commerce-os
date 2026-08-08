@@ -109,7 +109,14 @@ export async function loadLegacyVerifiedCostReadiness(): Promise<LegacyVerifiedC
           : "UNTRUSTED";
       const evidenceCost = evidence ? Math.ceil(evidence.unitCostKrw) : 0;
       const effectivePurchaseUnitCostKrw = confirmedReceipt
-        ? Math.max(1, integer(row.protectedCostKrw || row.latestCostKrw || shadowUnitCost))
+        ? Math.max(
+            1,
+            integer(
+              row.protectedCostKrw ||
+                row.latestConfirmedReceiptCostKrw ||
+                shadowUnitCost,
+            ),
+          )
         : legacyVerified
           ? Math.max(shadowUnitCost, evidenceCost)
           : 0;
