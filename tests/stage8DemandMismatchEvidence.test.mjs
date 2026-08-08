@@ -21,15 +21,42 @@ test("evidence compiler sends the same raw Shopling row through canonical and le
   assert.match(engine, /revenueDeltaLegacyMinusCanonical/);
 });
 
-test("evidence preserves raw quantity and identity fields needed to explain large anomalies", () => {
+test("evidence preserves the unfiltered actual option barcode and raw identity fields", () => {
+  assert.match(engine, /rawOptionBarcodeText/);
+  assert.match(engine, /rawOptionBarcodeStructured/);
+  assert.match(engine, /rawOptionBarcodeManaged/);
   assert.match(engine, /rawMallOrderCount/);
   assert.match(engine, /rawQuantity/);
-  assert.match(engine, /rawOptionBarcode/);
   assert.match(engine, /rawPartnerCode/);
   assert.match(engine, /optionId/);
   assert.match(engine, /productId/);
   assert.match(engine, /mallProductKey/);
-  assert.match(page, /BAA2-1의 1001개 같은 비정상 집계/);
+  assert.match(page, /원본 옵션바코드를 가리지 않고 그대로 보여/);
+});
+
+test("legacy-only rows prove whether canonical excluded a structured non-managed option code", () => {
+  assert.match(engine, /const STRUCTURED_BARCODE = \/\^\[A-Z\]\{3\}/);
+  assert.match(engine, /CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE/);
+  assert.match(engine, /STRUCTURED_BARCODE\.test\(rawActualOptionBarcode\)/);
+  assert.match(engine, /!MANAGED_BARCODE\.test\(rawActualOptionBarcode\)/);
+  assert.match(page, /실제 옵션바코드가 비관리 구조코드라 Canonical이 의도적으로 제외/);
+});
+
+test("canonical-only legacy-unmapped rows distinguish inactive historical SKU support", () => {
+  assert.match(engine, /inactiveManagedBarcodes/);
+  assert.match(engine, /product\.skuActive === false/);
+  assert.match(engine, /CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY/);
+  assert.match(engine, /LEGACY_ACTIVE_IDENTITY_MISSING/);
+  assert.match(page, /비활성 관리 SKU 역사 바코드를 보존하지만 기존 직접집계는 활성 SKU만 조회/);
+});
+
+test("final evidence report aggregates reason counts and reason deltas", () => {
+  assert.match(engine, /reasonCounts/);
+  assert.match(engine, /reasonUnitDelta/);
+  assert.match(engine, /reasonRevenueDelta/);
+  assert.match(engine, /reasonUnitDelta\[row\.reason\]/);
+  assert.match(engine, /reasonRevenueDelta\[row\.reason\]/);
+  assert.match(page, /결정적 원인 분류/);
 });
 
 test("evidence request is pinned to the completed parity fingerprints and refuses planning drift", () => {

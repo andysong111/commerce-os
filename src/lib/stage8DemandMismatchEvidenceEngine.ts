@@ -16,6 +16,7 @@ import {
 import type { ShoplingDateRange } from "@/lib/shopling/shoplingReadClient";
 
 const MANAGED_BARCODE = /^B[A-Z]{2}\d+-\d+$/;
+const STRUCTURED_BARCODE = /^[A-Z]{3}\d+-\d+$/;
 const MAX_EVIDENCE_PER_CHUNK = 500;
 
 export type DemandMismatchCategory =
@@ -27,8 +28,18 @@ export type DemandMismatchCategory =
   | "LEGACY_QTY_DIFFERS_FROM_CANONICAL"
   | "LEGACY_REVENUE_DIFFERS_FROM_CANONICAL";
 
+export type DemandMismatchReason =
+  | "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE"
+  | "CANONICAL_OTHER_SCOPE_EXCLUSION"
+  | "CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY"
+  | "LEGACY_ACTIVE_IDENTITY_MISSING"
+  | "RESOLVER_SKU_PRECEDENCE_DIFFERENCE"
+  | "RESOLVER_QUANTITY_RULE_DIFFERENCE"
+  | "RESOLVER_REVENUE_RULE_DIFFERENCE";
+
 export type DemandMismatchEvidenceRow = {
   category: DemandMismatchCategory;
+  reason: DemandMismatchReason;
   externalId: string;
   orderNo: string;
   orderedAt: string;
@@ -37,6 +48,8 @@ export type DemandMismatchEvidenceRow = {
   productId: string | null;
   mallProductKey: string | null;
   rawOptionBarcode: string | null;
+  rawOptionBarcodeStructured: boolean;
+  rawOptionBarcodeManaged: boolean;
   rawPartnerCode: string | null;
   rawMallOrderCount: string | null;
   rawQuantity: string | null;
@@ -63,6 +76,7 @@ export type DemandMismatchEvidenceChunk = {
   truncatedEvidenceRows: number;
   evidence: DemandMismatchEvidenceRow[];
   categoryCounts: Record<DemandMismatchCategory, number>;
+  reasonCounts: Record<DemandMismatchReason, number>;
 };
 
 export type DemandMismatchEvidenceSummary = {
@@ -75,6 +89,9 @@ export type DemandMismatchEvidenceSummary = {
   categoryCounts: Record<DemandMismatchCategory, number>;
   categoryUnitDelta: Record<DemandMismatchCategory, number>;
   categoryRevenueDelta: Record<DemandMismatchCategory, number>;
+  reasonCounts: Record<DemandMismatchReason, number>;
+  reasonUnitDelta: Record<DemandMismatchReason, number>;
+  reasonRevenueDelta: Record<DemandMismatchReason, number>;
   topEvidence: DemandMismatchEvidenceRow[];
   evidenceFingerprint: string;
 };
@@ -93,6 +110,16 @@ const CATEGORIES: DemandMismatchCategory[] = [
   "LEGACY_SKU_DIFFERS_FROM_CANONICAL",
   "LEGACY_QTY_DIFFERS_FROM_CANONICAL",
   "LEGACY_REVENUE_DIFFERS_FROM_CANONICAL",
+];
+
+const REASONS: DemandMismatchReason[] = [
+  "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE",
+  "CANONICAL_OTHER_SCOPE_EXCLUSION",
+  "CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY",
+  "LEGACY_ACTIVE_IDENTITY_MISSING",
+  "RESOLVER_SKU_PRECEDENCE_DIFFERENCE",
+  "RESOLVER_QUANTITY_RULE_DIFFERENCE",
+  "RESOLVER_REVENUE_RULE_DIFFERENCE",
 ];
 
 function text(value: unknown) {
@@ -118,9 +145,20 @@ function managedBarcode(value: unknown) {
   return MANAGED_BARCODE.test(barcode) ? barcode : "";
 }
 
+function normalizedBarcodeText(value: unknown) {
+  return normalizeShoplingBarcode(value);
+}
+
 function emptyCategoryCounts() {
   return Object.fromEntries(CATEGORIES.map((category) => [category, 0])) as Record<
     DemandMismatchCategory,
+    number
+  >;
+}
+
+function emptyReasonCounts() {
+  return Object.fromEntries(REASONS.map((reason) => [reason, 0])) as Record<
+    DemandMismatchReason,
     number
   >;
 }
@@ -145,12 +183,23 @@ function buildTargetIndex(
   return { barcodes, optionIds, goodsKeys };
 }
 
-function rawOptionBarcode(raw: ShoplingRawRow) {
-  return managedBarcode(rawValue(raw, ["optBarcode", "opt_barcode", "barcode"]));
+function inactiveManagedBarcodes(planning: ProductPlanningSnapshot) {
+  return new Set(
+    (planning.products ?? [])
+      .filter((product) => product.skuActive === false)
+      .map((product) => managedBarcode(product.barcode))
+      .filter(Boolean),
+  );
 }
 
-function rawPartnerCode(raw: ShoplingRawRow) {
-  return managedBarcode(
+function rawOptionBarcodeText(raw: ShoplingRawRow) {
+  return normalizedBarcodeText(
+    rawValue(raw, ["optBarcode", "opt_barcode", "barcode"]),
+  );
+}
+
+function rawPartnerCodeText(raw: ShoplingRawRow) {
+  return normalizedBarcodeText(
     rawValue(raw, [
       "ptn_goods_cd",
       "buying_cd",
@@ -162,8 +211,8 @@ function rawPartnerCode(raw: ShoplingRawRow) {
 
 function candidateRow(raw: ShoplingRawRow, targets: TargetIndex) {
   const order = normalizeShoplingOrder(raw);
-  const optionBarcode = rawOptionBarcode(raw) || managedBarcode(order.barcode);
-  const partnerCode = rawPartnerCode(raw);
+  const optionBarcode = managedBarcode(rawOptionBarcodeText(raw)) || managedBarcode(order.barcode);
+  const partnerCode = managedBarcode(rawPartnerCodeText(raw));
   if (optionBarcode && targets.barcodes.has(optionBarcode)) return true;
   if (partnerCode && targets.barcodes.has(partnerCode)) return true;
   if (order.optionId && targets.optionIds.has(text(order.optionId))) return true;
@@ -243,6 +292,40 @@ function mismatchCategory(
   return null;
 }
 
+function mismatchReason(
+  category: DemandMismatchCategory,
+  rawActualOptionBarcode: string,
+  canonical: ReturnType<typeof canonicalContribution>,
+  inactiveBarcodes: Set<string>,
+): DemandMismatchReason {
+  if (category === "LEGACY_ACCEPTS_CANONICAL_IGNORES") {
+    if (
+      rawActualOptionBarcode &&
+      STRUCTURED_BARCODE.test(rawActualOptionBarcode) &&
+      !MANAGED_BARCODE.test(rawActualOptionBarcode)
+    ) {
+      return "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE";
+    }
+    return "CANONICAL_OTHER_SCOPE_EXCLUSION";
+  }
+  if (
+    category === "CANONICAL_ONLY_LEGACY_UNMAPPED" ||
+    category === "CANONICAL_ONLY_LEGACY_IGNORES"
+  ) {
+    if (canonical.barcode && inactiveBarcodes.has(canonical.barcode)) {
+      return "CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY";
+    }
+    return "LEGACY_ACTIVE_IDENTITY_MISSING";
+  }
+  if (category === "LEGACY_SKU_DIFFERS_FROM_CANONICAL") {
+    return "RESOLVER_SKU_PRECEDENCE_DIFFERENCE";
+  }
+  if (category === "LEGACY_QTY_DIFFERS_FROM_CANONICAL") {
+    return "RESOLVER_QUANTITY_RULE_DIFFERENCE";
+  }
+  return "RESOLVER_REVENUE_RULE_DIFFERENCE";
+}
+
 function evidenceImpact(row: DemandMismatchEvidenceRow) {
   return (
     Math.abs(row.unitDeltaLegacyMinusCanonical) * 1_000_000_000 +
@@ -258,8 +341,10 @@ export function compileDemandMismatchEvidenceChunk(
   targetBarcodes: string[],
 ): DemandMismatchEvidenceChunk {
   const targets = buildTargetIndex(planning, targetBarcodes);
+  const inactiveBarcodes = inactiveManagedBarcodes(planning);
   const evidence: DemandMismatchEvidenceRow[] = [];
   const categoryCounts = emptyCategoryCounts();
+  const reasonCounts = emptyReasonCounts();
   let candidateRows = 0;
   let truncatedEvidenceRows = 0;
 
@@ -294,13 +379,22 @@ export function compileDemandMismatchEvidenceChunk(
     if (!involvesTarget) continue;
     const category = mismatchCategory(canonical, legacy);
     if (!category) continue;
+    const actualOptionBarcode = rawOptionBarcodeText(raw);
+    const reason = mismatchReason(
+      category,
+      actualOptionBarcode,
+      canonical,
+      inactiveBarcodes,
+    );
     categoryCounts[category] += 1;
+    reasonCounts[reason] += 1;
     if (evidence.length >= MAX_EVIDENCE_PER_CHUNK) {
       truncatedEvidenceRows += 1;
       continue;
     }
     evidence.push({
       category,
+      reason,
       externalId: order.id,
       orderNo: order.orderNo,
       orderedAt: order.orderedAt,
@@ -308,8 +402,10 @@ export function compileDemandMismatchEvidenceChunk(
       optionId: order.optionId || null,
       productId: order.productId,
       mallProductKey: order.mallProductKey,
-      rawOptionBarcode: rawOptionBarcode(raw) || null,
-      rawPartnerCode: rawPartnerCode(raw) || null,
+      rawOptionBarcode: actualOptionBarcode || null,
+      rawOptionBarcodeStructured: STRUCTURED_BARCODE.test(actualOptionBarcode),
+      rawOptionBarcodeManaged: MANAGED_BARCODE.test(actualOptionBarcode),
+      rawPartnerCode: rawPartnerCodeText(raw) || null,
       rawMallOrderCount: rawValue(raw, ["mall_ord_cnt"]) || null,
       rawQuantity: rawValue(raw, ["quantity"]) || null,
       normalizedQuantity: Number(order.quantity) || 0,
@@ -337,6 +433,7 @@ export function compileDemandMismatchEvidenceChunk(
     truncatedEvidenceRows,
     evidence,
     categoryCounts,
+    reasonCounts,
   };
 }
 
@@ -346,6 +443,9 @@ export function combineDemandMismatchEvidenceChunks(
   const categoryCounts = emptyCategoryCounts();
   const categoryUnitDelta = emptyCategoryCounts();
   const categoryRevenueDelta = emptyCategoryCounts();
+  const reasonCounts = emptyReasonCounts();
+  const reasonUnitDelta = emptyReasonCounts();
+  const reasonRevenueDelta = emptyReasonCounts();
   const allEvidence: DemandMismatchEvidenceRow[] = [];
   const affected = new Set<string>();
   let fetchedRows = 0;
@@ -361,10 +461,15 @@ export function combineDemandMismatchEvidenceChunks(
     for (const category of CATEGORIES) {
       categoryCounts[category] += chunk.categoryCounts[category] || 0;
     }
+    for (const reason of REASONS) {
+      reasonCounts[reason] += chunk.reasonCounts?.[reason] || 0;
+    }
     for (const row of chunk.evidence) {
       allEvidence.push(row);
       categoryUnitDelta[row.category] += row.unitDeltaLegacyMinusCanonical;
       categoryRevenueDelta[row.category] += row.revenueDeltaLegacyMinusCanonical;
+      reasonUnitDelta[row.reason] += row.unitDeltaLegacyMinusCanonical;
+      reasonRevenueDelta[row.reason] += row.revenueDeltaLegacyMinusCanonical;
       if (row.canonicalBarcode) affected.add(row.canonicalBarcode);
       if (row.legacyBarcode) affected.add(row.legacyBarcode);
     }
@@ -381,6 +486,9 @@ export function combineDemandMismatchEvidenceChunks(
     categoryCounts,
     categoryUnitDelta,
     categoryRevenueDelta,
+    reasonCounts,
+    reasonUnitDelta,
+    reasonRevenueDelta,
     topEvidence,
   };
   return {
