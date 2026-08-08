@@ -31,7 +31,9 @@ test("parity compares exact 12-bucket units and revenue per managed B-code", () 
 
 test("direct portfolio revenue remains informational and does not decide SKU parity", () => {
   assert.match(engine, /directPortfolioRecent30Revenue/);
-  assert.doesNotMatch(engine, /directPortfolioRecent30Revenue[\s\S]*blockerCount\s*=/);
+  const blockerExpression = engine.match(/const blockerCount =([\s\S]*?);/)?.[1] ?? "";
+  assert.ok(blockerExpression.length > 0);
+  assert.doesNotMatch(blockerExpression, /directPortfolioRecent30Revenue/);
   assert.match(page, /포트폴리오 예산의 최근30일 총매출/);
   assert.match(page, /동일성 게이트는 현재 관리 SKU의 12×30일 수량·매출 배열에만 적용/);
 });
