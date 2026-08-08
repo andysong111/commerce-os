@@ -50,6 +50,11 @@ test("worker is business-read-only: Shopling GET plus Ops evidence ledger only",
   assert.match(page, /발주·가격·재고·입고원가·단종은 변경하지 않습니다/);
 });
 
+test("data-heavy evidence ranges get a bounded long function window", () => {
+  assert.match(api, /export const maxDuration = 300/);
+  assert.match(cron, /export const maxDuration = 300/);
+});
+
 test("existing Stage8 parity cron automatically hands terminal mismatch into evidence collection", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /current\.state === "MISMATCH"/);
