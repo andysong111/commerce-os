@@ -1,0 +1,184 @@
+name: Temporary Stage8 Candidate Verified Apply
+
+on:
+  push:
+    branches:
+      - ops/stage8-candidate-verified-apply-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-candidate-verified-apply-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-candidate-verified-apply-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for exact candidate parity then canary and full-apply verified events
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          parity_page="$base/stage8-candidate-demand-parity"
+          parity_api="$base/api/stage8/candidate-demand-parity"
+          sales_page="$base/stage8-sales-events"
+          sales_api="$base/api/product-master/shopling-sales-events"
+
+          ready=0
+          parity_file=''
+          sales_file=''
+          for i in $(seq 1 160); do
+            parity_file="$(mktemp)"
+            sales_file="$(mktemp)"
+            pcode="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$parity_file" -w '%{http_code}' "$parity_api" -H "origin: $base" -H "referer: $parity_page" || true)"
+            scode="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$sales_file" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page" || true)"
+            if [ "$pcode" != '200' ] || [ "$scode" != '200' ]; then
+              echo "WAIT $i parity_http=$pcode sales_http=$scode"
+              sleep 5
+              continue
+            fi
+            read -r parity_state parity_sales_request parity_plan <<<"$(PARITY_FILE="$parity_file" python - <<'PY'
+          import json, os
+          with open(os.environ['PARITY_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          print(s.get('state') or '', r.get('candidateSalesRequestId') or '-', r.get('candidatePlanFingerprint') or '-')
+          PY
+          )"
+            read -r sales_state sales_request sales_plan <<<"$(SALES_FILE="$sales_file" python - <<'PY'
+          import json, os
+          with open(os.environ['SALES_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          print(s.get('state') or '', s.get('requestId') or '-', r.get('planFingerprint') or '-')
+          PY
+          )"
+            echo "WAIT $i parity=$parity_state sales=$sales_state candidate=$parity_sales_request current=$sales_request"
+
+            if [ "$parity_state" = 'MISMATCH' ] || [ "$parity_state" = 'FAILED' ]; then
+              echo 'Pre-write candidate parity is not exact. Safe stop: no Product Master write will be attempted.'
+              cat "$parity_file"
+              exit 0
+            fi
+            if [ "$sales_state" = 'BLOCKED' ] || [ "$sales_state" = 'FAILED' ]; then
+              echo 'Canonical sales candidate is blocked. Safe stop.'
+              cat "$sales_file"
+              exit 0
+            fi
+            if [ "$parity_state" = 'MATCH' ] && [ "$sales_state" = 'READY_CANARY' ] && [ "$parity_sales_request" = "$sales_request" ] && [ "$parity_plan" = "$sales_plan" ]; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = '1'
+
+          read -r request_id plan source_count <<<"$(SALES_FILE="$sales_file" python - <<'PY'
+          import json, os
+          with open(os.environ['SALES_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          print(s.get('requestId'), r.get('planFingerprint'), r.get('sourceEventCount'))
+          PY
+          )"
+          echo "VERIFIED_GATE request=$request_id plan=$plan rows=$source_count"
+
+          canary_file="$(mktemp)"
+          canary_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+            -o "$canary_file" -w '%{http_code}' \
+            -X POST "$sales_api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" -H "referer: $sales_page" \
+            --data "{\"action\":\"canary\",\"planFingerprint\":\"$plan\",\"confirmation\":\"CANARY\"}")"
+          echo "CANARY HTTP $canary_code"
+          cat "$canary_file"
+          test "$canary_code" = '200'
+          CANARY_FILE="$canary_file" PLAN="$plan" python - <<'PY'
+          import json, os
+          with open(os.environ['CANARY_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          r=data.get('result') or {}
+          assert data.get('ok') is True, data
+          assert r.get('mode') == 'canary', r
+          assert r.get('selected') == 1 and r.get('written') == 1, r
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          PY
+
+          post_canary="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$post_canary" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page")"
+          test "$code" = '200'
+          POST_CANARY="$post_canary" REQUEST="$request_id" PLAN="$plan" python - <<'PY'
+          import json, os
+          with open(os.environ['POST_CANARY'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          assert s.get('state') == 'READY_FULL', s
+          assert s.get('requestId') == os.environ['REQUEST'], s
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          assert s.get('canaryVerified') is True, s
+          PY
+
+          full_file="$(mktemp)"
+          full_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+            -o "$full_file" -w '%{http_code}' \
+            -X POST "$sales_api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" -H "referer: $sales_page" \
+            --data "{\"action\":\"full\",\"planFingerprint\":\"$plan\",\"confirmation\":\"FULL\"}")"
+          echo "FULL HTTP $full_code"
+          test "$full_code" = '200'
+          FULL_FILE="$full_file" PLAN="$plan" SOURCE_COUNT="$source_count" python - <<'PY'
+          import json, os
+          with open(os.environ['FULL_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          r=data.get('result') or {}
+          assert data.get('ok') is True, data
+          assert r.get('mode') == 'full', r
+          expected=int(os.environ['SOURCE_COUNT'])
+          assert r.get('selected') == expected and r.get('written') == expected, r
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          snap=r.get('snapshot') or {}
+          print('FULL_APPLY_RESULT', json.dumps({
+              'selected': r.get('selected'),
+              'written': r.get('written'),
+              'planFingerprint': r.get('planFingerprint'),
+              'snapshotSourceEventCount': snap.get('sourceEventCount'),
+              'snapshotValidEventCount': snap.get('validEventCount'),
+              'snapshotTombstoneCount': snap.get('tombstoneCount'),
+              'snapshotManagedActiveSkuCount': snap.get('managedActiveSkuCount'),
+              'snapshotOrphanEventCount': snap.get('orphanEventCount'),
+              'snapshotClassificationComplete': snap.get('classificationComplete'),
+              'snapshotFingerprint': snap.get('contentFingerprint'),
+          }, ensure_ascii=False))
+          PY
+
+          final_file="$(mktemp)"
+          final_code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$final_file" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page")"
+          test "$final_code" = '200'
+          FINAL_FILE="$final_file" REQUEST="$request_id" PLAN="$plan" python - <<'PY'
+          import json, os
+          with open(os.environ['FINAL_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          assert s.get('state') == 'COMPLETED', s
+          assert s.get('requestId') == os.environ['REQUEST'], s
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          print('FINAL_STATUS', json.dumps({
+              'state': s.get('state'),
+              'requestId': s.get('requestId'),
+              'sourceEventCount': r.get('sourceEventCount'),
+              'validEventCount': r.get('validEventCount'),
+              'tombstoneCount': r.get('tombstoneCount'),
+              'totalBaseUnits': r.get('totalBaseUnits'),
+              'totalRevenue': r.get('totalRevenue'),
+              'eventFingerprint': r.get('eventFingerprint'),
+              'planFingerprint': r.get('planFingerprint'),
+          }, ensure_ascii=False))
+          PY
