@@ -4,6 +4,7 @@ import {
   combineProductMasterShoplingSalesEventChunks,
   PRODUCT_MASTER_SALES_EVENT_FORMAT,
   PRODUCT_MASTER_SALES_EVENT_SOURCE,
+  PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS,
   type ProductMasterShoplingSalesEventChunk,
   type ProductMasterSalesEventRow,
 } from "@/lib/productMasterShoplingSalesEventEngine";
@@ -27,7 +28,7 @@ export const SALES_EVENT_FULL = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FULL";
 export const SALES_EVENT_FAILED = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FAILED";
 
 const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
-const ANALYSIS_DAYS = 360;
+const ANALYSIS_DAYS = PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS;
 const RANGE_DAYS = 30;
 const OPERATION_LIMIT = 500;
 const APPLY_BATCH_SIZE = 2_000;
@@ -466,6 +467,7 @@ export async function runProductMasterShoplingSalesEventSyncStep() {
         raw,
         planning,
         nextRange,
+        { analysisAsOf: request.analysisAsOf },
       );
       await storeOperation({
         operationType: SALES_EVENT_CHUNK,
