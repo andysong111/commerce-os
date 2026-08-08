@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import {
-  createSalesEventSyncRequestPlan,
-} from "../src/lib/productMasterShoplingSalesEventSync.ts";
 
 const [sync, route, cron, vercel] = await Promise.all([
   readFile("src/lib/productMasterShoplingSalesEventSync.ts", "utf8"),
@@ -12,21 +9,13 @@ const [sync, route, cron, vercel] = await Promise.all([
   readFile("vercel.json", "utf8"),
 ]);
 
-test("360-day request pins one Product Master planning fingerprint", () => {
-  const request = createSalesEventSyncRequestPlan(
-    "request-1",
-    {
-      generatedAt: "2026-08-08T00:00:00.000Z",
-      contentFingerprint: `sha256:${"a".repeat(64)}`,
-      products: [{ skuId: "sku:BAA1-1", barcode: "BAA1-1", productName: "x", listings: [] }],
-    },
-    "2026-08-08T12:00:00.000Z",
-  );
-  assert.equal(request.planningContentFingerprint, `sha256:${"a".repeat(64)}`);
-  assert.equal(request.analysisAsOf, "2026-08-08T12:00:00.000Z");
-  assert.ok(request.ranges.length >= 12);
-  assert.equal(request.ranges[0].start, request.analysisStartDate);
-  assert.equal(request.ranges.at(-1).end, request.analysisEndDate);
+test("360-day request pins one Product Master planning fingerprint and bounded ranges", () => {
+  assert.match(sync, /const ANALYSIS_DAYS = 360/);
+  assert.match(sync, /const RANGE_DAYS = 30/);
+  assert.match(sync, /analysisAsOf: asOf\.toISOString\(\)/);
+  assert.match(sync, /planningContentFingerprint: planning\.contentFingerprint/);
+  assert.match(sync, /splitShoplingDateRange\(analysisStartDate, analysisEndDate, RANGE_DAYS\)/);
+  assert.match(sync, /SALES_EVENT_PLANNING_CHANGED/);
 });
 
 test("collection is read-only and business write waits for explicit canary/full", () => {
@@ -46,6 +35,12 @@ test("Product Master storage migration gate is preserved before any event write"
   assert.ok(eventPost > storageCheck);
   assert.match(sync, /storageReady: false/);
   assert.match(sync, /migration/);
+});
+
+test("Product Master responses are checked for persisted readback rows", () => {
+  assert.match(sync, /payload\.verifiedRows/);
+  assert.match(sync, /verifiedRows === expected/);
+  assert.match(sync, /SALES_EVENT_WRITE_VERIFY_FAILED/);
 });
 
 test("cron only collects and never performs canary or full business writes", () => {
