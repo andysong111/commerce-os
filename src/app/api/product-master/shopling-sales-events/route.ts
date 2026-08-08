@@ -4,6 +4,7 @@ import {
   loadProductMasterShoplingSalesEventSyncStatus,
   runProductMasterShoplingSalesEventSyncStep,
 } from "@/lib/productMasterShoplingSalesEventSync";
+import { loadCandidatePromotionGate } from "@/lib/stage8CandidatePromotionGate";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
       if (!/^sha256:[a-f0-9]{64}$/.test(planFingerprint)) {
         return Response.json(
           { ok: false, code: "SALES_EVENT_PLAN_FINGERPRINT_REQUIRED" },
-          { status: 400 },
+          { status: 400, headers: { "cache-control": "no-store" } },
         );
       }
       const expectedConfirmation = action === "canary" ? "CANARY" : "FULL";
@@ -74,21 +75,60 @@ export async function POST(request: Request) {
             code: "SALES_EVENT_CONFIRMATION_REQUIRED",
             message: `${expectedConfirmation} 확인이 필요합니다.`,
           },
-          { status: 400 },
+          { status: 400, headers: { "cache-control": "no-store" } },
         );
       }
+
+      const promotionGate = await loadCandidatePromotionGate();
+      if (
+        !promotionGate.safeToApply ||
+        promotionGate.candidatePlanFingerprint !== planFingerprint ||
+        !promotionGate.promotionFingerprint
+      ) {
+        return Response.json(
+          {
+            ok: false,
+            code: "SALES_EVENT_PREWRITE_PROMOTION_GATE_BLOCKED",
+            message: promotionGate.message,
+            promotionGate,
+          },
+          { status: 409, headers: { "cache-control": "no-store" } },
+        );
+      }
+
       const result = await applyProductMasterShoplingSalesEvents(
         action,
         planFingerprint,
       );
       return Response.json(
-        { ok: result.ok, result },
-        { status: result.ok ? 200 : 409, headers: { "cache-control": "no-store" } },
+        {
+          ok: result.ok,
+          result,
+          promotionGate: {
+            state: promotionGate.state,
+            promotionFingerprint: promotionGate.promotionFingerprint,
+            candidateParityFingerprint:
+              promotionGate.candidateParityFingerprint,
+            evidenceFingerprint: promotionGate.evidenceFingerprint,
+          },
+        },
+        {
+          status: result.ok ? 200 : 409,
+          headers: { "cache-control": "no-store" },
+        },
       );
     }
 
     const current = await loadProductMasterShoplingSalesEventSyncStatus();
-    if (["QUEUED", "RUNNING", "READY_CANARY", "READY_FULL", "STORAGE_NOT_READY"].includes(current.state)) {
+    if (
+      [
+        "QUEUED",
+        "RUNNING",
+        "READY_CANARY",
+        "READY_FULL",
+        "STORAGE_NOT_READY",
+      ].includes(current.state)
+    ) {
       return Response.json(
         {
           ok: true,
@@ -116,7 +156,8 @@ export async function POST(request: Request) {
       {
         ok: false,
         code: "SALES_EVENT_SYNC_ACTION_FAILED",
-        message: error instanceof Error ? error.message : "판매 이벤트 작업 실행 실패",
+        message:
+          error instanceof Error ? error.message : "판매 이벤트 작업 실행 실패",
       },
       { status: 500, headers: { "cache-control": "no-store" } },
     );

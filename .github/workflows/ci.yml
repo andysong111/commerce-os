@@ -46,6 +46,7 @@ jobs:
           src/lib/stage8DemandMismatchEvidence.ts
           src/lib/stage8CandidateDemandParity.ts
           src/lib/stage8CandidateMismatchEvidence.ts
+          src/lib/stage8CandidatePromotionGate.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/api/cron/product-master-shopling-sales-events/route.ts
           src/app/api/cron/stage8-canonical-demand-parity/route.ts
@@ -63,6 +64,7 @@ jobs:
           src/app/stage8-demand-mismatch-evidence/page.tsx
           src/app/stage8-candidate-demand-parity/page.tsx
           src/app/stage8-candidate-mismatch-evidence/page.tsx
+          src/app/stage8-candidate-promotion-gate/page.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -92,6 +94,7 @@ jobs:
           tests/stage8DemandMismatchEvidence.test.mjs
           tests/stage8CandidateDemandParity.test.mjs
           tests/stage8CandidateMismatchEvidence.test.mjs
+          tests/stage8CandidatePromotionGate.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
