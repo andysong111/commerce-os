@@ -13,6 +13,7 @@ test("canonical audit reuses the exact completed sales-event analysisAsOf", () =
   assert.match(audit, /analysisAsOf=\$\{encodeURIComponent\(analysisAsOf\)\}/);
   assert.match(audit, /snapshot\.analysisAsOf !== status\.analysisAsOf/);
   assert.match(sync, /analysisAsOf: string \| null/);
+  assert.match(sync, /analysisAsOf: request\.analysisAsOf/);
 });
 
 test("audit is GET-only and blocks structural canonical mismatches", () => {
