@@ -33,6 +33,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/stage8-demand-mismatch-evidence",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }
