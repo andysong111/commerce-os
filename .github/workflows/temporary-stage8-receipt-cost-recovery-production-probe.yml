@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - ops/stage8-receipt-cost-recovery-probe-20260809
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/stage8-receipt-cost-recovery-probe-20260809' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
