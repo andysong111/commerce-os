@@ -1,0 +1,144 @@
+name: Temporary Stage8 Candidate Mismatch Evidence Runner
+
+on:
+  push:
+    branches:
+      - ops/stage8-candidate-mismatch-run-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-candidate-mismatch-run-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-candidate-mismatch-run-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Diagnose only the remaining pre-write candidate mismatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          page="$base/stage8-candidate-mismatch-evidence"
+          api="$base/api/stage8/candidate-mismatch-evidence"
+
+          ready=0
+          for i in $(seq 1 60); do
+            code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o /tmp/page -w '%{http_code}' "$page" || true)"
+            if [ "$code" = '200' ] && grep -q '쓰기 전 Candidate 차이 원주문행 진단' /tmp/page; then
+              ready=1
+              break
+            fi
+            echo "waiting for deployed candidate mismatch evidence page: HTTP $code"
+            sleep 5
+          done
+          test "$ready" = '1'
+
+          start_file="$(mktemp)"
+          start_code="$(curl -L -sS --connect-timeout 10 --max-time 180 \
+            -o "$start_file" -w '%{http_code}' \
+            -X POST "$api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" -H "referer: $page" \
+            --data '{"action":"start"}')"
+          echo "START HTTP $start_code"
+          cat "$start_file"
+          test "$start_code" = '200' -o "$start_code" = '202'
+          START_FILE="$start_file" python - <<'PY'
+          import json, os
+          with open(os.environ['START_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          assert data.get('ok') is True, data
+          PY
+
+          for i in $(seq 1 90); do
+            status_file="$(mktemp)"
+            status_code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o "$status_file" -w '%{http_code}' "$api" -H "origin: $base" -H "referer: $page")"
+            test "$status_code" = '200'
+            state="$(STATUS_FILE="$status_file" python - <<'PY'
+          import json, os
+          with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          print((data.get('status') or {}).get('state') or '')
+          PY
+          )"
+            echo "STATUS $i $state"
+            if [ "$state" = 'COMPLETE' ] || [ "$state" = 'FAILED' ]; then
+              STATUS_FILE="$status_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          summary={
+              'requestId': s.get('requestId'),
+              'state': s.get('state'),
+              'targetBarcodes': s.get('targetBarcodes'),
+              'completedRanges': s.get('completedRanges'),
+              'totalRanges': s.get('totalRanges'),
+              'fetchedRows': r.get('fetchedRows'),
+              'candidateRows': r.get('candidateRows'),
+              'evidenceRows': r.get('evidenceRows'),
+              'affectedBarcodes': r.get('affectedBarcodes'),
+              'categoryCounts': r.get('categoryCounts'),
+              'categoryUnitDelta': r.get('categoryUnitDelta'),
+              'categoryRevenueDelta': r.get('categoryRevenueDelta'),
+              'reasonCounts': r.get('reasonCounts'),
+              'reasonUnitDelta': r.get('reasonUnitDelta'),
+              'reasonRevenueDelta': r.get('reasonRevenueDelta'),
+              'truncatedEvidenceRows': r.get('truncatedEvidenceRows'),
+              'evidenceFingerprint': r.get('evidenceFingerprint'),
+          }
+          print('FINAL_CANDIDATE_MISMATCH_EVIDENCE', json.dumps(summary, ensure_ascii=False))
+          rows=[]
+          for row in (r.get('topEvidence') or [])[:100]:
+              rows.append({k:row.get(k) for k in (
+                  'reason','category','externalId','orderNo','orderedAt','status','optionId',
+                  'productId','mallProductKey','rawOptionBarcode','rawPartnerCode','rawMallOrderCount',
+                  'normalizedQuantity','canonicalState','canonicalBarcode','canonicalUnits','canonicalRevenue',
+                  'legacyState','legacyBarcode','legacyUnits','legacyRevenue',
+                  'unitDeltaLegacyMinusCanonical','revenueDeltaLegacyMinusCanonical'
+              )})
+          print('ALL_TOP_EVIDENCE', json.dumps(rows, ensure_ascii=False))
+          if s.get('state') == 'FAILED':
+              raise SystemExit(2)
+          PY
+              exit 0
+            fi
+
+            step_file="$(mktemp)"
+            step_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+              -o "$step_file" -w '%{http_code}' \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $base" -H "referer: $page" \
+              --data '{"action":"run-next"}' || true)"
+            echo "STEP $i HTTP $step_code"
+            if [ "$step_code" != '200' ]; then
+              cat "$step_file"
+              sleep 10
+              continue
+            fi
+            STEP_FILE="$step_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['STEP_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          result=data.get('result') or {}
+          print(json.dumps({k:result.get(k) for k in ('state','range','fetchedRows','candidateRows','evidenceRows','attempt','message') if k in result}, ensure_ascii=False))
+          if result.get('state') == 'FAILED':
+              raise SystemExit(2)
+          PY
+            sleep 1
+          done
+
+          echo 'Candidate mismatch evidence runner exhausted before terminal state.' >&2
+          exit 1
