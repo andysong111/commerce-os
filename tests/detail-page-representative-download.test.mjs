@@ -21,32 +21,37 @@ const page = readFileSync(
   "utf8",
 );
 
-test("representative ZIP API uses the canonical review asset resolver", () => {
-  assert.match(route, /detailPageReviewAssets\(/);
-  assert.match(route, /publicDetailPageJob\(job\)/);
-  assert.match(route, /\.representatives\.slice\(0, MAX_REPRESENTATIVE_IMAGES\)/);
+test("full ZIP API uses the canonical review asset resolver for representative and final detail images", () => {
+  assert.match(route, /detailPageReviewAssets\(publicDetailPageJob\(job\)\)/);
+  assert.match(route, /reviewAssets\.representatives\.slice/);
+  assert.match(route, /reviewAssets\.detail\[0\]/);
+  assert.match(route, /detail_page/);
   assert.doesNotMatch(route, /representatives\.length === 5/);
 });
 
-test("representative ZIP API only fetches owned product-launch assets", () => {
+test("full ZIP API only fetches owned product-launch assets", () => {
   assert.match(route, /product-launch-assets/);
   assert.match(route, /url\.origin === ownedPrefix\.origin/);
   assert.match(route, /url\.pathname\.startsWith\(ownedPrefix\.pathname\)/);
-  assert.match(route, /DETAIL_PAGE_REPRESENTATIVE_DOWNLOAD_FAILED/);
+  assert.match(route, /DETAIL_PAGE_FULL_IMAGE_DOWNLOAD_FAILED/);
 });
 
-test("representative ZIP API preserves already-compressed image bytes", () => {
+test("full ZIP API preserves already-compressed image bytes and appends the detail page", () => {
   assert.match(route, /zipSync\(files, \{ level: 0 \}\)/);
-  assert.match(route, /01_main/);
-  assert.match(route, /sub_/);
+  assert.match(route, /representativeFilenameBase/);
+  assert.match(route, /_main/);
+  assert.match(route, /_sub_/);
+  assert.match(route, /_detail_page/);
+  assert.match(route, /-all-images\.zip/);
   assert.match(route, /Content-Disposition/);
   assert.match(route, /application\/zip/);
 });
 
-test("review page exposes one-click representative ZIP download for any stored image count", () => {
+test("review page exposes one-click representative, sub and final detail-page ZIP download", () => {
   assert.match(page, /DetailPageRepresentativeDownloadControl/);
-  assert.match(control, /대표·부가 이미지 일괄 다운로드/);
-  assert.match(control, /detailPageReviewAssets\(job\)\.representatives\.length > 0/);
-  assert.match(control, /대표·부가 \{representativeCount\}장 ZIP 다운로드/);
+  assert.match(control, /대표 부가 상세페이지 전체 ZIP 다운로드/);
+  assert.match(control, /assets\.representatives\.length > 0 && assets\.detail\.length > 0/);
+  assert.match(control, /대표·부가 \{count\}장 \+ 상세페이지/);
+  assert.match(control, /최종 상세페이지 이미지까지 총 \$\{totalImageCount\}장/);
   assert.match(control, /\/representative-images/);
 });

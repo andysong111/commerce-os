@@ -10,9 +10,17 @@ import {
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 
+const DEFAULT_MESSAGE =
+  "대표·부가 이미지와 최종 상세페이지 이미지를 ZIP 한 개로 다운로드합니다. v3와 Evidence Compiler 결과 모두 지원합니다.";
+
 type StatusState =
   | { tone: "neutral"; message: string }
   | { tone: "success" | "error"; message: string };
+
+function hasFullDownloadAssets(job: DetailPageReviewJob) {
+  const assets = detailPageReviewAssets(job);
+  return assets.representatives.length > 0 && assets.detail.length > 0;
+}
 
 export function DetailPageRepresentativeDownloadControl() {
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
@@ -20,8 +28,7 @@ export function DetailPageRepresentativeDownloadControl() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<StatusState>({
     tone: "neutral",
-    message:
-      "저장된 대표·부가 이미지를 현재 장수 그대로 ZIP 한 개로 다운로드합니다. v3와 Evidence Compiler 결과 모두 지원합니다.",
+    message: DEFAULT_MESSAGE,
   });
 
   const refresh = useCallback(async () => {
@@ -42,9 +49,7 @@ export function DetailPageRepresentativeDownloadControl() {
       }
       setJobs(body.jobs);
       setJobId((current) => {
-        const candidates = body.jobs!.filter(
-          (job) => detailPageReviewAssets(job).representatives.length > 0,
-        );
+        const candidates = body.jobs!.filter(hasFullDownloadAssets);
         if (current && candidates.some((job) => job.jobId === current)) return current;
         return (
           candidates.find((job) => detailPageReviewBucket(job) === "passed")?.jobId ||
@@ -54,11 +59,7 @@ export function DetailPageRepresentativeDownloadControl() {
       });
       setStatus((current) =>
         current.tone === "error"
-          ? {
-              tone: "neutral",
-              message:
-                "저장된 대표·부가 이미지를 현재 장수 그대로 ZIP 한 개로 다운로드합니다. v3와 Evidence Compiler 결과 모두 지원합니다.",
-            }
+          ? { tone: "neutral", message: DEFAULT_MESSAGE }
           : current,
       );
     } catch (error) {
@@ -79,16 +80,13 @@ export function DetailPageRepresentativeDownloadControl() {
   }, [refresh]);
 
   const candidates = useMemo(
-    () =>
-      jobs.filter(
-        (job) => detailPageReviewAssets(job).representatives.length > 0,
-      ),
+    () => jobs.filter(hasFullDownloadAssets),
     [jobs],
   );
   const selected = candidates.find((job) => job.jobId === jobId) || null;
-  const representativeCount = selected
-    ? detailPageReviewAssets(selected).representatives.length
-    : 0;
+  const selectedAssets = selected ? detailPageReviewAssets(selected) : null;
+  const representativeCount = selectedAssets?.representatives.length ?? 0;
+  const totalImageCount = representativeCount + (selectedAssets?.detail.length ? 1 : 0);
   const downloadHref = selected
     ? `${JOBS_API}/${encodeURIComponent(selected.jobId)}/representative-images`
     : "";
@@ -106,14 +104,14 @@ export function DetailPageRepresentativeDownloadControl() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-black text-slate-950">
-              대표·부가 이미지 일괄 다운로드
+              대표 부가 상세페이지 전체 ZIP 다운로드
             </h2>
             <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-black text-emerald-700">
-              ZIP 1개
+              전체 이미지 ZIP
             </span>
           </div>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-            작업에 실제 저장된 대표·부가 이미지만 모아 01_main, 02_sub_1… 순서로 압축합니다. 이미지 수가 달라져도 저장된 배열 기준으로 자동 처리합니다.
+            작업에 실제 저장된 대표·부가 이미지를 01_main, 02_sub_1… 순서로 담고, 마지막에 최종 상세페이지 이미지를 detail_page 파일로 함께 압축합니다.
           </p>
         </div>
         <button
@@ -136,13 +134,14 @@ export function DetailPageRepresentativeDownloadControl() {
             className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900"
           >
             {candidates.length === 0 ? (
-              <option value="">대표·부가 이미지가 저장된 작업이 없습니다.</option>
+              <option value="">대표·부가·최종 상세페이지 이미지가 모두 저장된 작업이 없습니다.</option>
             ) : null}
             {candidates.map((job) => {
-              const count = detailPageReviewAssets(job).representatives.length;
+              const assets = detailPageReviewAssets(job);
+              const count = assets.representatives.length;
               return (
                 <option key={job.jobId} value={job.jobId}>
-                  {detailPageJobName(job)} · {count}장 · {job.jobId.slice(0, 8)}
+                  {detailPageJobName(job)} · 대표·부가 {count}장 + 상세페이지 · {job.jobId.slice(0, 8)}
                 </option>
               );
             })}
@@ -155,16 +154,16 @@ export function DetailPageRepresentativeDownloadControl() {
             onClick={() =>
               setStatus({
                 tone: "success",
-                message: `${detailPageJobName(selected)} · 대표·부가 ${representativeCount}장 ZIP 다운로드를 요청했습니다.`,
+                message: `${detailPageJobName(selected)} · 대표·부가 ${representativeCount}장 + 최종 상세페이지 이미지까지 총 ${totalImageCount}장 ZIP 다운로드를 요청했습니다.`,
               })
             }
             className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-800"
           >
-            대표·부가 {representativeCount}장 ZIP 다운로드
+            대표 부가 상세페이지 전체 ZIP 다운로드
           </a>
         ) : (
           <span className="rounded-xl bg-slate-200 px-4 py-2.5 text-sm font-black text-slate-500">
-            다운로드할 이미지 없음
+            다운로드할 전체 이미지 없음
           </span>
         )}
       </div>
