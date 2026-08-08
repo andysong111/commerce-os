@@ -84,6 +84,7 @@ export type SalesEventSyncReport = {
 export type SalesEventSyncStatus = {
   configured: boolean;
   requestId: string | null;
+  analysisAsOf: string | null;
   state:
     | "IDLE"
     | "QUEUED"
@@ -648,6 +649,7 @@ export async function loadProductMasterShoplingSalesEventSyncStatus(): Promise<S
   const empty: SalesEventSyncStatus = {
     configured,
     requestId: null,
+    analysisAsOf: null,
     state: "IDLE",
     stage: "대기",
     message: "정확한 30일 구간용 주문행 판매 이벤트 원장을 아직 수집하지 않았습니다.",
@@ -666,6 +668,7 @@ export async function loadProductMasterShoplingSalesEventSyncStatus(): Promise<S
   const common = {
     ...empty,
     requestId: request.requestId,
+    analysisAsOf: request.analysisAsOf,
     completedRanges,
     totalRanges: request.ranges.length,
     progress: Math.min(100, Math.round((completedRanges / request.ranges.length) * 100)),
