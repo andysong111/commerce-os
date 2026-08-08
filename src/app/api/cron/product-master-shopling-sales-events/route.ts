@@ -8,6 +8,7 @@ import {
   SALES_EVENT_DEFAULT_CHUNK_DAYS,
   SALES_EVENT_FALLBACK_CHUNK_DAYS,
   SALES_EVENT_MINIMUM_CHUNK_DAYS,
+  hydrateProductMasterShoplingSalesEventRecovery,
   recoverProductMasterShoplingSalesEventRequest,
 } from "@/lib/productMasterShoplingSalesEventRecovery";
 
@@ -45,17 +46,20 @@ function recoveryMessage(result: {
   reason?: string;
   chunkDays?: number;
   attemptsInPreviousTier?: number;
+  reusedChunks?: number;
 }) {
+  const reused = Number(result.reusedChunks ?? 0);
+  const reuseNote = reused > 0 ? ` 이전 성공 구간 ${reused}개는 다시 읽지 않고 재사용합니다.` : "";
   if (result.reason === "RETRY_SAME_TIER") {
-    return `${result.chunkDays}일 Shopling 조회를 같은 분석시점으로 안전 재시도합니다. 이 구간 크기의 ${Number(result.attemptsInPreviousTier ?? 0) + 1}번째 요청입니다.`;
+    return `${result.chunkDays}일 Shopling 조회를 같은 분석시점으로 안전 재시도합니다. 이 구간 크기의 ${Number(result.attemptsInPreviousTier ?? 0) + 1}번째 요청입니다.${reuseNote}`;
   }
   if (result.chunkDays === SALES_EVENT_FALLBACK_CHUNK_DAYS) {
-    return "30일 Shopling 주문 조회가 반복 실패해 같은 분석시점을 유지한 채 7일 단위로 안전 재접수했습니다.";
+    return `30일 Shopling 주문 조회가 반복 실패해 같은 분석시점을 유지한 채 7일 단위로 안전 재접수했습니다.${reuseNote}`;
   }
   if (result.chunkDays === SALES_EVENT_MINIMUM_CHUNK_DAYS) {
-    return "7일 Shopling 주문 조회도 반복 실패해 같은 분석시점을 유지한 채 2일 단위로 최종 안전 재접수했습니다.";
+    return `7일 Shopling 주문 조회도 반복 실패해 같은 분석시점을 유지한 채 2일 단위로 최종 안전 재접수했습니다.${reuseNote}`;
   }
-  return "Shopling 주문 조회를 더 작은 안전 구간으로 재접수했습니다.";
+  return `Shopling 주문 조회를 더 작은 안전 구간으로 재접수했습니다.${reuseNote}`;
 }
 
 export async function GET(request: Request) {
@@ -112,9 +116,11 @@ export async function GET(request: Request) {
       }
     }
     if (current.state === "QUEUED" || current.state === "RUNNING") {
+      const hydrated = await hydrateProductMasterShoplingSalesEventRecovery();
       return Response.json({
         ok: true,
         configured: true,
+        hydrated,
         ...(await runBoundedBurst()),
       });
     }
