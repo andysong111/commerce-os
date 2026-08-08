@@ -1,0 +1,29 @@
+name: Temporary Stage8 Receipt Cost Recovery Production Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-receipt-cost-recovery-probe-20260809
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read production receipt cost recovery metrics
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-receipt-cost-recovery-readiness'
+          body="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url")"
+          text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:160000])')"
+          echo "HTTP $code"
+          echo '--- RECEIPT COST RECOVERY READINESS ---'
+          echo "$text"
+          test "$code" = '200'
+          echo "$text" | grep -q '과거 입고원가 자동복구 준비도'
+          echo "$text" | grep -q '실제 쓰기 0 · READ ONLY'
+          echo "$text" | grep -q '자동 Product Master write · false'
