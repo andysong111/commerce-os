@@ -1,0 +1,55 @@
+name: Temporary Stage8 Postfix Reconciliation Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-postfix-reconciliation-probe-20260809
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for Product Master fix and require persisted reconciliation READY
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-postapply-canonical-reconciliation'
+          ready=0
+          for i in $(seq 1 90); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:60000])')"
+            echo "PROBE $i HTTP $code"
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Persisted Canonical 판매원장 최종 대사'; then
+              echo '--- RECONCILIATION PAGE ---'
+              echo "$text"
+              if echo "$text" | grep -q '대사 결과 READY'; then
+                echo "$text" | grep -q 'PERSISTED CANDIDATE 일치'
+                echo "$text" | grep -q 'Candidate 이벤트 11,042'
+                echo "$text" | grep -q 'Persisted 이벤트 11,042'
+                echo "$text" | grep -q 'Candidate 정상판매 10,783'
+                echo "$text" | grep -q 'Persisted 정상판매 10,783'
+                echo "$text" | grep -q 'Candidate tombstone 259'
+                echo "$text" | grep -q 'Persisted tombstone 259'
+                echo "$text" | grep -q 'Candidate active SKU 332'
+                echo "$text" | grep -q 'Persisted active SKU 332'
+                echo "$text" | grep -q '공유 active SKU 332'
+                echo "$text" | grep -q '완전일치 active SKU 332'
+                echo "$text" | grep -q 'FULL 검증 write 11,042'
+                echo "$text" | grep -q 'Candidate 누락 0'
+                echo "$text" | grep -q '추가 persisted 판매보유 0'
+                echo "$text" | grep -q 'candidate-active-arrays-exact PASS'
+                echo "$text" | grep -q 'extra-persisted-rows-zero-only PASS'
+                echo "$text" | grep -q 'full-apply-evidence-verified PASS'
+                echo "$text" | grep -q 'Reconciliation · sha256:'
+                ready=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ready" = '1'
