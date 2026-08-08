@@ -32,7 +32,7 @@ jobs:
           ready=0
           for i in $(seq 1 36); do
             code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o /tmp/page -w '%{http_code}' "$page" || true)"
-            if [ "$code" = '200' ] && grep -q 'Shopling 조회구간과 실제 주문일이 달라' /tmp/page; then
+            if [ "$code" = '200' ] && grep -q 'Shopling이 돌려준 조회구간과 주문행의 실제 mall_ord_dt' /tmp/page; then
               ready=1
               break
             fi
