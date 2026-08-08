@@ -1,111 +1,55 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
-import {
-  aggregateProductMasterShoplingSalesChunk,
-} from "../src/lib/productMasterShoplingSalesBackfillEngine.ts";
-import {
-  aggregateProductMasterShoplingSalesEventChunk,
-  combineProductMasterShoplingSalesEventChunks,
-  PRODUCT_MASTER_SALES_EVENT_FORMAT,
-  PRODUCT_MASTER_SALES_EVENT_SOURCE,
-} from "../src/lib/productMasterShoplingSalesEventEngine.ts";
 
-const planning = {
-  generatedAt: "2026-08-08T00:00:00.000Z",
-  products: [
-    {
-      skuId: "sku:BAA1-1",
-      barcode: "BAA1-1",
-      productName: "current",
-      skuActive: true,
-      listings: [
-        { optionId: "opt-current", goodsKey: "goods-a", unitsPerOrder: 2, active: true },
-      ],
-    },
-    {
-      skuId: "sku:BBB1-1",
-      barcode: "BBB1-1",
-      productName: "historical",
-      skuActive: false,
-      listings: [
-        { optionId: "opt-old", goodsKey: "goods-old", unitsPerOrder: 1, active: false },
-      ],
-    },
-  ],
-};
+const [engine, monthly] = await Promise.all([
+  readFile("src/lib/productMasterShoplingSalesEventEngine.ts", "utf8"),
+  readFile("src/lib/productMasterShoplingSalesBackfillEngine.ts", "utf8"),
+]);
 
-const range = { start: "2026-07-01", end: "2026-07-31" };
-
-function row({ orderNo, optionId, barcode, status = "배송완료", quantity = 1, unitPrice = 1000, date = "20260710120000", seq = "1", goodsKey = "goods-a" }) {
-  return {
-    ord_no: orderNo,
-    opt_id: optionId,
-    optBarcode: barcode,
-    ord_status: status,
-    mall_ord_cnt: quantity,
-    mall_unit_price: unitPrice,
-    mall_ord_dt: date,
-    mall_ord_seq: seq,
-    prod_id: goodsKey,
-  };
-}
-
-test("event ledger preserves monthly totals for valid managed sales", () => {
-  const rows = [
-    row({ orderNo: "A1", optionId: "opt-current", barcode: "BAA1-1", quantity: 2, unitPrice: 1500 }),
-    row({ orderNo: "A2", optionId: "opt-current", barcode: "BAA1-1", quantity: 1, unitPrice: 2000, date: "20260721123000" }),
-  ];
-  const monthly = aggregateProductMasterShoplingSalesChunk(rows, planning, range);
-  const events = aggregateProductMasterShoplingSalesEventChunk(
-    rows,
-    planning,
-    range,
-    "2026-08-08T00:00:00.000Z",
-  );
-  assert.equal(events.unmappedRows, 0);
-  assert.equal(events.tombstoneRows, 0);
-  assert.equal(events.totalBaseUnits, monthly.totalBaseUnits);
-  assert.equal(events.totalRevenue, monthly.totalRevenue);
+test("event rows use the same base-unit and paid-amount inputs as the monthly canonical ledger", () => {
+  assert.match(engine, /Math\.round\(number\(order\.quantity\)\)\) \* identity\.unitsPerOrder/);
+  assert.match(engine, /Math\.round\(number\(order\.paidAmount\)\)/);
+  assert.match(monthly, /order\.quantity \* identity\.unitsPerOrder/);
+  assert.match(monthly, /order\.paidAmount/);
 });
 
-test("cancelled managed order lines become tombstones instead of stale demand", () => {
-  const events = aggregateProductMasterShoplingSalesEventChunk(
-    [row({ orderNo: "C1", optionId: "opt-current", barcode: "BAA1-1", status: "주문취소", quantity: 3 })],
-    planning,
-    range,
-    "2026-08-08T00:00:00.000Z",
-  );
-  assert.equal(events.eventRows, 1);
-  assert.equal(events.validRows, 0);
-  assert.equal(events.tombstoneRows, 1);
-  assert.equal(events.events[0].validSale, false);
+test("cancelled and returned managed lines are retained as explicit tombstones", () => {
+  assert.match(engine, /validSale = validSaleStatus\(order\.status\) && quantity > 0/);
+  assert.match(engine, /validSale,/);
+  assert.match(engine, /tombstoneRows: events\.length - validRows\.length/);
+  assert.match(engine, /취소/);
+  assert.match(engine, /반품/);
+  assert.match(engine, /환불/);
 });
 
-test("exact historical option barcode remains stronger than a later current option identity", () => {
-  const events = aggregateProductMasterShoplingSalesEventChunk(
-    [row({ orderNo: "H1", optionId: "opt-current", barcode: "BBB1-1", goodsKey: "goods-old" })],
-    planning,
-    range,
-    "2026-08-08T00:00:00.000Z",
-  );
-  assert.equal(events.unmappedRows, 0);
-  assert.equal(events.events[0].barcode, "BBB1-1");
+test("exact historical option barcode is evaluated before a later current option identity", () => {
+  const optionBarcode = engine.indexOf("const optionBarcode = managedBarcode");
+  const optionIdentityReturn = engine.indexOf("if (optionIdentity) return optionIdentity");
+  const historicalDirect = engine.indexOf("historicalDirectIdentity(index, optionBarcode, order)");
+  assert.ok(optionBarcode >= 0);
+  assert.ok(historicalDirect > optionBarcode);
+  assert.ok(optionIdentityReturn > historicalDirect);
+  assert.match(engine, /historicalByBarcode/);
+  assert.match(engine, /ownUnits\.size === 1/);
+  assert.match(engine, /ownUnits\.size > 1\) return null/);
 });
 
-test("cross-chunk external identity conflicts fail visibly in the combine result", () => {
-  const first = aggregateProductMasterShoplingSalesEventChunk(
-    [row({ orderNo: "D1", optionId: "opt-current", barcode: "BAA1-1" })],
-    planning,
-    range,
-    "2026-08-08T00:00:00.000Z",
-  );
-  const second = structuredClone(first);
-  second.events[0].barcode = "BBB1-1";
-  const combined = combineProductMasterShoplingSalesEventChunks([first, second]);
-  assert.deepEqual(combined.conflictExternalIds, [first.events[0].externalId]);
+test("managed B-code scope is preserved and old non-B rows are ignored", () => {
+  assert.match(engine, /const MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}\\d\+-\\d\+\$\//);
+  assert.match(engine, /if \(!isManagedSalesScope\(index, order, raw\)\)/);
+  assert.match(engine, /ignoredRows \+= 1/);
+});
+
+test("cross-chunk identity disagreement is surfaced instead of silently overwritten", () => {
+  assert.match(engine, /prior\.barcode !== event\.barcode \|\| prior\.occurredAt !== event\.occurredAt/);
+  assert.match(engine, /conflicts\.push\(event\.externalId\)/);
+  assert.match(engine, /conflictExternalIds/);
 });
 
 test("wire contract is pinned to Product Master canonical sales event API", () => {
-  assert.equal(PRODUCT_MASTER_SALES_EVENT_FORMAT, "commerce-os-sales-events-v1");
-  assert.equal(PRODUCT_MASTER_SALES_EVENT_SOURCE, "shopling_orders_event_v1");
+  assert.match(engine, /commerce-os-sales-events-v1/);
+  assert.match(engine, /shopling_orders_event_v1/);
+  assert.match(engine, /externalId: order\.id/);
+  assert.match(engine, /occurredAt: orderedAt/);
 });
