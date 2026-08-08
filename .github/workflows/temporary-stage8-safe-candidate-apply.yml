@@ -1,0 +1,169 @@
+name: Temporary Stage8 Safe Candidate Apply
+
+on:
+  push:
+    branches:
+      - ops/stage8-safe-candidate-apply-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-safe-candidate-apply-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-safe-candidate-apply-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify live promotion gate then canary and full apply exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          sales_page="$base/stage8-sales-events"
+          sales_api="$base/api/product-master/shopling-sales-events"
+          gate_page="$base/stage8-candidate-promotion-gate"
+
+          expected_request='7bd616ba-899c-49d6-8151-5debacfcd47f'
+          expected_plan='sha256:00f3e644458e5050d12b4f2468925ba8d24c0472d5b3b1d28d93568ac34b70a3'
+          expected_event='sha256:73ea0b784a4c09128c1c01fa659daa1d3db38aa38f91802c33434565cc1c6a3f'
+          expected_parity='sha256:d5106e4d3fde74ea9df2c57948a1af685fca49f28398d2bb6a8ea773dcfd2645'
+          expected_evidence='sha256:da0c98c81152a1d3a3de59a0c2c7f656cce9b13735145773843034f3b49ffbbf'
+          expected_promotion='sha256:1d14eb94f46a574fee1c9952d34a6f9694d2a927aef18808659a62d756baeef7'
+          expected_rows=11042
+
+          gate_body="$(mktemp)"
+          gate_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$gate_body" -w '%{http_code}' "$gate_page")"
+          test "$gate_code" = '200'
+          gate_text="$(cat "$gate_body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:40000])')"
+          echo "$gate_text"
+          echo "$gate_text" | grep -q 'SAFE_CANONICAL_SUPERSET'
+          echo "$gate_text" | grep -q 'CANARY 적재 허용'
+          for value in "$expected_request" "$expected_plan" "$expected_event" "$expected_parity" "$expected_evidence" "$expected_promotion"; do
+            echo "$gate_text" | grep -q "$value"
+          done
+
+          before="$(mktemp)"
+          before_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$before" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page")"
+          test "$before_code" = '200'
+          BEFORE="$before" REQUEST="$expected_request" PLAN="$expected_plan" EVENT="$expected_event" ROWS="$expected_rows" python - <<'PY'
+          import json, os
+          with open(os.environ['BEFORE'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          assert s.get('state') == 'READY_CANARY', s
+          assert s.get('requestId') == os.environ['REQUEST'], s
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          assert r.get('eventFingerprint') == os.environ['EVENT'], r
+          assert r.get('sourceEventCount') == int(os.environ['ROWS']), r
+          assert r.get('unmappedRows') == 0 and r.get('identityConflictCount') == 0, r
+          print('PRE_APPLY_STATUS', json.dumps({
+              'state':s.get('state'),'requestId':s.get('requestId'),
+              'sourceEventCount':r.get('sourceEventCount'),'validEventCount':r.get('validEventCount'),
+              'tombstoneCount':r.get('tombstoneCount'),'totalBaseUnits':r.get('totalBaseUnits'),
+              'totalRevenue':r.get('totalRevenue'),'eventFingerprint':r.get('eventFingerprint'),
+              'planFingerprint':r.get('planFingerprint')}, ensure_ascii=False))
+          PY
+
+          canary="$(mktemp)"
+          canary_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+            -o "$canary" -w '%{http_code}' \
+            -X POST "$sales_api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" -H "referer: $sales_page" \
+            --data "{\"action\":\"canary\",\"planFingerprint\":\"$expected_plan\",\"confirmation\":\"CANARY\"}")"
+          echo "CANARY HTTP $canary_code"
+          cat "$canary"
+          test "$canary_code" = '200'
+          CANARY="$canary" PLAN="$expected_plan" PROMO="$expected_promotion" PARITY="$expected_parity" EVIDENCE="$expected_evidence" python - <<'PY'
+          import json, os
+          with open(os.environ['CANARY'], encoding='utf-8') as f:
+              data=json.load(f)
+          r=data.get('result') or {}; g=data.get('promotionGate') or {}
+          assert data.get('ok') is True, data
+          assert r.get('mode') == 'canary' and r.get('selected') == 1 and r.get('written') == 1, r
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          assert g.get('state') == 'SAFE_CANONICAL_SUPERSET', g
+          assert g.get('promotionFingerprint') == os.environ['PROMO'], g
+          assert g.get('candidateParityFingerprint') == os.environ['PARITY'], g
+          assert g.get('evidenceFingerprint') == os.environ['EVIDENCE'], g
+          PY
+
+          after_canary="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$after_canary" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page")"
+          test "$code" = '200'
+          AFTER="$after_canary" REQUEST="$expected_request" PLAN="$expected_plan" python - <<'PY'
+          import json, os
+          with open(os.environ['AFTER'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          assert s.get('state') == 'READY_FULL', s
+          assert s.get('canaryVerified') is True, s
+          assert s.get('requestId') == os.environ['REQUEST'], s
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          print('CANARY_VERIFIED', json.dumps({'state':s.get('state'),'canaryVerified':s.get('canaryVerified')}, ensure_ascii=False))
+          PY
+
+          full="$(mktemp)"
+          full_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+            -o "$full" -w '%{http_code}' \
+            -X POST "$sales_api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" -H "referer: $sales_page" \
+            --data "{\"action\":\"full\",\"planFingerprint\":\"$expected_plan\",\"confirmation\":\"FULL\"}")"
+          echo "FULL HTTP $full_code"
+          if [ "$full_code" != '200' ]; then cat "$full"; exit 1; fi
+          FULL="$full" PLAN="$expected_plan" PROMO="$expected_promotion" PARITY="$expected_parity" EVIDENCE="$expected_evidence" ROWS="$expected_rows" python - <<'PY'
+          import json, os
+          with open(os.environ['FULL'], encoding='utf-8') as f:
+              data=json.load(f)
+          r=data.get('result') or {}; g=data.get('promotionGate') or {}
+          expected=int(os.environ['ROWS'])
+          assert data.get('ok') is True, data
+          assert r.get('mode') == 'full', r
+          assert r.get('selected') == expected and r.get('written') == expected, r
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          assert g.get('state') == 'SAFE_CANONICAL_SUPERSET', g
+          assert g.get('promotionFingerprint') == os.environ['PROMO'], g
+          assert g.get('candidateParityFingerprint') == os.environ['PARITY'], g
+          assert g.get('evidenceFingerprint') == os.environ['EVIDENCE'], g
+          snap=r.get('snapshot') or {}
+          print('FULL_APPLY', json.dumps({
+              'selected':r.get('selected'),'written':r.get('written'),
+              'planFingerprint':r.get('planFingerprint'),
+              'promotionFingerprint':g.get('promotionFingerprint'),
+              'snapshotSourceEventCount':snap.get('sourceEventCount'),
+              'snapshotValidEventCount':snap.get('validEventCount'),
+              'snapshotTombstoneCount':snap.get('tombstoneCount'),
+              'snapshotManagedActiveSkuCount':snap.get('managedActiveSkuCount'),
+              'snapshotOrphanEventCount':snap.get('orphanEventCount'),
+              'snapshotClassificationComplete':snap.get('classificationComplete'),
+              'snapshotFingerprint':snap.get('contentFingerprint')}, ensure_ascii=False))
+          PY
+
+          final="$(mktemp)"
+          final_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$final" -w '%{http_code}' "$sales_api" -H "origin: $base" -H "referer: $sales_page")"
+          test "$final_code" = '200'
+          FINAL="$final" REQUEST="$expected_request" PLAN="$expected_plan" EVENT="$expected_event" ROWS="$expected_rows" python - <<'PY'
+          import json, os
+          with open(os.environ['FINAL'], encoding='utf-8') as f:
+              data=json.load(f)
+          s=data.get('status') or {}; r=s.get('report') or {}
+          assert s.get('state') == 'COMPLETED', s
+          assert s.get('requestId') == os.environ['REQUEST'], s
+          assert r.get('sourceEventCount') == int(os.environ['ROWS']), r
+          assert r.get('planFingerprint') == os.environ['PLAN'], r
+          assert r.get('eventFingerprint') == os.environ['EVENT'], r
+          print('FINAL_STATUS', json.dumps({
+              'state':s.get('state'),'requestId':s.get('requestId'),
+              'sourceEventCount':r.get('sourceEventCount'),'validEventCount':r.get('validEventCount'),
+              'tombstoneCount':r.get('tombstoneCount'),'totalBaseUnits':r.get('totalBaseUnits'),
+              'totalRevenue':r.get('totalRevenue'),'eventFingerprint':r.get('eventFingerprint'),
+              'planFingerprint':r.get('planFingerprint')}, ensure_ascii=False))
+          PY
