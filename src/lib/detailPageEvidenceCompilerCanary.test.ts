@@ -39,7 +39,7 @@ describe("Product Launch Evidence Compiler canary", () => {
       'const COMPILER_CANARY_ACTION = "compiler_v1_canary"',
     );
     expect(startRoute).toContain(
-      'const compilerCanary = command.action === COMPILER_CANARY_ACTION',
+      "const explicitCompilerCanary = command.action === COMPILER_CANARY_ACTION",
     );
     expect(startRoute).toContain(
       'workerUrl.searchParams.set(COMPILER_CANARY_PARAMETER, "1")',
@@ -58,7 +58,8 @@ describe("Product Launch Evidence Compiler canary", () => {
     expect(startRoute).toContain("execution_id: executionId");
   });
 
-  it("clears every Compiler-only checkpoint before a repeated canary while preserving evidence and analysis", () => {
+  it("clears every Compiler-only checkpoint including Geometry Lock before a repeated canary while preserving evidence and analysis", () => {
+    expect(startRoute).toContain("compilerGeometryLock: null");
     expect(startRoute).toContain("compilerV1PreflightReady: null");
     expect(startRoute).toContain("compilerProductPack: null");
     expect(startRoute).toContain("compilerBlueprint: null");

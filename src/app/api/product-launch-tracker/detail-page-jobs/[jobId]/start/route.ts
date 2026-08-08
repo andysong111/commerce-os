@@ -121,7 +121,7 @@ export async function POST(
         status: "queued",
         stage: "compiler_v1_canary",
         message:
-          "기존 1688 원본·상품 분석을 재사용하여 Evidence Compiler v1 카나리를 시작합니다.",
+          "기존 1688 원본·상품 분석을 재사용하되 사이즈표 Geometry Lock부터 다시 계산하여 Evidence Compiler v1 카나리를 시작합니다.",
         progress: 20,
         qa_status: "pending",
         payload: {
@@ -135,6 +135,7 @@ export async function POST(
         },
         result: {
           compilerProfile: null,
+          compilerGeometryLock: null,
           compilerV1PreflightReady: null,
           compilerProductPack: null,
           compilerBlueprint: null,
