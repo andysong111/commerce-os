@@ -1,0 +1,51 @@
+name: Temporary Stage8 Canonical Audit Patcher
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'feat/stage8-canonical-sales-audit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/stage8-canonical-sales-audit
+          fetch-depth: 0
+      - name: Expose exact completed sales-event analysisAsOf in status
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('src/lib/productMasterShoplingSalesEventSync.ts')
+          src=path.read_text(encoding='utf-8')
+
+          old='''  configured: boolean;\n  requestId: string | null;\n  state:'''
+          new='''  configured: boolean;\n  requestId: string | null;\n  analysisAsOf: string | null;\n  state:'''
+          if old not in src:
+              raise SystemExit('SalesEventSyncStatus type marker not found')
+          src=src.replace(old,new,1)
+
+          old='''    configured,\n    requestId: null,\n    state: "IDLE",'''
+          new='''    configured,\n    requestId: null,\n    analysisAsOf: null,\n    state: "IDLE",'''
+          if old not in src:
+              raise SystemExit('empty status marker not found')
+          src=src.replace(old,new,1)
+
+          old='''    ...empty,\n    requestId: request.requestId,\n    completedRanges,'''
+          new='''    ...empty,\n    requestId: request.requestId,\n    analysisAsOf: request.analysisAsOf,\n    completedRanges,'''
+          if old not in src:
+              raise SystemExit('common status marker not found')
+          src=src.replace(old,new,1)
+          path.write_text(src,encoding='utf-8')
+          PY
+          rm .github/workflows/tmp-stage8-canonical-audit-patcher.yml
+          git config user.name 'commerce-os-ops-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/lib/productMasterShoplingSalesEventSync.ts .github/workflows/tmp-stage8-canonical-audit-patcher.yml
+          git commit -m 'Expose canonical sales analysis timestamp in Stage8 status'
+          git push origin HEAD:feat/stage8-canonical-sales-audit
