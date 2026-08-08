@@ -1,0 +1,43 @@
+name: Temporary Stage8 Inventory Verification Priority Production Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-inventory-verification-priority-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/stage8-inventory-verification-priority-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read production inventory verification priority metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-inventory-verification-priority'
+          ready=0
+          for i in $(seq 1 40); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])')"
+            echo "PROBE $i HTTP $code"
+            if [ "$code" = '200' ] && echo "$text" | grep -q '발주후보 재고확인 우선순위'; then
+              echo '--- INVENTORY PRIORITY PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q '상태 READY'
+              echo "$text" | grep -q '실제 쓰기 0 · READ ONLY'
+              echo "$text" | grep -q '우선 실사 80% 커버 SKU'
+              echo "$text" | grep -q '우선 실사 커버금액'
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = '1'
