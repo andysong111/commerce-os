@@ -92,7 +92,7 @@ test("cron only collects or recovers requests and never performs canary or full 
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
 });
 
-test("event source and wire format match Product Master contract", () => {
+test("full apply keeps Product Master writes in bounded verified batches", () => {
   assert.match(sync, /commerce-os-sales-events-v1|PRODUCT_MASTER_SALES_EVENT_FORMAT/);
   assert.match(sync, /shopling_orders_event_v1|PRODUCT_MASTER_SALES_EVENT_SOURCE/);
   assert.match(sync, /APPLY_BATCH_SIZE = 2_000/);
