@@ -58,3 +58,16 @@ test("reconciliation is read-only and does not fall back to legacy direct parity
   assert.match(audit, /loadProductMasterCanonicalSalesAudit/);
   assert.match(sales, /SALES_EVENT_FULL/);
 });
+
+
+test("blocked extra persisted SKUs expose planning state and nonzero demand evidence", () => {
+  assert.match(engine, /extraPersistedDiagnostics/);
+  assert.match(engine, /persistedHasDemand/);
+  assert.match(engine, /planningMatchCount/);
+  assert.match(engine, /activePlanningMatchCount/);
+  assert.match(engine, /ALL_PLANNING_ROWS_INACTIVE/);
+  assert.match(engine, /DUPLICATE_ACTIVE_PLANNING_ROWS/);
+  assert.match(engine, /UNKNOWN_CANDIDATE_INDEX_EXCLUSION/);
+  assert.match(page, /Candidate에 없는 Persisted active SKU 진단/);
+  assert.match(page, /Candidate 제외 이유/);
+});

@@ -35,6 +35,32 @@ export type PostApplyCanonicalRowMismatch = {
   persistedRevenue: number[];
 };
 
+export type ExtraPersistedSkuPlanningMatch = {
+  skuId: string;
+  modelNo: string | null;
+  productName: string;
+  skuActive: boolean | null;
+  listingCount: number;
+  activeListingCount: number;
+};
+
+export type ExtraPersistedSkuDiagnostic = {
+  barcode: string;
+  persistedHasDemand: boolean;
+  persistedValidEventCount: number;
+  persistedMonthlyUnits: number[];
+  persistedMonthlyRevenue: number[];
+  persistedLastSaleAt: string | null;
+  planningMatchCount: number;
+  activePlanningMatchCount: number;
+  candidateOmissionReason:
+    | "NO_PLANNING_ROW"
+    | "ALL_PLANNING_ROWS_INACTIVE"
+    | "DUPLICATE_ACTIVE_PLANNING_ROWS"
+    | "UNKNOWN_CANDIDATE_INDEX_EXCLUSION";
+  planningMatches: ExtraPersistedSkuPlanningMatch[];
+};
+
 export type PostApplyCanonicalReconciliation = {
   generatedAt: string;
   state: PostApplyCanonicalReconciliationState;
@@ -64,6 +90,7 @@ export type PostApplyCanonicalReconciliation = {
   fullApplyWritten: number;
   missingPersistedBarcodes: string[];
   extraPersistedBarcodes: string[];
+  extraPersistedDiagnostics: ExtraPersistedSkuDiagnostic[];
   rowMismatchSamples: PostApplyCanonicalRowMismatch[];
   checks: PostApplyCanonicalReconciliationCheck[];
 };
@@ -222,6 +249,7 @@ function waiting(
     fullApplyWritten: 0,
     missingPersistedBarcodes: [],
     extraPersistedBarcodes: [],
+    extraPersistedDiagnostics: [],
     rowMismatchSamples: [],
     checks,
   };
@@ -395,6 +423,46 @@ export async function loadPostApplyCanonicalReconciliation(): Promise<PostApplyC
     const row = persistedByBarcode.get(barcode);
     return row ? !persistedRowIsZero(row) : false;
   }).length;
+  const extraPersistedDiagnostics: ExtraPersistedSkuDiagnostic[] =
+    extraPersistedBarcodes.map((barcode) => {
+      const persistedRow = persistedByBarcode.get(barcode)!;
+      const planningMatches = (planning.products ?? [])
+        .filter((product) => text(product.barcode).toUpperCase() === barcode)
+        .map((product) => ({
+          skuId: text(product.skuId),
+          modelNo: text(product.modelNo) || null,
+          productName: text(product.productName) || barcode,
+          skuActive:
+            typeof product.skuActive === "boolean" ? product.skuActive : null,
+          listingCount: Array.isArray(product.listings) ? product.listings.length : 0,
+          activeListingCount: Array.isArray(product.listings)
+            ? product.listings.filter((listing) => listing.active !== false).length
+            : 0,
+        }));
+      const activePlanningMatchCount = planningMatches.filter(
+        (row) => row.skuActive !== false,
+      ).length;
+      const candidateOmissionReason: ExtraPersistedSkuDiagnostic["candidateOmissionReason"] =
+        planningMatches.length === 0
+          ? "NO_PLANNING_ROW"
+          : activePlanningMatchCount === 0
+            ? "ALL_PLANNING_ROWS_INACTIVE"
+            : activePlanningMatchCount > 1
+              ? "DUPLICATE_ACTIVE_PLANNING_ROWS"
+              : "UNKNOWN_CANDIDATE_INDEX_EXCLUSION";
+      return {
+        barcode,
+        persistedHasDemand: !persistedRowIsZero(persistedRow),
+        persistedValidEventCount: integer(persistedRow.validEventCount),
+        persistedMonthlyUnits: normalizedArray(persistedRow.monthlyUnits),
+        persistedMonthlyRevenue: normalizedArray(persistedRow.monthlyRevenue),
+        persistedLastSaleAt: persistedRow.lastSaleAt,
+        planningMatchCount: planningMatches.length,
+        activePlanningMatchCount,
+        candidateOmissionReason,
+        planningMatches,
+      };
+    });
 
   const rowMismatchCount =
     candidateRows.length - exactActiveRowCount - missingPersistedBarcodes.length;
@@ -487,6 +555,7 @@ export async function loadPostApplyCanonicalReconciliation(): Promise<PostApplyC
     fullApplyWritten: fullApply.written,
     missingPersistedBarcodes,
     extraPersistedBarcodes,
+    extraPersistedDiagnostics,
     rowMismatchSamples,
     checks,
   };
