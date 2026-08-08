@@ -29,6 +29,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/stage8-canonical-demand-parity",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }
