@@ -29,6 +29,10 @@ test("collection is read-only and business write waits for explicit canary/full"
   assert.match(route, /FULL/);
 });
 
+test("explicit canary/full route has bounded time for persisted verification", () => {
+  assert.match(route, /export const maxDuration = 300/);
+});
+
 test("Product Master storage migration gate is preserved before any event write", () => {
   const storageCheck = sync.indexOf("const storage = await productMasterSnapshot(request)");
   const eventPost = sync.indexOf("await postProductMasterEvents(batch)");
