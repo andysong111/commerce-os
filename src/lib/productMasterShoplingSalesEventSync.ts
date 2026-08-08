@@ -563,9 +563,7 @@ async function postProductMasterEvents(events: ProductMasterSalesEventRow[]) {
 
 function verifiedWriteResult(payload: Record<string, unknown>, expected: number) {
   const rows = Math.round(number(payload.rows));
-  const verifiedRows = payload.verifiedRows === undefined
-    ? rows
-    : Math.round(number(payload.verifiedRows));
+  const verifiedRows = Math.round(number(payload.verifiedRows));
   return rows === expected && verifiedRows === expected;
 }
 
@@ -663,7 +661,6 @@ export async function loadProductMasterShoplingSalesEventSyncStatus(): Promise<S
   };
   if (!request) return empty;
   const operations = await requestOperations(request);
-  const chunks = operations.chunks.map(chunkFromRow).filter(Boolean) as ProductMasterShoplingSalesEventChunk[];
   const completedRanges = new Set(operations.chunks.map(operationRangeKey)).size;
   const report = operations.reports.map(reportFromRow).find(Boolean) ?? null;
   const common = {

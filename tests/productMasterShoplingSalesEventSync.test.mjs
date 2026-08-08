@@ -39,6 +39,7 @@ test("Product Master storage migration gate is preserved before any event write"
 
 test("Product Master responses are checked for persisted readback rows", () => {
   assert.match(sync, /payload\.verifiedRows/);
+  assert.doesNotMatch(sync, /payload\.verifiedRows === undefined/);
   assert.match(sync, /verifiedRows === expected/);
   assert.match(sync, /SALES_EVENT_WRITE_VERIFY_FAILED/);
 });
