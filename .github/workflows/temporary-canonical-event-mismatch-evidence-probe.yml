@@ -1,0 +1,52 @@
+name: Temporary Canonical Event Mismatch Evidence Production Probe
+
+on:
+  push:
+    branches:
+      - ops/canonical-event-mismatch-evidence-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/canonical-event-mismatch-evidence-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for mismatch evidence terminal state
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-canonical-event-mismatch-evidence'
+          ready=0
+          for i in $(seq 1 50); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:100000])')"
+            echo "PROBE $i HTTP $code"
+            echo "$text" | grep -oE 'Evidence 상태 (WAITING_SHADOW|NO_CHANGES|READY|BLOCKED|FAILED)|신규·변경 [0-9,]+|Canary 가능 [0-9,]+|Canary 차단 [0-9,]+' || true
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Evidence 상태 NO_CHANGES'; then
+              echo '--- MISMATCH EVIDENCE PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q 'NO CHANGES'
+              echo "$text" | grep -q '실제 쓰기 0 · DISABLED'
+              echo "$text" | grep -q '신규·변경 0'
+              echo "$text" | grep -q 'Canary 가능 0'
+              echo "$text" | grep -q 'Canary 차단 0'
+              echo "$text" | grep -q 'AUTOMATIC WRITE OFF'
+              echo "$text" | grep -q '현재 overlap에는 신규·변경 후보가 없습니다.'
+              ready=1
+              break
+            fi
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Evidence 상태 FAILED'; then
+              echo '--- TERMINAL FAILURE ---'
+              echo "$text"
+              exit 2
+            fi
+            sleep 10
+          done
+          test "$ready" = '1'
