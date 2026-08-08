@@ -1,0 +1,37 @@
+name: Temporary Stage8 Legacy Cost Readiness Production Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-legacy-cost-readiness-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/stage8-legacy-cost-readiness-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read production legacy cost readiness metrics
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-legacy-verified-cost-readiness'
+          body="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url")"
+          text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:160000])')"
+          echo "HTTP $code"
+          echo '--- LEGACY VERIFIED COST READINESS ---'
+          echo "$text"
+          test "$code" = '200'
+          echo "$text" | grep -q '발주전용 과거 검증원가 신뢰도'
+          echo "$text" | grep -q '상태 READY'
+          echo "$text" | grep -q '실제 쓰기 0 · READ ONLY'
+          echo "$text" | grep -q '가격 사용 false'
+          echo "$text" | grep -q '확정입고 승격 false'
+          echo "$text" | grep -q '재고 write false'
+          echo "$text" | grep -q 'business write false'
