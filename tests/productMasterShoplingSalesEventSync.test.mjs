@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [sync, route, cron, vercel] = await Promise.all([
+const [sync, recovery, route, cron, vercel] = await Promise.all([
   readFile("src/lib/productMasterShoplingSalesEventSync.ts", "utf8"),
+  readFile("src/lib/productMasterShoplingSalesEventRecovery.ts", "utf8"),
   readFile("src/app/api/product-master/shopling-sales-events/route.ts", "utf8"),
   readFile("src/app/api/cron/product-master-shopling-sales-events/route.ts", "utf8"),
   readFile("vercel.json", "utf8"),
@@ -44,9 +45,25 @@ test("Product Master responses are checked for persisted readback rows", () => {
   assert.match(sync, /SALES_EVENT_WRITE_VERIFY_FAILED/);
 });
 
-test("cron only collects and never performs canary or full business writes", () => {
+test("failed Shopling requests retry their tier then shrink 30 to 7 to 2 days", () => {
+  assert.match(recovery, /SALES_EVENT_DEFAULT_CHUNK_DAYS = 30/);
+  assert.match(recovery, /SALES_EVENT_FALLBACK_CHUNK_DAYS = 7/);
+  assert.match(recovery, /SALES_EVENT_MINIMUM_CHUNK_DAYS = 2/);
+  assert.match(recovery, /SALES_EVENT_MAX_REQUEST_ATTEMPTS_PER_TIER = 3/);
+  assert.match(recovery, /tierAttemptCount/);
+  assert.match(recovery, /supersedesRequestId: latest\.requestId/);
+  assert.match(recovery, /analysisAsOf: latest\.analysisAsOf/);
+  assert.match(recovery, /MINIMUM_RANGE_EXHAUSTED/);
+  assert.match(cron, /recoverProductMasterShoplingSalesEventRequest/);
+  assert.match(cron, /current\.state === "FAILED"/);
+  assert.match(cron, /30일[\s\S]*7일/);
+  assert.match(cron, /7일[\s\S]*2일/);
+});
+
+test("cron only collects or recovers requests and never performs canary or full business writes", () => {
   assert.match(cron, /runProductMasterShoplingSalesEventSyncStep/);
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
+  assert.doesNotMatch(recovery, /sku_sales_events|inventory_movements|1688/i);
   assert.match(vercel, /\/api\/cron\/product-master-shopling-sales-events/);
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
 });
