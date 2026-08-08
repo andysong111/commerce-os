@@ -142,8 +142,11 @@ export const STAGE8_LEGACY_VERIFIED_PURCHASE_COST_EVIDENCE = [
   },
 ] as const satisfies readonly LegacyVerifiedPurchaseCostEvidence[];
 
-export function legacyVerifiedPurchaseCostEvidenceByBarcode() {
-  return new Map(
+export function legacyVerifiedPurchaseCostEvidenceByBarcode(): Map<
+  string,
+  LegacyVerifiedPurchaseCostEvidence
+> {
+  return new Map<string, LegacyVerifiedPurchaseCostEvidence>(
     STAGE8_LEGACY_VERIFIED_PURCHASE_COST_EVIDENCE.map((row) => [
       row.barcode,
       row,
