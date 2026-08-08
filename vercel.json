@@ -33,6 +33,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/stage8-canonical-sales-event-incremental-shadow",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }
