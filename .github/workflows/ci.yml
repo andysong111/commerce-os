@@ -38,10 +38,15 @@ jobs:
           src/lib/productMasterShoplingSalesHistoricalShadow.ts
           src/lib/productMasterShoplingSalesDirectCodeEvidenceEngine.ts
           src/lib/productMasterShoplingSalesDirectCodeEvidence.ts
+          src/lib/productMasterShoplingSalesEventEngine.ts
+          src/lib/productMasterShoplingSalesEventSync.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
-          src/app/api/product-master/shopling-sales-backfill/unmapped-context/route.ts
+          src/app/api/cron/product-master-shopling-sales-events/route.ts
+          src/app/api/product-master/shopling-sales-events/route.ts
           src/app/product-master/shopling-sales-backfill/historical-shadow/page.tsx
           src/app/product-master/shopling-sales-backfill/direct-code-evidence/page.tsx
+          src/app/stage8-sales-events/page.tsx
+          src/app/stage8-sales-events/SalesEventSyncControls.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -64,6 +69,8 @@ jobs:
           tests/productMasterShoplingSalesHistoricalShadow.test.mjs
           tests/productMasterShoplingSalesDirectCodeEvidenceEngine.test.mjs
           tests/productMasterShoplingSalesDirectCodeEvidence.test.mjs
+          tests/productMasterShoplingSalesEventEngine.test.mjs
+          tests/productMasterShoplingSalesEventSync.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
