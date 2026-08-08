@@ -73,10 +73,6 @@ function emptyBuckets() {
   return Array.from({ length: BUCKET_COUNT }, () => 0);
 }
 
-function sum(values: number[]) {
-  return values.reduce((total, value) => total + integer(value), 0);
-}
-
 function planningByBarcode(products: PlanningProduct[]) {
   const byBarcode = new Map<string, PlanningProduct[]>();
   for (const product of products) {
@@ -246,10 +242,10 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
         notice:
           "판매수요는 Product Master persisted canonical 12×30일 원장만 사용한 그림자 발주안입니다. 클레임 보조신호는 아직 연결하지 않아 중립값이며 실제 발주 실행은 차단됩니다.",
       };
-      if (snapshot.products.length !== exactPlanningMatchCount) {
+      if ((snapshot.products ?? []).length !== exactPlanningMatchCount) {
         blockers.push({
           key: "engine-output-coverage",
-          message: `Engine 입력 ${exactPlanningMatchCount}개 · 출력 ${snapshot.products.length}개`,
+          message: `Engine 입력 ${exactPlanningMatchCount}개 · 출력 ${(snapshot.products ?? []).length}개`,
         });
       }
     }
