@@ -18,10 +18,14 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 const REASON_LABELS: Record<string, string> = {
+  CANONICAL_ORDER_DATE_OUTSIDE_FETCH_RANGE:
+    "Shopling 조회구간과 실제 주문일이 달라 Canonical 날짜 사전필터에서 제외",
   CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE:
     "실제 옵션바코드가 비관리 구조코드라 Canonical이 의도적으로 제외",
+  CANONICAL_MANAGED_SCOPE_FALSE:
+    "조회구간 안 주문이지만 Canonical 관리 SKU 증거가 없어 제외",
   CANONICAL_OTHER_SCOPE_EXCLUSION:
-    "Canonical 관리 판매범위의 다른 제외 조건",
+    "날짜·관리범위는 통과하지만 Canonical의 다른 제외 조건",
   CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY:
     "Canonical은 비활성 관리 SKU 역사 바코드를 보존하지만 기존 직접집계는 활성 SKU만 조회",
   LEGACY_ACTIVE_IDENTITY_MISSING:
@@ -29,6 +33,16 @@ const REASON_LABELS: Record<string, string> = {
   RESOLVER_SKU_PRECEDENCE_DIFFERENCE: "두 resolver의 SKU 증거 우선순위 차이",
   RESOLVER_QUANTITY_RULE_DIFFERENCE: "두 resolver의 판매수량 환산 규칙 차이",
   RESOLVER_REVENUE_RULE_DIFFERENCE: "두 resolver의 매출 계산 규칙 차이",
+};
+
+const SCOPE_LABELS: Record<string, string> = {
+  OPTION_CODE_MANAGED: "옵션코드 B",
+  OPTION_CODE_NON_MANAGED: "옵션코드 비관리",
+  ACTIVE_OPTION_ID: "활성 optionId",
+  PARTNER_CODE_MANAGED: "파트너 B코드",
+  PARTNER_CODE_NON_MANAGED: "파트너 비관리코드",
+  ACTIVE_GOODS_KEY: "활성 goodsKey",
+  NO_MANAGED_EVIDENCE: "관리 증거 없음",
 };
 
 export default async function Stage8DemandMismatchEvidencePage() {
@@ -78,7 +92,7 @@ export default async function Stage8DemandMismatchEvidencePage() {
           <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm">
             <h2 className="text-lg font-black text-slate-950">결정적 원인 분류</h2>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              단순한 수락/제외 결과가 아니라 원본 옵션바코드와 현재·비활성 SKU 상태까지 대조해 왜 차이가 났는지 규칙 단위로 분류합니다.
+              이번 재진단은 Shopling이 돌려준 조회구간과 주문행의 실제 mall_ord_dt를 함께 저장합니다. Canonical이 SKU 판정 전에 주문일 날짜필터에서 버린 것인지, 날짜는 통과했지만 관리 SKU 증거가 없었던 것인지 먼저 분리합니다.
             </p>
             {Object.keys(reasonCounts).length ? (
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -116,15 +130,19 @@ export default async function Stage8DemandMismatchEvidencePage() {
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black text-slate-950">영향도가 큰 주문행</h2>
-            <p className="mt-2 text-sm text-slate-600">수량 차이를 우선하고, 같은 수량 차이에서는 매출 차이가 큰 순서입니다. 원본 옵션바코드를 가리지 않고 그대로 보여 Canonical의 관리범위 제외가 실제로 타당한지 확인합니다.</p>
+            <p className="mt-2 text-sm text-slate-600">수량 차이를 우선하고, 같은 수량 차이에서는 매출 차이가 큰 순서입니다. 조회구간·mall_ord_dt·i_dt·Canonical 관리범위 판정을 한 행에서 함께 보여 날짜필터와 SKU 범위 문제를 분리합니다.</p>
             <div className="mt-4 overflow-x-auto">
-              <table className="min-w-[1900px] text-left text-xs">
+              <table className="min-w-[2600px] text-left text-xs">
                 <thead className="text-slate-500">
                   <tr>
                     <th className="px-3 py-2">원인</th>
                     <th className="px-3 py-2">분류</th>
                     <th className="px-3 py-2">주문번호</th>
-                    <th className="px-3 py-2">주문시각</th>
+                    <th className="px-3 py-2">Shopling 조회구간</th>
+                    <th className="px-3 py-2">mall_ord_dt</th>
+                    <th className="px-3 py-2">주문일 판정</th>
+                    <th className="px-3 py-2">i_dt</th>
+                    <th className="px-3 py-2">Canonical 범위판정</th>
                     <th className="px-3 py-2">상태</th>
                     <th className="px-3 py-2">optionId</th>
                     <th className="px-3 py-2">원본 옵션바코드</th>
@@ -143,7 +161,11 @@ export default async function Stage8DemandMismatchEvidencePage() {
                       <td className="px-3 py-2 font-bold leading-5 text-indigo-900">{row.reason ? (REASON_LABELS[row.reason] ?? row.reason) : "이전 evidence · 재진단 대기"}</td>
                       <td className="px-3 py-2 font-bold text-slate-900">{CATEGORY_LABELS[row.category] ?? row.category}</td>
                       <td className="px-3 py-2">{row.orderNo}</td>
-                      <td className="px-3 py-2">{row.orderedAt}</td>
+                      <td className="px-3 py-2">{row.sourceRangeStart && row.sourceRangeEnd ? `${row.sourceRangeStart} ~ ${row.sourceRangeEnd}` : "이전원장"}</td>
+                      <td className="px-3 py-2">{row.orderedAt || "-"}<br />로컬일 {row.orderedLocalDate || "-"}</td>
+                      <td className="px-3 py-2">UTC일 {row.canonicalUtcOrderedDate || "-"}<br />{row.canonicalDateInsideFetchRange === true ? "조회구간 안" : row.canonicalDateInsideFetchRange === false ? "조회구간 밖" : "이전원장"}</td>
+                      <td className="px-3 py-2">{row.rawIDt || "-"}</td>
+                      <td className="px-3 py-2">{row.canonicalScopeWouldBeManaged === true ? "관리범위 예" : row.canonicalScopeWouldBeManaged === false ? "관리범위 아니오" : "이전원장"}<br />{row.canonicalScopeDecisionPath ? (SCOPE_LABELS[row.canonicalScopeDecisionPath] ?? row.canonicalScopeDecisionPath) : "-"}<br />옵션 {row.canonicalScopeOptionStructuredCode || "-"} · 파트너 {row.canonicalScopePartnerStructuredCode || "-"}</td>
                       <td className="px-3 py-2">{row.status || "-"}</td>
                       <td className="px-3 py-2">{row.optionId || "-"}</td>
                       <td className="px-3 py-2 font-semibold">{row.rawOptionBarcode || "-"}</td>

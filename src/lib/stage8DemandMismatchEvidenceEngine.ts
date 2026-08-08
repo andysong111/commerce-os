@@ -29,13 +29,24 @@ export type DemandMismatchCategory =
   | "LEGACY_REVENUE_DIFFERS_FROM_CANONICAL";
 
 export type DemandMismatchReason =
+  | "CANONICAL_ORDER_DATE_OUTSIDE_FETCH_RANGE"
   | "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE"
+  | "CANONICAL_MANAGED_SCOPE_FALSE"
   | "CANONICAL_OTHER_SCOPE_EXCLUSION"
   | "CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY"
   | "LEGACY_ACTIVE_IDENTITY_MISSING"
   | "RESOLVER_SKU_PRECEDENCE_DIFFERENCE"
   | "RESOLVER_QUANTITY_RULE_DIFFERENCE"
   | "RESOLVER_REVENUE_RULE_DIFFERENCE";
+
+export type CanonicalScopeDecisionPath =
+  | "OPTION_CODE_MANAGED"
+  | "OPTION_CODE_NON_MANAGED"
+  | "ACTIVE_OPTION_ID"
+  | "PARTNER_CODE_MANAGED"
+  | "PARTNER_CODE_NON_MANAGED"
+  | "ACTIVE_GOODS_KEY"
+  | "NO_MANAGED_EVIDENCE";
 
 export type DemandMismatchEvidenceRow = {
   category: DemandMismatchCategory;
@@ -47,6 +58,16 @@ export type DemandMismatchEvidenceRow = {
   optionId: string | null;
   productId: string | null;
   mallProductKey: string | null;
+  sourceRangeStart: string;
+  sourceRangeEnd: string;
+  rawIDt: string | null;
+  orderedLocalDate: string | null;
+  canonicalUtcOrderedDate: string | null;
+  canonicalDateInsideFetchRange: boolean;
+  canonicalScopeWouldBeManaged: boolean;
+  canonicalScopeDecisionPath: CanonicalScopeDecisionPath;
+  canonicalScopeOptionStructuredCode: string | null;
+  canonicalScopePartnerStructuredCode: string | null;
   rawOptionBarcode: string | null;
   rawOptionBarcodeStructured: boolean;
   rawOptionBarcodeManaged: boolean;
@@ -102,6 +123,18 @@ type TargetIndex = {
   goodsKeys: Set<string>;
 };
 
+type CanonicalScopeIndex = {
+  managedOptionIds: Set<string>;
+  managedGoodsKeys: Set<string>;
+};
+
+type CanonicalScopeProbe = {
+  wouldBeManaged: boolean;
+  decisionPath: CanonicalScopeDecisionPath;
+  optionStructuredCode: string | null;
+  partnerStructuredCode: string | null;
+};
+
 const CATEGORIES: DemandMismatchCategory[] = [
   "LEGACY_ACCEPTS_CANONICAL_IGNORES",
   "LEGACY_ACCEPTS_CANONICAL_UNMAPPED",
@@ -113,7 +146,9 @@ const CATEGORIES: DemandMismatchCategory[] = [
 ];
 
 const REASONS: DemandMismatchReason[] = [
+  "CANONICAL_ORDER_DATE_OUTSIDE_FETCH_RANGE",
   "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE",
+  "CANONICAL_MANAGED_SCOPE_FALSE",
   "CANONICAL_OTHER_SCOPE_EXCLUSION",
   "CANONICAL_HISTORICAL_BARCODE_LEGACY_ACTIVE_ONLY",
   "LEGACY_ACTIVE_IDENTITY_MISSING",
@@ -147,6 +182,26 @@ function managedBarcode(value: unknown) {
 
 function normalizedBarcodeText(value: unknown) {
   return normalizeShoplingBarcode(value);
+}
+
+function structuredBarcode(value: unknown) {
+  const barcode = normalizedBarcodeText(value);
+  return STRUCTURED_BARCODE.test(barcode) ? barcode : "";
+}
+
+function validIso(value: unknown) {
+  const parsed = Date.parse(text(value));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function localDate(value: unknown) {
+  const normalized = text(value);
+  const matched = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return matched ? `${matched[1]}-${matched[2]}-${matched[3]}` : null;
+}
+
+function dateInsideRange(date: string | null, range: ShoplingDateRange) {
+  return Boolean(date && date >= range.start && date <= range.end);
 }
 
 function emptyCategoryCounts() {
@@ -183,6 +238,24 @@ function buildTargetIndex(
   return { barcodes, optionIds, goodsKeys };
 }
 
+function buildCanonicalScopeIndex(
+  planning: ProductPlanningSnapshot,
+): CanonicalScopeIndex {
+  const managedOptionIds = new Set<string>();
+  const managedGoodsKeys = new Set<string>();
+  for (const product of planning.products ?? []) {
+    if (!managedBarcode(product.barcode) || product.skuActive === false) continue;
+    for (const listing of product.listings ?? []) {
+      if (listing.active === false) continue;
+      const optionId = text(listing.optionId);
+      const goodsKey = text(listing.goodsKey);
+      if (optionId) managedOptionIds.add(optionId);
+      if (goodsKey) managedGoodsKeys.add(goodsKey);
+    }
+  }
+  return { managedOptionIds, managedGoodsKeys };
+}
+
 function inactiveManagedBarcodes(planning: ProductPlanningSnapshot) {
   return new Set(
     (planning.products ?? [])
@@ -207,6 +280,65 @@ function rawPartnerCodeText(raw: ShoplingRawRow) {
       "mall_opt_cd",
     ]),
   );
+}
+
+function canonicalScopeProbe(
+  raw: ShoplingRawRow,
+  planningIndex: CanonicalScopeIndex,
+): CanonicalScopeProbe {
+  const order = normalizeShoplingOrder(raw);
+  const optionStructuredCode =
+    structuredBarcode(rawOptionBarcodeText(raw)) || structuredBarcode(order.barcode);
+  if (optionStructuredCode) {
+    return {
+      wouldBeManaged: MANAGED_BARCODE.test(optionStructuredCode),
+      decisionPath: MANAGED_BARCODE.test(optionStructuredCode)
+        ? "OPTION_CODE_MANAGED"
+        : "OPTION_CODE_NON_MANAGED",
+      optionStructuredCode,
+      partnerStructuredCode: null,
+    };
+  }
+
+  const optionId = text(order.optionId);
+  if (optionId && planningIndex.managedOptionIds.has(optionId)) {
+    return {
+      wouldBeManaged: true,
+      decisionPath: "ACTIVE_OPTION_ID",
+      optionStructuredCode: null,
+      partnerStructuredCode: null,
+    };
+  }
+
+  const partnerStructuredCode = structuredBarcode(rawPartnerCodeText(raw));
+  if (partnerStructuredCode) {
+    return {
+      wouldBeManaged: MANAGED_BARCODE.test(partnerStructuredCode),
+      decisionPath: MANAGED_BARCODE.test(partnerStructuredCode)
+        ? "PARTNER_CODE_MANAGED"
+        : "PARTNER_CODE_NON_MANAGED",
+      optionStructuredCode: null,
+      partnerStructuredCode,
+    };
+  }
+
+  for (const key of [text(order.productId), text(order.mallProductKey)]) {
+    if (key && planningIndex.managedGoodsKeys.has(key)) {
+      return {
+        wouldBeManaged: true,
+        decisionPath: "ACTIVE_GOODS_KEY",
+        optionStructuredCode: null,
+        partnerStructuredCode: null,
+      };
+    }
+  }
+
+  return {
+    wouldBeManaged: false,
+    decisionPath: "NO_MANAGED_EVIDENCE",
+    optionStructuredCode: null,
+    partnerStructuredCode: null,
+  };
 }
 
 function candidateRow(raw: ShoplingRawRow, targets: TargetIndex) {
@@ -297,14 +429,24 @@ function mismatchReason(
   rawActualOptionBarcode: string,
   canonical: ReturnType<typeof canonicalContribution>,
   inactiveBarcodes: Set<string>,
+  canonicalDateInsideFetchRange: boolean,
+  scopeProbe: CanonicalScopeProbe,
 ): DemandMismatchReason {
   if (category === "LEGACY_ACCEPTS_CANONICAL_IGNORES") {
+    // This is the exact first collector gate after order identity/date validity.
+    // If it fires, scope resolution was never reached by the canonical collector.
+    if (!canonicalDateInsideFetchRange) {
+      return "CANONICAL_ORDER_DATE_OUTSIDE_FETCH_RANGE";
+    }
     if (
       rawActualOptionBarcode &&
       STRUCTURED_BARCODE.test(rawActualOptionBarcode) &&
       !MANAGED_BARCODE.test(rawActualOptionBarcode)
     ) {
       return "CANONICAL_EXCLUDES_STRUCTURED_NON_MANAGED_OPTION_BARCODE";
+    }
+    if (!scopeProbe.wouldBeManaged) {
+      return "CANONICAL_MANAGED_SCOPE_FALSE";
     }
     return "CANONICAL_OTHER_SCOPE_EXCLUSION";
   }
@@ -341,6 +483,7 @@ export function compileDemandMismatchEvidenceChunk(
   targetBarcodes: string[],
 ): DemandMismatchEvidenceChunk {
   const targets = buildTargetIndex(planning, targetBarcodes);
+  const scopeIndex = buildCanonicalScopeIndex(planning);
   const inactiveBarcodes = inactiveManagedBarcodes(planning);
   const evidence: DemandMismatchEvidenceRow[] = [];
   const categoryCounts = emptyCategoryCounts();
@@ -352,6 +495,14 @@ export function compileDemandMismatchEvidenceChunk(
     if (!candidateRow(raw, targets)) continue;
     candidateRows += 1;
     const order = normalizeShoplingOrder(raw);
+    const canonicalOrderedAt = validIso(order.orderedAt);
+    const orderedLocalDate = localDate(order.orderedAt);
+    const canonicalUtcOrderedDate = canonicalOrderedAt?.slice(0, 10) ?? null;
+    const canonicalDateInsideFetchRange = dateInsideRange(
+      canonicalUtcOrderedDate,
+      range,
+    );
+    const scopeProbe = canonicalScopeProbe(raw, scopeIndex);
     const canonicalChunk = aggregateProductMasterShoplingSalesEventChunk(
       [raw],
       planning,
@@ -385,6 +536,8 @@ export function compileDemandMismatchEvidenceChunk(
       actualOptionBarcode,
       canonical,
       inactiveBarcodes,
+      canonicalDateInsideFetchRange,
+      scopeProbe,
     );
     categoryCounts[category] += 1;
     reasonCounts[reason] += 1;
@@ -402,6 +555,16 @@ export function compileDemandMismatchEvidenceChunk(
       optionId: order.optionId || null,
       productId: order.productId,
       mallProductKey: order.mallProductKey,
+      sourceRangeStart: range.start,
+      sourceRangeEnd: range.end,
+      rawIDt: rawValue(raw, ["i_dt"]) || null,
+      orderedLocalDate,
+      canonicalUtcOrderedDate,
+      canonicalDateInsideFetchRange,
+      canonicalScopeWouldBeManaged: scopeProbe.wouldBeManaged,
+      canonicalScopeDecisionPath: scopeProbe.decisionPath,
+      canonicalScopeOptionStructuredCode: scopeProbe.optionStructuredCode,
+      canonicalScopePartnerStructuredCode: scopeProbe.partnerStructuredCode,
       rawOptionBarcode: actualOptionBarcode || null,
       rawOptionBarcodeStructured: STRUCTURED_BARCODE.test(actualOptionBarcode),
       rawOptionBarcodeManaged: MANAGED_BARCODE.test(actualOptionBarcode),

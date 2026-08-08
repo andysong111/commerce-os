@@ -31,7 +31,26 @@ test("evidence preserves the unfiltered actual option barcode and raw identity f
   assert.match(engine, /optionId/);
   assert.match(engine, /productId/);
   assert.match(engine, /mallProductKey/);
-  assert.match(page, /원본 옵션바코드를 가리지 않고 그대로 보여/);
+  assert.match(page, /원본 옵션바코드/);
+});
+
+test("legacy-only rows expose the exact canonical date preflight before managed scope", () => {
+  assert.match(engine, /sourceRangeStart/);
+  assert.match(engine, /sourceRangeEnd/);
+  assert.match(engine, /rawIDt/);
+  assert.match(engine, /orderedLocalDate/);
+  assert.match(engine, /canonicalUtcOrderedDate/);
+  assert.match(engine, /canonicalDateInsideFetchRange/);
+  assert.match(engine, /CANONICAL_ORDER_DATE_OUTSIDE_FETCH_RANGE/);
+  assert.match(engine, /if \(!canonicalDateInsideFetchRange\)/);
+  assert.match(engine, /canonicalScopeProbe/);
+  assert.match(engine, /canonicalScopeWouldBeManaged/);
+  assert.match(engine, /canonicalScopeDecisionPath/);
+  assert.match(engine, /CANONICAL_MANAGED_SCOPE_FALSE/);
+  assert.match(page, /Shopling 조회구간/);
+  assert.match(page, /mall_ord_dt/);
+  assert.match(page, /i_dt/);
+  assert.match(page, /Canonical 범위판정/);
 });
 
 test("legacy-only rows prove whether canonical excluded a structured non-managed option code", () => {
