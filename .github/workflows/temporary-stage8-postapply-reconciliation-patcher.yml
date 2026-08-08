@@ -4,13 +4,20 @@ on:
   push:
     branches:
       - feat/stage8-postapply-canonical-reconciliation
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[postapply-recon-patched]') }}
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'feat/stage8-postapply-canonical-reconciliation' && !contains(github.event.head_commit.message, '[postapply-recon-patched]')) ||
+        (github.event_name == 'pull_request' && github.head_ref == 'feat/stage8-postapply-canonical-reconciliation')
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,5 +83,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/lib/stage8PostApplyCanonicalReconciliation.ts
+          if git diff --cached --quiet; then
+            echo 'No reconciliation compile patch needed.'
+            exit 0
+          fi
           git commit -m "Fix post-apply canonical reconciliation [postapply-recon-patched]"
           git push origin HEAD:feat/stage8-postapply-canonical-reconciliation
