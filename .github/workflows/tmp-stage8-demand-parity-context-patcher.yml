@@ -1,0 +1,153 @@
+name: Temporary Stage8 Demand Parity Context Patcher
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'fix/stage8-demand-parity-context-check'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stage8-demand-parity-context-check
+          fetch-depth: 0
+      - name: Defer heavy canonical snapshot reread until final parity report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path=Path('src/lib/stage8CanonicalDemandParity.ts')
+          src=path.read_text(encoding='utf-8')
+          old='''async function verifiedContext(request: CanonicalDemandParityRequest) {
+  const [planning, audit] = await Promise.all([
+    loadProductPlanningSnapshot(),
+    loadProductMasterCanonicalSalesAudit(),
+  ]);
+  if (planning.contentFingerprint !== request.planningContentFingerprint) {
+    throw new Error("CANONICAL_DEMAND_PARITY_PLANNING_CHANGED");
+  }
+  if (!audit.ready || !audit.snapshot) {
+    throw new Error(`CANONICAL_DEMAND_PARITY_AUDIT_NOT_READY:${audit.state}`);
+  }
+  if (audit.analysisAsOf !== request.analysisAsOf) {
+    throw new Error("CANONICAL_DEMAND_PARITY_ANALYSIS_TIME_CHANGED");
+  }
+  if (audit.snapshot.contentFingerprint !== request.canonicalContentFingerprint) {
+    throw new Error("CANONICAL_DEMAND_PARITY_CANONICAL_CHANGED");
+  }
+  return { planning, canonical: audit.snapshot };
+}
+'''
+          new='''async function verifiedPlanning(request: CanonicalDemandParityRequest) {
+  const planning = await loadProductPlanningSnapshot();
+  if (planning.contentFingerprint !== request.planningContentFingerprint) {
+    throw new Error("CANONICAL_DEMAND_PARITY_PLANNING_CHANGED");
+  }
+  return planning;
+}
+
+async function verifiedCanonical(request: CanonicalDemandParityRequest) {
+  const audit = await loadProductMasterCanonicalSalesAudit();
+  if (!audit.ready || !audit.snapshot) {
+    throw new Error(`CANONICAL_DEMAND_PARITY_AUDIT_NOT_READY:${audit.state}`);
+  }
+  if (audit.analysisAsOf !== request.analysisAsOf) {
+    throw new Error("CANONICAL_DEMAND_PARITY_ANALYSIS_TIME_CHANGED");
+  }
+  if (audit.snapshot.contentFingerprint !== request.canonicalContentFingerprint) {
+    throw new Error("CANONICAL_DEMAND_PARITY_CANONICAL_CHANGED");
+  }
+  return audit.snapshot;
+}
+'''
+          if old not in src:
+              raise SystemExit('verifiedContext block not found')
+          src=src.replace(old,new,1)
+
+          old='''  let planning: ProductPlanningSnapshot;
+  let canonical: ProductMasterCanonicalSalesSnapshot;
+  try {
+    const context = await verifiedContext(request);
+    planning = context.planning;
+    canonical = context.canonical;
+  } catch (error) {
+    const message = await storeStepFailure(request, "context", 1, error);
+    await storeTerminalFailure(request, "context", message);
+    return {
+      processed: true,
+      state: "FAILED" as const,
+      requestId: request.requestId,
+      message,
+    };
+  }
+'''
+          new='''  let planning: ProductPlanningSnapshot;
+  try {
+    planning = await verifiedPlanning(request);
+  } catch (error) {
+    const message = await storeStepFailure(request, "planning", 1, error);
+    await storeTerminalFailure(request, "planning", message);
+    return {
+      processed: true,
+      state: "FAILED" as const,
+      requestId: request.requestId,
+      message,
+    };
+  }
+'''
+          if old not in src:
+              raise SystemExit('run context block not found')
+          src=src.replace(old,new,1)
+
+          marker='''  const chunks = operations.orders
+    .map(orderChunkFromRow)
+    .filter(Boolean) as ShoplingOrderChunkSummary[];
+'''
+          insert='''  let canonical: ProductMasterCanonicalSalesSnapshot;
+  try {
+    canonical = await verifiedCanonical(request);
+  } catch (error) {
+    const message = await storeStepFailure(request, "canonical-final", 1, error);
+    await storeTerminalFailure(request, "canonical-final", message);
+    return {
+      processed: true,
+      state: "FAILED" as const,
+      requestId: request.requestId,
+      message,
+    };
+  }
+
+'''
+          if marker not in src:
+              raise SystemExit('final chunks marker not found')
+          src=src.replace(marker,insert+marker,1)
+          path.write_text(src,encoding='utf-8')
+
+          test_path=Path('tests/stage8CanonicalDemandParity.test.mjs')
+          test=test_path.read_text(encoding='utf-8')
+          needle='''  assert.match(engine, /combineShoplingLiveChunks\\([\\s\\S]*request\\.analysisAsOf/);
+});
+'''
+          replacement='''  assert.match(engine, /combineShoplingLiveChunks\\([\\s\\S]*request\\.analysisAsOf/);
+  const nextRangeGate = engine.indexOf("if (nextRange)");
+  const finalCanonicalCheck = engine.indexOf("canonical = await verifiedCanonical(request)");
+  assert.ok(nextRangeGate >= 0 && finalCanonicalCheck > nextRangeGate);
+});
+'''
+          if needle not in test:
+              raise SystemExit('parity test insertion marker not found')
+          test=test.replace(needle,replacement,1)
+          test_path.write_text(test,encoding='utf-8')
+          PY
+          rm .github/workflows/tmp-stage8-demand-parity-context-patcher.yml
+          git config user.name 'commerce-os-ops-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/lib/stage8CanonicalDemandParity.ts tests/stage8CanonicalDemandParity.test.mjs .github/workflows/tmp-stage8-demand-parity-context-patcher.yml
+          git commit -m 'Defer canonical parity snapshot reread until final comparison'
+          git push origin HEAD:fix/stage8-demand-parity-context-check
