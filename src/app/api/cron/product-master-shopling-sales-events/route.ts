@@ -4,6 +4,12 @@ import {
   productMasterShoplingSalesEventSyncConfigured,
   runProductMasterShoplingSalesEventSyncStep,
 } from "@/lib/productMasterShoplingSalesEventSync";
+import {
+  SALES_EVENT_DEFAULT_CHUNK_DAYS,
+  SALES_EVENT_FALLBACK_CHUNK_DAYS,
+  SALES_EVENT_MINIMUM_CHUNK_DAYS,
+  recoverProductMasterShoplingSalesEventRequest,
+} from "@/lib/productMasterShoplingSalesEventRecovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +41,23 @@ async function runBoundedBurst() {
   return { ...result, stepCount, burstElapsedMs: Date.now() - startedAt };
 }
 
+function recoveryMessage(result: {
+  reason?: string;
+  chunkDays?: number;
+  attemptsInPreviousTier?: number;
+}) {
+  if (result.reason === "RETRY_SAME_TIER") {
+    return `${result.chunkDays}일 Shopling 조회를 같은 분석시점으로 안전 재시도합니다. 이 구간 크기의 ${Number(result.attemptsInPreviousTier ?? 0) + 1}번째 요청입니다.`;
+  }
+  if (result.chunkDays === SALES_EVENT_FALLBACK_CHUNK_DAYS) {
+    return "30일 Shopling 주문 조회가 반복 실패해 같은 분석시점을 유지한 채 7일 단위로 안전 재접수했습니다.";
+  }
+  if (result.chunkDays === SALES_EVENT_MINIMUM_CHUNK_DAYS) {
+    return "7일 Shopling 주문 조회도 반복 실패해 같은 분석시점을 유지한 채 2일 단위로 최종 안전 재접수했습니다.";
+  }
+  return "Shopling 주문 조회를 더 작은 안전 구간으로 재접수했습니다.";
+}
+
 export async function GET(request: Request) {
   if (!authorized(request)) {
     return Response.json({ ok: false, code: "UNAUTHORIZED" }, { status: 401 });
@@ -58,9 +81,35 @@ export async function GET(request: Request) {
         processed: true,
         state: "QUEUED",
         requestId: created.requestId,
+        chunkDays: SALES_EVENT_DEFAULT_CHUNK_DAYS,
         totalRanges: created.ranges.length,
         message: "최근 360일 정확한 주문행 판매 이벤트 수집을 자동 접수했습니다.",
       });
+    }
+    if (current.state === "FAILED") {
+      const recovered = await recoverProductMasterShoplingSalesEventRequest();
+      if (recovered.recovered) {
+        return Response.json({
+          ok: true,
+          configured: true,
+          processed: true,
+          state: "QUEUED",
+          ...recovered,
+          message: recoveryMessage(recovered),
+        });
+      }
+      if (recovered.reason === "MINIMUM_RANGE_EXHAUSTED") {
+        return Response.json({
+          ok: true,
+          configured: true,
+          processed: false,
+          state: "FAILED",
+          requestId: recovered.requestId,
+          chunkDays: recovered.chunkDays,
+          message:
+            "2일 Shopling 주문 조회도 반복 실패해 자동 축소 재시도를 종료했습니다. 실제 데이터 쓰기는 없으며 원인 진단이 필요합니다.",
+        });
+      }
     }
     if (current.state === "QUEUED" || current.state === "RUNNING") {
       return Response.json({
