@@ -1,0 +1,72 @@
+name: Temporary Historical Receipt Source Probe
+
+on:
+  push:
+    branches:
+      - ops/historical-receipt-source-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/historical-receipt-source-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe old China order site read-only receipt source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://china-order-manager.andy123df23.chatgpt.site'
+          list_body="$(mktemp)"
+          list_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$list_body" -w '%{http_code}' "$base/api/batches" || true)"
+          echo "LIST_HTTP=$list_code"
+          python - "$list_body" <<'PY'
+          import json,sys,collections
+          path=sys.argv[1]
+          try:
+              body=json.load(open(path,encoding='utf-8'))
+          except Exception as exc:
+              print('LIST_JSON_ERROR='+type(exc).__name__)
+              raise SystemExit(0)
+          batches=body.get('batches') if isinstance(body,dict) else None
+          if not isinstance(batches,list):
+              print('LIST_BATCHES_MISSING')
+              raise SystemExit(0)
+          ids=[int(x.get('id') or 0) for x in batches if isinstance(x,dict)]
+          statuses=collections.Counter(str(x.get('status') or '') for x in batches if isinstance(x,dict))
+          print('LIST_BATCH_COUNT='+str(len(batches)))
+          print('LIST_MAX_BATCH_ID='+str(max(ids) if ids else 0))
+          print('LIST_STATUS_COUNTS='+','.join(f'{k}:{v}' for k,v in sorted(statuses.items())))
+          PY
+          test "$list_code" = '200'
+          max_id="$(python - "$list_body" <<'PY'
+          import json,sys
+          body=json.load(open(sys.argv[1],encoding='utf-8'))
+          ids=[int(x.get('id') or 0) for x in body.get('batches',[]) if isinstance(x,dict)]
+          print(max(ids) if ids else 0)
+          PY
+          )"
+          test "$max_id" -gt 0
+          detail_body="$(mktemp)"
+          detail_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$detail_body" -w '%{http_code}' "$base/api/batches?id=$max_id" || true)"
+          echo "DETAIL_HTTP=$detail_code"
+          python - "$detail_body" <<'PY'
+          import json,sys
+          body=json.load(open(sys.argv[1],encoding='utf-8'))
+          batch=body.get('batch') if isinstance(body,dict) else None
+          receipt=body.get('receipt') if isinstance(body,dict) else None
+          items=body.get('items') if isinstance(body,dict) else None
+          print('DETAIL_HAS_BATCH='+str(isinstance(batch,dict)).lower())
+          print('DETAIL_STATUS='+str((batch or {}).get('status') or ''))
+          print('DETAIL_HAS_RECEIPT='+str(isinstance(receipt,dict)).lower())
+          print('DETAIL_ITEM_COUNT='+str(len(items) if isinstance(items,list) else -1))
+          print('DETAIL_HAS_CONFIRMED_AT='+str(bool((receipt or {}).get('confirmedAt'))).lower())
+          print('DETAIL_POSITIVE_RECEIVED_ROWS='+str(sum(1 for row in items or [] if isinstance(row,dict) and float(row.get('receivedGoodQty') or 0)>0)))
+          print('DETAIL_BARCODE_ROWS='+str(sum(1 for row in items or [] if isinstance(row,dict) and str(row.get('barcode') or '').strip())))
+          PY
+          test "$detail_code" = '200'
