@@ -85,7 +85,7 @@ export default async function Stage8CanonicalPurchaseShadowPage() {
             <h2 className="text-lg font-black text-slate-950">Canonical 발주추천 상위 40개</h2>
             <p className="mt-1 text-xs text-slate-500">클레임 감액 전 shadow이므로 수량은 운영 실행값이 아닙니다.</p>
           </div>
-          <span className="text-xs font-bold text-slate-500">총 {number.format(result.snapshot?.products.length ?? 0)} SKU</span>
+          <span className="text-xs font-bold text-slate-500">총 {number.format(result.snapshot?.products?.length ?? 0)} SKU</span>
         </div>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[1100px] text-left text-xs">
