@@ -30,7 +30,7 @@ const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.ap
 const ANALYSIS_DAYS = 360;
 const RANGE_DAYS = 30;
 const OPERATION_LIMIT = 500;
-const APPLY_BATCH_SIZE = 5_000;
+const APPLY_BATCH_SIZE = 2_000;
 
 type OperationRow = {
   operation_type?: unknown;
@@ -552,7 +552,7 @@ async function postProductMasterEvents(events: ProductMasterSalesEventRow[]) {
       rows: events,
     }),
     cache: "no-store",
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok || payload.ok !== true) {

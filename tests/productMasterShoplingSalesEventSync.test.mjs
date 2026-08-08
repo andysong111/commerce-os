@@ -95,6 +95,7 @@ test("cron only collects or recovers requests and never performs canary or full 
 test("event source and wire format match Product Master contract", () => {
   assert.match(sync, /commerce-os-sales-events-v1|PRODUCT_MASTER_SALES_EVENT_FORMAT/);
   assert.match(sync, /shopling_orders_event_v1|PRODUCT_MASTER_SALES_EVENT_SOURCE/);
-  assert.match(sync, /APPLY_BATCH_SIZE = 5_000/);
+  assert.match(sync, /APPLY_BATCH_SIZE = 2_000/);
+  assert.match(sync, /AbortSignal\.timeout\(120_000\)/);
   assert.doesNotMatch(sync, /1688|price change|Shopling write/i);
 });
