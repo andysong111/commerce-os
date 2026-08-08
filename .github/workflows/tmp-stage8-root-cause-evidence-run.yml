@@ -1,0 +1,132 @@
+name: Temporary Stage8 Root Cause Evidence Runner
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Re-run read-only mismatch evidence with root-cause classification
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          api="$base/api/stage8/demand-mismatch-evidence"
+          origin="$base"
+          referer="$base/stage8-demand-mismatch-evidence"
+
+          status_code=''
+          for i in $(seq 1 24); do
+            status_code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o /tmp/status.json -w '%{http_code}' \
+              "$api" -H "origin: $origin" -H "referer: $referer" || true)"
+            if [ "$status_code" = '200' ]; then
+              break
+            fi
+            echo "waiting for production evidence API: HTTP $status_code"
+            sleep 5
+          done
+          test "$status_code" = '200'
+          cat /tmp/status.json
+
+          start="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+            -X POST "$api" \
+            -H 'content-type: application/json' \
+            -H "origin: $origin" \
+            -H "referer: $referer" \
+            --data '{"action":"start"}')"
+          echo "START $start"
+          START="$start" python - <<'PY'
+          import json, os, sys
+          data=json.loads(os.environ['START'])
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+          for i in $(seq 1 90); do
+            response_file="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+              -o "$response_file" -w '%{http_code}' \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $origin" \
+              -H "referer: $referer" \
+              --data '{"action":"run-next"}' || true)"
+            echo "STEP $i HTTP $code"
+            if [ "$code" != '200' ]; then
+              cat "$response_file"
+              exit 1
+            fi
+            STEP_FILE="$response_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['STEP_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          result=data.get('result') or {}
+          print(json.dumps({k:result.get(k) for k in ('state','range','fetchedRows','candidateRows','evidenceRows','attempt','message') if k in result}, ensure_ascii=False))
+          if result.get('state') == 'FAILED':
+              raise SystemExit(2)
+          PY
+
+            current_file="$(mktemp)"
+            current_code="$(curl -L -sS --connect-timeout 10 --max-time 60 \
+              -o "$current_file" -w '%{http_code}' "$api" \
+              -H "origin: $origin" -H "referer: $referer")"
+            test "$current_code" = '200'
+            CURRENT_FILE="$current_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['CURRENT_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          status=data.get('status') or {}
+          state=status.get('state')
+          print('STATUS', state, status.get('completedRanges'), '/', status.get('totalRanges'))
+          if state == 'FAILED':
+              print(data, file=sys.stderr)
+              raise SystemExit(3)
+          if state == 'COMPLETE':
+              report=status.get('report') or {}
+              summary={
+                  'requestId': status.get('requestId'),
+                  'fetchedRows': report.get('fetchedRows'),
+                  'candidateRows': report.get('candidateRows'),
+                  'evidenceRows': report.get('evidenceRows'),
+                  'affectedBarcodes': len(report.get('affectedBarcodes') or []),
+                  'categoryCounts': report.get('categoryCounts'),
+                  'categoryUnitDelta': report.get('categoryUnitDelta'),
+                  'categoryRevenueDelta': report.get('categoryRevenueDelta'),
+                  'reasonCounts': report.get('reasonCounts'),
+                  'reasonUnitDelta': report.get('reasonUnitDelta'),
+                  'reasonRevenueDelta': report.get('reasonRevenueDelta'),
+                  'evidenceFingerprint': report.get('evidenceFingerprint'),
+              }
+              print('FINAL_SUMMARY', json.dumps(summary, ensure_ascii=False))
+              rows=[]
+              for row in (report.get('topEvidence') or [])[:12]:
+                  rows.append({k:row.get(k) for k in (
+                      'reason','category','orderNo','optionId','rawOptionBarcode',
+                      'rawOptionBarcodeStructured','rawOptionBarcodeManaged','rawPartnerCode',
+                      'rawMallOrderCount','rawQuantity','canonicalState','canonicalBarcode',
+                      'legacyState','legacyBarcode','legacyUnits','unitDeltaLegacyMinusCanonical',
+                      'revenueDeltaLegacyMinusCanonical'
+                  )})
+              print('TOP_EVIDENCE', json.dumps(rows, ensure_ascii=False))
+              raise SystemExit(10)
+          PY
+            exit_code=$?
+            if [ "$exit_code" = '10' ]; then
+              exit 0
+            fi
+            if [ "$exit_code" != '0' ]; then
+              exit "$exit_code"
+            fi
+            sleep 1
+          done
+          echo 'Root-cause evidence runner exhausted before terminal state.' >&2
+          exit 1
