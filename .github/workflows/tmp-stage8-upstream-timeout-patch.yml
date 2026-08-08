@@ -1,0 +1,57 @@
+name: Temporary Stage8 Upstream Timeout Patcher
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'fix/stage8-sales-event-upstream-timeout'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/stage8-sales-event-upstream-timeout
+          fetch-depth: 0
+      - name: Bound Product Master batches and upstream wait
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          sync_path = Path('src/lib/productMasterShoplingSalesEventSync.ts')
+          sync = sync_path.read_text(encoding='utf-8')
+          if 'const APPLY_BATCH_SIZE = 5_000;' not in sync:
+              raise SystemExit('expected 5,000-row batch constant not found')
+          sync = sync.replace('const APPLY_BATCH_SIZE = 5_000;', 'const APPLY_BATCH_SIZE = 2_000;', 1)
+
+          marker = 'async function postProductMasterEvents(events: ProductMasterSalesEventRow[]) {'
+          before, sep, after = sync.partition(marker)
+          if not sep:
+              raise SystemExit('postProductMasterEvents marker not found')
+          old = 'signal: AbortSignal.timeout(60_000),'
+          if old not in after:
+              raise SystemExit('expected upstream 60s timeout not found')
+          after = after.replace(old, 'signal: AbortSignal.timeout(120_000),', 1)
+          sync_path.write_text(before + sep + after, encoding='utf-8')
+
+          test_path = Path('tests/productMasterShoplingSalesEventSync.test.mjs')
+          test = test_path.read_text(encoding='utf-8')
+          if 'assert.match(sync, /APPLY_BATCH_SIZE = 5_000/);' not in test:
+              raise SystemExit('expected batch-size regression assertion not found')
+          test = test.replace(
+              'assert.match(sync, /APPLY_BATCH_SIZE = 5_000/);',
+              'assert.match(sync, /APPLY_BATCH_SIZE = 2_000/);\n  assert.match(sync, /AbortSignal\\.timeout\\(120_000\\)/);',
+              1,
+          )
+          test_path.write_text(test, encoding='utf-8')
+          PY
+          rm .github/workflows/tmp-stage8-upstream-timeout-patch.yml
+          git config user.name 'commerce-os-ops-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/lib/productMasterShoplingSalesEventSync.ts tests/productMasterShoplingSalesEventSync.test.mjs .github/workflows/tmp-stage8-upstream-timeout-patch.yml
+          git commit -m 'Bound Stage8 sales-event write batches and upstream timeout'
+          git push origin HEAD:fix/stage8-sales-event-upstream-timeout
