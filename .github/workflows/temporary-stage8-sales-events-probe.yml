@@ -1,0 +1,29 @@
+name: Temporary Stage8 Sales Events Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  production-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production sales-event status until terminal gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-sales-events'
+          for i in $(seq 1 14); do
+            echo "--- probe $i ---"
+            text="$(curl -L -sS --connect-timeout 10 --max-time 60 "$url" \
+              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:16000])')"
+            echo "$text"
+            if echo "$text" | grep -Eq 'STORAGE_NOT_READY|READY_CANARY|READY_FULL|COMPLETED|BLOCKED|FAILED'; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo 'Probe window ended before a terminal gate.'
