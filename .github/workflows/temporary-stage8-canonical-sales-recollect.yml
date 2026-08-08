@@ -1,0 +1,148 @@
+name: Temporary Stage8 Canonical Sales Recollect
+
+on:
+  push:
+    branches:
+      - ops/stage8-canonical-sales-recollect-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  recollect:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-canonical-sales-recollect-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-canonical-sales-recollect-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Collect corrected canonical sales candidate without Product Master writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          page="$base/stage8-sales-events"
+          api="$base/api/product-master/shopling-sales-events"
+
+          ready=0
+          for i in $(seq 1 36); do
+            code="$(curl -L -sS --connect-timeout 10 --max-time 60 -o /tmp/page -w '%{http_code}' "$page" || true)"
+            if [ "$code" = '200' ] && grep -q '정확한 30일 구간 판매 이벤트' /tmp/page; then
+              ready=1
+              break
+            fi
+            echo "waiting for production sales-event page: HTTP $code"
+            sleep 5
+          done
+          test "$ready" = '1'
+
+          start_file="$(mktemp)"
+          start_code="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+            -o "$start_file" -w '%{http_code}' \
+            -X POST "$api" \
+            -H 'content-type: application/json' \
+            -H "origin: $base" \
+            -H "referer: $page" \
+            --data '{"action":"start"}')"
+          echo "START HTTP $start_code"
+          cat "$start_file"
+          test "$start_code" = '200' -o "$start_code" = '202'
+          START_FILE="$start_file" python - <<'PY'
+          import json, os
+          with open(os.environ['START_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          assert data.get('ok') is True, data
+          if data.get('alreadyActive'):
+              status=data.get('status') or {}
+              if status.get('state') in ('READY_CANARY','READY_FULL','COMPLETED'):
+                  print('Existing terminal candidate:', status.get('requestId'), status.get('state'))
+          PY
+
+          for i in $(seq 1 80); do
+            status_file="$(mktemp)"
+            status_code="$(curl -L -sS --connect-timeout 10 --max-time 60 \
+              -o "$status_file" -w '%{http_code}' "$api" \
+              -H "origin: $base" -H "referer: $page")"
+            test "$status_code" = '200'
+            state="$(STATUS_FILE="$status_file" python - <<'PY'
+          import json, os
+          with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          status=data.get('status') or {}
+          print(status.get('state') or '')
+          PY
+          )"
+            echo "STATUS $i $state"
+            if [ "$state" = 'READY_CANARY' ] || [ "$state" = 'READY_FULL' ] || [ "$state" = 'BLOCKED' ] || [ "$state" = 'FAILED' ]; then
+              STATUS_FILE="$status_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['STATUS_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          status=data.get('status') or {}
+          report=status.get('report') or {}
+          summary={
+              'requestId': status.get('requestId'),
+              'analysisAsOf': status.get('analysisAsOf'),
+              'state': status.get('state'),
+              'completedRanges': status.get('completedRanges'),
+              'totalRanges': status.get('totalRanges'),
+              'sourceEventCount': report.get('sourceEventCount'),
+              'validEventCount': report.get('validEventCount'),
+              'tombstoneCount': report.get('tombstoneCount'),
+              'fetchedRows': report.get('fetchedRows'),
+              'ignoredRows': report.get('ignoredRows'),
+              'unmappedRows': report.get('unmappedRows'),
+              'duplicateRows': report.get('duplicateRows'),
+              'identityConflictCount': report.get('identityConflictCount'),
+              'totalBaseUnits': report.get('totalBaseUnits'),
+              'totalRevenue': report.get('totalRevenue'),
+              'eventFingerprint': report.get('eventFingerprint'),
+              'planFingerprint': report.get('planFingerprint'),
+          }
+          print('FINAL_CANDIDATE', json.dumps(summary, ensure_ascii=False))
+          if status.get('state') in ('BLOCKED','FAILED'):
+              raise SystemExit(2)
+          PY
+              exit 0
+            fi
+            if [ "$state" = 'COMPLETED' ]; then
+              echo 'Latest request is already fully applied; start did not create a new candidate.' >&2
+              cat "$status_file"
+              exit 3
+            fi
+
+            step_file="$(mktemp)"
+            step_code="$(curl -L -sS --connect-timeout 10 --max-time 290 \
+              -o "$step_file" -w '%{http_code}' \
+              -X POST "$api" \
+              -H 'content-type: application/json' \
+              -H "origin: $base" \
+              -H "referer: $page" \
+              --data '{"action":"run-next"}' || true)"
+            echo "STEP $i HTTP $step_code"
+            if [ "$step_code" != '200' ]; then
+              cat "$step_file"
+              exit 1
+            fi
+            STEP_FILE="$step_file" python - <<'PY'
+          import json, os, sys
+          with open(os.environ['STEP_FILE'], encoding='utf-8') as f:
+              data=json.load(f)
+          if data.get('ok') is not True:
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          result=data.get('result') or {}
+          print(json.dumps(result, ensure_ascii=False)[:3000])
+          if result.get('state') == 'FAILED':
+              raise SystemExit(2)
+          PY
+            sleep 1
+          done
+
+          echo 'Canonical sales recollection exhausted before candidate terminal state.' >&2
+          exit 1
