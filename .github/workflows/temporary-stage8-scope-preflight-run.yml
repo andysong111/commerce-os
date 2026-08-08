@@ -4,12 +4,20 @@ on:
   push:
     branches:
       - ops/stage8-scope-preflight-run-20260809
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   evidence:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-scope-preflight-run-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-scope-preflight-run-20260809')
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
