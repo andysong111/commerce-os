@@ -10,8 +10,8 @@ const [engine, monthly] = await Promise.all([
 test("event rows use the same base-unit and paid-amount inputs as the monthly canonical ledger", () => {
   assert.match(engine, /Math\.round\(number\(order\.quantity\)\)\) \* identity\.unitsPerOrder/);
   assert.match(engine, /Math\.round\(number\(order\.paidAmount\)\)/);
-  assert.match(monthly, /order\.quantity \* identity\.unitsPerOrder/);
-  assert.match(monthly, /order\.paidAmount/);
+  assert.match(monthly, /current\.quantity \+= quantity \* identity\.unitsPerOrder/);
+  assert.match(monthly, /current\.revenue \+= Math\.max\(0, number\(order\.paidAmount\)\)/);
 });
 
 test("cancelled and returned managed lines are retained as explicit tombstones", () => {
