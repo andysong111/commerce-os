@@ -1,0 +1,481 @@
+name: Patch canonical sales-event Shopling recovery
+
+on:
+  push:
+    branches:
+      - fix/canonical-sales-event-shopling-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/canonical-sales-event-shopling-recovery
+          fetch-depth: 0
+      - name: Add retry attempts and 30 to 7 to 2 day recovery
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/lib/productMasterShoplingSalesEventSync.ts')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              if old not in text:
+                  raise SystemExit(f'{label}: target not found')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+'''export const SALES_EVENT_FULL = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FULL";
+export const SALES_EVENT_FAILED = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FAILED";
+
+const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
+const ANALYSIS_DAYS = 360;
+const RANGE_DAYS = 30;
+const OPERATION_LIMIT = 500;
+const APPLY_BATCH_SIZE = 5_000;''',
+'''export const SALES_EVENT_FULL = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FULL";
+export const SALES_EVENT_STEP_FAILURE =
+  "PRODUCT_MASTER_SHOPLING_SALES_EVENT_STEP_FAILURE";
+export const SALES_EVENT_FAILED = "PRODUCT_MASTER_SHOPLING_SALES_EVENT_FAILED";
+
+export const SALES_EVENT_DEFAULT_CHUNK_DAYS = 30;
+export const SALES_EVENT_FALLBACK_CHUNK_DAYS = 7;
+export const SALES_EVENT_MINIMUM_CHUNK_DAYS = 2;
+
+const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
+const ANALYSIS_DAYS = 360;
+const MAX_STEP_ATTEMPTS = 3;
+const OPERATION_LIMIT = 500;
+const APPLY_BATCH_SIZE = 5_000;''',
+'constants')
+
+          replace_once(
+'''  planningGeneratedAt: string;
+  planningContentFingerprint: string;
+  ranges: ShoplingDateRange[];
+  createdAt: string;''',
+'''  planningGeneratedAt: string;
+  planningContentFingerprint: string;
+  chunkDays: number;
+  supersedesRequestId: string | null;
+  ranges: ShoplingDateRange[];
+  createdAt: string;''',
+'request type')
+
+          replace_once(
+'''  completedRanges: number;
+  totalRanges: number;
+  progress: number;''',
+'''  completedRanges: number;
+  totalRanges: number;
+  chunkDays: number;
+  progress: number;''',
+'status chunkDays')
+
+          replace_once(
+'''    planningGeneratedAt,
+    planningContentFingerprint,
+    ranges,
+    createdAt: iso(value.createdAt) || analysisAsOf,''',
+'''    planningGeneratedAt,
+    planningContentFingerprint,
+    chunkDays: Math.max(
+      SALES_EVENT_MINIMUM_CHUNK_DAYS,
+      Math.min(
+        SALES_EVENT_DEFAULT_CHUNK_DAYS,
+        Math.round(number(value.chunkDays)) || SALES_EVENT_DEFAULT_CHUNK_DAYS,
+      ),
+    ),
+    supersedesRequestId: text(value.supersedesRequestId) || null,
+    ranges,
+    createdAt: iso(value.createdAt) || analysisAsOf,''',
+'requestFromRow fields')
+
+          replace_once(
+'''  const [chunks, reports, canaries, fulls, failures] = await Promise.all([
+    readOperations(SALES_EVENT_CHUNK, correlationId),
+    readOperations(SALES_EVENT_REPORT, correlationId, 10),
+    readOperations(SALES_EVENT_CANARY, correlationId, 10),
+    readOperations(SALES_EVENT_FULL, correlationId, 10),
+    readOperations(SALES_EVENT_FAILED, correlationId, 10),
+  ]);
+  return { correlationId, chunks, reports, canaries, fulls, failures };''',
+'''  const [chunks, reports, canaries, fulls, stepFailures, failures] =
+    await Promise.all([
+      readOperations(SALES_EVENT_CHUNK, correlationId),
+      readOperations(SALES_EVENT_REPORT, correlationId, 10),
+      readOperations(SALES_EVENT_CANARY, correlationId, 10),
+      readOperations(SALES_EVENT_FULL, correlationId, 10),
+      readOperations(SALES_EVENT_STEP_FAILURE, correlationId),
+      readOperations(SALES_EVENT_FAILED, correlationId, 10),
+    ]);
+  return {
+    correlationId,
+    chunks,
+    reports,
+    canaries,
+    fulls,
+    stepFailures,
+    failures,
+  };''',
+'requestOperations')
+
+          replace_once(
+'''export function createSalesEventSyncRequestPlan(
+  requestId: string,
+  planning: Awaited<ReturnType<typeof loadProductPlanningSnapshot>>,
+  analysisAsOf = new Date().toISOString(),
+): SalesEventSyncRequest {
+  const asOf = new Date(analysisAsOf);
+  if (!Number.isFinite(asOf.valueOf())) throw new Error("SALES_EVENT_AS_OF_INVALID");
+  const start = new Date(asOf.valueOf() - ANALYSIS_DAYS * 24 * 60 * 60 * 1000);
+  const analysisStartDate = dateOnly(start);
+  const analysisEndDate = dateOnly(asOf);
+  return {
+    requestId,
+    analysisAsOf: asOf.toISOString(),
+    analysisStartDate,
+    analysisEndDate,
+    planningGeneratedAt: planning.generatedAt,
+    planningContentFingerprint: planning.contentFingerprint,
+    ranges: splitShoplingDateRange(analysisStartDate, analysisEndDate, RANGE_DAYS),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function createProductMasterShoplingSalesEventSyncRequest() {
+  shoplingReadConfigFromEnv(shoplingEnvironment());
+  const planning = await loadProductPlanningSnapshot();
+  const request = createSalesEventSyncRequestPlan(crypto.randomUUID(), planning);
+  await storeOperation({
+    operationType: SALES_EVENT_REQUEST,
+    sourceEventId: `sales-event-request:${request.requestId}`,
+    correlationId: requestCorrelationId(request.requestId),
+    inputSnapshot: request,
+    resultSnapshot: {
+      accepted: true,
+      state: "QUEUED",
+      message: "최근 360일 Shopling 주문행을 정확한 timestamp 판매 이벤트로 읽습니다.",
+    },
+    occurredAt: request.createdAt,
+  });
+  return request;
+}''',
+'''export function createSalesEventSyncRequestPlan(
+  requestId: string,
+  planning: Awaited<ReturnType<typeof loadProductPlanningSnapshot>>,
+  analysisAsOf = new Date().toISOString(),
+  chunkDays = SALES_EVENT_DEFAULT_CHUNK_DAYS,
+  supersedesRequestId: string | null = null,
+): SalesEventSyncRequest {
+  const asOf = new Date(analysisAsOf);
+  if (!Number.isFinite(asOf.valueOf())) throw new Error("SALES_EVENT_AS_OF_INVALID");
+  const normalizedChunkDays = Math.max(
+    SALES_EVENT_MINIMUM_CHUNK_DAYS,
+    Math.min(SALES_EVENT_DEFAULT_CHUNK_DAYS, Math.round(chunkDays)),
+  );
+  const start = new Date(asOf.valueOf() - ANALYSIS_DAYS * 24 * 60 * 60 * 1000);
+  const analysisStartDate = dateOnly(start);
+  const analysisEndDate = dateOnly(asOf);
+  return {
+    requestId,
+    analysisAsOf: asOf.toISOString(),
+    analysisStartDate,
+    analysisEndDate,
+    planningGeneratedAt: planning.generatedAt,
+    planningContentFingerprint: planning.contentFingerprint,
+    chunkDays: normalizedChunkDays,
+    supersedesRequestId,
+    ranges: splitShoplingDateRange(
+      analysisStartDate,
+      analysisEndDate,
+      normalizedChunkDays,
+    ),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function createProductMasterShoplingSalesEventSyncRequest(options: {
+  chunkDays?: number;
+  supersedesRequestId?: string | null;
+  analysisAsOf?: string;
+} = {}) {
+  shoplingReadConfigFromEnv(shoplingEnvironment());
+  const planning = await loadProductPlanningSnapshot();
+  const request = createSalesEventSyncRequestPlan(
+    crypto.randomUUID(),
+    planning,
+    options.analysisAsOf ?? new Date().toISOString(),
+    options.chunkDays ?? SALES_EVENT_DEFAULT_CHUNK_DAYS,
+    text(options.supersedesRequestId) || null,
+  );
+  await storeOperation({
+    operationType: SALES_EVENT_REQUEST,
+    sourceEventId: `sales-event-request:${request.requestId}`,
+    correlationId: requestCorrelationId(request.requestId),
+    inputSnapshot: request,
+    resultSnapshot: {
+      accepted: true,
+      state: "QUEUED",
+      message: `최근 360일 Shopling 주문행을 ${request.chunkDays}일 조회구간으로 정확한 timestamp 판매 이벤트에 재구성합니다.`,
+    },
+    occurredAt: request.createdAt,
+  });
+  return request;
+}
+
+function recoveryChunkDays(request: SalesEventSyncRequest) {
+  if (request.chunkDays > SALES_EVENT_FALLBACK_CHUNK_DAYS) {
+    return SALES_EVENT_FALLBACK_CHUNK_DAYS;
+  }
+  if (request.chunkDays > SALES_EVENT_MINIMUM_CHUNK_DAYS) {
+    return SALES_EVENT_MINIMUM_CHUNK_DAYS;
+  }
+  return null;
+}
+
+export async function recoverProductMasterShoplingSalesEventSyncRequest() {
+  const current = await latestRequest();
+  if (!current) return null;
+  const chunkDays = recoveryChunkDays(current);
+  if (chunkDays === null) return null;
+  return createProductMasterShoplingSalesEventSyncRequest({
+    chunkDays,
+    supersedesRequestId: current.requestId,
+    analysisAsOf: current.analysisAsOf,
+  });
+}''',
+'plan and create request')
+
+          replace_once(
+'''async function storeFailure(request: SalesEventSyncRequest, stage: string, error: unknown) {
+  const message = safeMessage(error);
+  await storeOperation({
+    operationType: SALES_EVENT_FAILED,
+    sourceEventId: `sales-event-failed:${request.requestId}:${encodeURIComponent(stage)}`,
+    correlationId: requestCorrelationId(request.requestId),
+    status: "FAILED",
+    inputSnapshot: { requestId: request.requestId, stage },
+    resultSnapshot: { requestId: request.requestId, stage, message },
+    errorMessage: message,
+  });
+  return message;
+}''',
+'''function stepFailureAttempt(row: OperationRow) {
+  const input = object(row.input_snapshot);
+  return {
+    rangeKey: text(input.rangeKey),
+    attempt: Math.max(0, Math.round(number(input.attempt))),
+    message: safeMessage(
+      row.error_message || object(row.result_snapshot).message,
+    ),
+  };
+}
+
+async function storeStepFailure(
+  request: SalesEventSyncRequest,
+  range: ShoplingDateRange,
+  attempt: number,
+  error: unknown,
+) {
+  const key = rangeKey(range);
+  const message = safeMessage(error);
+  await storeOperation({
+    operationType: SALES_EVENT_STEP_FAILURE,
+    sourceEventId: `sales-event-step-failure:${request.requestId}:${key}:${attempt}`,
+    correlationId: requestCorrelationId(request.requestId),
+    status: "FAILED",
+    inputSnapshot: {
+      requestId: request.requestId,
+      range,
+      rangeKey: key,
+      chunkDays: request.chunkDays,
+      attempt,
+    },
+    resultSnapshot: { requestId: request.requestId, state: "RETRY_PENDING", message },
+    errorMessage: message,
+  });
+  return message;
+}
+
+async function storeTerminalFailure(
+  request: SalesEventSyncRequest,
+  stage: string,
+  error: unknown,
+) {
+  const message = safeMessage(error);
+  await storeOperation({
+    operationType: SALES_EVENT_FAILED,
+    sourceEventId: `sales-event-failed:${request.requestId}:${encodeURIComponent(stage)}`,
+    correlationId: requestCorrelationId(request.requestId),
+    status: "FAILED",
+    inputSnapshot: {
+      requestId: request.requestId,
+      stage,
+      chunkDays: request.chunkDays,
+    },
+    resultSnapshot: { requestId: request.requestId, stage, message },
+    errorMessage: message,
+  });
+  return message;
+}''',
+'failure helpers')
+
+          text = text.replace(
+            'const message = await storeFailure(request, "planning", error);',
+            'const message = await storeTerminalFailure(request, "planning", error);',
+            1,
+          )
+
+          old_block = '''  if (nextRange) {
+    try {
+      const config = shoplingReadConfigFromEnv(shoplingEnvironment());
+      const raw = await new ShoplingReadClient(config).read("orders", nextRange);
+      const summary = aggregateProductMasterShoplingSalesEventChunk(
+        raw,
+        planning,
+        nextRange,
+      );
+      await storeOperation({
+        operationType: SALES_EVENT_CHUNK,
+        sourceEventId: `sales-event-chunk:${request.requestId}:${rangeKey(nextRange)}`,
+        correlationId: requestCorrelationId(request.requestId),
+        inputSnapshot: {
+          requestId: request.requestId,
+          range: nextRange,
+          rangeKey: rangeKey(nextRange),
+          planningContentFingerprint: request.planningContentFingerprint,
+        },
+        resultSnapshot: summary,
+      });
+      return {
+        processed: true,
+        state: "RUNNING" as const,
+        requestId: request.requestId,
+        range: nextRange,
+        fetchedRows: summary.fetchedRows,
+        eventRows: summary.eventRows,
+        unmappedRows: summary.unmappedRows,
+      };
+    } catch (error) {
+      const message = await storeFailure(request, `orders:${rangeKey(nextRange)}`, error);
+      return { processed: true, state: "FAILED" as const, requestId: request.requestId, message };
+    }
+  }'''
+          new_block = '''  if (nextRange) {
+    const key = rangeKey(nextRange);
+    const priorAttempts = operations.stepFailures
+      .map(stepFailureAttempt)
+      .filter((failure) => failure.rangeKey === key);
+    if (priorAttempts.length >= MAX_STEP_ATTEMPTS) {
+      const message = `${key} Shopling 주문 조회가 ${MAX_STEP_ATTEMPTS}회 실패했습니다. 최종 원인: ${priorAttempts[0]?.message || "확인 필요"}`;
+      await storeTerminalFailure(request, `orders:${key}`, message);
+      return {
+        processed: false,
+        state: "FAILED" as const,
+        requestId: request.requestId,
+        message,
+      };
+    }
+    try {
+      const config = shoplingReadConfigFromEnv(shoplingEnvironment());
+      const raw = await new ShoplingReadClient(config).read("orders", nextRange);
+      const summary = aggregateProductMasterShoplingSalesEventChunk(
+        raw,
+        planning,
+        nextRange,
+      );
+      await storeOperation({
+        operationType: SALES_EVENT_CHUNK,
+        sourceEventId: `sales-event-chunk:${request.requestId}:${key}`,
+        correlationId: requestCorrelationId(request.requestId),
+        inputSnapshot: {
+          requestId: request.requestId,
+          range: nextRange,
+          rangeKey: key,
+          chunkDays: request.chunkDays,
+          planningContentFingerprint: request.planningContentFingerprint,
+        },
+        resultSnapshot: summary,
+      });
+      return {
+        processed: true,
+        state: "RUNNING" as const,
+        requestId: request.requestId,
+        range: nextRange,
+        fetchedRows: summary.fetchedRows,
+        eventRows: summary.eventRows,
+        unmappedRows: summary.unmappedRows,
+      };
+    } catch (error) {
+      const attempt = priorAttempts.length + 1;
+      const message = await storeStepFailure(request, nextRange, attempt, error);
+      if (attempt >= MAX_STEP_ATTEMPTS) {
+        await storeTerminalFailure(request, `orders:${key}`, message);
+        return {
+          processed: true,
+          state: "FAILED" as const,
+          requestId: request.requestId,
+          attempt,
+          range: nextRange,
+          message,
+        };
+      }
+      return {
+        processed: false,
+        state: "RUNNING" as const,
+        retryPending: true,
+        requestId: request.requestId,
+        attempt,
+        range: nextRange,
+        message,
+      };
+    }
+  }'''
+          replace_once(old_block, new_block, 'next range block')
+
+          replace_once(
+'''    completedRanges: 0,
+    totalRanges: 0,
+    progress: 0,''',
+'''    completedRanges: 0,
+    totalRanges: 0,
+    chunkDays: 0,
+    progress: 0,''',
+'empty status chunkDays')
+
+          replace_once(
+'''    completedRanges,
+    totalRanges: request.ranges.length,
+    progress: Math.min(100, Math.round((completedRanges / request.ranges.length) * 100)),''',
+'''    completedRanges,
+    totalRanges: request.ranges.length,
+    chunkDays: request.chunkDays,
+    progress: Math.min(100, Math.round((completedRanges / request.ranges.length) * 100)),''',
+'common status chunkDays')
+
+          replace_once(
+'''      message: `${completedRanges}/${request.ranges.length}개 기간을 읽었습니다.`,''',
+'''      message: `${request.chunkDays}일 조회구간 · ${completedRanges}/${request.ranges.length}개 기간을 읽었습니다.`,''',
+'progress message')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Commit patch if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No patch needed.'
+            exit 0
+          fi
+          git config user.name 'commerce-os-bot'
+          git config user.email 'commerce-os-bot@users.noreply.github.com'
+          git add src/lib/productMasterShoplingSalesEventSync.ts
+          git commit -m 'Recover Shopling sales-event collection with smaller ranges'
+          git push origin HEAD:fix/canonical-sales-event-shopling-recovery
