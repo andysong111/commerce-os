@@ -1,0 +1,61 @@
+name: Temporary Stage8 Post Apply Reconciliation Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-postapply-reconciliation-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-postapply-reconciliation-probe-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-postapply-reconciliation-probe-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production reconciliation and require READY
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-postapply-canonical-reconciliation'
+          ready=0
+          for i in $(seq 1 90); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:50000])')"
+            echo "PROBE $i HTTP $code"
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Persisted Canonical 판매원장 최종 대사'; then
+              echo '--- RECONCILIATION PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q '대사 결과 READY'
+              echo "$text" | grep -q 'PERSISTED CANDIDATE 일치'
+              echo "$text" | grep -q 'Candidate 이벤트 11,042'
+              echo "$text" | grep -q 'Persisted 이벤트 11,042'
+              echo "$text" | grep -q 'Candidate 정상판매 10,783'
+              echo "$text" | grep -q 'Persisted 정상판매 10,783'
+              echo "$text" | grep -q 'Candidate tombstone 259'
+              echo "$text" | grep -q 'Persisted tombstone 259'
+              echo "$text" | grep -q 'Candidate active SKU 332'
+              echo "$text" | grep -q '완전일치 active SKU 332'
+              echo "$text" | grep -q 'FULL 검증 write 11,042'
+              echo "$text" | grep -q 'Candidate 누락 0'
+              echo "$text" | grep -q '추가 persisted 판매보유 0'
+              echo "$text" | grep -q 'full-apply-evidence-verified PASS'
+              echo "$text" | grep -q 'candidate-active-arrays-exact PASS'
+              echo "$text" | grep -q 'source-event-count-match PASS'
+              echo "$text" | grep -q 'persisted-classification-complete PASS'
+              echo "$text" | grep -q 'Reconciliation · sha256:'
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = '1'
