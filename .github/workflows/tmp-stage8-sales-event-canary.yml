@@ -1,4 +1,4 @@
-name: Temporary Stage8 Sales Event Canary
+name: Temporary Stage8 Sales Event Full Apply
 
 on:
   pull_request:
@@ -7,38 +7,26 @@ permissions:
   contents: read
 
 jobs:
-  canary:
+  full:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: Wait for Product Master migration and run one canonical event canary
+      - name: Apply all events only after verified canary
         shell: bash
         run: |
           set -euo pipefail
           base='https://commerce-os-ops-center.vercel.app'
           page="$base/stage8-sales-events"
           api="$base/api/product-master/shopling-sales-events"
-          text=''
-          for i in $(seq 1 12); do
-            echo "--- readiness probe $i ---"
-            text="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
-              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
-            echo "$text"
-            if echo "$text" | grep -q 'READY_CANARY'; then
-              break
-            fi
-            if echo "$text" | grep -Eq 'BLOCKED|FAILED'; then
-              echo 'Stage8 is blocked or failed; refusing canary.' >&2
-              exit 1
-            fi
-            sleep 5
-          done
-          echo "$text" | grep -q 'READY_CANARY'
+          text="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
+            | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
+          echo "$text"
+          echo "$text" | grep -q 'READY_FULL'
           plan="$(echo "$text" | grep -oE 'plan sha256:[a-f0-9]{64}' | head -1 | awk '{print $2}')"
           test -n "$plan"
-          echo "Using plan fingerprint: $plan"
-          payload="$(printf '{\"action\":\"canary\",\"planFingerprint\":\"%s\",\"confirmation\":\"CANARY\"}' "$plan")"
-          response="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+          echo "Using verified plan fingerprint: $plan"
+          payload="$(printf '{\"action\":\"full\",\"planFingerprint\":\"%s\",\"confirmation\":\"FULL\"}' "$plan")"
+          response="$(curl -L -sS --connect-timeout 10 --max-time 180 \
             -X POST "$api" \
             -H 'content-type: application/json' \
             -H "origin: $base" \
@@ -52,12 +40,26 @@ jobs:
               print(data, file=sys.stderr)
               raise SystemExit(1)
           result=data.get('result') or {}
-          if result.get('mode') != 'canary' or result.get('written') != 1 or result.get('selected') != 1:
+          if result.get('mode') != 'full':
+              print(data, file=sys.stderr)
+              raise SystemExit(1)
+          selected=int(result.get('selected') or 0)
+          written=int(result.get('written') or 0)
+          if selected != 9386 or written != selected:
               print(data, file=sys.stderr)
               raise SystemExit(1)
           PY
-          sleep 3
-          after="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
-            | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
-          echo "$after"
-          echo "$after" | grep -q 'READY_FULL'
+          for i in $(seq 1 12); do
+            sleep 3
+            after="$(curl -L -sS --connect-timeout 10 --max-time 60 "$page" \
+              | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:20000])')"
+            echo "$after"
+            if echo "$after" | grep -q 'COMPLETED'; then
+              exit 0
+            fi
+            if echo "$after" | grep -Eq 'BLOCKED|FAILED'; then
+              exit 1
+            fi
+          done
+          echo 'Stage8 did not reach COMPLETED after full apply.' >&2
+          exit 1
