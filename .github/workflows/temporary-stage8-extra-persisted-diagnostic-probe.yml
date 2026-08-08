@@ -1,0 +1,47 @@
+name: Temporary Stage8 Extra Persisted Diagnostic Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-extra-persisted-diagnostic-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-extra-persisted-diagnostic-probe-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-extra-persisted-diagnostic-probe-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production diagnostic and print extra SKU rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-postapply-canonical-reconciliation'
+          ready=0
+          for i in $(seq 1 90); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:60000])')"
+            echo "PROBE $i HTTP $code"
+            if [ "$code" = '200' ] && echo "$text" | grep -q 'Candidate에 없는 Persisted active SKU 진단'; then
+              echo '--- DIAGNOSTIC PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q 'BAF1-1'
+              echo "$text" | grep -q 'BBA4-1'
+              echo "$text" | grep -q 'BEA6-1'
+              echo "$text" | grep -q 'Candidate 제외 이유'
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = '1'
