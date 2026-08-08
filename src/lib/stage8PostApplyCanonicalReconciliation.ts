@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   buildCandidateRollingRows,
   loadLatestCandidateSalesSnapshot,
-  type CandidateRollingSalesRow,
 } from "@/lib/stage8CandidateDemandParity";
 import {
   loadProductMasterCanonicalSalesAudit,
@@ -169,7 +168,7 @@ async function loadVerifiedFullApply(
   return { verified: false, written: 0, reason: "FULL_APPLY_EVIDENCE_NOT_FOUND" };
 }
 
-function reconciliationFingerprint(input: {
+function makeReconciliationFingerprint(input: {
   candidateSalesRequestId: string;
   analysisAsOf: string;
   candidatePlanFingerprint: string;
@@ -435,7 +434,7 @@ export async function loadPostApplyCanonicalReconciliation(): Promise<PostApplyC
   const ready = checks.every((row) => row.passed);
   const persistedContentFingerprint = persisted.contentFingerprint;
   const reconciliationFingerprint = ready
-    ? reconciliationFingerprint({
+    ? makeReconciliationFingerprint({
         candidateSalesRequestId: candidate.salesRequestId,
         analysisAsOf: candidate.analysisAsOf,
         candidatePlanFingerprint: candidate.planFingerprint,
