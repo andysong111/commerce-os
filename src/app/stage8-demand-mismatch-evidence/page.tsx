@@ -34,6 +34,9 @@ const REASON_LABELS: Record<string, string> = {
 export default async function Stage8DemandMismatchEvidencePage() {
   const status = await loadDemandMismatchEvidenceStatus();
   const report = status.report;
+  const reasonCounts = (report?.reasonCounts ?? {}) as Record<string, number>;
+  const reasonUnitDelta = (report?.reasonUnitDelta ?? {}) as Record<string, number>;
+  const reasonRevenueDelta = (report?.reasonRevenueDelta ?? {}) as Record<string, number>;
 
   return (
     <div className="space-y-6">
@@ -77,17 +80,23 @@ export default async function Stage8DemandMismatchEvidencePage() {
             <p className="mt-2 text-sm leading-6 text-slate-700">
               단순한 수락/제외 결과가 아니라 원본 옵션바코드와 현재·비활성 SKU 상태까지 대조해 왜 차이가 났는지 규칙 단위로 분류합니다.
             </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {Object.entries(report.reasonCounts).map(([reason, count]) => (
-                <article key={reason} className="rounded-xl border border-indigo-100 bg-white p-4">
-                  <span className="text-xs font-semibold leading-5 text-slate-600">{REASON_LABELS[reason] ?? reason}</span>
-                  <strong className="mt-1 block text-xl text-slate-950">{number.format(count)}행</strong>
-                  <p className="mt-2 text-xs text-slate-500">
-                    수량 Δ {number.format(report.reasonUnitDelta[reason as keyof typeof report.reasonUnitDelta] ?? 0)} · 매출 Δ {number.format(report.reasonRevenueDelta[reason as keyof typeof report.reasonRevenueDelta] ?? 0)}원
-                  </p>
-                </article>
-              ))}
-            </div>
+            {Object.keys(reasonCounts).length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {Object.entries(reasonCounts).map(([reason, count]) => (
+                  <article key={reason} className="rounded-xl border border-indigo-100 bg-white p-4">
+                    <span className="text-xs font-semibold leading-5 text-slate-600">{REASON_LABELS[reason] ?? reason}</span>
+                    <strong className="mt-1 block text-xl text-slate-950">{number.format(count)}행</strong>
+                    <p className="mt-2 text-xs text-slate-500">
+                      수량 Δ {number.format(reasonUnitDelta[reason] ?? 0)} · 매출 Δ {number.format(reasonRevenueDelta[reason] ?? 0)}원
+                    </p>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 rounded-xl border border-indigo-100 bg-white p-4 text-sm text-slate-600">
+                기존 evidence 원장은 원인코드 추가 이전 버전입니다. 기존 결과는 유지하며 새 읽기 전용 재진단이 완료되면 원인별 수치가 표시됩니다.
+              </p>
+            )}
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -131,14 +140,14 @@ export default async function Stage8DemandMismatchEvidencePage() {
                 <tbody>
                   {report.topEvidence.map((row) => (
                     <tr key={`${row.externalId}:${row.category}`} className="border-t border-slate-100 align-top">
-                      <td className="px-3 py-2 font-bold leading-5 text-indigo-900">{REASON_LABELS[row.reason] ?? row.reason}</td>
+                      <td className="px-3 py-2 font-bold leading-5 text-indigo-900">{row.reason ? (REASON_LABELS[row.reason] ?? row.reason) : "이전 evidence · 재진단 대기"}</td>
                       <td className="px-3 py-2 font-bold text-slate-900">{CATEGORY_LABELS[row.category] ?? row.category}</td>
                       <td className="px-3 py-2">{row.orderNo}</td>
                       <td className="px-3 py-2">{row.orderedAt}</td>
                       <td className="px-3 py-2">{row.status || "-"}</td>
                       <td className="px-3 py-2">{row.optionId || "-"}</td>
                       <td className="px-3 py-2 font-semibold">{row.rawOptionBarcode || "-"}</td>
-                      <td className="px-3 py-2">{row.rawOptionBarcodeStructured ? "구조코드" : "비구조"}<br />{row.rawOptionBarcodeManaged ? "관리 B코드" : "비관리"}</td>
+                      <td className="px-3 py-2">{row.rawOptionBarcodeStructured ? "구조코드" : "비구조/이전원장"}<br />{row.rawOptionBarcodeManaged ? "관리 B코드" : "비관리/미확인"}</td>
                       <td className="px-3 py-2">{row.rawPartnerCode || "-"}</td>
                       <td className="px-3 py-2">mall_ord_cnt {row.rawMallOrderCount ?? "-"}<br />quantity {row.rawQuantity ?? "-"}<br />정규화 {number.format(row.normalizedQuantity)}</td>
                       <td className="px-3 py-2">{row.canonicalState}<br />{row.canonicalBarcode || "-"}<br />{number.format(row.canonicalUnits)}개 · {number.format(row.canonicalRevenue)}원</td>
