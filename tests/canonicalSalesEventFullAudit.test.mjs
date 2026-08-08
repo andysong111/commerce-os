@@ -11,7 +11,8 @@ const [engine, cron, page, vercel] = await Promise.all([
 
 test("full audit re-reads the complete 360-day exact-event window and never writes Product Master", () => {
   assert.match(engine, /PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS/);
-  assert.match(engine, /CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS = 30/);
+  assert.match(engine, /CANONICAL_EVENT_FULL_AUDIT_RANGE_DAYS = 7/);
+  assert.match(engine, /CANONICAL_EVENT_FULL_AUDIT_POLICY_VERSION = "v2-seven-day-source"/);
   assert.match(engine, /aggregateProductMasterShoplingSalesEventChunk/);
   assert.match(engine, /combineProductMasterShoplingSalesEventChunks/);
   assert.match(engine, /\/api\/integrations\/sales-events\/verify/);

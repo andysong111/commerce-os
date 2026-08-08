@@ -32,7 +32,7 @@ export default async function CanonicalSalesEventFullAuditPage() {
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Metric label="상태" value={status.state} />
-        <Metric label="30일 Source range" value={`${status.completedRanges}/${status.totalRanges}`} />
+        <Metric label="7일 Source range" value={`${status.completedRanges}/${status.totalRanges}`} />
         <Metric label="Event verify batch" value={`${status.verifiedBatches}/${status.totalVerifyBatches}`} />
         <Metric label="진행률" value={`${status.progress}%`} />
         <Metric label="실제 쓰기" value="0 · DISABLED" />
