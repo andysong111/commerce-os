@@ -5,6 +5,7 @@ import {
   createSupabaseAdminHeaders,
 } from "@/lib/supabase/admin";
 import {
+  SALES_EVENT_CHUNK,
   SALES_EVENT_FAILED,
   SALES_EVENT_REQUEST,
 } from "@/lib/productMasterShoplingSalesEventSync";
@@ -14,7 +15,7 @@ export const SALES_EVENT_FALLBACK_CHUNK_DAYS = 7;
 export const SALES_EVENT_MINIMUM_CHUNK_DAYS = 2;
 export const SALES_EVENT_MAX_REQUEST_ATTEMPTS_PER_TIER = 3;
 
-const OPERATION_LIMIT = 100;
+const OPERATION_LIMIT = 500;
 
 type OperationRow = {
   operation_type?: unknown;
@@ -39,6 +40,12 @@ type RecoveryRequest = {
   createdAt: string;
 };
 
+type ReusableChunk = {
+  rangeKey: string;
+  inputSnapshot: Record<string, unknown>;
+  resultSnapshot: Record<string, unknown>;
+};
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -61,6 +68,18 @@ function iso(value: unknown) {
 
 function requestCorrelationId(requestId: string) {
   return `product-master-sales-events:${requestId}`;
+}
+
+function rangeKey(range: { start: string; end: string }) {
+  return `${range.start}:${range.end}`;
+}
+
+function operationRangeKey(row: OperationRow) {
+  const input = object(row.input_snapshot);
+  const range = object(input.range);
+  const start = text(range.start);
+  const end = text(range.end);
+  return start && end ? `${start}:${end}` : text(input.rangeKey);
 }
 
 function supabaseConnection() {
@@ -130,8 +149,15 @@ function parseRequest(row: OperationRow) {
   };
 }
 
+async function latestRequests() {
+  const requestRows = await readOperations(SALES_EVENT_REQUEST);
+  return requestRows
+    .map(parseRequest)
+    .filter(Boolean) as Array<NonNullable<ReturnType<typeof parseRequest>>>;
+}
+
 async function hasTerminalFailure(requestId: string) {
-  const rows = await readOperations(SALES_EVENT_FAILED, 50);
+  const rows = await readOperations(SALES_EVENT_FAILED, 100);
   const correlationId = requestCorrelationId(requestId);
   return rows.some(
     (row) =>
@@ -171,8 +197,101 @@ function nextChunkDays(chunkDays: number) {
   return null;
 }
 
-async function storeRecoveryRequest(request: RecoveryRequest) {
+function canReuseChunks(
+  child: NonNullable<ReturnType<typeof parseRequest>> | RecoveryRequest,
+  parent: NonNullable<ReturnType<typeof parseRequest>>,
+) {
+  return (
+    child.chunkDays === parent.chunkDays &&
+    child.analysisAsOf === parent.analysisAsOf &&
+    child.analysisStartDate === parent.analysisStartDate &&
+    child.analysisEndDate === parent.analysisEndDate &&
+    child.planningContentFingerprint === parent.planningContentFingerprint
+  );
+}
+
+async function reusableParentChunks(
+  child: NonNullable<ReturnType<typeof parseRequest>> | RecoveryRequest,
+  parent: NonNullable<ReturnType<typeof parseRequest>> | undefined,
+) {
+  if (!parent || !canReuseChunks(child, parent)) return [] as ReusableChunk[];
+  const parentCorrelationId = requestCorrelationId(parent.requestId);
+  const allowed = new Set(child.ranges.map(rangeKey));
+  const rows = await readOperations(SALES_EVENT_CHUNK);
+  const byRange = new Map<string, ReusableChunk>();
+  for (const row of rows) {
+    if (text(row.correlation_id) !== parentCorrelationId) continue;
+    const key = operationRangeKey(row);
+    if (!allowed.has(key) || byRange.has(key)) continue;
+    const input = object(row.input_snapshot);
+    const result = object(row.result_snapshot);
+    if (
+      text(input.planningContentFingerprint) !== child.planningContentFingerprint ||
+      !Array.isArray(result.events)
+    ) {
+      continue;
+    }
+    const resultRange = object(result.range);
+    if (`${text(resultRange.start)}:${text(resultRange.end)}` !== key) continue;
+    byRange.set(key, {
+      rangeKey: key,
+      inputSnapshot: input,
+      resultSnapshot: result,
+    });
+  }
+  return [...byRange.values()].sort((left, right) =>
+    left.rangeKey.localeCompare(right.rangeKey),
+  );
+}
+
+async function storeRecoveryOperations(
+  request: RecoveryRequest,
+  reused: ReusableChunk[],
+) {
   const { baseUrl, secret } = supabaseConnection();
+  const operations = [
+    {
+      operation_type: SALES_EVENT_REQUEST,
+      status: "SUCCEEDED",
+      source: "ops-center-canonical-sales-events-recovery",
+      source_event_id: `sales-event-recovery-request:${request.requestId}`,
+      correlation_id: requestCorrelationId(request.requestId),
+      actor_type: "OPS_WORKER",
+      input_snapshot: request,
+      result_snapshot: {
+        accepted: true,
+        state: "QUEUED",
+        recovery: true,
+        chunkDays: request.chunkDays,
+        supersedesRequestId: request.supersedesRequestId,
+        reusedChunkCount: reused.length,
+        message: `${request.chunkDays}일 Shopling 주문 조회구간으로 안전 재접수했습니다.`,
+      },
+      error_message: null,
+      started_at: request.createdAt,
+      finished_at: request.createdAt,
+      updated_at: request.createdAt,
+    },
+    ...reused.map((chunk) => ({
+      operation_type: SALES_EVENT_CHUNK,
+      status: "SUCCEEDED",
+      source: "ops-center-canonical-sales-events-recovery-reuse",
+      source_event_id: `sales-event-recovery-chunk:${request.requestId}:${chunk.rangeKey}`,
+      correlation_id: requestCorrelationId(request.requestId),
+      actor_type: "OPS_WORKER",
+      input_snapshot: {
+        ...chunk.inputSnapshot,
+        requestId: request.requestId,
+        planningContentFingerprint: request.planningContentFingerprint,
+        reusedFromRequestId: request.supersedesRequestId,
+      },
+      result_snapshot: chunk.resultSnapshot,
+      error_message: null,
+      started_at: request.createdAt,
+      finished_at: request.createdAt,
+      updated_at: request.createdAt,
+    })),
+  ];
   const response = await fetch(
     `${baseUrl}/rest/v1/commerce_operation_runs?on_conflict=source_event_id&select=id,source_event_id,started_at`,
     {
@@ -181,29 +300,7 @@ async function storeRecoveryRequest(request: RecoveryRequest) {
         ...createSupabaseAdminHeaders(secret),
         Prefer: "resolution=ignore-duplicates,return=representation",
       },
-      body: JSON.stringify([
-        {
-          operation_type: SALES_EVENT_REQUEST,
-          status: "SUCCEEDED",
-          source: "ops-center-canonical-sales-events-recovery",
-          source_event_id: `sales-event-recovery-request:${request.requestId}`,
-          correlation_id: requestCorrelationId(request.requestId),
-          actor_type: "OPS_WORKER",
-          input_snapshot: request,
-          result_snapshot: {
-            accepted: true,
-            state: "QUEUED",
-            recovery: true,
-            chunkDays: request.chunkDays,
-            supersedesRequestId: request.supersedesRequestId,
-            message: `${request.chunkDays}일 Shopling 주문 조회구간으로 안전 재접수했습니다.`,
-          },
-          error_message: null,
-          started_at: request.createdAt,
-          finished_at: request.createdAt,
-          updated_at: request.createdAt,
-        },
-      ]),
+      body: JSON.stringify(operations),
       cache: "no-store",
     },
   );
@@ -215,11 +312,91 @@ async function storeRecoveryRequest(request: RecoveryRequest) {
   }
 }
 
+async function copyMissingReusableChunksToLatest() {
+  const requests = await latestRequests();
+  const latest = requests[0];
+  if (!latest?.supersedesRequestId) {
+    return { reusedChunks: 0, requestId: latest?.requestId ?? null };
+  }
+  const requestsById = new Map(requests.map((request) => [request.requestId, request]));
+  const parent = requestsById.get(latest.supersedesRequestId);
+  const reusable = await reusableParentChunks(latest, parent);
+  if (!reusable.length) return { reusedChunks: 0, requestId: latest.requestId };
+
+  const currentRows = await readOperations(
+    SALES_EVENT_CHUNK,
+    OPERATION_LIMIT,
+  );
+  const currentCorrelation = requestCorrelationId(latest.requestId);
+  const completed = new Set(
+    currentRows
+      .filter((row) => text(row.correlation_id) === currentCorrelation)
+      .map(operationRangeKey),
+  );
+  const missing = reusable.filter((chunk) => !completed.has(chunk.rangeKey));
+  if (!missing.length) return { reusedChunks: 0, requestId: latest.requestId };
+
+  const recoveryRequest: RecoveryRequest = {
+    ...latest,
+    ranges: splitShoplingDateRange(
+      latest.analysisStartDate,
+      latest.analysisEndDate,
+      latest.chunkDays,
+    ),
+  };
+  const { baseUrl, secret } = supabaseConnection();
+  const now = new Date().toISOString();
+  const rows = missing.map((chunk) => ({
+    operation_type: SALES_EVENT_CHUNK,
+    status: "SUCCEEDED",
+    source: "ops-center-canonical-sales-events-recovery-reuse",
+    source_event_id: `sales-event-recovery-chunk:${latest.requestId}:${chunk.rangeKey}`,
+    correlation_id: currentCorrelation,
+    actor_type: "OPS_WORKER",
+    input_snapshot: {
+      ...chunk.inputSnapshot,
+      requestId: latest.requestId,
+      planningContentFingerprint: latest.planningContentFingerprint,
+      reusedFromRequestId: latest.supersedesRequestId,
+    },
+    result_snapshot: chunk.resultSnapshot,
+    error_message: null,
+    started_at: now,
+    finished_at: now,
+    updated_at: now,
+  }));
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?on_conflict=source_event_id&select=id,source_event_id,started_at`,
+    {
+      method: "POST",
+      headers: {
+        ...createSupabaseAdminHeaders(secret),
+        Prefer: "resolution=ignore-duplicates,return=representation",
+      },
+      body: JSON.stringify(rows),
+      cache: "no-store",
+    },
+  );
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `SALES_EVENT_REUSE_STORE_FAILED:${response.status}:${body.slice(0, 300)}`,
+    );
+  }
+  void recoveryRequest;
+  return {
+    reusedChunks: missing.length,
+    requestId: latest.requestId,
+    reusedFromRequestId: latest.supersedesRequestId,
+  };
+}
+
+export async function hydrateProductMasterShoplingSalesEventRecovery() {
+  return copyMissingReusableChunksToLatest();
+}
+
 export async function recoverProductMasterShoplingSalesEventRequest() {
-  const requestRows = await readOperations(SALES_EVENT_REQUEST);
-  const requests = requestRows
-    .map(parseRequest)
-    .filter(Boolean) as Array<NonNullable<ReturnType<typeof parseRequest>>>;
+  const requests = await latestRequests();
   const latest = requests[0];
   if (!latest) return { recovered: false as const, reason: "NO_REQUEST" as const };
   if (!(await hasTerminalFailure(latest.requestId))) {
@@ -263,7 +440,8 @@ export async function recoverProductMasterShoplingSalesEventRequest() {
     ),
     createdAt,
   };
-  await storeRecoveryRequest(request);
+  const reusable = await reusableParentChunks(request, latest);
+  await storeRecoveryOperations(request, reusable);
   return {
     recovered: true as const,
     reason,
@@ -271,6 +449,7 @@ export async function recoverProductMasterShoplingSalesEventRequest() {
     supersedesRequestId: latest.requestId,
     analysisAsOf: request.analysisAsOf,
     chunkDays,
+    reusedChunks: reusable.length,
     attemptsInPreviousTier: attemptsInTier,
     totalRanges: request.ranges.length,
   };
