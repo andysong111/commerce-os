@@ -1,0 +1,59 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const [sync, route, cron, vercel] = await Promise.all([
+  readFile("src/lib/productMasterShoplingSalesEventSync.ts", "utf8"),
+  readFile("src/app/api/product-master/shopling-sales-events/route.ts", "utf8"),
+  readFile("src/app/api/cron/product-master-shopling-sales-events/route.ts", "utf8"),
+  readFile("vercel.json", "utf8"),
+]);
+
+test("360-day request pins one Product Master planning fingerprint and bounded ranges", () => {
+  assert.match(sync, /const ANALYSIS_DAYS = 360/);
+  assert.match(sync, /const RANGE_DAYS = 30/);
+  assert.match(sync, /analysisAsOf: asOf\.toISOString\(\)/);
+  assert.match(sync, /planningContentFingerprint: planning\.contentFingerprint/);
+  assert.match(sync, /splitShoplingDateRange\(analysisStartDate, analysisEndDate, RANGE_DAYS\)/);
+  assert.match(sync, /SALES_EVENT_PLANNING_CHANGED/);
+});
+
+test("collection is read-only and business write waits for explicit canary/full", () => {
+  assert.match(sync, /ShoplingReadClient/);
+  assert.match(sync, /mode: "canary" \| "full"/);
+  assert.match(sync, /SALES_EVENT_CANARY_REQUIRED/);
+  assert.match(sync, /SALES_EVENT_PLAN_CHANGED/);
+  assert.match(route, /confirmation/);
+  assert.match(route, /CANARY/);
+  assert.match(route, /FULL/);
+});
+
+test("Product Master storage migration gate is preserved before any event write", () => {
+  const storageCheck = sync.indexOf("const storage = await productMasterSnapshot(request)");
+  const eventPost = sync.indexOf("await postProductMasterEvents(batch)");
+  assert.ok(storageCheck >= 0);
+  assert.ok(eventPost > storageCheck);
+  assert.match(sync, /storageReady: false/);
+  assert.match(sync, /migration/);
+});
+
+test("Product Master responses are checked for persisted readback rows", () => {
+  assert.match(sync, /payload\.verifiedRows/);
+  assert.doesNotMatch(sync, /payload\.verifiedRows === undefined/);
+  assert.match(sync, /verifiedRows === expected/);
+  assert.match(sync, /SALES_EVENT_WRITE_VERIFY_FAILED/);
+});
+
+test("cron only collects and never performs canary or full business writes", () => {
+  assert.match(cron, /runProductMasterShoplingSalesEventSyncStep/);
+  assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
+  assert.match(vercel, /\/api\/cron\/product-master-shopling-sales-events/);
+  assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+});
+
+test("event source and wire format match Product Master contract", () => {
+  assert.match(sync, /commerce-os-sales-events-v1|PRODUCT_MASTER_SALES_EVENT_FORMAT/);
+  assert.match(sync, /shopling_orders_event_v1|PRODUCT_MASTER_SALES_EVENT_SOURCE/);
+  assert.match(sync, /APPLY_BATCH_SIZE = 5_000/);
+  assert.doesNotMatch(sync, /1688|price change|Shopling write/i);
+});
