@@ -46,6 +46,6 @@ test("planning and canonical active SKU coverage must be exact before shadow is 
   assert.match(engine, /matches\.length !== 1/);
   assert.match(engine, /planningMismatchBarcodes/);
   assert.match(engine, /exactPlanningMatchCount !== canonical\.rows\.length/);
-  assert.match(engine, /snapshot\.products\.length !== exactPlanningMatchCount/);
+  assert.match(engine, /\(snapshot\.products \?\? \[\]\)\.length !== exactPlanningMatchCount/);
   assert.match(page, /Engine 입력 일치/);
 });
