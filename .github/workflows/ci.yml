@@ -47,7 +47,6 @@ jobs:
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/api/cron/product-master-shopling-sales-events/route.ts
           src/app/api/cron/stage8-canonical-demand-parity/route.ts
-          src/app/api/cron/stage8-demand-mismatch-evidence/route.ts
           src/app/api/product-master/shopling-sales-events/route.ts
           src/app/api/stage8/canonical-demand-parity/route.ts
           src/app/api/stage8/demand-mismatch-evidence/route.ts
