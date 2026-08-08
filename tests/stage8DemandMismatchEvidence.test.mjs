@@ -7,7 +7,7 @@ const [engine, workflow, page, api, cron, parity] = await Promise.all([
   readFile("src/lib/stage8DemandMismatchEvidence.ts", "utf8"),
   readFile("src/app/stage8-demand-mismatch-evidence/page.tsx", "utf8"),
   readFile("src/app/api/stage8/demand-mismatch-evidence/route.ts", "utf8"),
-  readFile("src/app/api/cron/stage8-demand-mismatch-evidence/route.ts", "utf8"),
+  readFile("src/app/api/cron/stage8-canonical-demand-parity/route.ts", "utf8"),
   readFile("src/lib/stage8CanonicalDemandParity.ts", "utf8"),
 ]);
 
@@ -50,10 +50,13 @@ test("worker is business-read-only: Shopling GET plus Ops evidence ledger only",
   assert.match(page, /발주·가격·재고·입고원가·단종은 변경하지 않습니다/);
 });
 
-test("durable cron and same-origin API can resume bounded evidence collection", () => {
+test("existing Stage8 parity cron automatically hands terminal mismatch into evidence collection", () => {
   assert.match(cron, /CRON_SECRET/);
-  assert.match(cron, /MAX_STEPS_PER_INVOCATION = 2/);
+  assert.match(cron, /current\.state === "MISMATCH"/);
+  assert.match(cron, /continueMismatchEvidence/);
+  assert.match(cron, /createDemandMismatchEvidenceRequest/);
   assert.match(cron, /runDemandMismatchEvidenceStep/);
+  assert.match(cron, /PARITY_REQUEUED/);
   assert.match(api, /isSameOriginOpsRequest/);
   assert.match(api, /run-next/);
   assert.match(api, /createDemandMismatchEvidenceRequest/);
