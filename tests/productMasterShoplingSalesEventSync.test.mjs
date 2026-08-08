@@ -11,12 +11,18 @@ const [sync, recovery, route, cron, vercel] = await Promise.all([
 ]);
 
 test("360-day request pins one Product Master planning fingerprint and bounded ranges", () => {
-  assert.match(sync, /const ANALYSIS_DAYS = 360/);
+  assert.match(sync, /const ANALYSIS_DAYS = PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS/);
   assert.match(sync, /const RANGE_DAYS = 30/);
   assert.match(sync, /analysisAsOf: asOf\.toISOString\(\)/);
   assert.match(sync, /planningContentFingerprint: planning\.contentFingerprint/);
   assert.match(sync, /splitShoplingDateRange\(analysisStartDate, analysisEndDate, RANGE_DAYS\)/);
   assert.match(sync, /SALES_EVENT_PLANNING_CHANGED/);
+});
+
+
+test("each source chunk applies the one pinned analysisAsOf instead of its fetch partition", () => {
+  assert.match(sync, /aggregateProductMasterShoplingSalesEventChunk\([\s\S]*analysisAsOf: request\.analysisAsOf/);
+  assert.doesNotMatch(sync, /aggregateProductMasterShoplingSalesEventChunk\([\s\S]*inDateRange/);
 });
 
 test("collection is read-only and business write waits for explicit canary/full", () => {

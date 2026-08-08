@@ -35,6 +35,15 @@ test("exact historical option barcode is evaluated before a later current option
   assert.match(engine, /ownUnits\.size > 1\) return null/);
 });
 
+
+test("Shopling source range is not treated as the order-date truth", () => {
+  assert.match(engine, /PRODUCT_MASTER_SALES_EVENT_ANALYSIS_DAYS = 360/);
+  assert.match(engine, /insideGlobalAnalysisWindow/);
+  assert.match(engine, /options\.analysisAsOf/);
+  assert.doesNotMatch(engine, /inDateRange\(orderedAt, range\)/);
+  assert.match(engine, /Cross-range duplicates are[\s\S]*externalId/);
+});
+
 test("managed B-code scope is preserved and old non-B rows are ignored", () => {
   assert.match(engine, /const MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}\\d\+-\\d\+\$\//);
   assert.match(engine, /if \(!isManagedSalesScope\(index, order, raw\)\)/);

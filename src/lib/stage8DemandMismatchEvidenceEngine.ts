@@ -507,7 +507,7 @@ export function compileDemandMismatchEvidenceChunk(
       [raw],
       planning,
       range,
-      analysisAsOf,
+      { syncedAt: analysisAsOf, analysisAsOf },
     );
     const legacyChunk = aggregateShoplingOrderChunk(
       [raw],
