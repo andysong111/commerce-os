@@ -229,7 +229,7 @@ export async function recoverProductMasterShoplingSalesEventRequest() {
   const requestsById = new Map(requests.map((request) => [request.requestId, request]));
   const attemptsInTier = tierAttemptCount(latest, requestsById);
   let chunkDays = latest.chunkDays;
-  let reason = "RETRY_SAME_TIER" as const | "SHRINK_RANGE";
+  let reason: "RETRY_SAME_TIER" | "SHRINK_RANGE" = "RETRY_SAME_TIER";
   if (attemptsInTier >= SALES_EVENT_MAX_REQUEST_ATTEMPTS_PER_TIER) {
     const smaller = nextChunkDays(latest.chunkDays);
     if (smaller === null) {
