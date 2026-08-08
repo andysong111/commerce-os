@@ -1,0 +1,49 @@
+name: Temporary Canonical Sales Event Full Audit Production Probe
+
+on:
+  push:
+    branches:
+      - ops/canonical-sales-event-full-audit-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/canonical-sales-event-full-audit-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for 360-day full audit terminal state
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-canonical-sales-event-full-audit'
+          terminal=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url" || true)"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:150000])')"
+            echo "PROBE $i HTTP $code"
+            echo "$text" | grep -oE '상태 (IDLE|QUEUED|RUNNING|EXACT|DRIFT|BLOCKED|FAILED)|30일 Source range [0-9]+/[0-9]+|Event verify batch [0-9]+/[0-9]+|진행률 [0-9]+%' || true
+            if [ "$code" = '200' ] && (echo "$text" | grep -q '상태 EXACT' || echo "$text" | grep -q '상태 DRIFT'); then
+              echo '--- 360 DAY FULL AUDIT PAGE ---'
+              echo "$text"
+              echo "$text" | grep -q '실제 쓰기 0 · DISABLED'
+              echo "$text" | grep -q '미연결 · 0'
+              echo "$text" | grep -q 'identity/time 충돌 · 0'
+              echo "$text" | grep -q '분류 완전성 PASS'
+              terminal=1
+              break
+            fi
+            if [ "$code" = '200' ] && (echo "$text" | grep -q '상태 FAILED' || echo "$text" | grep -q '상태 BLOCKED'); then
+              echo '--- TERMINAL BLOCK ---'
+              echo "$text"
+              exit 2
+            fi
+            sleep 20
+          done
+          test "$terminal" = '1'
