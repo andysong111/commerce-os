@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { loadStocktakeInterventionPlan } from "@/lib/stage8StocktakeInterventionPlan";
 
 const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
@@ -60,6 +61,29 @@ function integerQuantity(value: unknown) {
   return parsed;
 }
 
+function normalizedBarcode(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
+
+function signedPayload(input: {
+  barcode: string;
+  physicalQuantity: number;
+  expectedInventoryGuard: string;
+  expectedPlanFingerprint: string;
+}) {
+  return [
+    "commerce-os-stocktake-canary-v1",
+    normalizedBarcode(input.barcode),
+    String(input.physicalQuantity),
+    input.expectedInventoryGuard,
+    input.expectedPlanFingerprint,
+  ].join("\n");
+}
+
 async function productMasterPreview(barcode: string) {
   const { baseUrl, secret } = connection();
   const response = await fetch(
@@ -77,6 +101,7 @@ async function productMasterPreview(barcode: string) {
     ok?: boolean;
     preview?: ProductMasterStocktakePreview;
     writeEnabled?: boolean;
+    signedAuthorizationSupported?: boolean;
     message?: string;
     error?: string;
   };
@@ -153,8 +178,8 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
     generatedAt: new Date().toISOString(),
     state: preview.writeEnabled ? "READY_FOR_COUNT" : "WRITE_GATE_OFF",
     message: preview.writeEnabled
-      ? "첫 canary의 실물 수량 1개 값만 입력하면 정확히 1개 STOCKTAKE를 저장하고 persisted readback을 검증합니다."
-      : "첫 canary와 inventory guard는 일치하지만 Product Master의 1건 STOCKTAKE write 환경 게이트가 아직 꺼져 있습니다.",
+      ? "첫 canary의 실물 수량 1개 값만 입력하면 서명된 정확한 1개 STOCKTAKE를 저장하고 persisted readback을 검증합니다."
+      : "첫 canary와 inventory guard는 일치하지만 Product Master의 1건 STOCKTAKE write 승인이 아직 준비되지 않았습니다.",
     barcode,
     name: row.name,
     modelNo: row.modelNo,
@@ -196,18 +221,25 @@ export async function applyStocktakeCanaryFromOperator(input: {
   }
 
   const { baseUrl, secret } = connection();
+  const payload = {
+    barcode: readiness.barcode,
+    physicalQuantity,
+    expectedInventoryGuard,
+    expectedPlanFingerprint,
+  };
+  const signature = createHmac("sha256", secret)
+    .update(signedPayload(payload))
+    .digest("hex");
   const response = await fetch(`${baseUrl}/api/integrations/stocktake-canary`, {
     method: "POST",
     headers: {
       accept: "application/json",
       "content-type": "application/json",
       "x-commerce-os-integration-secret": secret,
+      "x-commerce-os-stocktake-canary-signature": signature,
     },
     body: JSON.stringify({
-      barcode: readiness.barcode,
-      physicalQuantity,
-      expectedInventoryGuard,
-      expectedPlanFingerprint,
+      ...payload,
       note: "Stage 8 operator-confirmed physical stocktake canary via Ops Center",
     }),
     cache: "no-store",
