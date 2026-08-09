@@ -3,16 +3,28 @@ import {
   loadProductMasterInventoryCostReadiness,
   type ProductMasterInventoryCostRow,
 } from "@/lib/productMasterInventoryCostReadiness";
+import { calculateNetRequirement } from "@/lib/productDecisionEngine/netRequirement";
+import type { SalesOrderGroup } from "@/lib/productDecisionEngine/salesOrder";
+import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+
+export type InventoryOperatingMode =
+  | "VERIFIED"
+  | "PROVISIONAL"
+  | "REVIEW"
+  | "MISSING";
 
 export type InventoryVerificationPriorityRow = {
   barcode: string;
   name: string;
   modelNo: string | null;
-  purchaseStatus: string;
+  purchaseStatus: SalesOrderGroup;
+  originalPurchaseStatus: string;
   recommendedQty: number;
+  originalRecommendedQty: number;
   expectedCost: number;
   priorityScore: number;
   inventoryQuantity: number;
+  inventoryMode: InventoryOperatingMode;
   inventoryVerified: boolean;
   inventoryVerification: string;
   inventoryRequiresReview: boolean;
@@ -20,13 +32,13 @@ export type InventoryVerificationPriorityRow = {
   inventoryBaselineKind: string | null;
   movementCount: number;
   inboundMovementCount: number;
+  openCommitment: number;
   hasConfirmedReceiptCost: boolean;
   latestConfirmedReceiptAt: string | null;
   latestConfirmedReceiptCostKrw: number;
   protectedCostKrw: number;
   action:
     | "NONE"
-    | "STOCKTAKE_REQUIRED"
     | "LEDGER_REVIEW_REQUIRED"
     | "COST_CONFIRMATION_REQUIRED";
   operationallyReady: boolean;
@@ -39,13 +51,15 @@ export type InventoryVerificationPriority = {
   purchaseShadowReady: boolean;
   managedActiveSkuCount: number;
   purchaseRecommendationCount: number;
-  verifiedPurchaseRecommendationCount: number;
+  operationallyReadyPurchaseCount: number;
   blockedPurchaseRecommendationCount: number;
+  provisionalPurchaseCount: number;
+  verifiedPurchaseCount: number;
+  reviewInventoryCount: number;
   totalExpectedSpend: number;
   operationallyReadyExpectedSpend: number;
   blockedExpectedSpend: number;
-  priorityStocktakeCountFor80PctBlockedSpend: number;
-  priorityStocktakeExpectedSpendCoverage: number;
+  stocktakeRequiredCount: 0;
   writesEnabled: false;
   rows: InventoryVerificationPriorityRow[];
 };
@@ -59,6 +73,10 @@ function number(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function integer(value: unknown) {
+  return Math.max(0, Math.round(number(value)));
+}
+
 function barcode(value: unknown) {
   return text(value).toUpperCase().replace(/\s+/g, "");
 }
@@ -67,80 +85,137 @@ function inventoryByBarcode(rows: ProductMasterInventoryCostRow[]) {
   return new Map(rows.map((row) => [barcode(row.barcode), row]));
 }
 
-function actionFor(row: ProductMasterInventoryCostRow | undefined) {
-  if (!row) return "LEDGER_REVIEW_REQUIRED" as const;
-  if (row.inventoryRequiresReview) return "LEDGER_REVIEW_REQUIRED" as const;
-  if (!row.inventoryVerified || row.initialZeroUnverified) {
-    return "STOCKTAKE_REQUIRED" as const;
+function planningByBarcode(
+  products: Awaited<ReturnType<typeof loadProductPlanningSnapshot>>["products"],
+) {
+  return new Map(
+    products
+      .filter((row) => row.skuActive !== false)
+      .map((row) => [barcode(row.barcode), row] as const),
+  );
+}
+
+function inventoryMode(
+  row: ProductMasterInventoryCostRow | undefined,
+): InventoryOperatingMode {
+  if (!row) return "MISSING";
+  if (row.inventoryRequiresReview || row.inventoryVerification === "REVIEW") {
+    return "REVIEW";
   }
-  if (!row.hasConfirmedReceiptCost) {
+  if (row.inventoryVerified) return "VERIFIED";
+  return "PROVISIONAL";
+}
+
+function actionFor(row: ProductMasterInventoryCostRow | undefined) {
+  const mode = inventoryMode(row);
+  if (mode === "MISSING" || mode === "REVIEW") {
+    return "LEDGER_REVIEW_REQUIRED" as const;
+  }
+  if (!row?.hasConfirmedReceiptCost) {
     return "COST_CONFIRMATION_REQUIRED" as const;
   }
   return "NONE" as const;
 }
 
-function spendCoverageCount(rows: InventoryVerificationPriorityRow[], target = 0.8) {
-  const candidates = rows
-    .filter((row) => row.purchaseStatus === "발주 추천" && !row.operationallyReady)
-    .sort(
-      (left, right) =>
-        right.expectedCost - left.expectedCost ||
-        right.priorityScore - left.priorityScore ||
-        left.barcode.localeCompare(right.barcode),
-    );
-  const blockedSpend = candidates.reduce((sum, row) => sum + row.expectedCost, 0);
-  if (!(blockedSpend > 0)) return { count: 0, coverageSpend: 0 };
-  const targetSpend = blockedSpend * target;
-  let coverageSpend = 0;
-  let count = 0;
-  for (const row of candidates) {
-    coverageSpend += row.expectedCost;
-    count += 1;
-    if (coverageSpend >= targetSpend) break;
+function salesOrderGroup(value: unknown): SalesOrderGroup {
+  const normalized = text(value);
+  if (
+    normalized === "발주 추천" ||
+    normalized === "소량 검토" ||
+    normalized === "발주 보류" ||
+    normalized === "데이터 부족"
+  ) {
+    return normalized;
   }
-  return { count, coverageSpend };
+  return "발주 보류";
+}
+
+function expectedCostForQuantity(
+  previousCost: unknown,
+  previousQuantity: unknown,
+  nextQuantity: number,
+) {
+  const quantity = integer(previousQuantity);
+  const cost = integer(previousCost);
+  if (!quantity || !cost || !nextQuantity) return 0;
+  return Math.round((cost / quantity) * nextQuantity);
 }
 
 export async function loadInventoryVerificationPriority(): Promise<InventoryVerificationPriority> {
-  const [purchaseShadow, inventoryReadiness] = await Promise.all([
+  const [purchaseShadow, inventoryReadiness, planning] = await Promise.all([
     loadCanonicalPurchaseShadow(),
     loadProductMasterInventoryCostReadiness(),
+    loadProductPlanningSnapshot(),
   ]);
   const purchaseProducts = purchaseShadow.snapshot?.products ?? [];
   const inventoryIndex = inventoryByBarcode(inventoryReadiness.rows);
+  const planningIndex = planningByBarcode(planning.products);
 
   const rows: InventoryVerificationPriorityRow[] = purchaseProducts
     .map((product) => {
       const key = barcode(product.barcode);
       const inventory = inventoryIndex.get(key);
+      const profile = planningIndex.get(key);
+      const mode = inventoryMode(inventory);
+      const inventoryUsable = mode === "VERIFIED" || mode === "PROVISIONAL";
+      const originalGroup = salesOrderGroup(product.status);
+      const originalRecommendedQty = integer(product.recommendedQty);
+      const demandTarget = integer(
+        product.rawRecommendedQty ?? product.recommendedQty,
+      );
+      const openCommitment = integer(product.openCommitment);
+      const net = calculateNetRequirement({
+        demandTarget,
+        originalGroup,
+        inventoryKnown: inventoryUsable,
+        availableQuantity: inventoryUsable
+          ? integer(inventory?.inventoryQuantity)
+          : 0,
+        reservedQuantity: 0,
+        incomingQuantity: 0,
+        ledgerCommitment: openCommitment,
+        moq: Math.max(1, integer(profile?.moq) || 1),
+        cartonQuantity: Math.max(1, integer(profile?.cartonQuantity) || 1),
+      });
       const action = actionFor(inventory);
+      const purchaseStatus = net.group;
+      const recommendedQty = net.recommendedQuantity;
+      const expectedCost = expectedCostForQuantity(
+        product.expectedCost,
+        originalRecommendedQty,
+        recommendedQty,
+      );
       const operationallyReady =
-        product.status === "발주 추천" &&
+        purchaseStatus === "발주 추천" &&
         action === "NONE" &&
-        product.inventoryKnown === true;
+        inventoryUsable;
+
       return {
         barcode: key,
         name: text(product.name),
         modelNo: product.modelNo ? text(product.modelNo) : null,
-        purchaseStatus: text(product.status),
-        recommendedQty: Math.max(0, Math.round(number(product.recommendedQty))),
-        expectedCost: Math.max(0, Math.round(number(product.expectedCost))),
-        priorityScore: Math.max(0, Math.round(number(product.score?.total))),
-        inventoryQuantity: inventory ? Math.round(number(inventory.inventoryQuantity)) : 0,
+        purchaseStatus,
+        originalPurchaseStatus: text(product.status),
+        recommendedQty,
+        originalRecommendedQty,
+        expectedCost,
+        priorityScore: integer(product.score?.total),
+        inventoryQuantity: inventory ? integer(inventory.inventoryQuantity) : 0,
+        inventoryMode: mode,
         inventoryVerified: inventory?.inventoryVerified === true,
         inventoryVerification: text(inventory?.inventoryVerification) || "MISSING",
         inventoryRequiresReview: inventory?.inventoryRequiresReview === true,
         initialZeroUnverified: inventory?.initialZeroUnverified === true,
         inventoryBaselineKind: inventory?.inventoryBaselineKind ?? null,
-        movementCount: Math.max(0, Math.round(number(inventory?.movementCount))),
-        inboundMovementCount: Math.max(0, Math.round(number(inventory?.inboundMovementCount))),
+        movementCount: integer(inventory?.movementCount),
+        inboundMovementCount: integer(inventory?.inboundMovementCount),
+        openCommitment,
         hasConfirmedReceiptCost: inventory?.hasConfirmedReceiptCost === true,
         latestConfirmedReceiptAt: inventory?.latestConfirmedReceiptAt ?? null,
-        latestConfirmedReceiptCostKrw: Math.max(
-          0,
-          Math.round(number(inventory?.latestConfirmedReceiptCostKrw)),
+        latestConfirmedReceiptCostKrw: integer(
+          inventory?.latestConfirmedReceiptCostKrw,
         ),
-        protectedCostKrw: Math.max(0, Math.round(number(inventory?.protectedCostKrw))),
+        protectedCostKrw: integer(inventory?.protectedCostKrw),
         action,
         operationallyReady,
       };
@@ -157,7 +232,10 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
 
   const purchaseRows = rows.filter((row) => row.purchaseStatus === "발주 추천");
   const readyRows = purchaseRows.filter((row) => row.operationallyReady);
-  const totalExpectedSpend = purchaseRows.reduce((sum, row) => sum + row.expectedCost, 0);
+  const totalExpectedSpend = purchaseRows.reduce(
+    (sum, row) => sum + row.expectedCost,
+    0,
+  );
   const operationallyReadyExpectedSpend = readyRows.reduce(
     (sum, row) => sum + row.expectedCost,
     0,
@@ -166,28 +244,37 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
     0,
     totalExpectedSpend - operationallyReadyExpectedSpend,
   );
-  const coverage = spendCoverageCount(rows);
   const structuralReady =
     purchaseShadow.shadowReady &&
     purchaseProducts.length === inventoryReadiness.summary.managedActiveSkuCount &&
-    rows.every((row) => inventoryIndex.has(row.barcode));
+    rows.every(
+      (row) => inventoryIndex.has(row.barcode) && planningIndex.has(row.barcode),
+    );
 
   return {
     generatedAt: new Date().toISOString(),
     state: structuralReady ? "READY" : "BLOCKED",
     message: structuralReady
-      ? "Canonical 발주 shadow와 Product Master 재고·원가 원장을 1:1로 결합했습니다. 실제 발주 후보 중 확인이 필요한 SKU만 기대발주금액 순으로 최소화해 표시합니다."
-      : "Canonical 발주 shadow와 재고·원가 원장 간 구조 불일치가 있어 실사 우선순위를 확정하지 않습니다.",
+      ? "초기 0은 실제 0으로 확정하지 않고 PROVISIONAL 추정재고로 사용합니다. 확정입고는 추정재고와 원가에 즉시 반영하고, 품절 확인 시 SOLD_OUT_RESET=0부터 VERIFIED 원장으로 전환합니다. 재고실사는 운영 필수조건이 아닙니다."
+      : "Canonical 발주 shadow·Product Master 재고원장·planning 연결이 완전하지 않아 발주 수량을 확정하지 않습니다.",
     purchaseShadowReady: purchaseShadow.shadowReady,
     managedActiveSkuCount: inventoryReadiness.summary.managedActiveSkuCount,
     purchaseRecommendationCount: purchaseRows.length,
-    verifiedPurchaseRecommendationCount: readyRows.length,
+    operationallyReadyPurchaseCount: readyRows.length,
     blockedPurchaseRecommendationCount: purchaseRows.length - readyRows.length,
+    provisionalPurchaseCount: purchaseRows.filter(
+      (row) => row.inventoryMode === "PROVISIONAL",
+    ).length,
+    verifiedPurchaseCount: purchaseRows.filter(
+      (row) => row.inventoryMode === "VERIFIED",
+    ).length,
+    reviewInventoryCount: rows.filter(
+      (row) => row.inventoryMode === "REVIEW" || row.inventoryMode === "MISSING",
+    ).length,
     totalExpectedSpend,
     operationallyReadyExpectedSpend,
     blockedExpectedSpend,
-    priorityStocktakeCountFor80PctBlockedSpend: coverage.count,
-    priorityStocktakeExpectedSpendCoverage: coverage.coverageSpend,
+    stocktakeRequiredCount: 0,
     writesEnabled: false,
     rows,
   };
