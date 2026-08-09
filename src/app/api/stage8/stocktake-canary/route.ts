@@ -3,6 +3,7 @@ import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 import {
   applyStocktakeCanaryFromOperator,
   loadStocktakeCanaryOperatorReadiness,
+  stocktakeOperatorProxyWriteEnabled,
 } from "@/lib/stage8StocktakeCanaryOperator";
 
 export const runtime = "nodejs";
@@ -41,6 +42,20 @@ export async function POST(request: NextRequest) {
   if (!isSameOriginOpsRequest(request)) {
     return Response.json(
       { ok: false, error: "SAME_ORIGIN_REQUIRED", message: "Ops Center 화면에서만 실행할 수 있습니다." },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
+  }
+  if (!stocktakeOperatorProxyWriteEnabled()) {
+    return Response.json(
+      {
+        ok: false,
+        error: "STOCKTAKE_CANARY_OPERATOR_WRITE_GATE_OFF",
+        message: "Ops Center 브라우저 STOCKTAKE canary write 프록시는 별도 환경 게이트로 잠겨 있습니다.",
+        maxWriteRows: 1,
+        purchaseWritesEnabled: false,
+        priceWritesEnabled: false,
+        receiptWritesEnabled: false,
+      },
       { status: 403, headers: { "cache-control": "no-store" } },
     );
   }
@@ -86,7 +101,9 @@ export async function POST(request: NextRequest) {
       message.includes("NOT_READY") ||
       message.includes("INVENTORY_CHANGED") ||
       message.includes("NOT_ELIGIBLE");
-    const disabled = message.includes("WRITE_DISABLED") || message.includes("WRITE_GATE_OFF");
+    const disabled =
+      message.includes("WRITE_DISABLED") ||
+      message.includes("WRITE_GATE_OFF");
     return Response.json(
       {
         ok: false,
