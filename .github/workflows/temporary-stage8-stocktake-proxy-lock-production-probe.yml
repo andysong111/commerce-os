@@ -1,0 +1,53 @@
+name: Temporary Stage8 Stocktake Proxy Lock Production Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-stocktake-proxy-lock-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'ops/stage8-stocktake-proxy-lock-probe-20260809' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for browser stocktake proxy to be locked in production
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          ready=0
+          for i in $(seq 1 50); do
+            page="$(mktemp)"
+            page_code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$page" -w '%{http_code}' "$base/stage8-stocktake-canary" || true)"
+            page_text="$(cat "$page" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])')"
+            api="$(mktemp)"
+            api_code="$(curl -sS --connect-timeout 10 --max-time 90 \
+              -X POST "$base/api/stage8/stocktake-canary" \
+              -H "Origin: $base" \
+              -H 'Content-Type: application/json' \
+              --data '{"confirmation":"APPLY_ONE_STOCKTAKE_CANARY","physicalQuantity":0,"expectedPlanFingerprint":"sha256:0000000000000000000000000000000000000000000000000000000000000000","expectedInventoryGuard":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}' \
+              -o "$api" -w '%{http_code}' || true)"
+            api_text="$(cat "$api")"
+            echo "PROBE $i PAGE=$page_code API=$api_code"
+            if [ "$page_code" = '200' ] && [ "$api_code" = '403' ] && \
+               echo "$api_text" | grep -q 'STOCKTAKE_CANARY_OPERATOR_WRITE_GATE_OFF'; then
+              echo '--- STOCKTAKE OPERATOR PAGE ---'
+              echo "$page_text"
+              echo '--- LOCKED POST RESPONSE ---'
+              echo "$api_text"
+              echo "$page_text" | grep -q 'BGG1-1'
+              echo "$page_text" | grep -q 'WRITE_GATE_OFF'
+              echo "$page_text" | grep -q '최대 write 1 건'
+              echo "$page_text" | grep -q '발주 write false'
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = '1'
