@@ -1,0 +1,32 @@
+name: Stage8 Purchase Candidate Shopling Identity Audit CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  identity-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint identity audit files
+        run: >-
+          npx eslint
+          src/lib/stage8PurchaseCandidateShoplingIdentityAudit.ts
+          src/app/stage8-purchase-candidate-shopling-identity-audit/page.tsx
+      - name: Test identity audit safety
+        run: node --experimental-strip-types --test tests/stage8PurchaseCandidateShoplingIdentityAudit.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-shopling-identity-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_shopling_identity_build
