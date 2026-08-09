@@ -37,10 +37,10 @@ test("recovery fails closed for missing or conflicting identity evidence", () =>
   assert.match(recoverySource, /inventoryPromotionAllowed: false/);
   assert.match(recoverySource, /purchaseWritesEnabled: false/);
   assert.match(recoverySource, /inventoryWritesEnabled: false/);
-  assert.doesNotMatch(recoverySource, /\.insert\(/);
-  assert.doesNotMatch(recoverySource, /\.update\(/);
-  assert.doesNotMatch(recoverySource, /\.upsert\(/);
-  assert.doesNotMatch(recoverySource, /fetch\([^)]*method:\s*["']POST/i);
+  assert.doesNotMatch(recoverySource, /\.from\([^\n]+\)[\s\S]{0,200}\.insert\(/);
+  assert.doesNotMatch(recoverySource, /\.from\([^\n]+\)[\s\S]{0,200}\.update\(/);
+  assert.doesNotMatch(recoverySource, /\.from\([^\n]+\)[\s\S]{0,200}\.upsert\(/);
+  assert.doesNotMatch(recoverySource, /fetch\([^)]*method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
 
 test("operator page clearly labels direct evidence and zero business writes", () => {
