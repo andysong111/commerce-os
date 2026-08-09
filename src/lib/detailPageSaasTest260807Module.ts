@@ -1,22 +1,23 @@
 import type { CommerceModule } from "@/lib/moduleRegistry";
+import { DETAIL_PAGE_V3_BASELINE_NOTE } from "@/lib/detailPageV3ProductionBaseline";
 
 export const detailPageSaasTest260807Module: CommerceModule = {
   id: "detail-page-studio-saas-test-260807",
   title: "Commerce OS Detail Page Studio · SaaS(테스트버전) · v260807",
   navigationLabel: "상세페이지 스튜디오 · SaaS(테스트버전)",
   description:
-    "SaaS 테스트버전에서 검증된 동일 엔진 기준을 자유로운 수정·실험용 독립 개발선으로 복제했습니다. 상품 이미지와 정보를 입력하면 표준 생성 프로필에 따라 8개 섹션을 만들고, AI 검수·문제 패널 자동보정 후 최종 상세페이지를 제공합니다.",
+    "Production v3 기준과 동일한 상세페이지 생성 코드를 사용하는 SaaS 실험 카드입니다. 새 UI·과금·다국어 실험은 이 카드에서 진행하되 대표 1장·부가 4장과 1000×14000 상세페이지 엔진 기준은 공통 baseline에서 시작합니다.",
   status: "available",
   route:
     "https://commerce-os-detail-page-studio-git-isolated-saas-test-a2bsangsa.vercel.app/?studio_variant=saas-test",
   category: "detail-page",
   inputType:
-    "상품 이미지 최대 3장, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
+    "상품 이미지 최대 3장 또는 1688 링크, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
   outputType:
-    "AI 검수된 8개 섹션 상세페이지, 대표 1장·부가 4장, 실행·사용량 원장",
+    "Production v3 상세페이지 1000×14000 JPG, 대표 1장·부가 4장, 실행·사용량 원장",
   historySupport: false,
   externalProject: true,
-  note: "기준 버전 v260807. commerce-os-detail-page-studio의 isolated/saas-test 개발선만 사용합니다. OPS Center 전용·SaaS 전용 엔진 수정은 이 카드에 자동 반영하지 않습니다.",
-  helperNote: "v260807 · SaaS 테스트 · 독립 엔진",
+  note: `${DETAIL_PAGE_V3_BASELINE_NOTE} 이 카드는 isolated/saas-test 배포 별칭을 유지합니다.`,
+  helperNote: "v260807 · 공통 Production v3 · SaaS 테스트",
   actionLabel: "SaaS 테스트 스튜디오 열기",
 };
