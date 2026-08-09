@@ -30,14 +30,13 @@ test("effective current sale price includes the exact option additional amount",
         skuId: "sku-1",
         barcode: "BGG1-1",
         productName: "계란펀칭기",
-        listings: [
-          { goodsKey: "121111", optionId: "987", active: true },
-        ],
+        listings: [{ goodsKey: "121111", optionId: "987", active: true }],
       },
     ],
     [
       {
         goods_key: "121111",
+        ptn_goods_cd: "aaa316a",
         sale_price: "3000",
         optId: "987",
         optAmt: "500",
@@ -45,10 +44,12 @@ test("effective current sale price includes the exact option additional amount",
     ],
   );
   assert.equal(snapshot.rows[0].state, "READY");
+  assert.equal(snapshot.rows[0].priceMode, "UNIFORM");
   assert.equal(snapshot.rows[0].currentSalePrice, 3500);
+  assert.equal(snapshot.rows[0].listings[0].productGroup, "도매1");
 });
 
-test("multiple mapped Shopling prices fail closed instead of choosing one", () => {
+test("different Shopling product-group prices are preserved instead of collapsed", () => {
   const snapshot = resolveShoplingCurrentPrices(
     [
       {
@@ -62,13 +63,37 @@ test("multiple mapped Shopling prices fail closed instead of choosing one", () =
       },
     ],
     [
+      { goods_key: "121111", ptn_goods_cd: "aaa316a", sale_price: "3000", optId: "1", optAmt: "0" },
+      { goods_key: "121112", ptn_goods_cd: "aaa316e", sale_price: "3200", optId: "2", optAmt: "0" },
+    ],
+  );
+  assert.equal(snapshot.rows[0].state, "READY");
+  assert.equal(snapshot.rows[0].priceMode, "GROUPED");
+  assert.equal(snapshot.rows[0].currentSalePrice, 0);
+  assert.deepEqual(snapshot.rows[0].distinctPrices, [3000, 3200]);
+  assert.deepEqual(
+    snapshot.rows[0].listings.map((row) => [row.productGroup, row.effectiveSalePrice]),
+    [["도매1", 3000], ["소매1", 3200]],
+  );
+});
+
+test("ambiguous price for one exact listing fails closed", () => {
+  const snapshot = resolveShoplingCurrentPrices(
+    [
+      {
+        skuId: "sku-1",
+        barcode: "BGG1-1",
+        productName: "계란펀칭기",
+        listings: [{ goodsKey: "121111", optionId: "1", active: true }],
+      },
+    ],
+    [
       { goods_key: "121111", sale_price: "3000", optId: "1", optAmt: "0" },
-      { goods_key: "121112", sale_price: "3200", optId: "2", optAmt: "0" },
+      { goods_key: "121111", sale_price: "3100", optId: "1", optAmt: "0" },
     ],
   );
   assert.equal(snapshot.rows[0].state, "CONFLICT");
-  assert.equal(snapshot.rows[0].currentSalePrice, 0);
-  assert.deepEqual(snapshot.rows[0].distinctPrices, [3000, 3200]);
+  assert.equal(snapshot.rows[0].priceMode, "UNRESOLVED");
 });
 
 test("live price reader is read only", () => {
