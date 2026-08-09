@@ -1,0 +1,37 @@
+name: Stage8 Shopling Live Model Identity CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-model-identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint live model identity files
+        run: >-
+          npx eslint
+          src/lib/shopling/shoplingCurrentModelIdentityResolver.ts
+          src/lib/shopling/shoplingCurrentModelIdentity.ts
+          src/lib/stage8ShoplingLiveModelIdentityAudit.ts
+          src/app/stage8-shopling-live-model-identity/page.tsx
+      - name: Test live model identity safety
+        run: node --experimental-strip-types --test tests/shoplingCurrentModelIdentity.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-shopling-model-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_shopling_model_build
+          SHOPLING_LOGIN_ID: ci-login
+          SHOPLING_COMPANY_ID: ci-company
+          SHOPLING_API_AUTH_KEY: ci-auth
