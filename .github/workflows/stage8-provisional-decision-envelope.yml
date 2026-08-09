@@ -1,0 +1,35 @@
+name: Provisional Inventory Decision Envelope CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  decision-envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint decision envelope files
+        run: >-
+          npx eslint
+          src/lib/stage8ProvisionalDecisionEnvelopeEngine.ts
+          src/lib/stage8ProvisionalDecisionEnvelope.ts
+          src/app/stage8-provisional-decision-envelope/page.tsx
+      - name: Test decision envelope safety
+        run: node --experimental-strip-types --test tests/stage8ProvisionalDecisionEnvelope.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://provisional-envelope-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_provisional_envelope_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
