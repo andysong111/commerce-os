@@ -1,0 +1,34 @@
+name: Stage8 Stored Monthly Gap Envelope CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stored-monthly-gap-envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint stored monthly gap files
+        run: >-
+          npx eslint
+          src/lib/stage8StoredMonthlyGapEnvelope.ts
+          src/app/stage8-stored-monthly-gap-envelope/page.tsx
+      - name: Test stored monthly gap safety
+        run: node --experimental-strip-types --test tests/stage8StoredMonthlyGapEnvelope.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stored-monthly-gap-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stored_monthly_gap_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
