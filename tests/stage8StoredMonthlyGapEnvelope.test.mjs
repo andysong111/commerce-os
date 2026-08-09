@@ -18,8 +18,17 @@ test("stored monthly evidence is accepted only from a completed zero-unmapped ba
   assert.match(source, /rangesCover\(gapStartDate, gapEndDate, storedRanges\)/);
 });
 
-test("boundary months remain uncertainty instead of fabricated day-level sales", () => {
-  assert.match(source, /interiorFullMonthQuantity/);
+test("an absent SKU-month row is never converted into zero sales", () => {
+  assert.match(source, /MONTHLY_IDENTITY_COVERAGE_UNPROVEN/);
+  assert.match(source, /requiredMonths\.every\(\(month\) => monthMap\.has\(month\)\)/);
+  assert.match(source, /행 부재를 0판매로 간주하지 않습니다/);
+  assert.match(source, /explicitEvidenceMonthCount/);
+  assert.match(source, /requiredEvidenceMonthCount/);
+  assert.doesNotMatch(source, /monthMap\.get\([^)]*\) \?\? 0/);
+});
+
+test("boundary months remain uncertainty only after explicit identity coverage is proven", () => {
+  assert.match(source, /if \(!identityCoverageReady\)/);
   assert.match(source, /gapSalesLowerBound = interiorFullMonthQuantity/);
   assert.match(
     source,
@@ -40,8 +49,6 @@ test("boundary months remain uncertainty instead of fabricated day-level sales",
 test("monthly bounds feed the existing fail-closed purchase envelope", () => {
   assert.match(source, /calculateNetRequirement/);
   assert.match(source, /buildProvisionalDecisionEnvelope/);
-  assert.match(source, /diagnosticLowQuantity/);
-  assert.match(source, /diagnosticHighQuantity/);
   assert.match(source, /actualDraftCreationEnabled: false/);
   assert.match(source, /inventoryPromotionAllowed: false/);
   assert.match(source, /purchaseWritesEnabled: false/);
@@ -55,9 +62,10 @@ test("stored evidence path performs no business mutation", () => {
   assert.doesNotMatch(source, /fetch\([^)]*method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
 
-test("operator page explains boundary-month uncertainty and zero writes", () => {
-  assert.match(pageSource, /STORED MONTHLY EVIDENCE · BOUNDARY MONTHS STAY UNCERTAIN/);
+test("operator page exposes evidence-month gaps and zero writes", () => {
+  assert.match(pageSource, /ABSENT MONTHLY ROW ≠ ZERO SALES · FAIL CLOSED/);
+  assert.match(pageSource, /정체성 미증명/);
   assert.match(pageSource, /Actual write/);
   assert.match(pageSource, /0 · READ ONLY/);
-  assert.match(pageSource, /임의 비율로 계산하지 않습니다/);
+  assert.match(pageSource, /월행 부재를 0으로 채우지 않습니다/);
 });

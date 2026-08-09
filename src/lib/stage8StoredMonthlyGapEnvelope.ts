@@ -32,12 +32,15 @@ export type StoredMonthlyGapEnvelopeRow = {
   state:
     | "MONTHLY_BAND_READY"
     | "MONTHLY_COVERAGE_MISSING"
+    | "MONTHLY_IDENTITY_COVERAGE_UNPROVEN"
     | "PURCHASE_INPUT_MISSING";
   message: string;
   gapStartDate: string;
   gapEndDate: string;
   startMonth: string;
   endMonth: string;
+  requiredEvidenceMonthCount: number;
+  explicitEvidenceMonthCount: number;
   startMonthQuantity: number;
   interiorFullMonthQuantity: number;
   endMonthQuantity: number;
@@ -72,9 +75,12 @@ export type StoredMonthlyGapEnvelope = {
   backfillTotalRanges: number;
   storedCoverageStart: string | null;
   storedCoverageEnd: string | null;
+  storedEvidenceMonthStart: string | null;
+  storedEvidenceMonthEnd: string | null;
   canonicalCoverageStart: string | null;
   targetCount: number;
   readyBandCount: number;
+  identityCoverageUnprovenCount: number;
   inventorySensitiveCount: number;
   orderDirectionStableCount: number;
   holdDirectionStableCount: number;
@@ -157,6 +163,20 @@ function rangesCover(
   return cursor > endDate;
 }
 
+function monthSequence(startMonth: string, endMonth: string) {
+  if (!/^\d{4}-\d{2}$/.test(startMonth) || !/^\d{4}-\d{2}$/.test(endMonth)) {
+    return [];
+  }
+  const output: string[] = [];
+  let cursor = new Date(`${startMonth}-01T00:00:00.000Z`);
+  const end = new Date(`${endMonth}-01T00:00:00.000Z`);
+  while (cursor <= end && output.length < 36) {
+    output.push(cursor.toISOString().slice(0, 7));
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+  return output;
+}
+
 function sha256(value: unknown) {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
@@ -185,6 +205,62 @@ async function loadStoredChunks(requestId: string) {
     .map((snapshot) => snapshot as unknown as ProductMasterShoplingSalesChunk);
 }
 
+function blockedRow(input: {
+  barcode: string;
+  modelNo: string;
+  productName: string;
+  state: Exclude<StoredMonthlyGapEnvelopeRow["state"], "MONTHLY_BAND_READY">;
+  message: string;
+  gapStartDate: string;
+  gapEndDate: string;
+  startMonth: string;
+  endMonth: string;
+  requiredEvidenceMonthCount: number;
+  explicitEvidenceMonthCount: number;
+  startMonthQuantity: number;
+  interiorFullMonthQuantity: number;
+  endMonthQuantity: number;
+  canonicalSalesAfterGap: number;
+  latestOrderQuantity: number;
+  cumulativeResidualCandidate: number;
+}): StoredMonthlyGapEnvelopeRow {
+  return {
+    barcode: input.barcode,
+    modelNo: input.modelNo,
+    productName: input.productName,
+    state: input.state,
+    message: input.message,
+    gapStartDate: input.gapStartDate,
+    gapEndDate: input.gapEndDate,
+    startMonth: input.startMonth,
+    endMonth: input.endMonth,
+    requiredEvidenceMonthCount: input.requiredEvidenceMonthCount,
+    explicitEvidenceMonthCount: input.explicitEvidenceMonthCount,
+    startMonthQuantity: input.startMonthQuantity,
+    interiorFullMonthQuantity: input.interiorFullMonthQuantity,
+    endMonthQuantity: input.endMonthQuantity,
+    gapSalesLowerBound: 0,
+    gapSalesUpperBound: 0,
+    canonicalSalesAfterGap: input.canonicalSalesAfterGap,
+    latestOrderQuantity: input.latestOrderQuantity,
+    latestResidualLowerBound: 0,
+    latestResidualUpperBound: 0,
+    cumulativeResidualCandidate: input.cumulativeResidualCandidate,
+    diagnosticLowQuantity: 0,
+    diagnosticHighQuantity: 0,
+    decisionState: "BLOCKED",
+    lowRecommendedQuantity: 0,
+    highRecommendedQuantity: 0,
+    conservativeDraftRecommendedQuantity: 0,
+    draftSimulationEligible: false,
+    actualDraftCreationEnabled: false,
+    inventoryUseAllowed: false,
+    inventoryPromotionAllowed: false,
+    purchaseWritesEnabled: false,
+    inventoryWritesEnabled: false,
+  };
+}
+
 export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEnvelope> {
   const [backfill, diagnostics, purchaseShadow, planning] = await Promise.all([
     loadProductMasterShoplingSalesStatus(),
@@ -208,10 +284,10 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
   const storedCoverageEnd = storedRanges.length
     ? [...storedRanges].sort((a, b) => b.end.localeCompare(a.end))[0]?.end ?? null
     : null;
+  const storedEvidenceMonthStart = combined.months[0] ?? null;
+  const storedEvidenceMonthEnd = combined.months.at(-1) ?? null;
   const canonicalCoverageStart = diagnostics.canonicalCoverageStartAt;
-  const gapEndDate = canonicalCoverageStart
-    ? previousDate(canonicalCoverageStart)
-    : "";
+  const gapEndDate = canonicalCoverageStart ? previousDate(canonicalCoverageStart) : "";
   const monthlyByBarcode = new Map<string, Map<string, number>>();
   for (const row of combined.rows) {
     const key = normalizeBarcode(row.barcode);
@@ -229,7 +305,6 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
       .filter((row) => row.skuActive !== false)
       .map((row) => [normalizeBarcode(row.barcode), row] as const),
   );
-
   const targets = diagnostics.rows.filter(
     (row) =>
       row.state === "LATEST_COVERAGE_GAP" &&
@@ -241,28 +316,78 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
 
   const rows = targets.map((target): StoredMonthlyGapEnvelopeRow => {
     const barcode = normalizeBarcode(target.barcode);
+    const modelNo = target.modelNo ?? "";
     const gapStartDate = target.latestDeductionStartDate ?? "";
     const startMonth = gapStartDate.slice(0, 7);
     const endMonth = gapEndDate.slice(0, 7);
+    const requiredMonths = monthSequence(startMonth, endMonth);
     const monthMap = monthlyByBarcode.get(barcode) ?? new Map<string, number>();
-    const coverageReady =
+    const explicitEvidenceMonthCount = requiredMonths.filter((month) =>
+      monthMap.has(month),
+    ).length;
+    const chunkCoverageReady =
       backfillComplete &&
       Boolean(gapStartDate && gapEndDate) &&
       gapStartDate <= gapEndDate &&
       rangesCover(gapStartDate, gapEndDate, storedRanges);
-    const purchase = purchaseByBarcode.get(barcode);
-    const profile = planningByBarcode.get(barcode);
+    const identityCoverageReady =
+      requiredMonths.length > 0 &&
+      requiredMonths.every((month) => monthMap.has(month));
     const startMonthQuantity = integer(monthMap.get(startMonth));
     const endMonthQuantity =
       startMonth === endMonth ? 0 : integer(monthMap.get(endMonth));
     const interiorFullMonthQuantity = [...monthMap.entries()]
       .filter(([month]) => month > startMonth && month < endMonth)
       .reduce((sum, [, quantity]) => sum + integer(quantity), 0);
+    const canonicalSalesAfterGap = integer(target.canonical360SalesQuantity);
+    const latestOrderQuantity = integer(target.latestOrderQuantity);
+    const cumulativeResidualCandidate = integer(target.cumulativeResidualCandidate);
+    const common = {
+      barcode,
+      modelNo,
+      productName: target.productName,
+      gapStartDate,
+      gapEndDate,
+      startMonth,
+      endMonth,
+      requiredEvidenceMonthCount: requiredMonths.length,
+      explicitEvidenceMonthCount,
+      startMonthQuantity,
+      interiorFullMonthQuantity,
+      endMonthQuantity,
+      canonicalSalesAfterGap,
+      latestOrderQuantity,
+      cumulativeResidualCandidate,
+    };
+
+    if (!chunkCoverageReady) {
+      return blockedRow({
+        ...common,
+        state: "MONTHLY_COVERAGE_MISSING",
+        message: "저장된 24개월 chunk 날짜구간이 gap 전체를 연속 커버하지 않아 월판매 증거를 사용하지 않습니다.",
+      });
+    }
+    if (!identityCoverageReady) {
+      return blockedRow({
+        ...common,
+        state: "MONTHLY_IDENTITY_COVERAGE_UNPROVEN",
+        message: "날짜 chunk는 존재하지만 이 B-code의 gap 월마다 명시적인 월판매 행이 존재하지 않습니다. 과거 aaa 코드 주문이 당시 B-code로 매핑되지 않아 누락됐을 가능성과 실제 0판매를 구분할 수 없으므로, 행 부재를 0판매로 간주하지 않습니다.",
+      });
+    }
+
+    const purchase = purchaseByBarcode.get(barcode);
+    const profile = planningByBarcode.get(barcode);
+    if (!purchase || !profile) {
+      return blockedRow({
+        ...common,
+        state: "PURCHASE_INPUT_MISSING",
+        message: "발주 shadow 또는 planning 입력이 없어 월 단위 재고범위를 발주판단에 연결하지 않습니다.",
+      });
+    }
+
     const gapSalesLowerBound = interiorFullMonthQuantity;
     const gapSalesUpperBound =
       interiorFullMonthQuantity + startMonthQuantity + endMonthQuantity;
-    const canonicalSalesAfterGap = integer(target.canonical360SalesQuantity);
-    const latestOrderQuantity = integer(target.latestOrderQuantity);
     const latestResidualLowerBound = Math.max(
       0,
       latestOrderQuantity - canonicalSalesAfterGap - gapSalesUpperBound,
@@ -270,9 +395,6 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
     const latestResidualUpperBound = Math.max(
       0,
       latestOrderQuantity - canonicalSalesAfterGap - gapSalesLowerBound,
-    );
-    const cumulativeResidualCandidate = integer(
-      target.cumulativeResidualCandidate,
     );
     const diagnosticLowQuantity = Math.min(
       cumulativeResidualCandidate,
@@ -282,79 +404,6 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
       cumulativeResidualCandidate,
       latestResidualUpperBound,
     );
-
-    if (!coverageReady) {
-      return {
-        barcode,
-        modelNo: target.modelNo ?? "",
-        productName: target.productName,
-        state: "MONTHLY_COVERAGE_MISSING",
-        message: "저장된 24개월 월판매 chunk가 이 SKU의 gap 시작일부터 Canonical 시작 직전까지 연속적으로 커버하지 않아 월 단위 불확실성 밴드를 사용하지 않습니다.",
-        gapStartDate,
-        gapEndDate,
-        startMonth,
-        endMonth,
-        startMonthQuantity,
-        interiorFullMonthQuantity,
-        endMonthQuantity,
-        gapSalesLowerBound,
-        gapSalesUpperBound,
-        canonicalSalesAfterGap,
-        latestOrderQuantity,
-        latestResidualLowerBound,
-        latestResidualUpperBound,
-        cumulativeResidualCandidate,
-        diagnosticLowQuantity,
-        diagnosticHighQuantity,
-        decisionState: "BLOCKED",
-        lowRecommendedQuantity: 0,
-        highRecommendedQuantity: 0,
-        conservativeDraftRecommendedQuantity: 0,
-        draftSimulationEligible: false,
-        actualDraftCreationEnabled: false,
-        inventoryUseAllowed: false,
-        inventoryPromotionAllowed: false,
-        purchaseWritesEnabled: false,
-        inventoryWritesEnabled: false,
-      };
-    }
-
-    if (!purchase || !profile) {
-      return {
-        barcode,
-        modelNo: target.modelNo ?? "",
-        productName: target.productName,
-        state: "PURCHASE_INPUT_MISSING",
-        message: "발주 shadow 또는 planning 입력이 없어 월 단위 재고범위를 발주판단에 연결하지 않습니다.",
-        gapStartDate,
-        gapEndDate,
-        startMonth,
-        endMonth,
-        startMonthQuantity,
-        interiorFullMonthQuantity,
-        endMonthQuantity,
-        gapSalesLowerBound,
-        gapSalesUpperBound,
-        canonicalSalesAfterGap,
-        latestOrderQuantity,
-        latestResidualLowerBound,
-        latestResidualUpperBound,
-        cumulativeResidualCandidate,
-        diagnosticLowQuantity,
-        diagnosticHighQuantity,
-        decisionState: "BLOCKED",
-        lowRecommendedQuantity: 0,
-        highRecommendedQuantity: 0,
-        conservativeDraftRecommendedQuantity: 0,
-        draftSimulationEligible: false,
-        actualDraftCreationEnabled: false,
-        inventoryUseAllowed: false,
-        inventoryPromotionAllowed: false,
-        purchaseWritesEnabled: false,
-        inventoryWritesEnabled: false,
-      };
-    }
-
     const demandTarget = integer(
       purchase.rawRecommendedQty ?? purchase.recommendedQty,
     );
@@ -386,25 +435,13 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
     });
 
     return {
-      barcode,
-      modelNo: target.modelNo ?? "",
-      productName: target.productName,
+      ...common,
       state: "MONTHLY_BAND_READY",
-      message: "시작월과 종료월의 일별 분포는 모르므로 두 경계월 판매량을 0~월전체 사이로 두고, 사이의 완전한 월만 확정 차감해 보수적인 최신잔여 범위를 만들었습니다. 이 범위와 누적발주 잔여후보를 합쳐 발주 민감도만 계산합니다.",
-      gapStartDate,
-      gapEndDate,
-      startMonth,
-      endMonth,
-      startMonthQuantity,
-      interiorFullMonthQuantity,
-      endMonthQuantity,
+      message: "모든 gap 월에 이 B-code의 명시적 월판매 증거가 존재합니다. 시작월·종료월의 일별 분포는 만들지 않고 두 경계월을 0~월전체로 두며, 사이 완전월만 확정 차감해 보수적인 최신잔여 범위를 계산합니다.",
       gapSalesLowerBound,
       gapSalesUpperBound,
-      canonicalSalesAfterGap,
-      latestOrderQuantity,
       latestResidualLowerBound,
       latestResidualUpperBound,
-      cumulativeResidualCandidate,
       diagnosticLowQuantity,
       diagnosticHighQuantity,
       decisionState: envelope.state,
@@ -429,6 +466,8 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
   const stable = rows.map((row) => ({
     barcode: row.barcode,
     state: row.state,
+    requiredEvidenceMonthCount: row.requiredEvidenceMonthCount,
+    explicitEvidenceMonthCount: row.explicitEvidenceMonthCount,
     gapSalesLowerBound: row.gapSalesLowerBound,
     gapSalesUpperBound: row.gapSalesUpperBound,
     latestResidualLowerBound: row.latestResidualLowerBound,
@@ -437,15 +476,13 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
     diagnosticLowQuantity: row.diagnosticLowQuantity,
     diagnosticHighQuantity: row.diagnosticHighQuantity,
     decisionState: row.decisionState,
-    lowRecommendedQuantity: row.lowRecommendedQuantity,
-    highRecommendedQuantity: row.highRecommendedQuantity,
   }));
 
   return {
     generatedAt: new Date().toISOString(),
     state: ready ? "READY_READ_ONLY" : "BLOCKED",
     message: ready
-      ? "직접 과거 주문 API가 실패하는 구간은 이미 완료된 24개월 Shopling 월판매 chunk를 재사용합니다. 시작월·종료월의 일별 위치를 만들지 않고 경계월 전체를 불확실성으로 남겨 보수적인 잔여재고 범위만 계산합니다."
+      ? "완료된 24개월 월판매 chunk는 날짜 커버리지와 SKU 정체성 커버리지를 구분해서 사용합니다. 날짜 chunk가 있어도 해당 B-code 월행이 없으면 0판매로 가정하지 않고 IDENTITY_COVERAGE_UNPROVEN으로 차단합니다."
       : "완료된 24개월 Shopling 월판매 원장 또는 선행 추정재고 진단이 준비되지 않아 월 단위 gap 보완을 차단합니다.",
     backfillRequestId: requestId,
     backfillState: backfill.state,
@@ -453,9 +490,14 @@ export async function loadStoredMonthlyGapEnvelope(): Promise<StoredMonthlyGapEn
     backfillTotalRanges: backfill.totalRanges,
     storedCoverageStart,
     storedCoverageEnd,
+    storedEvidenceMonthStart,
+    storedEvidenceMonthEnd,
     canonicalCoverageStart,
     targetCount: rows.length,
     readyBandCount: rows.filter((row) => row.state === "MONTHLY_BAND_READY").length,
+    identityCoverageUnprovenCount: rows.filter(
+      (row) => row.state === "MONTHLY_IDENTITY_COVERAGE_UNPROVEN",
+    ).length,
     inventorySensitiveCount: rows.filter(
       (row) => row.decisionState === "INVENTORY_SENSITIVE",
     ).length,
