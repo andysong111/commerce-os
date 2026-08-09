@@ -54,6 +54,7 @@ jobs:
           src/lib/stage8LegacyOrderSurrogateValidation.ts
           src/lib/stage8HistoricalSalesCoverageAudit.ts
           src/lib/stage8LegacySalesGapLiveAudit.ts
+          src/lib/stage8LatestOrderProvisionalValidation.ts
           src/data/stage8ProvisionalInventoryValidationEvidence.ts
           src/data/stage8LegacyOrderSurrogateValidationEvidence.ts
           src/lib/shopling/shoplingCurrentPriceResolver.ts
@@ -87,6 +88,7 @@ jobs:
           src/app/stage8-legacy-order-surrogate-validation/page.tsx
           src/app/stage8-historical-sales-coverage-audit/page.tsx
           src/app/stage8-legacy-sales-gap-live-audit/page.tsx
+          src/app/stage8-latest-order-provisional-validation/page.tsx
           src/app/stage8-shopling-receipt-price-readiness/page.tsx
           src/app/stage8-receipt-live-price-proposals/page.tsx
       - name: Test existing bulk safety and new engine integration
@@ -125,6 +127,7 @@ jobs:
           tests/stage8LegacyOrderSurrogateValidation.test.mjs
           tests/stage8HistoricalSalesCoverageAudit.test.mjs
           tests/stage8LegacySalesGapLiveAudit.test.mjs
+          tests/stage8LatestOrderProvisionalValidation.test.mjs
           tests/shoplingCurrentPrice.test.mjs
           tests/stage8ShoplingReceiptPriceReadiness.test.mjs
           tests/confirmedReceiptBatchSource.test.mjs
