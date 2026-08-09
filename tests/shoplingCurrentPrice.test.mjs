@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import {
+  buildShoplingProductIdLookupXml,
+  resolveShoplingCurrentPrices,
+} from "../src/lib/shopling/shoplingCurrentPrice.ts";
+
+const source = await readFile(
+  "src/lib/shopling/shoplingCurrentPrice.ts",
+  "utf8",
+);
+
+test("current price lookup uses explicit Shopling product IDs instead of a recent modified-date window", () => {
+  const xml = buildShoplingProductIdLookupXml(
+    { loginId: "login", companyId: "company", authKey: "secret" },
+    ["121111", "121112"],
+  );
+  assert.match(xml, /<prod_id><!\[CDATA\[121111,121112\]\]><\/prod_id>/);
+  assert.match(xml, /sale_price/);
+  assert.match(xml, /org_price/);
+  assert.match(xml, /<opt_yn>Y<\/opt_yn>/);
+  assert.doesNotMatch(xml, /start_dt|end_dt|search_tp/);
+});
+
+test("effective current sale price includes the exact option additional amount", () => {
+  const snapshot = resolveShoplingCurrentPrices(
+    [
+      {
+        skuId: "sku-1",
+        barcode: "BGG1-1",
+        productName: "계란펀칭기",
+        listings: [
+          { goodsKey: "121111", optionId: "987", active: true },
+        ],
+      },
+    ],
+    [
+      {
+        goods_key: "121111",
+        sale_price: "3000",
+        optId: "987",
+        optAmt: "500",
+      },
+    ],
+  );
+  assert.equal(snapshot.rows[0].state, "READY");
+  assert.equal(snapshot.rows[0].currentSalePrice, 3500);
+});
+
+test("multiple mapped Shopling prices fail closed instead of choosing one", () => {
+  const snapshot = resolveShoplingCurrentPrices(
+    [
+      {
+        skuId: "sku-1",
+        barcode: "BGG1-1",
+        productName: "계란펀칭기",
+        listings: [
+          { goodsKey: "121111", optionId: "1", active: true },
+          { goodsKey: "121112", optionId: "2", active: true },
+        ],
+      },
+    ],
+    [
+      { goods_key: "121111", sale_price: "3000", optId: "1", optAmt: "0" },
+      { goods_key: "121112", sale_price: "3200", optId: "2", optAmt: "0" },
+    ],
+  );
+  assert.equal(snapshot.rows[0].state, "CONFLICT");
+  assert.equal(snapshot.rows[0].currentSalePrice, 0);
+  assert.deepEqual(snapshot.rows[0].distinctPrices, [3000, 3200]);
+});
+
+test("live price reader is read only", () => {
+  assert.match(source, /postShoplingXml/);
+  assert.match(source, /parseShoplingReadResponse\("products"/);
+  assert.match(source, /writesEnabled: false/);
+  assert.doesNotMatch(source, /prod_modify_api|priceModify|method:\s*["']PUT["']/i);
+});
