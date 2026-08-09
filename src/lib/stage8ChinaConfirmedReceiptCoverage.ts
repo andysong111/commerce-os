@@ -40,6 +40,8 @@ export type ChinaConfirmedReceiptCoverage = {
   sourcePageCount: number;
   sourceReceiptRowCount: number;
   sourceReceiptQuantity: number;
+  targetedBarcodeCount: number;
+  foreignBarcodeRowCount: 0;
   purchaseCandidateCount: number;
   candidateWithChinaReceiptCount: number;
   candidateWithProductMasterReceiptCount: number;
@@ -47,7 +49,6 @@ export type ChinaConfirmedReceiptCoverage = {
   sourceSyncGapCount: number;
   quantityMismatchCount: number;
   noConfirmedReceiptCount: number;
-  nonCandidateReceiptRowCount: number;
   fingerprint: string;
   sourceWritesEnabled: false;
   currentInventoryPromotionAllowed: false;
@@ -75,19 +76,37 @@ function sha256(value: unknown) {
 }
 
 export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirmedReceiptCoverage> {
-  const [source, candidates, productMaster] = await Promise.all([
-    loadConfirmedReceiptHistorySource(),
+  const [candidates, productMaster] = await Promise.all([
     loadPurchaseCandidateShoplingIdentityAudit(),
     loadProductMasterInventoryCostReadiness(),
   ]);
-  const candidateBarcodes = new Set(candidates.rows.map((row) => barcode(row.barcode)));
+  const candidateBarcodeList = candidates.rows
+    .map((row) => barcode(row.barcode))
+    .filter(Boolean)
+    .sort();
+  if (!candidateBarcodeList.length) {
+    throw new Error("CHINA_RECEIPT_COVERAGE_CANDIDATE_SCOPE_EMPTY");
+  }
+  const candidateBarcodes = new Set(candidateBarcodeList);
+  const source = await loadConfirmedReceiptHistorySource(candidateBarcodeList);
+  const filteredBarcodes = source.filter.barcodes;
+  if (
+    filteredBarcodes.length !== candidateBarcodeList.length ||
+    filteredBarcodes.some((value, index) => value !== candidateBarcodeList[index])
+  ) {
+    throw new Error("CHINA_RECEIPT_COVERAGE_FILTER_SCOPE_MISMATCH");
+  }
+  const foreignBarcodeRows = source.rows.filter(
+    (row) => !candidateBarcodes.has(barcode(row.barcode)),
+  );
+  if (foreignBarcodeRows.length) {
+    throw new Error("CHINA_RECEIPT_COVERAGE_FOREIGN_BARCODE");
+  }
+
   const pmByBarcode = new Map(
     productMaster.rows.map((row) => [barcode(row.barcode), row] as const),
   );
-  const sourceByBarcode = new Map<
-    string,
-    typeof source.rows
-  >();
+  const sourceByBarcode = new Map<string, typeof source.rows>();
   for (const receipt of source.rows) {
     const key = barcode(receipt.barcode);
     sourceByBarcode.set(key, [...(sourceByBarcode.get(key) ?? []), receipt]);
@@ -174,9 +193,6 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
   const ready =
     candidates.state === "READY_READ_ONLY" &&
     productMaster.rows.length > 0;
-  const nonCandidateReceiptRowCount = source.rows.filter(
-    (row) => !candidateBarcodes.has(barcode(row.barcode)),
-  ).length;
   const stable = rows.map((row) => ({
     barcode: row.barcode,
     chinaReceiptRowCount: row.chinaReceiptRowCount,
@@ -196,7 +212,7 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
     generatedAt: new Date().toISOString(),
     state: ready ? "READY_READ_ONLY" : "BLOCKED",
     message: ready
-      ? "중국 발주·입고 관리의 확정입고 API 전체 이력을 읽어 현재 42개 발주후보 B-code와 Product Master receipt 원장을 직접 대조합니다. 중국 확정입고가 Product Master에 빠져 있다면 SOURCE_SYNC_GAP으로 드러내며, 이 감사 자체는 초기 미확인 재고를 VERIFIED로 승격하거나 실제 발주를 실행하지 않습니다."
+      ? "중국 발주·입고 관리의 확정입고 API를 현재 42개 발주후보 B-code로 서버측 필터링해 Product Master receipt 원장과 직접 대조합니다. 전체 입고이력을 훑지 않고 필요한 B-code만 조회하며, 중국 확정입고가 Product Master에 빠져 있다면 SOURCE_SYNC_GAP으로 드러냅니다. 이 감사 자체는 초기 미확인 재고를 VERIFIED로 승격하거나 실제 발주를 실행하지 않습니다."
       : "현재 발주후보 또는 Product Master 원장이 준비되지 않아 확정입고 커버리지 감사를 운영 판단에 사용하지 않습니다.",
     sourceMode: source.sourceMode,
     sourcePageCount: source.pageCount,
@@ -205,6 +221,8 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
       (sum, row) => sum + positiveNumber(row.quantity),
       0,
     ),
+    targetedBarcodeCount: source.filter.barcodes.length,
+    foreignBarcodeRowCount: 0,
     purchaseCandidateCount: rows.length,
     candidateWithChinaReceiptCount: rows.filter(
       (row) => row.chinaReceiptQuantity > 0,
@@ -220,10 +238,10 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
     noConfirmedReceiptCount: rows.filter(
       (row) => row.state === "NO_CONFIRMED_RECEIPT",
     ).length,
-    nonCandidateReceiptRowCount,
     fingerprint: sha256({
       sourceMode: source.sourceMode,
       syncedAt: source.syncedAt,
+      filter: source.filter,
       productMasterFingerprint: productMaster.contentFingerprint,
       candidateFingerprint: candidates.fingerprint,
       rows: stable,
