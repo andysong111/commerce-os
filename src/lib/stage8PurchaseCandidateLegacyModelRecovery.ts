@@ -31,6 +31,7 @@ export type PurchaseCandidateLegacyModelRecoveryRow = {
 export type PurchaseCandidateLegacyModelRecovery = {
   generatedAt: string;
   state: "READY_READ_ONLY" | "BLOCKED";
+  upstreamPurchaseState: "READY" | "BLOCKED";
   message: string;
   purchaseCandidateCount: number;
   recoveredExactCount: number;
@@ -99,8 +100,7 @@ export async function loadPurchaseCandidateLegacyModelRecovery(): Promise<Purcha
           : state === "CURRENT_MODEL_ALREADY_EXACT"
             ? currentModelNo
             : null;
-      const orderHistoryJoinAllowed =
-        Boolean(effectiveModelNo) && state !== "CONFLICT";
+      const orderHistoryJoinAllowed = Boolean(effectiveModelNo) && state !== "CONFLICT";
 
       return {
         barcode,
@@ -137,6 +137,7 @@ export async function loadPurchaseCandidateLegacyModelRecovery(): Promise<Purcha
   const orderHistoryJoinEligibleCount = rows.filter(
     (row) => row.orderHistoryJoinAllowed,
   ).length;
+  const readOnlyEvidenceReady = rows.length > 0;
   const stable = rows.map((row) => ({
     barcode: row.barcode,
     currentModelNo: row.currentModelNo,
@@ -149,18 +150,23 @@ export async function loadPurchaseCandidateLegacyModelRecovery(): Promise<Purcha
 
   return {
     generatedAt: new Date().toISOString(),
-    state: priority.state === "READY" ? "READY_READ_ONLY" : "BLOCKED",
-    message:
-      priority.state === "READY"
+    state: readOnlyEvidenceReady ? "READY_READ_ONLY" : "BLOCKED",
+    upstreamPurchaseState: priority.state,
+    message: readOnlyEvidenceReady
+      ? priority.state === "READY"
         ? "과거 자료에서 B-code와 aaa 모델번호가 직접 함께 기록된 증거만 EXACT로 복구합니다. 상품명이 비슷하다는 이유만으로 모델번호를 추정하지 않으며, 미복구·충돌 행은 과거 발주이력 연결을 차단합니다."
-        : "현재 발주후보 원장이 준비되지 않아 모델번호 복구 결과를 운영 판단에 사용하지 않습니다.",
+        : "읽기 전용 모델번호 복구 증거는 준비되었습니다. 다만 상위 발주 실행 준비상태는 BLOCKED이므로 이 결과는 증거 연결에만 사용하고 발주 실행에는 사용하지 않습니다."
+      : "현재 발주후보 행이 없어 모델번호 복구 증거를 만들 수 없습니다.",
     purchaseCandidateCount: rows.length,
     recoveredExactCount,
     currentExactCount,
     unrecoveredCount,
     conflictCount,
     orderHistoryJoinEligibleCount,
-    fingerprint: sha256(stable),
+    fingerprint: sha256({
+      upstreamPurchaseState: priority.state,
+      rows: stable,
+    }),
     inventoryPromotionAllowed: false,
     purchaseWritesEnabled: false,
     inventoryWritesEnabled: false,
