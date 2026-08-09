@@ -3,6 +3,7 @@ import {
   historicalGoodsKeyModelEvidence,
   type HistoricalGoodsKeyModelEvidence,
 } from "@/data/stage8HistoricalGoodsKeyModelEvidence";
+import { historicalGoodsKeyModelEvidenceExpansion1 } from "@/data/stage8HistoricalGoodsKeyModelEvidenceExpansion1";
 import { loadPurchaseCandidateShoplingIdentityAudit } from "@/lib/stage8PurchaseCandidateShoplingIdentityAudit";
 
 export type HistoricalGoodsKeyModelCrosswalkState =
@@ -82,10 +83,11 @@ function conflictFor(rows: HistoricalGoodsKeyModelEvidence[]) {
 }
 
 export async function loadHistoricalGoodsKeyModelCrosswalk(): Promise<HistoricalGoodsKeyModelCrosswalk> {
-  const [identity, evidenceRows] = await Promise.all([
-    loadPurchaseCandidateShoplingIdentityAudit(),
-    Promise.resolve(historicalGoodsKeyModelEvidence()),
-  ]);
+  const identity = await loadPurchaseCandidateShoplingIdentityAudit();
+  const evidenceRows = [
+    ...historicalGoodsKeyModelEvidence(),
+    ...historicalGoodsKeyModelEvidenceExpansion1(),
+  ];
   const evidenceIndex = evidenceByGoodsKey(evidenceRows);
 
   const rows = identity.rows
