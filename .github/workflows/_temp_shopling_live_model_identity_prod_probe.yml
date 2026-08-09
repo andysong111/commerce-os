@@ -1,0 +1,41 @@
+name: Temporary Shopling Live Model Identity Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for production live model identity page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-shopling-live-model-identity'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 210 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:700000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q 'Shopling 실시간 model_no · model_nm 교차검증'; then
+              echo '--- SHOPLING LIVE MODEL IDENTITY PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q 'SHOPLING PRODUCT QUERY · MODEL_NO / MODEL_NM · READ ONLY'
+              echo "$text" | grep -q 'SHOPLING WRITE 0'
+              echo "$text" | grep -q '발주후보 42'
+              echo "$text" | grep -q '모델복구·과거발주 연결·재고승격·실제 발주·가격변경은 모두 OFF입니다.'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
