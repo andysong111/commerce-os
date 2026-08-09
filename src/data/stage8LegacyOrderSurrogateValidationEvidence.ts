@@ -4,6 +4,7 @@ export type LegacyOrderSurrogateValidationEvidence = {
   productName: string;
   cumulativeOrderedQuantity: number;
   latestOrderDate: string;
+  latestOrderQuantity: number;
   validOrderRecordCount: number;
   sourceArtifact: string;
   sourceKind: "LEGACY_ORDER_HISTORY_WORKBOOK";
@@ -19,6 +20,7 @@ const EVIDENCE: LegacyOrderSurrogateValidationEvidence[] = [
     productName: "계란펀칭기",
     cumulativeOrderedQuantity: 11533,
     latestOrderDate: "2025-09-29",
+    latestOrderQuantity: 6000,
     validOrderRecordCount: 5,
     sourceArtifact: "1차_중국발주이력_안전원가_안전판매가_신규산출.xlsx",
     sourceKind: "LEGACY_ORDER_HISTORY_WORKBOOK",
