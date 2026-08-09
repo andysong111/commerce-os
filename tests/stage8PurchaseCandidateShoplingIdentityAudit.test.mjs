@@ -16,11 +16,13 @@ test("audit joins purchase-candidate recovery evidence to current planning listi
   assert.match(engine, /unitsPerOrder/);
 });
 
-test("one active goods key is distinguishable from missing or ambiguous identity", () => {
-  assert.match(engine, /"IDENTITY_READY"/);
+test("any nonempty active goods-key set is ready and multiple listings are informational", () => {
+  assert.match(engine, /"IDENTITY_SET_READY"/);
   assert.match(engine, /"NO_ACTIVE_LISTING"/);
-  assert.match(engine, /"AMBIGUOUS_GOODS_KEY"/);
-  assert.match(engine, /goodsKeys\.length === 1/);
+  assert.match(engine, /goodsKeys\.length > 0/);
+  assert.match(engine, /multiGoodsKeyCount/);
+  assert.doesNotMatch(engine, /AMBIGUOUS_GOODS_KEY/);
+  assert.match(page, /MULTI GOODS_KEY IS NORMAL LISTING SCOPE · NOT IDENTITY AMBIGUITY/);
 });
 
 test("goods key evidence cannot promote an aaa model or business state", () => {
@@ -29,7 +31,7 @@ test("goods key evidence cannot promote an aaa model or business state", () => {
   assert.match(engine, /purchaseWritesEnabled: false/);
   assert.match(engine, /inventoryWritesEnabled: false/);
   assert.match(engine, /shoplingWritesEnabled: false/);
-  assert.match(page, /goods_key 연결 ≠ aaa 모델번호 확정/);
+  assert.match(page, /goods_key 집합 연결 ≠ aaa 모델번호 확정/);
   assert.match(page, /BUSINESS WRITE 0/);
 });
 
