@@ -1,4 +1,3 @@
-import { ProductLaunchEvidenceCompilerCanary } from "@/components/product-launch-flow/ProductLaunchEvidenceCompilerCanary";
 import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
@@ -20,17 +19,13 @@ export default async function ProductLaunchTrackerPage({
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <strong className="block text-sm text-slate-950">
-            상품마스터 기준정보 동기화
-          </strong>
+          <strong className="block text-sm text-slate-950">상품마스터 기준정보 동기화</strong>
           <span className="mt-1 block text-xs leading-5 text-slate-500">
             저장된 출시상품·옵션 바코드·샵플링 goods_key와 최근 확정 입고원가를 독립 상품마스터로 보냅니다.
           </span>
         </div>
         <ProductMasterSyncButton />
       </div>
-
-      <ProductLaunchEvidenceCompilerCanary />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <iframe
