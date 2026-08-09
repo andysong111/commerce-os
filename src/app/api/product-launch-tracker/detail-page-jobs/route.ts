@@ -10,6 +10,7 @@ import {
 } from "@/lib/detailPageJobServer";
 
 const MAX_RECENT_JOBS = 50;
+const COMPILER_WORKER_SLOT_COUNT = 3;
 
 export async function GET(request: NextRequest) {
   const identity = await resolveDetailPageJobIdentity(request);
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
     productName: string;
     attempt: number;
     compilerCanary: boolean;
+    compilerWorkerSlot: number | null;
   };
   try {
     const body = await request.json();
@@ -73,6 +75,15 @@ export async function POST(request: NextRequest) {
     if (!isValidDetailPageJobId(jobId) || !itemId) {
       throw new Error("상품 또는 작업 ID가 올바르지 않습니다.");
     }
+    const compilerCanary = body?.compilerCanary === true;
+    const requestedCompilerSlot = Number(body?.compilerWorkerSlot);
+    const compilerWorkerSlot =
+      compilerCanary &&
+      Number.isInteger(requestedCompilerSlot) &&
+      requestedCompilerSlot >= 0 &&
+      requestedCompilerSlot < COMPILER_WORKER_SLOT_COUNT
+        ? requestedCompilerSlot
+        : null;
     input = {
       jobId,
       itemId,
@@ -80,7 +91,8 @@ export async function POST(request: NextRequest) {
       salesOptions: safeText(body?.salesOptions, 2_000),
       productName: safeText(body?.productName, 250) || "상품",
       attempt: Math.max(1, Math.min(100, Number(body?.attempt) || 1)),
-      compilerCanary: body?.compilerCanary === true,
+      compilerCanary,
+      compilerWorkerSlot,
     };
   } catch (error) {
     return Response.json(
@@ -133,6 +145,7 @@ export async function POST(request: NextRequest) {
         product_name_hint: input.productName,
         source_run_id: "",
         compiler_canary: input.compilerCanary,
+        compiler_worker_slot: input.compilerWorkerSlot,
         compiler_canary_created_at: input.compilerCanary ? now : null,
         step_version: 0,
         lease_owner: "",

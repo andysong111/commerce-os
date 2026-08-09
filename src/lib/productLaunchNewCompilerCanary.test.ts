@@ -40,12 +40,17 @@ const dock = readFileSync(
 );
 
 describe("Product Launch multi-item Evidence Compiler", () => {
-  it("persists Compiler intent on every durable job from creation", () => {
+  it("persists Compiler intent and explicit collection slot on every durable job", () => {
     expect(createRoute).toContain("compilerCanary: boolean");
+    expect(createRoute).toContain("compilerWorkerSlot: number | null");
     expect(createRoute).toContain("body?.compilerCanary === true");
     expect(createRoute).toContain("compiler_canary: input.compilerCanary");
+    expect(createRoute).toContain("compiler_worker_slot: input.compilerWorkerSlot");
     expect(createRoute).toContain("compiler_canary_created_at");
     expect(control).toContain("compilerCanary: true");
+    expect(control).toContain(
+      "compilerWorkerSlot = batchIndex % DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE",
+    );
   });
 
   it("keeps a non-terminal persisted Compiler job on the Compiler worker", () => {
@@ -70,16 +75,20 @@ describe("Product Launch multi-item Evidence Compiler", () => {
     expect(control).toContain("이미 진행 중");
   });
 
-  it("mounts two extra collectors and shards only Compiler jobs across three slots", () => {
+  it("mounts two extra collectors and routes the first three Compiler jobs to distinct persisted slots", () => {
     expect(appShell).toContain("DetailPageCompilerParallelWorkers");
     expect(parallelWorkers).toContain("DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE - 1");
     expect(parallelWorkers).toContain("compiler_worker_slot=${slot}");
     expect(parallelWorkers).toContain("compiler_worker_slots=${DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE}");
     expect(dock).toContain("COMPILER_WORKER_SLOT_RAW");
     expect(dock).toContain("compilerWorkerSlotForItem");
+    expect(dock).toContain("persistedCompilerWorkerSlot");
     expect(dock).toContain("job?.payload?.compiler_canary === true");
     expect(dock).toContain("function workerOwnsJob(job)");
     expect(dock).toContain("if (!isCompilerJob(job)) return !COMPILER_WORKER_EXPLICIT");
+    expect(dock).toContain(
+      "persistedSlot ?? compilerWorkerSlotForItem(job?.itemId)",
+    );
     expect(dock).toContain("!workerOwnsJob(server)");
     expect(dock).toContain("if (!workerOwnsJob(job)) continue");
   });
