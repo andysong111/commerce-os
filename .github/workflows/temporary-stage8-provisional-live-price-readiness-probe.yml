@@ -1,0 +1,55 @@
+name: Temporary Stage8 Provisional Live Price Readiness Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-provisional-live-price-readiness-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-provisional-live-price-readiness-probe-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-provisional-live-price-readiness-probe-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for merged production readiness pages and print metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          price_url="$base/stage8-shopling-receipt-price-readiness"
+          inventory_url="$base/stage8-inventory-verification-priority"
+          ready=0
+          for i in $(seq 1 60); do
+            price_body="$(mktemp)"
+            inventory_body="$(mktemp)"
+            price_code="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$price_body" -w '%{http_code}' "$price_url" || true)"
+            inventory_code="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$inventory_body" -w '%{http_code}' "$inventory_url" || true)"
+            price_text="$(cat "$price_body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:180000])')"
+            inventory_text="$(cat "$inventory_body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:140000])')"
+            echo "PROBE $i price=$price_code inventory=$inventory_code"
+            if [ "$price_code" = '200' ] && [ "$inventory_code" = '200' ] && \
+               echo "$price_text" | grep -q '샵플링 현재 판매가 → 확정입고 재가격 준비도' && \
+               echo "$inventory_text" | grep -q '발주후보 추정재고·원가 준비도'; then
+              echo '--- LIVE SHOPLING PRICE READINESS ---'
+              echo "$price_text"
+              echo '--- PROVISIONAL INVENTORY READINESS ---'
+              echo "$inventory_text"
+              echo "$price_text" | grep -q '실제 가격 write 0 · READ ONLY'
+              echo "$inventory_text" | grep -q '재고실사 필수 0'
+              echo "$inventory_text" | grep -q 'PROVISIONAL'
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = '1'
