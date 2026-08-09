@@ -1,0 +1,40 @@
+name: Temporary Latest Order Provisional Production Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production latest-order validation page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-latest-order-provisional-validation'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:260000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '최신 과거발주 기반 추정재고 후보식 검증'; then
+              echo '--- LATEST ORDER PROVISIONAL VALIDATION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '재고 write 0 · READ ONLY'
+              echo "$text" | grep -q 'ORDER SURROGATE · VALIDATION ONLY'
+              echo "$text" | grep -q '자동 승격 금지'
+              echo "$text" | grep -q 'BGG1-1'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
