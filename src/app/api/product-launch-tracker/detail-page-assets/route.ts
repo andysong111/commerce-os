@@ -28,11 +28,22 @@ const BUCKET_NAME = "product-launch-assets";
 // 상한에 맞춰 JPEG 품질을 단계적으로 조정합니다.
 const MAX_FILE_BYTES = 4_000_000;
 const REVISION_PATTERN = /^[a-z0-9][a-z0-9-]{0,79}$/;
+const TRANSIENT_ATTEMPTS = 3;
+const TRANSIENT_REQUEST_TIMEOUT_MS = 30_000;
+const TRANSIENT_DATABASE_PATTERN =
+  /connection to the database timed out|database.*timed out|connection.*timed out|statement timeout|too many connections|connection reset|temporar(?:y|ily)|service unavailable|gateway timeout/i;
+let publicBucketReady = false;
 
 type TrackerIdentity = {
   userId: string;
   email: string;
   workerJob?: DetailPageJobRow;
+};
+
+type StorageRequestResult = {
+  ok: boolean;
+  status: number;
+  body: unknown;
 };
 
 export async function POST(request: NextRequest) {
@@ -110,22 +121,20 @@ export async function POST(request: NextRequest) {
   const headers = createSupabaseAdminHeaders(config.secretKey);
   headers["Content-Type"] = "image/jpeg";
   headers["x-upsert"] = "true";
-  const upload = await fetch(
+  const upload = await storageRequestWithRetry(
     `${config.supabaseUrl}/storage/v1/object/${BUCKET_NAME}/${encodePath(objectPath)}`,
     {
       method: "POST",
       headers,
       body: await file.arrayBuffer(),
-      cache: "no-store",
     },
   );
-  const uploadBody = await readJson(upload);
   if (!upload.ok) {
     return Response.json(
       {
         ok: false,
         code: "DETAIL_PAGE_ASSET_UPLOAD_FAILED",
-        message: readErrorMessage(uploadBody, upload.status),
+        message: readErrorMessage(upload.body, upload.status),
       },
       { status: 502 },
     );
@@ -152,7 +161,7 @@ async function resolveUploadIdentity(
     const config = getDetailPageJobConfig();
     if (!config.ok) return config;
     try {
-      const job = await readDetailPageJob(config.value, jobId);
+      const job = await readDetailPageJobWithRetry(config.value, jobId);
       if (
         !job ||
         job.launch_item_id !== itemId ||
@@ -202,6 +211,25 @@ async function resolveUploadIdentity(
   return resolveIdentity();
 }
 
+async function readDetailPageJobWithRetry(
+  config: Parameters<typeof readDetailPageJob>[0],
+  jobId: string,
+) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= TRANSIENT_ATTEMPTS; attempt += 1) {
+    try {
+      return await readDetailPageJob(config, jobId);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseFailure(error) || attempt >= TRANSIENT_ATTEMPTS) {
+        throw error;
+      }
+      await retryDelay(attempt);
+    }
+  }
+  throw lastError;
+}
+
 function invalid(message: string) {
   return Response.json(
     { ok: false, code: "INVALID_DETAIL_PAGE_ASSET", message },
@@ -210,25 +238,31 @@ function invalid(message: string) {
 }
 
 async function ensurePublicBucket(supabaseUrl: string, secretKey: string) {
+  if (publicBucketReady) return { ok: true as const };
+
   const headers = createSupabaseAdminHeaders(secretKey);
-  const inspect = await fetch(`${supabaseUrl}/storage/v1/bucket/${BUCKET_NAME}`, {
-    headers,
-    cache: "no-store",
-  });
-  if (inspect.ok) return { ok: true as const };
+  const inspect = await storageRequestWithRetry(
+    `${supabaseUrl}/storage/v1/bucket/${BUCKET_NAME}`,
+    {
+      headers,
+    },
+  );
+  if (inspect.ok) {
+    publicBucketReady = true;
+    return { ok: true as const };
+  }
   if (inspect.status !== 400 && inspect.status !== 404) {
-    const body = await readJson(inspect);
     return {
       ok: false as const,
       body: {
         ok: false,
         code: "DETAIL_PAGE_BUCKET_READ_FAILED",
-        message: readErrorMessage(body, inspect.status),
+        message: readErrorMessage(inspect.body, inspect.status),
       },
     };
   }
 
-  const create = await fetch(`${supabaseUrl}/storage/v1/bucket`, {
+  const create = await storageRequestWithRetry(`${supabaseUrl}/storage/v1/bucket`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -238,18 +272,87 @@ async function ensurePublicBucket(supabaseUrl: string, secretKey: string) {
       file_size_limit: MAX_FILE_BYTES,
       allowed_mime_types: ["image/jpeg"],
     }),
-    cache: "no-store",
   });
-  if (create.ok || create.status === 409) return { ok: true as const };
-  const body = await readJson(create);
+  if (create.ok || create.status === 409) {
+    publicBucketReady = true;
+    return { ok: true as const };
+  }
   return {
     ok: false as const,
     body: {
       ok: false,
       code: "DETAIL_PAGE_BUCKET_CREATE_FAILED",
-      message: readErrorMessage(body, create.status),
+      message: readErrorMessage(create.body, create.status),
     },
   };
+}
+
+async function storageRequestWithRetry(
+  url: string,
+  init: RequestInit,
+): Promise<StorageRequestResult> {
+  let last: StorageRequestResult = {
+    ok: false,
+    status: 502,
+    body: { message: "상세페이지 저장소 요청에 실패했습니다." },
+  };
+
+  for (let attempt = 1; attempt <= TRANSIENT_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        cache: "no-store",
+        signal: AbortSignal.timeout(TRANSIENT_REQUEST_TIMEOUT_MS),
+      });
+      last = {
+        ok: response.ok,
+        status: response.status,
+        body: await readJson(response),
+      };
+      if (
+        last.ok ||
+        !isRetryableStorageFailure(last.status, last.body) ||
+        attempt >= TRANSIENT_ATTEMPTS
+      ) {
+        return last;
+      }
+    } catch (error) {
+      last = {
+        ok: false,
+        status: 504,
+        body: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+      if (!isTransientDatabaseFailure(error) || attempt >= TRANSIENT_ATTEMPTS) {
+        return last;
+      }
+    }
+    await retryDelay(attempt);
+  }
+  return last;
+}
+
+function isRetryableStorageFailure(status: number, body: unknown) {
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500 ||
+    TRANSIENT_DATABASE_PATTERN.test(readErrorMessage(body, status))
+  );
+}
+
+function isTransientDatabaseFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return (
+    TRANSIENT_DATABASE_PATTERN.test(message) ||
+    /timeout|timed out|fetch failed|econnreset|etimedout|socket hang up/i.test(message)
+  );
+}
+
+async function retryDelay(attempt: number) {
+  await new Promise<void>((resolve) => setTimeout(resolve, 350 * attempt));
 }
 
 async function resolveIdentity(): Promise<
@@ -340,5 +443,6 @@ function readErrorMessage(body: unknown, status: number) {
     const message = (body as { message?: unknown }).message;
     if (typeof message === "string" && message.trim()) return message;
   }
+  if (typeof body === "string" && body.trim()) return body;
   return `상세페이지 결과 저장 요청에 실패했습니다. status=${status}`;
 }

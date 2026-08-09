@@ -19,6 +19,7 @@ on:
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/20260731000*_product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
+      - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
       - '.github/workflows/product-launch-tracker-ci.yml'
 
@@ -42,6 +43,7 @@ jobs:
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/productLaunchTrackerSingleRowAdd.test.mjs
           tests/productLaunchTrackerTableOps.test.mjs
+          tests/detailPageAssetStorageRetry.test.mjs
           tests/shoplingCategoryCatalog.test.mjs
           tests/shoplingCategoryRunStatus.test.mjs
           tests/shoplingCategoryLocalUpdate.test.mjs
