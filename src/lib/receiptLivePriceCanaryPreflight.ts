@@ -401,7 +401,7 @@ export async function runReceiptLivePriceCanaryPreflightStep() {
   }
 
   const requestId = `${candidate.sourceKey}:request`;
-  let request = await readOperation(PREFLIGHT_REQUEST, requestId);
+  const request = await readOperation(PREFLIGHT_REQUEST, requestId);
   if (!request) {
     const dispatched = await dispatchShoplingPriceAdjustmentPlan([
       {
