@@ -48,6 +48,9 @@ export type ReceiptPriceGoodsKeyPlan = {
   automaticApplyEligible: boolean;
   blockedReason: string | null;
   barcodes: string[];
+  ownerBarcodes: string[];
+  unaffectedOwnerBarcodes: string[];
+  unplannedOwnerBarcodes: string[];
 };
 
 export type ShoplingReceiptPriceReadiness = {
@@ -56,8 +59,17 @@ export type ShoplingReceiptPriceReadiness = {
   message: string;
   currentPriceSource: "SHOPLING_LIVE_PRODUCT_LOOKUP";
   receiptCostSource: "PRODUCT_MASTER_WITH_RECEIPT_CACHE_FALLBACK";
+  shoplingLookupMode: "RECEIPT_AFFECTED_ONLY";
+  shoplingLookupSkipped: boolean;
   priceRuleVersion: string;
   inputCount: number;
+  affectedInputCount: number;
+  affectedBarcodeCount: number;
+  affectedPlanningProductCount: number;
+  affectedPlanningMissingCount: number;
+  affectedGoodsKeyCount: number;
+  queriedGoodsKeyCount: number;
+  sourceRowCount: number;
   livePriceReadyCount: number;
   livePriceMissingCount: number;
   livePriceConflictCount: number;
@@ -72,8 +84,20 @@ export type ShoplingReceiptPriceReadiness = {
   goodsKeyPlans: ReceiptPriceGoodsKeyPlan[];
 };
 
+type PriceInput = Awaited<
+  ReturnType<typeof loadPriceGradeReceiptAugmentedSnapshot>
+>["snapshot"]["inputs"][number];
+
+type PlanningProduct = Awaited<
+  ReturnType<typeof loadProductPlanningSnapshot>
+>["products"][number];
+
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
+}
+
+function barcodeKey(value: unknown) {
+  return text(value).toUpperCase().replace(/\s+/g, "");
 }
 
 function integer(value: unknown) {
@@ -113,6 +137,14 @@ function receiptTriggered(
   return lifecycleAt === null || receiptAt > lifecycleAt;
 }
 
+function receiptTriggeredInput(input: PriceInput) {
+  const receipt = latestReceipt(input);
+  return receiptTriggered(
+    receipt?.receivedAt ?? null,
+    input.existingLifecycle?.calculatedAt,
+  );
+}
+
 function adjustmentBps(result: ProductPriceGradeResult) {
   return Math.round(result.adjustmentRate * 10_000);
 }
@@ -122,9 +154,7 @@ function fingerprint(value: unknown) {
 }
 
 function listingPlan(
-  input: Awaited<
-    ReturnType<typeof loadPriceGradeReceiptAugmentedSnapshot>
-  >["snapshot"]["inputs"][number],
+  input: PriceInput,
   listing: ShoplingCurrentPriceListing,
   generatedAt: string,
 ): ReceiptPriceListingPlan {
@@ -148,7 +178,7 @@ function listingPlan(
   });
   return {
     skuId: input.skuId,
-    barcode: text(input.barcode).toUpperCase(),
+    barcode: barcodeKey(input.barcode),
     productName: input.productName,
     optionName: input.optionName ?? null,
     goodsKey: listing.goodsKey,
@@ -169,6 +199,7 @@ function listingPlan(
     recommendedPrice: result.recommendedPrice,
     adjustmentBps: adjustmentBps(result),
     priceChangeRequired:
+      triggered &&
       result.blockedReasons.length === 0 &&
       result.recommendedPrice !== listing.effectiveSalePrice,
     blockedReasons: result.blockedReasons,
@@ -186,8 +217,41 @@ function groupByGoodsKey(plans: ReceiptPriceListingPlan[]) {
   return grouped;
 }
 
+function activeGoodsKeyOwners(products: PlanningProduct[]) {
+  const owners = new Map<string, Set<string>>();
+  for (const product of products) {
+    if (product.skuActive === false) continue;
+    const owner = barcodeKey(product.barcode);
+    if (!owner) continue;
+    for (const listing of product.listings ?? []) {
+      if (listing.active === false) continue;
+      const goodsKey = text(listing.goodsKey);
+      if (!goodsKey) continue;
+      const set = owners.get(goodsKey) ?? new Set<string>();
+      set.add(owner);
+      owners.set(goodsKey, set);
+    }
+  }
+  return owners;
+}
+
+function affectedGoodsKeys(products: PlanningProduct[]) {
+  const keys = new Set<string>();
+  for (const product of products) {
+    if (product.skuActive === false) continue;
+    for (const listing of product.listings ?? []) {
+      if (listing.active === false) continue;
+      const goodsKey = text(listing.goodsKey);
+      if (goodsKey) keys.add(goodsKey);
+    }
+  }
+  return keys;
+}
+
 function goodsKeyPlans(
   plans: ReceiptPriceListingPlan[],
+  ownersByGoodsKey: Map<string, Set<string>>,
+  affectedBarcodes: Set<string>,
 ): ReceiptPriceGoodsKeyPlan[] {
   const byGoodsKey = groupByGoodsKey(plans);
   return [...byGoodsKey.entries()]
@@ -196,9 +260,23 @@ function goodsKeyPlans(
       const triggered = rows.filter((row) => row.receiptTriggered);
       const nonzeroBps = [...new Set(changed.map((row) => row.adjustmentBps))];
       const blockedRows = rows.filter((row) => row.blockedReasons.length > 0);
+      const ownerBarcodes = [...(ownersByGoodsKey.get(goodsKey) ?? new Set())].sort();
+      const plannedBarcodes = new Set(rows.map((row) => row.barcode));
+      const unaffectedOwnerBarcodes = ownerBarcodes.filter(
+        (barcode) => !affectedBarcodes.has(barcode),
+      );
+      const unplannedOwnerBarcodes = ownerBarcodes.filter(
+        (barcode) => !plannedBarcodes.has(barcode),
+      );
       let blockedReason: string | null = null;
       if (blockedRows.length) {
         blockedReason = "가격등급 입력 차단 행이 있습니다.";
+      } else if (!ownerBarcodes.length) {
+        blockedReason = "goods_key의 활성 B-code 소유자를 확인하지 못했습니다.";
+      } else if (unaffectedOwnerBarcodes.length) {
+        blockedReason = `같은 goods_key를 새 입고가 없는 B-code와 공유합니다: ${unaffectedOwnerBarcodes.join(", ")}`;
+      } else if (unplannedOwnerBarcodes.length) {
+        blockedReason = `같은 goods_key의 활성 소유자 중 가격계획이 없는 B-code가 있습니다: ${unplannedOwnerBarcodes.join(", ")}`;
       } else if (changed.length && triggered.length !== rows.length) {
         blockedReason =
           "같은 goods_key 안에 새 입고 트리거가 없는 옵션이 섞여 있습니다.";
@@ -211,6 +289,9 @@ function goodsKeyPlans(
         triggered.length === rows.length &&
         nonzeroBps.length === 1 &&
         blockedRows.length === 0 &&
+        ownerBarcodes.length > 0 &&
+        unaffectedOwnerBarcodes.length === 0 &&
+        unplannedOwnerBarcodes.length === 0 &&
         blockedReason === null;
       return {
         goodsKey,
@@ -223,9 +304,55 @@ function goodsKeyPlans(
         automaticApplyEligible,
         blockedReason,
         barcodes: [...new Set(rows.map((row) => row.barcode))].sort(),
+        ownerBarcodes,
+        unaffectedOwnerBarcodes,
+        unplannedOwnerBarcodes,
       };
     })
     .sort((left, right) => Number(left.goodsKey) - Number(right.goodsKey));
+}
+
+function emptyReadiness(input: {
+  generatedAt: string;
+  inputCount: number;
+  inputFingerprint: string;
+}): ShoplingReceiptPriceReadiness {
+  const stable = {
+    inputFingerprint: input.inputFingerprint,
+    affectedBarcodes: [] as string[],
+    plans: [] as unknown[],
+  };
+  return {
+    generatedAt: input.generatedAt,
+    state: "READY",
+    message:
+      "기존 가격판정 이후 새 확정입고가 없습니다. 가격을 다시 결정할 상품이 없어 Shopling 조회와 가격 write를 모두 생략합니다.",
+    currentPriceSource: "SHOPLING_LIVE_PRODUCT_LOOKUP",
+    receiptCostSource: "PRODUCT_MASTER_WITH_RECEIPT_CACHE_FALLBACK",
+    shoplingLookupMode: "RECEIPT_AFFECTED_ONLY",
+    shoplingLookupSkipped: true,
+    priceRuleVersion: PRICE_GRADE_RULE_VERSION,
+    inputCount: input.inputCount,
+    affectedInputCount: 0,
+    affectedBarcodeCount: 0,
+    affectedPlanningProductCount: 0,
+    affectedPlanningMissingCount: 0,
+    affectedGoodsKeyCount: 0,
+    queriedGoodsKeyCount: 0,
+    sourceRowCount: 0,
+    livePriceReadyCount: 0,
+    livePriceMissingCount: 0,
+    livePriceConflictCount: 0,
+    listingPlanCount: 0,
+    receiptTriggeredListingCount: 0,
+    priceChangeListingCount: 0,
+    eligibleGoodsKeyCount: 0,
+    blockedGoodsKeyCount: 0,
+    fingerprint: fingerprint(stable),
+    writesEnabled: false,
+    listingPlans: [],
+    goodsKeyPlans: [],
+  };
 }
 
 export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingReceiptPriceReadiness> {
@@ -234,12 +361,39 @@ export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingRecei
     loadPriceGradeReceiptAugmentedSnapshot(),
     loadProductPlanningSnapshot(),
   ]);
-  const live = await loadShoplingCurrentPriceSnapshot(planning.products);
+  const allInputs = augmented.snapshot.inputs;
+  const affectedInputs = allInputs.filter(receiptTriggeredInput);
+  if (!affectedInputs.length) {
+    return emptyReadiness({
+      generatedAt,
+      inputCount: augmented.snapshot.inputCount,
+      inputFingerprint: augmented.snapshot.contentFingerprint,
+    });
+  }
+
+  const affectedBarcodes = new Set(
+    affectedInputs.map((input) => barcodeKey(input.barcode)).filter(Boolean),
+  );
+  const affectedPlanningProducts = planning.products.filter(
+    (product) =>
+      product.skuActive !== false && affectedBarcodes.has(barcodeKey(product.barcode)),
+  );
+  const planningBarcodes = new Set(
+    affectedPlanningProducts.map((product) => barcodeKey(product.barcode)),
+  );
+  const affectedPlanningMissingCount = [...affectedBarcodes].filter(
+    (barcode) => !planningBarcodes.has(barcode),
+  ).length;
+  const affectedGoodsKeySet = affectedGoodsKeys(affectedPlanningProducts);
+
+  const live = await loadShoplingCurrentPriceSnapshot(affectedPlanningProducts);
   const liveByBarcode = new Map(live.rows.map((row) => [row.barcode, row]));
+  const inputByBarcode = new Map(
+    affectedInputs.map((input) => [barcodeKey(input.barcode), input]),
+  );
   const listingPlans: ReceiptPriceListingPlan[] = [];
 
-  for (const input of augmented.snapshot.inputs) {
-    const barcode = text(input.barcode).toUpperCase().replace(/\s+/g, "");
+  for (const [barcode, input] of inputByBarcode) {
     const liveRow = liveByBarcode.get(barcode);
     if (!liveRow || liveRow.state !== "READY") continue;
     for (const listing of liveRow.listings) {
@@ -253,7 +407,11 @@ export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingRecei
       Number(left.goodsKey) - Number(right.goodsKey) ||
       left.optionId.localeCompare(right.optionId),
   );
-  const grouped = goodsKeyPlans(listingPlans);
+  const grouped = goodsKeyPlans(
+    listingPlans,
+    activeGoodsKeyOwners(planning.products),
+    affectedBarcodes,
+  );
   const receiptTriggeredListingCount = listingPlans.filter(
     (row) => row.receiptTriggered,
   ).length;
@@ -266,14 +424,18 @@ export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingRecei
   const blockedGoodsKeyCount = grouped.filter(
     (row) => row.priceChangeListingCount > 0 && !row.automaticApplyEligible,
   ).length;
-  const state =
-    live.readyCount === live.productCount && blockedGoodsKeyCount === 0
-      ? "READY"
-      : live.readyCount > 0
+  const unresolvedAffectedCount =
+    affectedPlanningMissingCount + live.missingCount + live.conflictCount;
+  const state: ShoplingReceiptPriceReadiness["state"] =
+    affectedPlanningMissingCount > 0 || live.readyCount === 0
+      ? "BLOCKED"
+      : unresolvedAffectedCount > 0 || blockedGoodsKeyCount > 0
         ? "PARTIAL"
-        : "BLOCKED";
+        : "READY";
   const stable = {
     inputFingerprint: augmented.snapshot.contentFingerprint,
+    affectedBarcodes: [...affectedBarcodes].sort(),
+    affectedPlanningMissingCount,
     liveRows: live.rows.map((row) => ({
       barcode: row.barcode,
       state: row.state,
@@ -295,17 +457,33 @@ export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingRecei
       adjustmentBps: row.adjustmentBps,
       receiptTriggered: row.receiptTriggered,
     })),
+    goodsKeyPlans: grouped.map((row) => ({
+      goodsKey: row.goodsKey,
+      ownerBarcodes: row.ownerBarcodes,
+      adjustmentBps: row.adjustmentBps,
+      automaticApplyEligible: row.automaticApplyEligible,
+      blockedReason: row.blockedReason,
+    })),
   };
 
   return {
     generatedAt,
     state,
     message:
-      "현재 판매가는 매 실행마다 Shopling 상품조회 prod_id로 다시 읽습니다. 새 확정입고가 기존 가격판정 이후 들어온 옵션만 재가격 트리거로 잡고, 기존 가격등급·최근 3회 보호원가 규칙으로 목표가격을 다시 계산합니다. 같은 goods_key 안에서 조정률이 충돌하면 자동 적용 후보에서 제외합니다.",
+      "새 확정입고가 감지된 B-code만 추려 해당 goods_key의 현재 Shopling 판매가를 즉시 다시 읽었습니다. 가격판정은 이 LIVE 판매가를 기준으로 기존 가격등급·최근 3회 보호원가 규칙을 적용합니다. 같은 goods_key를 입고 비대상 B-code와 공유하거나 조정률이 충돌하면 자동 적용 후보에서 제외합니다.",
     currentPriceSource: "SHOPLING_LIVE_PRODUCT_LOOKUP",
     receiptCostSource: "PRODUCT_MASTER_WITH_RECEIPT_CACHE_FALLBACK",
+    shoplingLookupMode: "RECEIPT_AFFECTED_ONLY",
+    shoplingLookupSkipped: false,
     priceRuleVersion: PRICE_GRADE_RULE_VERSION,
     inputCount: augmented.snapshot.inputCount,
+    affectedInputCount: affectedInputs.length,
+    affectedBarcodeCount: affectedBarcodes.size,
+    affectedPlanningProductCount: affectedPlanningProducts.length,
+    affectedPlanningMissingCount,
+    affectedGoodsKeyCount: affectedGoodsKeySet.size,
+    queriedGoodsKeyCount: live.queriedGoodsKeyCount,
+    sourceRowCount: live.sourceRowCount,
     livePriceReadyCount: live.readyCount,
     livePriceMissingCount: live.missingCount,
     livePriceConflictCount: live.conflictCount,
