@@ -45,6 +45,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/receipt-live-price-proposals",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }

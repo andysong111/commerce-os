@@ -52,9 +52,13 @@ jobs:
           src/lib/shopling/shoplingCurrentPriceResolver.ts
           src/lib/shopling/shoplingCurrentPrice.ts
           src/lib/stage8ShoplingReceiptPriceReadiness.ts
+          src/lib/confirmedReceiptBatchSource.ts
+          src/lib/receiptLivePriceProposal.ts
+          src/lib/receiptLivePriceProposalWorker.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/api/cron/product-master-shopling-sales-events/route.ts
           src/app/api/cron/stage8-canonical-demand-parity/route.ts
+          src/app/api/cron/receipt-live-price-proposals/route.ts
           src/app/api/product-master/shopling-sales-events/route.ts
           src/app/api/stage8/canonical-demand-parity/route.ts
           src/app/api/stage8/demand-mismatch-evidence/route.ts
@@ -73,6 +77,7 @@ jobs:
           src/app/stage8-postapply-canonical-reconciliation/page.tsx
           src/app/stage8-inventory-verification-priority/page.tsx
           src/app/stage8-shopling-receipt-price-readiness/page.tsx
+          src/app/stage8-receipt-live-price-proposals/page.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -107,6 +112,9 @@ jobs:
           tests/stage8InventoryVerificationPriority.test.mjs
           tests/shoplingCurrentPrice.test.mjs
           tests/stage8ShoplingReceiptPriceReadiness.test.mjs
+          tests/confirmedReceiptBatchSource.test.mjs
+          tests/receiptLivePriceProposal.test.mjs
+          tests/receiptLivePriceProposalWorker.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
