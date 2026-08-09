@@ -1,0 +1,34 @@
+name: Stage8 Proven SKU Sales Gap Live Audit CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proven-sku-sales-gap-live-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint proven SKU sales gap files
+        run: >-
+          npx eslint
+          src/lib/stage8ProvenSkuSalesGapLiveAudit.ts
+          src/app/stage8-proven-sku-sales-gap-live-audit/page.tsx
+      - name: Test proven SKU sales gap safety
+        run: node --experimental-strip-types --test tests/stage8ProvenSkuSalesGapLiveAudit.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://proven-sku-sales-gap-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_proven_sku_sales_gap_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
