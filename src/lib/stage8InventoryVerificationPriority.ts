@@ -37,9 +37,13 @@ export type InventoryVerificationPriorityRow = {
   latestConfirmedReceiptAt: string | null;
   latestConfirmedReceiptCostKrw: number;
   protectedCostKrw: number;
+  inventoryCalculationUsable: boolean;
+  executionInventoryEligible: boolean;
+  advisoryOnly: boolean;
   action:
     | "NONE"
     | "LEDGER_REVIEW_REQUIRED"
+    | "PROVISIONAL_DECISION_EVIDENCE_REQUIRED"
     | "COST_CONFIRMATION_REQUIRED";
   operationallyReady: boolean;
 };
@@ -54,6 +58,7 @@ export type InventoryVerificationPriority = {
   operationallyReadyPurchaseCount: number;
   blockedPurchaseRecommendationCount: number;
   provisionalPurchaseCount: number;
+  provisionalExecutionBlockedCount: number;
   verifiedPurchaseCount: number;
   reviewInventoryCount: number;
   totalExpectedSpend: number;
@@ -111,6 +116,9 @@ function actionFor(row: ProductMasterInventoryCostRow | undefined) {
   if (mode === "MISSING" || mode === "REVIEW") {
     return "LEDGER_REVIEW_REQUIRED" as const;
   }
+  if (mode === "PROVISIONAL") {
+    return "PROVISIONAL_DECISION_EVIDENCE_REQUIRED" as const;
+  }
   if (!row?.hasConfirmedReceiptCost) {
     return "COST_CONFIRMATION_REQUIRED" as const;
   }
@@ -157,7 +165,10 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
       const inventory = inventoryIndex.get(key);
       const profile = planningIndex.get(key);
       const mode = inventoryMode(inventory);
-      const inventoryUsable = mode === "VERIFIED" || mode === "PROVISIONAL";
+      const inventoryCalculationUsable =
+        mode === "VERIFIED" || mode === "PROVISIONAL";
+      const executionInventoryEligible = mode === "VERIFIED";
+      const advisoryOnly = mode === "PROVISIONAL";
       const originalGroup = salesOrderGroup(product.status);
       const originalRecommendedQty = integer(product.recommendedQty);
       const demandTarget = integer(
@@ -167,8 +178,8 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
       const net = calculateNetRequirement({
         demandTarget,
         originalGroup,
-        inventoryKnown: inventoryUsable,
-        availableQuantity: inventoryUsable
+        inventoryKnown: inventoryCalculationUsable,
+        availableQuantity: inventoryCalculationUsable
           ? integer(inventory?.inventoryQuantity)
           : 0,
         reservedQuantity: 0,
@@ -188,7 +199,7 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
       const operationallyReady =
         purchaseStatus === "발주 추천" &&
         action === "NONE" &&
-        inventoryUsable;
+        executionInventoryEligible;
 
       return {
         barcode: key,
@@ -216,6 +227,9 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
           inventory?.latestConfirmedReceiptCostKrw,
         ),
         protectedCostKrw: integer(inventory?.protectedCostKrw),
+        inventoryCalculationUsable,
+        executionInventoryEligible,
+        advisoryOnly,
         action,
         operationallyReady,
       };
@@ -255,7 +269,7 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
     generatedAt: new Date().toISOString(),
     state: structuralReady ? "READY" : "BLOCKED",
     message: structuralReady
-      ? "초기 0은 실제 0으로 확정하지 않고 PROVISIONAL 추정재고로 사용합니다. 확정입고는 추정재고와 원가에 즉시 반영하고, 품절 확인 시 SOLD_OUT_RESET=0부터 VERIFIED 원장으로 전환합니다. 재고실사는 운영 필수조건이 아닙니다."
+      ? "PROVISIONAL 재고는 발주수량을 미리 계산하는 advisory 입력으로 사용할 수 있지만 실제 발주 Draft 실행가능 상태로 승격하지 않습니다. SOLD_OUT_RESET 또는 다른 신뢰 가능한 기준점으로 VERIFIED가 되거나, 별도 PROVISIONAL 의사결정 증거 게이트를 통과한 뒤에만 실행 경로를 열 수 있습니다. 재고실사는 필수조건이 아닙니다."
       : "Canonical 발주 shadow·Product Master 재고원장·planning 연결이 완전하지 않아 발주 수량을 확정하지 않습니다.",
     purchaseShadowReady: purchaseShadow.shadowReady,
     managedActiveSkuCount: inventoryReadiness.summary.managedActiveSkuCount,
@@ -264,6 +278,11 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
     blockedPurchaseRecommendationCount: purchaseRows.length - readyRows.length,
     provisionalPurchaseCount: purchaseRows.filter(
       (row) => row.inventoryMode === "PROVISIONAL",
+    ).length,
+    provisionalExecutionBlockedCount: purchaseRows.filter(
+      (row) =>
+        row.inventoryMode === "PROVISIONAL" &&
+        row.action === "PROVISIONAL_DECISION_EVIDENCE_REQUIRED",
     ).length,
     verifiedPurchaseCount: purchaseRows.filter(
       (row) => row.inventoryMode === "VERIFIED",
