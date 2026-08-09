@@ -145,11 +145,22 @@ export function FastPurchaseTriageWorkspace({ rows, sourceFingerprint }: { rows:
   }, [filter, query, rows, triage]);
 
   const exportPlan = () => {
-    const planRows = rows.flatMap((row) => {
+    const planRows = rows.flatMap((row): string[][] => {
       const entry = triage[row.barcode] ?? EMPTY_ENTRY;
       const plannedQuantity = isSystemOrder(row.action) ? row.recommendedQuantity : entry.plannedQuantity;
       if (plannedQuantity <= 0) return [];
-      return [[row.barcode, row.modelNo ?? "", row.productName, row.actionLabel, row.basis, row.riskBias, stockLabel(entry.stockSense), row.referenceDemandQuantity, plannedQuantity, entry.note]];
+      return [[
+        row.barcode,
+        row.modelNo ?? "",
+        row.productName,
+        row.actionLabel,
+        row.basis,
+        row.riskBias,
+        stockLabel(entry.stockSense),
+        String(row.referenceDemandQuantity),
+        String(plannedQuantity),
+        entry.note,
+      ]];
     });
     if (!planRows.length) {
       setNotice("내보낼 수량이 없습니다. 수동검토 상품은 판단 후 주문 예정수량을 직접 입력하세요.");
