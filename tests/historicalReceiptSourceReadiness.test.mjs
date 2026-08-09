@@ -14,6 +14,14 @@ test("historical receipt bridge only reads authenticated source", () => {
   assert.doesNotMatch(lib, /upsert|insert|update\(/i);
 });
 
+test("bridge tries only existing integration secret candidates and never exposes them", () => {
+  assert.match(lib, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
+  assert.match(lib, /PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET/);
+  assert.match(lib, /PRODUCT_MASTER_INTEGRATION_SECRET/);
+  assert.match(lib, /response\.status === 401 \|\| response\.status === 403/);
+  assert.doesNotMatch(lib, /console\.(log|error|warn).*secret/i);
+});
+
 test("source must explicitly declare writes disabled", () => {
   assert.match(lib, /sourceWritesEnabled === true/);
   assert.match(lib, /!sourceWritesEnabled/);
@@ -23,7 +31,7 @@ test("source must explicitly declare writes disabled", () => {
 test("page does not expose integration secret or receipt payload", () => {
   assert.match(page, /실제 쓰기/);
   assert.match(page, /READ ONLY/);
-  assert.doesNotMatch(page, /PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET/);
+  assert.doesNotMatch(page, /INTEGRATION_SECRET/);
   assert.doesNotMatch(page, /authorization/i);
   assert.doesNotMatch(page, /receipts\.map|receipt\.barcode|unitCostKrw/);
 });
