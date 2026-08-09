@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  PRICE_GRADE_RULE_VERSION,
   calculateProductPriceGrade,
   type ProductPriceGradeResult,
 } from "@/lib/priceGradeEngine";
@@ -303,7 +304,7 @@ export async function loadShoplingReceiptPriceReadiness(): Promise<ShoplingRecei
       "현재 판매가는 매 실행마다 Shopling 상품조회 prod_id로 다시 읽습니다. 새 확정입고가 기존 가격판정 이후 들어온 옵션만 재가격 트리거로 잡고, 기존 가격등급·최근 3회 보호원가 규칙으로 목표가격을 다시 계산합니다. 같은 goods_key 안에서 조정률이 충돌하면 자동 적용 후보에서 제외합니다.",
     currentPriceSource: "SHOPLING_LIVE_PRODUCT_LOOKUP",
     receiptCostSource: "PRODUCT_MASTER_WITH_RECEIPT_CACHE_FALLBACK",
-    priceRuleVersion: "commerce-os-price-grade-v1.0.0",
+    priceRuleVersion: PRICE_GRADE_RULE_VERSION,
     inputCount: augmented.snapshot.inputCount,
     livePriceReadyCount: live.readyCount,
     livePriceMissingCount: live.missingCount,
