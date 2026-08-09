@@ -11,7 +11,7 @@ import {
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 
 const DEFAULT_MESSAGE =
-  "대표·부가 이미지와 최종 상세페이지 이미지를 ZIP 한 개로 다운로드합니다. v3와 Evidence Compiler 결과 모두 지원합니다.";
+  "대표·부가 이미지와 최종 상세페이지 이미지를 ZIP 한 개로 다운로드합니다. 다운로드 목록에는 작업목록과 동일한 상품 작업 ID와 짧은 작업코드를 함께 표시합니다.";
 
 type StatusState =
   | { tone: "neutral"; message: string }
@@ -20,6 +20,18 @@ type StatusState =
 function hasFullDownloadAssets(job: DetailPageReviewJob) {
   const assets = detailPageReviewAssets(job);
   return assets.representatives.length > 0 && assets.detail.length > 0;
+}
+
+function completedLabel(job: DetailPageReviewJob) {
+  const date = new Date(job.completedAt || job.updatedAt || job.createdAt);
+  if (!Number.isFinite(date.getTime())) return "시간 미상";
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 export function DetailPageRepresentativeDownloadControl() {
@@ -111,7 +123,7 @@ export function DetailPageRepresentativeDownloadControl() {
             </span>
           </div>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-            작업에 실제 저장된 대표·부가 이미지를 01_main, 02_sub_1… 순서로 담고, 마지막에 최종 상세페이지 이미지를 detail_page 파일로 함께 압축합니다.
+            작업에 실제 저장된 대표·부가 이미지를 01_main, 02_sub_1… 순서로 담고, 마지막에 최종 상세페이지 이미지를 detail_page 파일로 함께 압축합니다. 작업목록의 launch 상품 ID와 짧은 작업코드를 같이 표시해 같은 상품의 재생성 이력도 구분합니다.
           </p>
         </div>
         <button
@@ -141,7 +153,7 @@ export function DetailPageRepresentativeDownloadControl() {
               const count = assets.representatives.length;
               return (
                 <option key={job.jobId} value={job.jobId}>
-                  {detailPageJobName(job)} · 대표·부가 {count}장 + 상세페이지 · {job.jobId.slice(0, 8)}
+                  {detailPageJobName(job)} · {job.itemId} · 완료 {completedLabel(job)} · 대표·부가 {count}장 + 상세페이지 · 작업 {job.jobId.slice(0, 8)}
                 </option>
               );
             })}
@@ -154,7 +166,7 @@ export function DetailPageRepresentativeDownloadControl() {
             onClick={() =>
               setStatus({
                 tone: "success",
-                message: `${detailPageJobName(selected)} · 대표·부가 ${representativeCount}장 + 최종 상세페이지 이미지까지 총 ${totalImageCount}장 ZIP 다운로드를 요청했습니다.`,
+                message: `${detailPageJobName(selected)} · ${selected.itemId} · 작업 ${selected.jobId.slice(0, 8)} · 대표·부가 ${representativeCount}장 + 최종 상세페이지 이미지까지 총 ${totalImageCount}장 ZIP 다운로드를 요청했습니다.`,
               })
             }
             className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-800"
