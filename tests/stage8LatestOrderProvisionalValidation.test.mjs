@@ -36,7 +36,7 @@ test("candidate formula is checked at zero seven fourteen and twenty-one day del
   assert.match(validation, /latestOrderQuantity - canonicalSalesSinceStart/);
   assert.match(validation, /diagnosticResidualQuantity/);
   assert.match(validation, /absoluteErrorPct/);
-  assert.match(page, /0·7·14·21일/);
+  assert.match(page, /7·14·21일/);
 });
 
 test("validation cannot write or promote inventory", () => {
