@@ -72,7 +72,7 @@ test("demand-only manual quantity can never exceed its displayed zero-stock refe
     ),
   );
   assert.ok(workspace.includes("max={manualMax}"));
-  assert.ok(workspace.includes("plannedQuantity: row.referenceDemandQuantity"));
+  assert.match(workspace, /plannedQuantity:\s*row\.referenceDemandQuantity/);
 });
 
 test("zero-stock demand reference is separated from planned quantity and requires an explicit click to copy", () => {
