@@ -166,9 +166,10 @@ export function ProductLaunchEvidenceCompilerCanary() {
       const results = await mapWithConcurrency(
         runnable,
         REGISTER_CONCURRENCY,
-        async (entry) => {
+        async (entry, batchIndex) => {
           const jobId = crypto.randomUUID();
           const attempt = Math.max(1, automationAttempt(entry.localItem) + 1);
+          const compilerWorkerSlot = batchIndex % DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE;
           const response = await fetch(JOBS_API, {
             method: "POST",
             credentials: "same-origin",
@@ -184,6 +185,7 @@ export function ProductLaunchEvidenceCompilerCanary() {
               productName: entry.productName,
               attempt,
               compilerCanary: true,
+              compilerWorkerSlot,
             }),
           });
           const body = (await response.json().catch(() => ({}))) as {
@@ -201,13 +203,18 @@ export function ProductLaunchEvidenceCompilerCanary() {
               `${entry.productName}: 서버가 Compiler 플래그를 저장하지 못했습니다.`,
             );
           }
+          if (Number(body.job.payload?.compiler_worker_slot) !== compilerWorkerSlot) {
+            throw new Error(
+              `${entry.productName}: 서버가 Compiler 병렬 슬롯을 저장하지 못했습니다.`,
+            );
+          }
 
           const now = new Date().toISOString();
           writeAutomationState(state, entry.itemId, {
             jobId,
             status: "queued",
             stage: "source_collection",
-            message: "Evidence Compiler · 1688 원본 수집 대기 중",
+            message: `Evidence Compiler · 1688 원본 수집 대기 중 · 병렬 슬롯 ${compilerWorkerSlot + 1}`,
             progress: 1,
             qaStatus: "pending",
             sourceUrl: entry.sourceUrl,
@@ -219,6 +226,7 @@ export function ProductLaunchEvidenceCompilerCanary() {
             error: "",
             executionMode: "server-v1",
             compilerCanary: true,
+            compilerWorkerSlot,
           });
           return entry.productName;
         },
@@ -282,7 +290,7 @@ export function ProductLaunchEvidenceCompilerCanary() {
             </span>
           </div>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            체크한 여러 상품을 한 번에 등록합니다. 1688 수집은 최대 {DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE}건 병렬 처리하고 나머지는 빈 슬롯에 자동 진입합니다. 일반 ‘선택 상세페이지 생성’은 v3 롤백 경로로 유지합니다.
+            체크한 여러 상품을 한 번에 등록합니다. 앞의 {DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE}건은 서로 다른 병렬 슬롯에 고정 배정되고, 이후 작업은 슬롯별 대기열로 자동 진입합니다. 일반 ‘선택 상세페이지 생성’은 v3 롤백 경로로 유지합니다.
           </p>
         </div>
         <button
@@ -393,7 +401,7 @@ function writeAutomationState(
 async function mapWithConcurrency<T, R>(
   values: T[],
   concurrency: number,
-  task: (value: T) => Promise<R>,
+  task: (value: T, index: number) => Promise<R>,
 ): Promise<PromiseSettledResult<R>[]> {
   const results = new Array<PromiseSettledResult<R>>(values.length);
   let cursor = 0;
@@ -404,7 +412,10 @@ async function mapWithConcurrency<T, R>(
         const index = cursor;
         cursor += 1;
         try {
-          results[index] = { status: "fulfilled", value: await task(values[index]) };
+          results[index] = {
+            status: "fulfilled",
+            value: await task(values[index], index),
+          };
         } catch (reason) {
           results[index] = { status: "rejected", reason };
         }
