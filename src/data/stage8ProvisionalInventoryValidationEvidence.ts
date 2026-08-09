@@ -1,7 +1,7 @@
 export type ProvisionalInventoryValidationEvidence = {
   barcode: string;
   physicalQuantity: number;
-  observedAt: string;
+  observedOn: string;
   source: "OPERATOR_PHYSICAL_OBSERVATION";
   validationOnly: true;
   inventoryUseAllowed: false;
@@ -11,7 +11,7 @@ const EVIDENCE: ProvisionalInventoryValidationEvidence[] = [
   {
     barcode: "BGG1-1",
     physicalQuantity: 3000,
-    observedAt: "2026-08-09T04:00:00.000Z",
+    observedOn: "2026-08-09",
     source: "OPERATOR_PHYSICAL_OBSERVATION",
     validationOnly: true,
     inventoryUseAllowed: false,
