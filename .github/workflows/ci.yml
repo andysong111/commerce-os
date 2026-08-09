@@ -51,7 +51,9 @@ jobs:
           src/lib/stage8PostApplyCanonicalReconciliation.ts
           src/lib/stage8InventoryVerificationPriority.ts
           src/lib/stage8ProvisionalInventorySourceAudit.ts
+          src/lib/stage8LegacyOrderSurrogateValidation.ts
           src/data/stage8ProvisionalInventoryValidationEvidence.ts
+          src/data/stage8LegacyOrderSurrogateValidationEvidence.ts
           src/lib/shopling/shoplingCurrentPriceResolver.ts
           src/lib/shopling/shoplingCurrentPrice.ts
           src/lib/stage8ShoplingReceiptPriceReadiness.ts
@@ -80,6 +82,7 @@ jobs:
           src/app/stage8-postapply-canonical-reconciliation/page.tsx
           src/app/stage8-inventory-verification-priority/page.tsx
           src/app/stage8-provisional-inventory-source-audit/page.tsx
+          src/app/stage8-legacy-order-surrogate-validation/page.tsx
           src/app/stage8-shopling-receipt-price-readiness/page.tsx
           src/app/stage8-receipt-live-price-proposals/page.tsx
       - name: Test existing bulk safety and new engine integration
@@ -115,6 +118,7 @@ jobs:
           tests/stage8PostApplyCanonicalReconciliation.test.mjs
           tests/stage8InventoryVerificationPriority.test.mjs
           tests/stage8ProvisionalInventorySourceAudit.test.mjs
+          tests/stage8LegacyOrderSurrogateValidation.test.mjs
           tests/shoplingCurrentPrice.test.mjs
           tests/stage8ShoplingReceiptPriceReadiness.test.mjs
           tests/confirmedReceiptBatchSource.test.mjs
