@@ -14,7 +14,7 @@ const PROPOSAL_OPERATION_TYPE = "RECEIPT_LIVE_SHOPLING_PRICE_PROPOSAL";
 const ROLLOUT_OPERATION_TYPE = "RECEIPT_LIVE_PRICE_PROPOSAL_ROLLOUT";
 const ROLLOUT_SOURCE_EVENT_ID = "receipt-live-price-proposal-rollout:v1";
 const PROPOSAL_SOURCE_PREFIX = "receipt-live-price-proposal:";
-const MAX_EVENT_SCAN = 20;
+const MAX_EVENT_SCAN = 100;
 
 type OperationRow = {
   id?: unknown;
@@ -25,6 +25,11 @@ type OperationRow = {
   input_snapshot?: unknown;
   result_snapshot?: unknown;
   started_at?: unknown;
+};
+
+type ReceiptCursor = {
+  startedAt: string;
+  sourceEventId: string;
 };
 
 export type ReceiptLivePriceProposalWorkerResult =
@@ -49,6 +54,7 @@ export type ReceiptLivePriceProposalStatus = {
   rolloutStartedAt: string | null;
   rolloutReady: boolean;
   pendingReceiptCount: number;
+  pendingReceiptCountCapped: boolean;
   latestProposal: ReceiptLivePriceProposal | null;
   latestProposalStartedAt: string | null;
   writesEnabled: false;
@@ -99,8 +105,10 @@ async function rest<T>(input: {
 }) {
   const { baseUrl, secret } = supabaseConnection();
   const query = input.query ?? new URLSearchParams();
-  const headers = createSupabaseAdminHeaders(secret);
-  if (input.prefer) headers.Prefer = input.prefer;
+  const headers = {
+    ...createSupabaseAdminHeaders(secret),
+    ...(input.prefer ? { Prefer: input.prefer } : {}),
+  };
   const response = await fetch(
     `${baseUrl}/rest/v1/${encodeURIComponent(input.table)}?${query.toString()}`,
     {
@@ -134,15 +142,34 @@ async function readOperationBySourceEvent(sourceEventId: string) {
   return Array.isArray(rows) ? rows[0] ?? null : null;
 }
 
+async function latestProposalOperation() {
+  const query = new URLSearchParams({
+    operation_type: `eq.${PROPOSAL_OPERATION_TYPE}`,
+    status: "eq.SUCCEEDED",
+    select:
+      "id,status,source_event_id,correlation_id,actor_id,input_snapshot,result_snapshot,started_at",
+    order: "started_at.desc,source_event_id.desc",
+    limit: "1",
+  });
+  const rows = await rest<OperationRow[]>({
+    table: "commerce_operation_runs",
+    query,
+  });
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
 async function ensureRolloutMarker() {
   const existing = await readOperationBySourceEvent(ROLLOUT_SOURCE_EVENT_ID);
   if (existing) {
     const startAt = iso(
       (existing.input_snapshot as Record<string, unknown> | undefined)?.startAt,
     );
-    if (!startAt) throw new Error("RECEIPT_LIVE_PRICE_ROLLOUT_MARKER_INVALID");
+    if (!startAt) {
+      throw new Error("RECEIPT_LIVE_PRICE_ROLLOUT_MARKER_INVALID");
+    }
     return { startAt, created: false };
   }
+
   const startAt = new Date().toISOString();
   await rest<OperationRow[]>({
     table: "commerce_operation_runs",
@@ -171,11 +198,14 @@ async function ensureRolloutMarker() {
       },
     ],
   });
+
   const stored = await readOperationBySourceEvent(ROLLOUT_SOURCE_EVENT_ID);
   const storedStartAt = iso(
     (stored?.input_snapshot as Record<string, unknown> | undefined)?.startAt,
   );
-  if (!storedStartAt) throw new Error("RECEIPT_LIVE_PRICE_ROLLOUT_STORE_FAILED");
+  if (!storedStartAt) {
+    throw new Error("RECEIPT_LIVE_PRICE_ROLLOUT_STORE_FAILED");
+  }
   return { startAt: storedStartAt, created: storedStartAt === startAt };
 }
 
@@ -188,7 +218,9 @@ function parseReceiptEvent(row: OperationRow): ReceiptLivePriceEvent {
       ? (row.input_snapshot as Record<string, unknown>)
       : {};
   const totalsRaw =
-    input.totals && typeof input.totals === "object" && !Array.isArray(input.totals)
+    input.totals &&
+    typeof input.totals === "object" &&
+    !Array.isArray(input.totals)
       ? (input.totals as Record<string, unknown>)
       : {};
   const receiptId = text(input.receiptId);
@@ -218,15 +250,41 @@ function parseReceiptEvent(row: OperationRow): ReceiptLivePriceEvent {
   };
 }
 
-async function receiptOperationsAfter(startAt: string) {
+function proposalCursor(
+  rolloutStartedAt: string,
+  latestProposal: OperationRow | null,
+): ReceiptCursor {
+  const input =
+    latestProposal?.input_snapshot &&
+    typeof latestProposal.input_snapshot === "object" &&
+    !Array.isArray(latestProposal.input_snapshot)
+      ? (latestProposal.input_snapshot as Record<string, unknown>)
+      : {};
+  const startedAt = iso(input.receiptOperationStartedAt);
+  const sourceEventId = text(input.receiptEventId);
+  if (startedAt && sourceEventId) return { startedAt, sourceEventId };
+  return { startedAt: rolloutStartedAt, sourceEventId: "" };
+}
+
+async function receiptOperationsAfterCursor(
+  cursor: ReceiptCursor,
+  limit = MAX_EVENT_SCAN,
+) {
   const query = new URLSearchParams({
     operation_type: `eq.${RECEIPT_OPERATION_TYPE}`,
-    started_at: `gt.${startAt}`,
     select:
       "id,status,source_event_id,correlation_id,actor_id,input_snapshot,result_snapshot,started_at",
-    order: "started_at.asc",
-    limit: String(MAX_EVENT_SCAN),
+    order: "started_at.asc,source_event_id.asc",
+    limit: String(limit),
   });
+  if (cursor.sourceEventId) {
+    query.set(
+      "or",
+      `(started_at.gt.${cursor.startedAt},and(started_at.eq.${cursor.startedAt},source_event_id.gt.${cursor.sourceEventId}))`,
+    );
+  } else {
+    query.set("started_at", `gt.${cursor.startedAt}`);
+  }
   const rows = await rest<OperationRow[]>({
     table: "commerce_operation_runs",
     query,
@@ -234,17 +292,11 @@ async function receiptOperationsAfter(startAt: string) {
   return Array.isArray(rows) ? rows : [];
 }
 
-async function nextPendingReceipt(startAt: string) {
-  const rows = await receiptOperationsAfter(startAt);
-  for (const row of rows) {
-    const sourceEventId = text(row.source_event_id);
-    if (!sourceEventId) continue;
-    const existing = await readOperationBySourceEvent(
-      proposalSourceEventId(sourceEventId),
-    );
-    if (!existing) return row;
-  }
-  return null;
+async function nextPendingReceipt(rolloutStartedAt: string) {
+  const latestProposal = await latestProposalOperation();
+  const cursor = proposalCursor(rolloutStartedAt, latestProposal);
+  const rows = await receiptOperationsAfterCursor(cursor);
+  return rows[0] ?? null;
 }
 
 async function storeProposal(
@@ -253,6 +305,10 @@ async function storeProposal(
   proposal: ReceiptLivePriceProposal,
 ) {
   const sourceEventId = proposalSourceEventId(event.eventId);
+  const receiptOperationStartedAt = iso(eventRow.started_at);
+  if (!receiptOperationStartedAt) {
+    throw new Error("RECEIPT_LIVE_PRICE_EVENT_STARTED_AT_INVALID");
+  }
   const storedAt = new Date().toISOString();
   await rest<OperationRow[]>({
     table: "commerce_operation_runs",
@@ -270,6 +326,7 @@ async function storeProposal(
         actor_id: text(eventRow.actor_id) || null,
         input_snapshot: {
           receiptEventId: event.eventId,
+          receiptOperationStartedAt,
           receiptId: event.receiptId,
           batchId: event.batchId,
           occurredAt: event.occurredAt,
@@ -328,7 +385,8 @@ async function buildProposal(event: ReceiptLivePriceEvent) {
   );
   const affectedPlanning = planning.products.filter(
     (product) =>
-      product.skuActive !== false && affectedBarcodes.has(barcodeKey(product.barcode)),
+      product.skuActive !== false &&
+      affectedBarcodes.has(barcodeKey(product.barcode)),
   );
   const livePrices = await loadShoplingCurrentPriceSnapshot(affectedPlanning);
   return buildReceiptLivePriceProposal({
@@ -352,6 +410,7 @@ export async function runReceiptLivePriceProposalStep(): Promise<ReceiptLivePric
         "입고→LIVE Shopling 가격제안 rollout 기준점을 생성했습니다. 기존 입고 이벤트는 소급 처리하지 않습니다.",
     };
   }
+
   const eventRow = await nextPendingReceipt(rollout.startAt);
   if (!eventRow) {
     return {
@@ -362,6 +421,7 @@ export async function runReceiptLivePriceProposalStep(): Promise<ReceiptLivePric
       message: "새 입고확정 이벤트가 없어 LIVE 가격제안 작업을 생략했습니다.",
     };
   }
+
   const event = parseReceiptEvent(eventRow);
   const proposal = await buildProposal(event);
   await storeProposal(eventRow, event, proposal);
@@ -393,39 +453,26 @@ function proposalFromRow(row: OperationRow | undefined) {
 
 export async function loadReceiptLivePriceProposalStatus(): Promise<ReceiptLivePriceProposalStatus> {
   const rollout = await readOperationBySourceEvent(ROLLOUT_SOURCE_EVENT_ID);
-  const rolloutStartedAt = iso(
-    (rollout?.input_snapshot as Record<string, unknown> | undefined)?.startAt,
-  ) || null;
+  const rolloutStartedAt =
+    iso(
+      (rollout?.input_snapshot as Record<string, unknown> | undefined)?.startAt,
+    ) || null;
+  const latestProposal = await latestProposalOperation();
   let pendingReceiptCount = 0;
+  let pendingReceiptCountCapped = false;
   if (rolloutStartedAt) {
-    const rows = await receiptOperationsAfter(rolloutStartedAt);
-    for (const row of rows) {
-      const eventId = text(row.source_event_id);
-      if (!eventId) continue;
-      if (!(await readOperationBySourceEvent(proposalSourceEventId(eventId)))) {
-        pendingReceiptCount += 1;
-      }
-    }
+    const cursor = proposalCursor(rolloutStartedAt, latestProposal);
+    const rows = await receiptOperationsAfterCursor(cursor);
+    pendingReceiptCount = rows.length;
+    pendingReceiptCountCapped = rows.length === MAX_EVENT_SCAN;
   }
-  const query = new URLSearchParams({
-    operation_type: `eq.${PROPOSAL_OPERATION_TYPE}`,
-    status: "eq.SUCCEEDED",
-    select:
-      "id,status,source_event_id,correlation_id,actor_id,input_snapshot,result_snapshot,started_at",
-    order: "started_at.desc",
-    limit: "1",
-  });
-  const rows = await rest<OperationRow[]>({
-    table: "commerce_operation_runs",
-    query,
-  });
-  const latest = Array.isArray(rows) ? rows[0] : undefined;
   return {
     rolloutStartedAt,
     rolloutReady: Boolean(rolloutStartedAt),
     pendingReceiptCount,
-    latestProposal: proposalFromRow(latest),
-    latestProposalStartedAt: iso(latest?.started_at) || null,
+    pendingReceiptCountCapped,
+    latestProposal: proposalFromRow(latestProposal ?? undefined),
+    latestProposalStartedAt: iso(latestProposal?.started_at) || null,
     writesEnabled: false,
   };
 }
