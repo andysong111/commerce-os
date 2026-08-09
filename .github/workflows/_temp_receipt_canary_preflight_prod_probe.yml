@@ -1,0 +1,40 @@
+name: Temporary Receipt Canary Preflight Production Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for production canary preflight page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-receipt-live-price-canary-preflight'
+          ready=0
+          for i in $(seq 1 60); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:160000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '입고확정 가격변경 1건 Canary 사전검증'; then
+              echo '--- RECEIPT CANARY PREFLIGHT PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '실제 가격 write 0'
+              echo "$text" | grep -q 'Canary write OFF'
+              echo "$text" | grep -q 'FAIL-CLOSED · READ ONLY'
+              echo "$text" | grep -q 'OPERATOR APPROVAL NOT OPEN'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
