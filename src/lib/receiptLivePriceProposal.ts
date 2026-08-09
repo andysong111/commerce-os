@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   PRICE_GRADE_RULE_VERSION,
   calculateProductPriceGrade,
+  type ReceiptCostInput,
 } from "@/lib/priceGradeEngine";
 import type { PriceGradeShadowInput } from "@/lib/priceGradeShadowComparison";
 import type {
@@ -75,6 +76,8 @@ export type ReceiptLivePriceProposal = {
   receiptId: string;
   batchId: number;
   eventOccurredAt: string;
+  eventGoodQuantity: number;
+  exactReceiptGoodQuantity: number;
   sourceMode: ConfirmedReceiptBatchSource["sourceMode"];
   exactReceiptRowCount: number;
   exactReceiptBarcodeCount: number;
@@ -121,7 +124,7 @@ function fingerprint(value: unknown) {
 
 function adjustmentBps(currentPrice: number, targetPrice: number) {
   if (!(currentPrice > 0) || !(targetPrice > 0)) return 0;
-  return Math.round(((targetPrice / currentPrice) - 1) * 10_000);
+  return Math.round((targetPrice / currentPrice - 1) * 10_000);
 }
 
 function aggregateBatchReceipts(rows: ConfirmedReceiptBatchRow[]) {
@@ -149,7 +152,10 @@ function aggregateBatchReceipts(rows: ConfirmedReceiptBatchRow[]) {
       continue;
     }
     current.quantity += integer(row.quantity);
-    current.unitCostKrw = Math.max(current.unitCostKrw, integer(row.unitCostKrw));
+    current.unitCostKrw = Math.max(
+      current.unitCostKrw,
+      integer(row.unitCostKrw),
+    );
     if ((timestamp(receivedAt) ?? 0) > (timestamp(current.receivedAt) ?? 0)) {
       current.receivedAt = receivedAt;
     }
@@ -161,7 +167,7 @@ function mergeReceiptHistory(
   input: PriceGradeShadowInput,
   current: { receivedAt: string; unitCostKrw: number; quantity: number },
 ) {
-  const all = [
+  const all: ReceiptCostInput[] = [
     {
       receivedAt: current.receivedAt,
       unitCostKrw: current.unitCostKrw,
@@ -169,7 +175,7 @@ function mergeReceiptHistory(
     },
     ...(input.receipts ?? []),
   ];
-  const unique = new Map<string, (typeof all)[number]>();
+  const unique = new Map<string, ReceiptCostInput>();
   for (const row of all) {
     const receivedAt = text(row.receivedAt);
     const unitCostKrw = integer(row.unitCostKrw);
@@ -180,7 +186,8 @@ function mergeReceiptHistory(
   }
   return [...unique.values()].sort(
     (left, right) =>
-      (timestamp(right.receivedAt) ?? 0) - (timestamp(left.receivedAt) ?? 0) ||
+      (timestamp(right.receivedAt) ?? 0) -
+        (timestamp(left.receivedAt) ?? 0) ||
       right.unitCostKrw - left.unitCostKrw,
   );
 }
@@ -276,7 +283,9 @@ function buildGoodsKeyProposals(input: {
     .map(([goodsKey, rows]): ReceiptLivePriceGoodsKeyProposal => {
       const ownerBarcodes = [...(owners.get(goodsKey) ?? new Set<string>())].sort();
       const plannedBarcodes = [...new Set(rows.map((row) => row.barcode))].sort();
-      const eventBarcodes = ownerBarcodes.filter((barcode) => input.eventBarcodes.has(barcode));
+      const eventBarcodes = ownerBarcodes.filter((barcode) =>
+        input.eventBarcodes.has(barcode),
+      );
       const changed = rows.filter((row) => row.priceChangeRequired);
       const blockedRows = rows.filter((row) => row.blockedReasons.length > 0);
       const bps = [...new Set(changed.map((row) => row.adjustmentBps))];
@@ -332,7 +341,9 @@ export function buildReceiptLivePriceProposal(input: {
   generatedAt?: string;
 }): ReceiptLivePriceProposal {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const eventBarcodes = new Set(input.event.barcodes.map(barcodeKey).filter(Boolean));
+  const eventBarcodes = new Set(
+    input.event.barcodes.map(barcodeKey).filter(Boolean),
+  );
   const sourceRows = input.receiptSource.rows;
   if (input.receiptSource.batchId !== input.event.batchId) {
     throw new Error("RECEIPT_PROPOSAL_BATCH_SOURCE_MISMATCH");
@@ -343,8 +354,14 @@ export function buildReceiptLivePriceProposal(input: {
   if (foreignSourceBarcode) {
     throw new Error(`RECEIPT_PROPOSAL_FOREIGN_BARCODE:${foreignSourceBarcode}`);
   }
-  if (integer(input.event.totals.good) > 0 && !sourceRows.length) {
-    throw new Error("RECEIPT_PROPOSAL_GOOD_RECEIPT_SOURCE_EMPTY");
+  const exactReceiptGoodQuantity = sourceRows.reduce(
+    (sum, row) => sum + integer(row.quantity),
+    0,
+  );
+  if (exactReceiptGoodQuantity !== integer(input.event.totals.good)) {
+    throw new Error(
+      `RECEIPT_PROPOSAL_GOOD_QUANTITY_MISMATCH:${exactReceiptGoodQuantity}:${integer(input.event.totals.good)}`,
+    );
   }
 
   const currentBatchByBarcode = aggregateBatchReceipts(sourceRows);
@@ -401,7 +418,8 @@ export function buildReceiptLivePriceProposal(input: {
     const row = liveByBarcode.get(barcode);
     return !row || row.state !== "READY";
   });
-  const structuralBlocked = missingPriceInputs.length > 0 || missingLive.length > 0;
+  const structuralBlocked =
+    missingPriceInputs.length > 0 || missingLive.length > 0;
   const state: ReceiptLivePriceProposal["state"] = structuralBlocked
     ? eligibleGoodsKeyCount > 0
       ? "PARTIAL"
@@ -418,6 +436,8 @@ export function buildReceiptLivePriceProposal(input: {
     eventId: input.event.eventId,
     receiptId: input.event.receiptId,
     batchId: input.event.batchId,
+    eventGoodQuantity: integer(input.event.totals.good),
+    exactReceiptGoodQuantity,
     sourceMode: input.receiptSource.sourceMode,
     sourceRows: sourceRows.map((row) => ({
       id: row.id,
@@ -454,6 +474,8 @@ export function buildReceiptLivePriceProposal(input: {
     receiptId: input.event.receiptId,
     batchId: input.event.batchId,
     eventOccurredAt: input.event.occurredAt,
+    eventGoodQuantity: integer(input.event.totals.good),
+    exactReceiptGoodQuantity,
     sourceMode: input.receiptSource.sourceMode,
     exactReceiptRowCount: sourceRows.length,
     exactReceiptBarcodeCount: affectedBarcodes.size,
