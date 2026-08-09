@@ -1,5 +1,4 @@
 import { Suspense, type ReactNode } from "react";
-import { DetailPageCompilerParallelWorkers } from "@/components/DetailPageCompilerParallelWorkers";
 import { OpsAiHelpDesk } from "@/components/OpsAiHelpDesk";
 import { OpsCategoryUpdateCancelControl } from "@/components/OpsCategoryUpdateCancelControl";
 import { OpsLocalCategoryStatusBridge } from "@/components/OpsLocalCategoryStatusBridge";
@@ -31,7 +30,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
         <>
           <OpsLocalCategoryStatusBridge />
           <OpsWorkAssistant />
-          <DetailPageCompilerParallelWorkers />
           <OpsCategoryUpdateCancelControl />
         </>
       ) : null}
