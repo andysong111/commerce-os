@@ -1,0 +1,35 @@
+name: Stage8 China Confirmed Receipt Coverage CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  receipt-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint receipt coverage files
+        run: >-
+          npx eslint
+          src/lib/confirmedReceiptHistorySource.ts
+          src/lib/stage8ChinaConfirmedReceiptCoverage.ts
+          src/app/stage8-china-confirmed-receipt-coverage/page.tsx
+      - name: Test receipt coverage safety
+        run: node --experimental-strip-types --test tests/stage8ChinaConfirmedReceiptCoverage.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-receipt-coverage-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_receipt_coverage_build
+          CHINA_ORDER_MANAGER_INTEGRATION_SECRET: ci-china-secret
+          PRODUCT_MASTER_INTEGRATION_SECRET: ci-product-master-secret
