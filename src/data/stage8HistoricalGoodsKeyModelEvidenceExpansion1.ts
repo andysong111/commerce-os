@@ -2,6 +2,7 @@ import type { HistoricalGoodsKeyModelEvidence } from "@/data/stage8HistoricalGoo
 
 const PRICE_COMPARE_SOURCE = "2차_샵플링_현재가_마진보호_비교결과_최종정정.xlsx";
 const GROUP_POLICY_SOURCE = "상품그룹_가격정책_재산출_검증내역.xlsx";
+const SAFE_DISCOUNT_SOURCE = "가격인하_고신뢰도_안전후보_검증내역.xlsx";
 
 const EVIDENCE: HistoricalGoodsKeyModelEvidence[] = [
   {
@@ -58,8 +59,8 @@ const EVIDENCE: HistoricalGoodsKeyModelEvidence[] = [
     goodsKey: "119409",
     originalModelNo: "aaa266",
     originalModelName: "대쉬보드 거치대 A형",
-    sourceArtifact: GROUP_POLICY_SOURCE,
-    sourceSheet: "가격인하 안전후보 계열",
+    sourceArtifact: SAFE_DISCOUNT_SOURCE,
+    sourceSheet: "정책유지 안전인하",
     evidenceKind: "ORIGINAL_SHOPLING_MODEL_NO",
     pricingCrossMatchModelNo: null,
     note: "BGB1-1 차량용 대쉬보드 거치대 계열",
@@ -78,8 +79,8 @@ const EVIDENCE: HistoricalGoodsKeyModelEvidence[] = [
     goodsKey: "119374",
     originalModelNo: "aaa269",
     originalModelName: "큐빅 고리링 25MM 골드",
-    sourceArtifact: GROUP_POLICY_SOURCE,
-    sourceSheet: "가격인하 고신뢰 안전후보",
+    sourceArtifact: SAFE_DISCOUNT_SOURCE,
+    sourceSheet: "정책유지 안전인하",
     evidenceKind: "ORIGINAL_SHOPLING_MODEL_NO",
     pricingCrossMatchModelNo: null,
     note: "BCC6-2 큐빅 고리링 25MM 계열",
