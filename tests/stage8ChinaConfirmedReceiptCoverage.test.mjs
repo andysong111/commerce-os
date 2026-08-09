@@ -43,6 +43,17 @@ test("coverage loads candidates first and sends only those B-codes to China", ()
   assert.match(page, /FILTER CONTRACT VERIFIED · FOREIGN BARCODE ROWS 0/);
 });
 
+test("source failures are converted into a blocked no-write report instead of a server error", () => {
+  assert.match(audit, /try \{[\s\S]*loadConfirmedReceiptHistorySource\(candidateBarcodeList\)/);
+  assert.match(audit, /state: "BLOCKED_SOURCE_UNAVAILABLE"/);
+  assert.match(audit, /safeSourceErrorCode/);
+  assert.match(audit, /sourceAvailable: false/);
+  assert.match(audit, /filterContractVerified: false/);
+  assert.match(page, /SOURCE ERROR/);
+  assert.match(page, /FILTER CONTRACT NOT VERIFIED · SOURCE DATA NOT USED/);
+  assert.match(page, /0건을 실제 0으로 해석하지 않습니다/);
+});
+
 test("coverage audit still distinguishes sync gaps mismatches parity and no receipts", () => {
   assert.match(audit, /SOURCE_SYNC_GAP/);
   assert.match(audit, /QUANTITY_MISMATCH/);
