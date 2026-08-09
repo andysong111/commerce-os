@@ -1,0 +1,32 @@
+name: Stage8 Provisional Estimate Candidate CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  estimate-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint provisional estimate files
+        run: >-
+          npx eslint
+          src/lib/stage8ProvisionalEstimateCandidate.ts
+          src/app/stage8-provisional-estimate-candidate/page.tsx
+      - name: Test provisional estimate safety
+        run: node --experimental-strip-types --test tests/stage8ProvisionalEstimateCandidate.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-provisional-estimate-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_provisional_estimate_build
