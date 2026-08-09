@@ -95,7 +95,7 @@ export async function loadProvisionalInventoryBandValidation(): Promise<Provisio
   const cumulativeRow = cumulative.rows.find(
     (row) => normalizeBarcode(row.barcode) === TARGET_BARCODE,
   ) ?? null;
-  const purchase = purchaseShadow.snapshot?.products.find(
+  const purchase = purchaseShadow.snapshot?.products?.find(
     (row) => normalizeBarcode(row.barcode) === TARGET_BARCODE,
   ) ?? null;
   const profile = planning.products.find(
