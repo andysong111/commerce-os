@@ -10,6 +10,7 @@ import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
 export type InventoryOperatingMode =
   | "VERIFIED"
   | "PROVISIONAL"
+  | "PROVISIONAL_UNSEEDED"
   | "REVIEW"
   | "MISSING";
 
@@ -40,6 +41,7 @@ export type InventoryVerificationPriorityRow = {
   action:
     | "NONE"
     | "LEDGER_REVIEW_REQUIRED"
+    | "PROVISIONAL_ESTIMATE_REQUIRED"
     | "COST_CONFIRMATION_REQUIRED";
   operationallyReady: boolean;
 };
@@ -54,6 +56,7 @@ export type InventoryVerificationPriority = {
   operationallyReadyPurchaseCount: number;
   blockedPurchaseRecommendationCount: number;
   provisionalPurchaseCount: number;
+  unseededProvisionalPurchaseCount: number;
   verifiedPurchaseCount: number;
   reviewInventoryCount: number;
   totalExpectedSpend: number;
@@ -103,6 +106,7 @@ function inventoryMode(
     return "REVIEW";
   }
   if (row.inventoryVerified) return "VERIFIED";
+  if (row.initialZeroUnverified) return "PROVISIONAL_UNSEEDED";
   return "PROVISIONAL";
 }
 
@@ -110,6 +114,9 @@ function actionFor(row: ProductMasterInventoryCostRow | undefined) {
   const mode = inventoryMode(row);
   if (mode === "MISSING" || mode === "REVIEW") {
     return "LEDGER_REVIEW_REQUIRED" as const;
+  }
+  if (mode === "PROVISIONAL_UNSEEDED") {
+    return "PROVISIONAL_ESTIMATE_REQUIRED" as const;
   }
   if (!row?.hasConfirmedReceiptCost) {
     return "COST_CONFIRMATION_REQUIRED" as const;
@@ -255,7 +262,7 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
     generatedAt: new Date().toISOString(),
     state: structuralReady ? "READY" : "BLOCKED",
     message: structuralReady
-      ? "초기 0은 실제 0으로 확정하지 않고 PROVISIONAL 추정재고로 사용합니다. 확정입고는 추정재고와 원가에 즉시 반영하고, 품절 확인 시 SOLD_OUT_RESET=0부터 VERIFIED 원장으로 전환합니다. 재고실사는 운영 필수조건이 아닙니다."
+      ? "INITIAL_ZERO의 0은 실제재고도 추정재고도 아닌 미설정 값입니다. 따라서 PROVISIONAL_UNSEEDED로 분리하고, 디지털 추정재고가 만들어지기 전에는 운영 발주를 차단합니다. 전수 재고실사는 요구하지 않으며, 품절 확인 시 SOLD_OUT_RESET=0부터 VERIFIED 원장으로 전환합니다."
       : "Canonical 발주 shadow·Product Master 재고원장·planning 연결이 완전하지 않아 발주 수량을 확정하지 않습니다.",
     purchaseShadowReady: purchaseShadow.shadowReady,
     managedActiveSkuCount: inventoryReadiness.summary.managedActiveSkuCount,
@@ -263,7 +270,12 @@ export async function loadInventoryVerificationPriority(): Promise<InventoryVeri
     operationallyReadyPurchaseCount: readyRows.length,
     blockedPurchaseRecommendationCount: purchaseRows.length - readyRows.length,
     provisionalPurchaseCount: purchaseRows.filter(
-      (row) => row.inventoryMode === "PROVISIONAL",
+      (row) =>
+        row.inventoryMode === "PROVISIONAL" ||
+        row.inventoryMode === "PROVISIONAL_UNSEEDED",
+    ).length,
+    unseededProvisionalPurchaseCount: purchaseRows.filter(
+      (row) => row.inventoryMode === "PROVISIONAL_UNSEEDED",
     ).length,
     verifiedPurchaseCount: purchaseRows.filter(
       (row) => row.inventoryMode === "VERIFIED",
