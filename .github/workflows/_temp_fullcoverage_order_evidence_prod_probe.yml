@@ -1,0 +1,45 @@
+name: Temporary Full-Coverage Historical Order Evidence Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for production full-coverage order evidence page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-fullcoverage-historical-order-evidence'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:500000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '완전증거 모델의 과거 중국발주이력 연결'; then
+              echo '--- FULL-COVERAGE HISTORICAL ORDER EVIDENCE PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q 'ORDER HISTORY ≠ CONFIRMED INBOUND ≠ CURRENT INVENTORY'
+              echo "$text" | grep -q 'PURCHASE / INVENTORY WRITE 0'
+              echo "$text" | grep -q 'BBA2-3'
+              echo "$text" | grep -q 'aaa092'
+              echo "$text" | grep -q '4,980'
+              echo "$text" | grep -q '4,370'
+              echo "$text" | grep -q '1,050'
+              echo "$text" | grep -q 'ORDER_HISTORY_READY_NOT_INBOUND'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
