@@ -1,0 +1,32 @@
+name: Stage8 China Auth Layer Probe CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  auth-layer-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint auth-layer probe files
+        run: >-
+          npx eslint
+          src/lib/stage8ChinaAuthLayerProbe.ts
+          src/app/stage8-china-auth-layer-probe/page.tsx
+      - name: Test auth-layer probe safety
+        run: node --experimental-strip-types --test tests/stage8ChinaAuthLayerProbe.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-auth-layer-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_auth_layer_build
