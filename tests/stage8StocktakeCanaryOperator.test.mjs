@@ -15,6 +15,15 @@ test("operator bridge is pinned to the deterministic first stocktake canary", ()
   assert.match(lib, /canaryEligible/);
 });
 
+test("operator bridge signs the exact one-row request with the existing integration secret", () => {
+  assert.match(lib, /createHmac\("sha256", secret\)/);
+  assert.match(lib, /commerce-os-stocktake-canary-v1/);
+  assert.match(lib, /x-commerce-os-stocktake-canary-signature/);
+  assert.match(lib, /physicalQuantity/);
+  assert.match(lib, /expectedInventoryGuard/);
+  assert.match(lib, /expectedPlanFingerprint/);
+});
+
 test("operator bridge can write at most one Product Master stocktake and no business action", () => {
   assert.match(lib, /api\/integrations\/stocktake-canary/);
   assert.match(route, /maxWriteRows: 1/);
@@ -31,7 +40,7 @@ test("POST is same-origin and requires explicit one-row confirmation", () => {
   assert.match(route, /STOCKTAKE_CANARY_CONFIRMATION_REQUIRED/);
 });
 
-test("operator page asks only for physical quantity and keeps write gate visible", () => {
+test("operator page asks only for physical quantity and keeps fail-closed state visible", () => {
   assert.match(page, /창고에서 직접 센 실물 수량/);
   assert.match(page, /physicalQuantity/);
   assert.match(page, /WRITE_GATE_OFF/);
