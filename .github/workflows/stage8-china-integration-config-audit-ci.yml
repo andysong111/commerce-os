@@ -1,0 +1,33 @@
+name: Stage8 China Integration Config Audit CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint config audit files
+        run: >-
+          npx eslint
+          src/lib/stage8ChinaIntegrationConfigAudit.ts
+          src/app/stage8-china-integration-config-audit/page.tsx
+      - name: Test config audit safety
+        run: node --experimental-strip-types --test tests/stage8ChinaIntegrationConfigAudit.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-china-config-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_china_config_build
+          CHINA_ORDER_MANAGER_INTEGRATION_SECRET: ci-china-secret
