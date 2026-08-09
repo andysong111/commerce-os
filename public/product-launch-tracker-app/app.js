@@ -14,6 +14,7 @@ function signalDetailPageWorkerReady() {
 }
 
 if (detailPageMode === "worker") {
+  await import("./detail-page-product-scope.js");
   await import("./detail-page-dock.js");
   await import("./detail-page-dock-repair.js");
   signalDetailPageWorkerReady();
@@ -35,6 +36,7 @@ if (detailPageMode === "worker") {
   await import("./dialog-close-fix.js");
   await import("./table-inline-ops-loader.js");
   await import("./table-frozen-columns-fix.js");
+  await import("./detail-page-product-scope.js");
   await import("./detail-page-dock.js");
   await import("./detail-page-dock-repair.js");
   await import("./detail-page-option-guard.js");
