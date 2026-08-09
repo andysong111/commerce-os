@@ -17,41 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Print two production preflight fingerprints
+      - name: Print current production preflight
         run: |
           set -euo pipefail
           url='https://commerce-os-ops-center.vercel.app/stage8-stocktake-canary-preflight'
-          fetch_text() {
-            local body
-            body="$(mktemp)"
-            local code
-            code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url")"
-            echo "HTTP=$code" >&2
-            cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])'
-          }
-          extract_fp() {
-            printf '%s' "$1" | grep -oE 'Plan fingerprint · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Plan fingerprint · //' || true
-          }
-          extract_guard() {
-            printf '%s' "$1" | grep -oE 'Inventory guard · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Inventory guard · //' || true
-          }
-          text1="$(fetch_text)"
-          sleep 7
-          text2="$(fetch_text)"
-          fp1="$(extract_fp "$text1")"
-          fp2="$(extract_fp "$text2")"
-          guard1="$(extract_guard "$text1")"
-          guard2="$(extract_guard "$text2")"
-          echo "PLAN_1=$fp1"
-          echo "PLAN_2=$fp2"
-          echo "GUARD_1=$guard1"
-          echo "GUARD_2=$guard2"
-          echo "STATE_1=$(printf '%s' "$text1" | grep -oE '상태 (READY_FOR_PHYSICAL_COUNT|NO_CANDIDATE|BLOCKED)' | head -1 || true)"
-          echo "STATE_2=$(printf '%s' "$text2" | grep -oE '상태 (READY_FOR_PHYSICAL_COUNT|NO_CANDIDATE|BLOCKED)' | head -1 || true)"
-          echo "CANARY_1=$(printf '%s' "$text1" | grep -oE 'Canary B-code [A-Z0-9-]+' | head -1 || true)"
-          echo "CANARY_2=$(printf '%s' "$text2" | grep -oE 'Canary B-code [A-Z0-9-]+' | head -1 || true)"
-          if [ -n "$fp1" ] && [ "$fp1" = "$fp2" ] && [ -n "$guard1" ] && [ "$guard1" = "$guard2" ]; then
-            echo 'STABLE=true'
-          else
-            echo 'STABLE=false'
-          fi
+          body="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url")"
+          text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])')"
+          echo "HTTP=$code"
+          echo '--- CURRENT PREFLIGHT ---'
+          echo "$text"
+          echo "PLAN=$(printf '%s' "$text" | grep -oE 'Plan fingerprint · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Plan fingerprint · //' || true)"
+          echo "GUARD=$(printf '%s' "$text" | grep -oE 'Inventory guard · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Inventory guard · //' || true)"
+          test "$code" = '200'
