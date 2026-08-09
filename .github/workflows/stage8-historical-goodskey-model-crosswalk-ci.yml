@@ -1,0 +1,33 @@
+name: Stage8 Historical GoodsKey Model Crosswalk CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crosswalk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint crosswalk files
+        run: >-
+          npx eslint
+          src/data/stage8HistoricalGoodsKeyModelEvidence.ts
+          src/lib/stage8HistoricalGoodsKeyModelCrosswalk.ts
+          src/app/stage8-historical-goodskey-model-crosswalk/page.tsx
+      - name: Test crosswalk safety
+        run: node --experimental-strip-types --test tests/stage8HistoricalGoodsKeyModelCrosswalk.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-historical-crosswalk-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_historical_crosswalk_build
