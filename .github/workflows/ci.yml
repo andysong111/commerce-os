@@ -49,6 +49,7 @@ jobs:
           src/lib/stage8CandidatePromotionGate.ts
           src/lib/stage8PostApplyCanonicalReconciliation.ts
           src/lib/stage8InventoryVerificationPriority.ts
+          src/lib/shopling/shoplingCurrentPriceResolver.ts
           src/lib/shopling/shoplingCurrentPrice.ts
           src/lib/stage8ShoplingReceiptPriceReadiness.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
