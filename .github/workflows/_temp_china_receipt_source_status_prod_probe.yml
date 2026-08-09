@@ -1,0 +1,50 @@
+name: Temporary China Receipt Source Status Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production China receipt source status page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-china-confirmed-receipt-coverage'
+          ready=0
+          for i in $(seq 1 60); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:700000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '발주후보 중국 확정입고 원장 직접대조'; then
+              echo '--- CHINA RECEIPT SOURCE STATUS PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q 'PURCHASE / INVENTORY WRITE 0'
+              echo "$text" | grep -q '대상 B-code 42'
+              if echo "$text" | grep -q 'READY_READ_ONLY'; then
+                echo 'SOURCE_STATUS=READY_READ_ONLY'
+                echo "$text" | grep -q 'FILTER CONTRACT VERIFIED · FOREIGN BARCODE ROWS 0'
+              elif echo "$text" | grep -q 'BLOCKED_SOURCE_UNAVAILABLE'; then
+                echo 'SOURCE_STATUS=BLOCKED_SOURCE_UNAVAILABLE'
+                echo "$text" | grep -q 'FILTER CONTRACT NOT VERIFIED · SOURCE DATA NOT USED'
+                echo "$text" | grep -q 'SOURCE ERROR'
+              else
+                echo 'unexpected source state'
+                exit 1
+              fi
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" = '1'
