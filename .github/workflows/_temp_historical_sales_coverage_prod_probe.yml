@@ -1,0 +1,39 @@
+name: Temporary Historical Sales Coverage Production Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production historical sales coverage page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-historical-sales-coverage-audit'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:260000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '24개월 과거 판매증거 재사용 점검'; then
+              echo '--- HISTORICAL SALES COVERAGE AUDIT ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '비즈니스 write 0 · READ ONLY'
+              echo "$text" | grep -q '재고 write 0 · READ ONLY'
+              echo "$text" | grep -q 'BGG1-1'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
