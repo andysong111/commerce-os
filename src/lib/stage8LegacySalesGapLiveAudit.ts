@@ -372,7 +372,7 @@ export async function loadLegacySalesGapLiveAudit(): Promise<LegacySalesGapLiveA
       targetBarcode: TARGET_BARCODE,
       scanStart: SCAN_START,
       scanEnd,
-      planningFingerprint: planning.fingerprint,
+      planningFingerprint: planning.contentFingerprint,
       canonicalFingerprint: canonical.snapshot?.contentFingerprint ?? null,
       results,
     }),
