@@ -34,13 +34,16 @@ export type ChinaConfirmedReceiptCoverageRow = {
 
 export type ChinaConfirmedReceiptCoverage = {
   generatedAt: string;
-  state: "READY_READ_ONLY" | "BLOCKED";
+  state: "READY_READ_ONLY" | "BLOCKED_SOURCE_UNAVAILABLE" | "BLOCKED";
   message: string;
+  sourceAvailable: boolean;
+  sourceErrorCode: string | null;
   sourceMode: string;
   sourcePageCount: number;
   sourceReceiptRowCount: number;
   sourceReceiptQuantity: number;
   targetedBarcodeCount: number;
+  filterContractVerified: boolean;
   foreignBarcodeRowCount: 0;
   purchaseCandidateCount: number;
   candidateWithChinaReceiptCount: number;
@@ -75,6 +78,12 @@ function sha256(value: unknown) {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
+function safeSourceErrorCode(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const prefix = message.split(":", 1)[0]?.trim().toUpperCase() ?? "";
+  return /^[A-Z0-9_]+$/.test(prefix) ? prefix : "CHINA_RECEIPT_SOURCE_UNAVAILABLE";
+}
+
 export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirmedReceiptCoverage> {
   const [candidates, productMaster] = await Promise.all([
     loadPurchaseCandidateShoplingIdentityAudit(),
@@ -85,10 +94,63 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
     .filter(Boolean)
     .sort();
   if (!candidateBarcodeList.length) {
-    throw new Error("CHINA_RECEIPT_COVERAGE_CANDIDATE_SCOPE_EMPTY");
+    return blockedStructuralReport({
+      candidateCount: 0,
+      productMasterFingerprint: productMaster.contentFingerprint,
+      candidateFingerprint: candidates.fingerprint,
+      message: "현재 발주후보 B-code 범위가 비어 있어 중국 확정입고 감사를 시작하지 않습니다.",
+    });
   }
+
+  let source: Awaited<ReturnType<typeof loadConfirmedReceiptHistorySource>>;
+  try {
+    source = await loadConfirmedReceiptHistorySource(candidateBarcodeList);
+  } catch (error) {
+    const sourceErrorCode = safeSourceErrorCode(error);
+    return {
+      generatedAt: new Date().toISOString(),
+      state: "BLOCKED_SOURCE_UNAVAILABLE",
+      message: "중국 확정입고 읽기 전용 소스가 현재 응답하지 않아 감사를 fail-closed로 중단했습니다. Product Master 재고·원가·발주 상태는 변경하지 않습니다.",
+      sourceAvailable: false,
+      sourceErrorCode,
+      sourceMode: "UNAVAILABLE",
+      sourcePageCount: 0,
+      sourceReceiptRowCount: 0,
+      sourceReceiptQuantity: 0,
+      targetedBarcodeCount: candidateBarcodeList.length,
+      filterContractVerified: false,
+      foreignBarcodeRowCount: 0,
+      purchaseCandidateCount: candidateBarcodeList.length,
+      candidateWithChinaReceiptCount: 0,
+      candidateWithProductMasterReceiptCount: candidates.rows.filter(
+        (candidate) => {
+          const pm = productMaster.rows.find(
+            (row) => barcode(row.barcode) === barcode(candidate.barcode),
+          );
+          return positiveNumber(pm?.receiptQuantityTotal) > 0;
+        },
+      ).length,
+      parityCount: 0,
+      sourceSyncGapCount: 0,
+      quantityMismatchCount: 0,
+      noConfirmedReceiptCount: 0,
+      fingerprint: sha256({
+        state: "BLOCKED_SOURCE_UNAVAILABLE",
+        sourceErrorCode,
+        candidateBarcodeList,
+        productMasterFingerprint: productMaster.contentFingerprint,
+        candidateFingerprint: candidates.fingerprint,
+      }),
+      sourceWritesEnabled: false,
+      currentInventoryPromotionAllowed: false,
+      purchaseDecisionAllowed: false,
+      purchaseWritesEnabled: false,
+      inventoryWritesEnabled: false,
+      rows: [],
+    };
+  }
+
   const candidateBarcodes = new Set(candidateBarcodeList);
-  const source = await loadConfirmedReceiptHistorySource(candidateBarcodeList);
   const filteredBarcodes = source.filter.barcodes;
   if (
     filteredBarcodes.length !== candidateBarcodeList.length ||
@@ -190,7 +252,7 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
         left.barcode.localeCompare(right.barcode),
     );
 
-  const ready =
+  const structuralReady =
     candidates.state === "READY_READ_ONLY" &&
     productMaster.rows.length > 0;
   const stable = rows.map((row) => ({
@@ -210,10 +272,12 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
 
   return {
     generatedAt: new Date().toISOString(),
-    state: ready ? "READY_READ_ONLY" : "BLOCKED",
-    message: ready
+    state: structuralReady ? "READY_READ_ONLY" : "BLOCKED",
+    message: structuralReady
       ? "중국 발주·입고 관리의 확정입고 API를 현재 42개 발주후보 B-code로 서버측 필터링해 Product Master receipt 원장과 직접 대조합니다. 전체 입고이력을 훑지 않고 필요한 B-code만 조회하며, 중국 확정입고가 Product Master에 빠져 있다면 SOURCE_SYNC_GAP으로 드러냅니다. 이 감사 자체는 초기 미확인 재고를 VERIFIED로 승격하거나 실제 발주를 실행하지 않습니다."
       : "현재 발주후보 또는 Product Master 원장이 준비되지 않아 확정입고 커버리지 감사를 운영 판단에 사용하지 않습니다.",
+    sourceAvailable: true,
+    sourceErrorCode: null,
     sourceMode: source.sourceMode,
     sourcePageCount: source.pageCount,
     sourceReceiptRowCount: source.rows.length,
@@ -222,6 +286,7 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
       0,
     ),
     targetedBarcodeCount: source.filter.barcodes.length,
+    filterContractVerified: true,
     foreignBarcodeRowCount: 0,
     purchaseCandidateCount: rows.length,
     candidateWithChinaReceiptCount: rows.filter(
@@ -252,6 +317,47 @@ export async function loadChinaConfirmedReceiptCoverage(): Promise<ChinaConfirme
     purchaseWritesEnabled: false,
     inventoryWritesEnabled: false,
     rows,
+  };
+}
+
+function blockedStructuralReport(input: {
+  candidateCount: number;
+  productMasterFingerprint: string;
+  candidateFingerprint: string;
+  message: string;
+}): ChinaConfirmedReceiptCoverage {
+  return {
+    generatedAt: new Date().toISOString(),
+    state: "BLOCKED",
+    message: input.message,
+    sourceAvailable: false,
+    sourceErrorCode: null,
+    sourceMode: "NOT_ATTEMPTED",
+    sourcePageCount: 0,
+    sourceReceiptRowCount: 0,
+    sourceReceiptQuantity: 0,
+    targetedBarcodeCount: input.candidateCount,
+    filterContractVerified: false,
+    foreignBarcodeRowCount: 0,
+    purchaseCandidateCount: input.candidateCount,
+    candidateWithChinaReceiptCount: 0,
+    candidateWithProductMasterReceiptCount: 0,
+    parityCount: 0,
+    sourceSyncGapCount: 0,
+    quantityMismatchCount: 0,
+    noConfirmedReceiptCount: 0,
+    fingerprint: sha256({
+      state: "BLOCKED",
+      candidateCount: input.candidateCount,
+      productMasterFingerprint: input.productMasterFingerprint,
+      candidateFingerprint: input.candidateFingerprint,
+    }),
+    sourceWritesEnabled: false,
+    currentInventoryPromotionAllowed: false,
+    purchaseDecisionAllowed: false,
+    purchaseWritesEnabled: false,
+    inventoryWritesEnabled: false,
+    rows: [],
   };
 }
 
