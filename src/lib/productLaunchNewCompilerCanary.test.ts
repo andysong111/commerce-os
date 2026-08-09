@@ -2,17 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const createRoute = readFileSync(
-  new URL(
-    "../app/api/product-launch-tracker/detail-page-jobs/route.ts",
-    import.meta.url,
-  ),
+  new URL("../app/api/product-launch-tracker/detail-page-jobs/route.ts", import.meta.url),
   "utf8",
 );
 const startRoute = readFileSync(
-  new URL(
-    "../app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts",
-    import.meta.url,
-  ),
+  new URL("../app/api/product-launch-tracker/detail-page-jobs/[jobId]/start/route.ts", import.meta.url),
   "utf8",
 );
 const page = readFileSync(
@@ -20,10 +14,7 @@ const page = readFileSync(
   "utf8",
 );
 const control = readFileSync(
-  new URL(
-    "../components/product-launch-flow/ProductLaunchEvidenceCompilerCanary.tsx",
-    import.meta.url,
-  ),
+  new URL("../components/product-launch-flow/ProductLaunchEvidenceCompilerCanary.tsx", import.meta.url),
   "utf8",
 );
 const appShell = readFileSync(
@@ -34,72 +25,24 @@ const parallelWorkers = readFileSync(
   new URL("../components/DetailPageCompilerParallelWorkers.tsx", import.meta.url),
   "utf8",
 );
-const dock = readFileSync(
-  new URL("../../public/product-launch-tracker-app/detail-page-dock.js", import.meta.url),
-  "utf8",
-);
 
-describe("Product Launch multi-item Evidence Compiler", () => {
-  it("persists Compiler intent and explicit collection slot on every durable job", () => {
-    expect(createRoute).toContain("compilerCanary: boolean");
-    expect(createRoute).toContain("compilerWorkerSlot: number | null");
-    expect(createRoute).toContain("body?.compilerCanary === true");
+describe("Retired Product Launch Evidence Compiler canary UI", () => {
+  it("keeps Compiler backend compatibility for old jobs without exposing the Product Launch trigger", () => {
     expect(createRoute).toContain("compiler_canary: input.compilerCanary");
-    expect(createRoute).toContain("compiler_worker_slot: input.compilerWorkerSlot");
-    expect(createRoute).toContain("compiler_canary_created_at");
-    expect(control).toContain("compilerCanary: true");
-    expect(control).toContain(
-      "compilerWorkerSlot = batchIndex % DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE",
-    );
-  });
-
-  it("keeps a non-terminal persisted Compiler job on the Compiler worker", () => {
-    expect(startRoute).toContain("const persistedCompilerCanary =");
     expect(startRoute).toContain("job.payload.compiler_canary === true");
-    expect(startRoute).toContain(
-      "const compilerCanary = explicitCompilerCanary || persistedCompilerCanary",
-    );
-    expect(startRoute).toContain(
-      'workerUrl.searchParams.set(COMPILER_CANARY_PARAMETER, "1")',
-    );
-  });
-
-  it("accepts one or more checked products instead of requiring exactly one", () => {
-    expect(page).toContain("ProductLaunchEvidenceCompilerCanary");
     expect(control).toContain("Evidence Compiler v1 · 다중 신규 생성");
-    expect(control).toContain('if (!selectedIds.length)');
-    expect(control).not.toContain("selectedIds.length !== 1");
-    expect(control).toContain("체크 상품 Compiler 생성");
-    expect(control).toContain("mapWithConcurrency");
-    expect(control).toContain("activeItemIds");
-    expect(control).toContain("이미 진행 중");
+    expect(page).not.toContain("ProductLaunchEvidenceCompilerCanary");
   });
 
-  it("mounts two extra collectors and routes the first three Compiler jobs to distinct persisted slots", () => {
-    expect(appShell).toContain("DetailPageCompilerParallelWorkers");
+  it("keeps archived parallel worker code but does not mount it in the global app shell", () => {
     expect(parallelWorkers).toContain("DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE - 1");
-    expect(parallelWorkers).toContain("compiler_worker_slot=${slot}");
-    expect(parallelWorkers).toContain("compiler_worker_slots=${DETAIL_PAGE_COMPILER_WORKER_POOL_SIZE}");
-    expect(dock).toContain("COMPILER_WORKER_SLOT_RAW");
-    expect(dock).toContain("compilerWorkerSlotForItem");
-    expect(dock).toContain("persistedCompilerWorkerSlot");
-    expect(dock).toContain("job?.payload?.compiler_canary === true");
-    expect(dock).toContain("function workerOwnsJob(job)");
-    expect(dock).toContain("if (!isCompilerJob(job)) return !COMPILER_WORKER_EXPLICIT");
-    expect(dock).toContain(
-      "persistedSlot ?? compilerWorkerSlotForItem(job?.itemId)",
-    );
-    expect(dock).toContain("!workerOwnsJob(server)");
-    expect(dock).toContain("if (!workerOwnsJob(job)) continue");
+    expect(appShell).not.toContain("DetailPageCompilerParallelWorkers");
   });
 
-  it("preserves existing product detail assets until each new job reaches normal final_complete docking", () => {
-    expect(control).toContain("detailPageAutomation: automation");
-    expect(control).not.toContain("detailPageAsset:");
-    expect(control).toContain("기존 상품상세 이미지/HTML은 각 새 결과가 최종 PASS할 때만 교체됩니다.");
-  });
-
-  it("keeps normal selection generation explicitly labeled as the v3 rollback path", () => {
-    expect(control).toContain("일반 ‘선택 상세페이지 생성’은 v3 롤백 경로로 유지합니다.");
+  it("keeps the normal Product Launch tracker and selected-detail-page workflow mounted", () => {
+    expect(page).toContain('title="신규 상품 출시 진행관리"');
+    expect(page).toContain('detail_page_mode: "client"');
+    expect(page).toContain("ProductLaunchTrackerCanonicalPriceBridge");
+    expect(page).toContain("ProductMasterSyncButton");
   });
 });
