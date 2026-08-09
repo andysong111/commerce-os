@@ -48,6 +48,9 @@ jobs:
           src/lib/stage8CandidateMismatchEvidence.ts
           src/lib/stage8CandidatePromotionGate.ts
           src/lib/stage8PostApplyCanonicalReconciliation.ts
+          src/lib/stage8InventoryVerificationPriority.ts
+          src/lib/shopling/shoplingCurrentPrice.ts
+          src/lib/stage8ShoplingReceiptPriceReadiness.ts
           src/app/api/cron/product-master-shopling-sales-backfill/route.ts
           src/app/api/cron/product-master-shopling-sales-events/route.ts
           src/app/api/cron/stage8-canonical-demand-parity/route.ts
@@ -67,6 +70,8 @@ jobs:
           src/app/stage8-candidate-mismatch-evidence/page.tsx
           src/app/stage8-candidate-promotion-gate/page.tsx
           src/app/stage8-postapply-canonical-reconciliation/page.tsx
+          src/app/stage8-inventory-verification-priority/page.tsx
+          src/app/stage8-shopling-receipt-price-readiness/page.tsx
       - name: Test existing bulk safety and new engine integration
         run: >-
           node --experimental-strip-types --test
@@ -98,6 +103,9 @@ jobs:
           tests/stage8CandidateMismatchEvidence.test.mjs
           tests/stage8CandidatePromotionGate.test.mjs
           tests/stage8PostApplyCanonicalReconciliation.test.mjs
+          tests/stage8InventoryVerificationPriority.test.mjs
+          tests/shoplingCurrentPrice.test.mjs
+          tests/stage8ShoplingReceiptPriceReadiness.test.mjs
       - name: Test tracker-connected product launch flow
         run: >-
           node --experimental-strip-types --test
