@@ -8,15 +8,23 @@ const [source, audit, page] = await Promise.all([
   readFile("src/app/stage8-china-confirmed-receipt-coverage/page.tsx", "utf8"),
 ]);
 
-test("all-history receipt reader calls the existing read-only China receipt endpoint without a batch filter", () => {
-  assert.match(source, /price-adjustment-receipts\?\$\{params\.toString\(\)\}/);
-  assert.match(source, /new URLSearchParams\(\{ limit: String\(PAGE_LIMIT\) \}\)/);
-  assert.doesNotMatch(source, /params\.set\("batchId"/);
-  assert.match(source, /payload\.sourceWritesEnabled !== false/);
-  assert.match(source, /payload\.filter !== null && payload\.filter !== undefined/);
+test("receipt reader uses the dedicated bounded China B-code filter endpoint", () => {
+  assert.match(source, /confirmed-receipts-by-barcodes\?\$\{params\.toString\(\)\}/);
+  assert.match(source, /barcodes: input\.barcodes\.join\(","\)/);
+  assert.match(source, /const MAX_BARCODES = 200/);
+  assert.match(source, /const MANAGED_BARCODE = \/\^B\[A-Z\]\{2\}\\d\+-\\d\+\$\//);
+  assert.doesNotMatch(source, /price-adjustment-receipts\?\$\{params\.toString\(\)\}/);
 });
 
-test("history reader is paginated bounded and retries only known integration secrets for auth", () => {
+test("reader requires the China source to echo the exact requested barcode scope", () => {
+  assert.match(source, /exactBarcodeFilter\(payload, requested\)/);
+  assert.match(source, /CHINA_RECEIPT_HISTORY_BARCODE_FILTER_NOT_ENFORCED/);
+  assert.match(source, /requestedSet\.has\(row\.barcode\)/);
+  assert.match(source, /CHINA_RECEIPT_HISTORY_FOREIGN_BARCODE/);
+  assert.match(source, /sourceWritesEnabled: false/);
+});
+
+test("targeted reader is paginated bounded and retries only known integration secrets on auth", () => {
   assert.match(source, /const MAX_PAGES = 10/);
   assert.match(source, /const PAGE_LIMIT = 5000/);
   assert.match(source, /CHINA_ORDER_MANAGER_INTEGRATION_SECRET/);
@@ -25,10 +33,17 @@ test("history reader is paginated bounded and retries only known integration sec
   assert.match(source, /message\.startsWith\("CHINA_RECEIPT_HISTORY_AUTH:"\)/);
 });
 
-test("coverage audit compares current purchase-candidate B-codes against China and Product Master receipt quantities", () => {
-  assert.match(audit, /loadConfirmedReceiptHistorySource/);
+test("coverage loads candidates first and sends only those B-codes to China", () => {
   assert.match(audit, /loadPurchaseCandidateShoplingIdentityAudit/);
   assert.match(audit, /loadProductMasterInventoryCostReadiness/);
+  assert.match(audit, /const candidateBarcodeList = candidates\.rows/);
+  assert.match(audit, /loadConfirmedReceiptHistorySource\(candidateBarcodeList\)/);
+  assert.match(audit, /CHINA_RECEIPT_COVERAGE_FILTER_SCOPE_MISMATCH/);
+  assert.match(audit, /foreignBarcodeRowCount: 0/);
+  assert.match(page, /FILTER CONTRACT VERIFIED · FOREIGN BARCODE ROWS 0/);
+});
+
+test("coverage audit still distinguishes sync gaps mismatches parity and no receipts", () => {
   assert.match(audit, /SOURCE_SYNC_GAP/);
   assert.match(audit, /QUANTITY_MISMATCH/);
   assert.match(audit, /PARITY/);

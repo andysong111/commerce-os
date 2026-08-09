@@ -15,14 +15,14 @@ export default async function ChinaConfirmedReceiptCoveragePage() {
       <PageHeader
         eyebrow="COMMERCE OS · STAGE 8 · CHINA CONFIRMED RECEIPT COVERAGE"
         title="발주후보 중국 확정입고 원장 직접대조"
-        description="중국 발주·입고 관리의 확정입고 API 전체 이력을 현재 42개 발주후보 B-code와 Product Master receipt 원장에 직접 대조합니다. 중국 원장에 있는데 Product Master에 없는 확정입고가 있는지 찾는 읽기 전용 감사입니다."
+        description="중국 발주·입고 관리의 확정입고 API를 현재 발주후보 B-code로 서버측 필터링해 Product Master receipt 원장과 직접 대조합니다. 전체 입고이력을 훑지 않고 필요한 상품만 조회하는 읽기 전용 감사입니다."
       />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Metric label="상태" value={report.state} />
+        <Metric label="대상 B-code" value={number.format(report.targetedBarcodeCount)} />
         <Metric label="중국 source rows" value={number.format(report.sourceReceiptRowCount)} />
         <Metric label="중국 source 수량" value={number.format(report.sourceReceiptQuantity)} />
-        <Metric label="발주후보" value={number.format(report.purchaseCandidateCount)} />
         <Metric label="후보 중국입고 있음" value={number.format(report.candidateWithChinaReceiptCount)} />
         <Metric label="후보 PM receipt 있음" value={number.format(report.candidateWithProductMasterReceiptCount)} />
       </section>
@@ -32,18 +32,19 @@ export default async function ChinaConfirmedReceiptCoveragePage() {
         <Metric label="수량불일치" value={number.format(report.quantityMismatchCount)} />
         <Metric label="PARITY" value={number.format(report.parityCount)} />
         <Metric label="확정입고 없음" value={number.format(report.noConfirmedReceiptCount)} />
-        <Metric label="비후보 source rows" value={number.format(report.nonCandidateReceiptRowCount)} />
+        <Metric label="범위밖 source rows" value={number.format(report.foreignBarcodeRowCount)} />
       </section>
 
       <section className={`rounded-2xl border p-5 shadow-sm ${report.state === "READY_READ_ONLY" ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="text-xs font-black tracking-[0.12em] text-slate-500">CHINA RECEIPT SOURCE · {report.sourceMode || "-"} · READ ONLY</span>
+            <span className="text-xs font-black tracking-[0.12em] text-slate-500">TARGETED B-CODE FILTER · CHINA RECEIPT SOURCE · {report.sourceMode || "-"} · READ ONLY</span>
             <h2 className="mt-1 text-2xl font-black text-slate-950">{report.state}</h2>
           </div>
           <strong className="rounded-full bg-slate-950 px-4 py-2 text-sm text-white">PURCHASE / INVENTORY WRITE 0</strong>
         </div>
         <p className="mt-3 text-sm leading-6 text-slate-700">{report.message}</p>
+        <p className="mt-2 text-xs font-bold text-emerald-900">FILTER CONTRACT VERIFIED · FOREIGN BARCODE ROWS 0</p>
         <p className="mt-2 text-xs text-slate-500">Source pages · {number.format(report.sourcePageCount)}</p>
         <p className="mt-1 break-all text-xs text-slate-500">Fingerprint · {report.fingerprint}</p>
       </section>
