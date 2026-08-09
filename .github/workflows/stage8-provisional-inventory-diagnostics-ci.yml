@@ -1,0 +1,35 @@
+name: Stage8 Provisional Inventory Diagnostics CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provisional-inventory-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint provisional inventory diagnostic files
+        run: >-
+          npx eslint
+          src/lib/stage8CanonicalSalesEventSnapshot.ts
+          src/lib/stage8ProvisionalInventoryDiagnostics.ts
+          src/app/stage8-provisional-inventory-diagnostics/page.tsx
+      - name: Test provisional inventory diagnostic safety
+        run: node --experimental-strip-types --test tests/stage8ProvisionalInventoryDiagnostics.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://provisional-inventory-diagnostics-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_provisional_inventory_diagnostics_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
