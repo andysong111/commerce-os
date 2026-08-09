@@ -2,6 +2,8 @@ const DEFAULT_CHINA_ORDER_BASE_URL =
   "https://china-order-manager.andy123df23.chatgpt.site";
 const MAX_PAGES = 10;
 const PAGE_LIMIT = 5000;
+const MAX_BARCODES = 200;
+const MANAGED_BARCODE = /^B[A-Z]{2}\d+-\d+$/;
 const SOURCE_MODES = new Set([
   "immutable_inventory_movement",
   "legacy_confirmed_batch",
@@ -25,7 +27,7 @@ export type ConfirmedReceiptHistorySource = {
   syncedAt: string;
   pageCount: number;
   sourceWritesEnabled: false;
-  filter: null;
+  filter: { barcodes: string[] };
   rows: ConfirmedReceiptHistoryRow[];
 };
 
@@ -61,6 +63,21 @@ function iso(value: unknown) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
 }
 
+function normalizeBarcode(value: unknown) {
+  return text(value).toUpperCase().replace(/\s+/g, "");
+}
+
+function normalizeBarcodes(values: string[]) {
+  const normalized = [...new Set(values.map(normalizeBarcode).filter(Boolean))].sort();
+  if (!normalized.length || normalized.length > MAX_BARCODES) {
+    throw new Error("CHINA_RECEIPT_HISTORY_BARCODE_SCOPE_INVALID");
+  }
+  if (normalized.some((value) => !MANAGED_BARCODE.test(value))) {
+    throw new Error("CHINA_RECEIPT_HISTORY_BARCODE_INVALID");
+  }
+  return normalized;
+}
+
 function normalizeRow(value: unknown): ConfirmedReceiptHistoryRow | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
@@ -68,7 +85,7 @@ function normalizeRow(value: unknown): ConfirmedReceiptHistoryRow | null {
   const receiptId = text(row.receiptId);
   const batchId = positiveInteger(row.batchId);
   const orderItemId = positiveInteger(row.orderItemId);
-  const barcode = text(row.barcode).toUpperCase().replace(/\s+/g, "");
+  const barcode = normalizeBarcode(row.barcode);
   const quantity = positiveNumber(row.quantity);
   const unitCostKrw = Math.ceil(positiveNumber(row.unitCostKrw));
   const receivedAt = iso(row.receivedAt);
@@ -118,15 +135,33 @@ function connection() {
   return { secrets, baseUrl };
 }
 
+function exactBarcodeFilter(payload: SourcePayload, expected: string[]) {
+  const filter =
+    payload.filter && typeof payload.filter === "object" && !Array.isArray(payload.filter)
+      ? (payload.filter as Record<string, unknown>)
+      : null;
+  const actual = Array.isArray(filter?.barcodes)
+    ? normalizeBarcodes(filter.barcodes.map((value) => text(value)))
+    : [];
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
+}
+
 async function fetchPage(input: {
   baseUrl: string;
   secret: string;
+  barcodes: string[];
   since?: string;
 }) {
-  const params = new URLSearchParams({ limit: String(PAGE_LIMIT) });
+  const params = new URLSearchParams({
+    barcodes: input.barcodes.join(","),
+    limit: String(PAGE_LIMIT),
+  });
   if (input.since) params.set("since", input.since);
   const response = await fetch(
-    `${input.baseUrl}/api/integrations/price-adjustment-receipts?${params.toString()}`,
+    `${input.baseUrl}/api/integrations/confirmed-receipts-by-barcodes?${params.toString()}`,
     {
       method: "GET",
       headers: {
@@ -144,8 +179,11 @@ async function fetchPage(input: {
 async function readWithSecret(input: {
   baseUrl: string;
   secret: string;
+  barcodes: string[];
 }): Promise<ConfirmedReceiptHistorySource> {
   const rows = new Map<string, ConfirmedReceiptHistoryRow>();
+  const requested = normalizeBarcodes(input.barcodes);
+  const requestedSet = new Set(requested);
   let since = "";
   let sourceMode: ConfirmedReceiptHistorySource["sourceMode"] | null = null;
   let syncedAt = "";
@@ -153,6 +191,7 @@ async function readWithSecret(input: {
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const { response, payload } = await fetchPage({
       ...input,
+      barcodes: requested,
       since: since || undefined,
     });
     if (response.status === 401 || response.status === 403) {
@@ -166,8 +205,8 @@ async function readWithSecret(input: {
     if (payload.sourceWritesEnabled !== false) {
       throw new Error("CHINA_RECEIPT_HISTORY_WRITE_CONTRACT_INVALID");
     }
-    if (payload.filter !== null && payload.filter !== undefined) {
-      throw new Error("CHINA_RECEIPT_HISTORY_UNEXPECTED_FILTER");
+    if (!exactBarcodeFilter(payload, requested)) {
+      throw new Error("CHINA_RECEIPT_HISTORY_BARCODE_FILTER_NOT_ENFORCED");
     }
     const mode = text(payload.sourceMode);
     if (!SOURCE_MODES.has(mode)) {
@@ -183,6 +222,9 @@ async function readWithSecret(input: {
     for (const raw of rawRows) {
       const row = normalizeRow(raw);
       if (!row) throw new Error("CHINA_RECEIPT_HISTORY_ROW_INVALID");
+      if (!requestedSet.has(row.barcode)) {
+        throw new Error(`CHINA_RECEIPT_HISTORY_FOREIGN_BARCODE:${row.barcode}`);
+      }
       rows.set(row.id, row);
     }
 
@@ -194,7 +236,7 @@ async function readWithSecret(input: {
         syncedAt,
         pageCount: page,
         sourceWritesEnabled: false,
-        filter: null,
+        filter: { barcodes: requested },
         rows: [...rows.values()].sort(
           (left, right) =>
             Date.parse(left.receivedAt) - Date.parse(right.receivedAt) ||
@@ -210,12 +252,15 @@ async function readWithSecret(input: {
   throw new Error("CHINA_RECEIPT_HISTORY_PAGE_LIMIT_EXCEEDED");
 }
 
-export async function loadConfirmedReceiptHistorySource(): Promise<ConfirmedReceiptHistorySource> {
+export async function loadConfirmedReceiptHistorySource(
+  barcodes: string[],
+): Promise<ConfirmedReceiptHistorySource> {
+  const requested = normalizeBarcodes(barcodes);
   const { secrets, baseUrl } = connection();
   let lastAuthError: Error | null = null;
   for (const secret of secrets) {
     try {
-      return await readWithSecret({ baseUrl, secret });
+      return await readWithSecret({ baseUrl, secret, barcodes: requested });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.startsWith("CHINA_RECEIPT_HISTORY_AUTH:")) {
