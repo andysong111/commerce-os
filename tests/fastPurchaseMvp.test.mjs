@@ -39,22 +39,56 @@ test("manual triage stores only local browser judgment and never posts business 
   assert.ok(workspace.includes("localStorage.getItem"));
   assert.ok(workspace.includes("commerceOs.fastPurchaseMvp.triage.v1"));
   assert.ok(workspace.includes('StockSense = "UNKNOWN" | "ENOUGH" | "LOW" | "OUT"'));
-  assert.doesNotMatch(workspace, /fetch\(|method:\s*["']POST["']|\.insert\(|\.upsert\(|\.delete\(/);
+  assert.doesNotMatch(
+    workspace,
+    /fetch\(|method:\s*["']POST["']|\.insert\(|\.upsert\(|\.delete\(/,
+  );
+});
+
+test("saved manual quantity is ignored after a row becomes a system hold or data hold", () => {
+  assert.ok(workspace.includes("function effectivePlannedQuantity"));
+  assert.ok(workspace.includes("if (isSystemOrder(row.action))"));
+  assert.ok(workspace.includes("if (isManual(row.action))"));
+  assert.ok(workspace.includes("return 0;"));
+  assert.ok(workspace.includes("const planned = effectivePlannedQuantity(row, entry)"));
+  assert.ok(workspace.includes("const plannedQuantity = effectivePlannedQuantity(row, entry)"));
+});
+
+test("browser plans are tied to the exact source fingerprint and invalidated when inputs change", () => {
+  assert.ok(workspace.includes("type PersistedTriage"));
+  assert.ok(workspace.includes("sourceFingerprint: string"));
+  assert.ok(workspace.includes("parsed.sourceFingerprint !== expectedFingerprint"));
+  assert.ok(workspace.includes("return { entries: {}, stale: true }"));
+  assert.ok(workspace.includes("발주 기준 데이터가 변경되어 이전 브라우저 판단·주문 예정수량을 초기화"));
+  assert.ok(workspace.includes("sourceFingerprint,"));
+});
+
+test("demand-only manual quantity can never exceed its displayed zero-stock reference ceiling", () => {
+  assert.ok(workspace.includes("function clampManualQuantity"));
+  assert.ok(workspace.includes('row.action === "DEMAND_ONLY_REVIEW"'));
+  assert.ok(
+    workspace.includes(
+      "Math.min(planned, quantity(row.referenceDemandQuantity))",
+    ),
+  );
+  assert.ok(workspace.includes("max={manualMax}"));
+  assert.ok(workspace.includes("plannedQuantity: row.referenceDemandQuantity"));
 });
 
 test("zero-stock demand reference is separated from planned quantity and requires an explicit click to copy", () => {
   assert.ok(workspace.includes("재고0 수요참고"));
   assert.ok(workspace.includes("주문 예정수량"));
   assert.ok(workspace.includes("참고상한 넣기"));
-  assert.ok(workspace.includes("plannedQuantity: row.referenceDemandQuantity"));
-  assert.ok(workspace.includes('entry.stockSense === "LOW" || entry.stockSense === "OUT"'));
+  assert.ok(workspace.includes('entry.stockSense === "LOW"'));
+  assert.ok(workspace.includes('entry.stockSense === "OUT"'));
   assert.ok(workspace.includes("referenceDemandQuantity"));
 });
 
-test("workspace can export only explicitly planned or system-order rows to local CSV", () => {
+test("workspace can export only current positive system orders or explicitly planned manual rows to local CSV", () => {
   assert.ok(workspace.includes("downloadCsv"));
   assert.ok(workspace.includes("주문예정 CSV"));
   assert.ok(workspace.includes("if (plannedQuantity <= 0) return []"));
+  assert.ok(workspace.includes("effectivePlannedQuantity(row, entry)"));
   assert.ok(workspace.includes("중국 주문을 자동 실행하지 않습니다"));
 });
 
