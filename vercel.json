@@ -49,6 +49,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/receipt-live-price-canary-preflight",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
       "schedule": "*/5 * * * *"
     }
