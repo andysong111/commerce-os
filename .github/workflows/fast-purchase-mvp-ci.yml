@@ -1,0 +1,34 @@
+name: Fast Purchase MVP CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-purchase-mvp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Test fast purchase MVP
+        run: node --experimental-strip-types --test tests/fastPurchaseMvp.test.mjs
+      - name: Lint fast purchase MVP
+        run: >-
+          npx eslint
+          src/lib/fastPurchaseMvp.ts
+          src/lib/fastPurchaseMvpModule.ts
+          src/app/fast-purchase-mvp/page.tsx
+          src/lib/opsModuleRegistry.ts
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://fast-purchase-mvp-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_fast_purchase_mvp_build
