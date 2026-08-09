@@ -14,17 +14,41 @@ const PRODUCT_FIELDS = [
 ].join(",");
 const LOOKUP_BATCH_SIZE = 50;
 const GOODS_KEY = /^\d+$/;
+const PRODUCT_GROUP_BY_SUFFIX: Record<string, string> = {
+  a: "도매1",
+  b: "도매2",
+  c: "도매3",
+  d: "도매4",
+  e: "소매1",
+  f: "소매2",
+};
 
 export type ShoplingCurrentPriceState = "READY" | "MISSING" | "CONFLICT";
+
+export type ShoplingCurrentPriceListing = {
+  goodsKey: string;
+  optionId: string;
+  ptnGoodsCd: string;
+  productGroup: string;
+  baseSalePrice: number;
+  optionAmount: number;
+  effectiveSalePrice: number;
+  originalCost: number;
+  listPrice: number;
+  saleStatus: string;
+};
 
 export type ShoplingCurrentPriceRow = {
   barcode: string;
   state: ShoplingCurrentPriceState;
+  priceMode: "UNIFORM" | "GROUPED" | "UNRESOLVED";
   currentSalePrice: number;
   goodsKeys: string[];
   mappedListingCount: number;
   unresolvedListingCount: number;
+  conflictListingCount: number;
   distinctPrices: number[];
+  listings: ShoplingCurrentPriceListing[];
 };
 
 export type ShoplingCurrentPriceSnapshot = {
@@ -76,7 +100,9 @@ export function buildShoplingProductIdLookupXml(
   config: { loginId: string; companyId: string; authKey: string },
   goodsKeys: string[],
 ) {
-  const normalized = [...new Set(goodsKeys.map(text).filter((key) => GOODS_KEY.test(key)))];
+  const normalized = [
+    ...new Set(goodsKeys.map(text).filter((key) => GOODS_KEY.test(key))),
+  ];
   if (!normalized.length || normalized.length > LOOKUP_BATCH_SIZE) {
     throw new Error("SHOPLING_PRODUCT_ID_LOOKUP_BATCH_INVALID");
   }
@@ -115,6 +141,11 @@ function effectiveSalePrice(row: RawRow) {
   return base + integer(row.optAmt);
 }
 
+function productGroup(row: RawRow) {
+  const ptnGoodsCd = text(row.ptn_goods_cd).toLowerCase();
+  return PRODUCT_GROUP_BY_SUFFIX[ptnGoodsCd.slice(-1)] ?? "";
+}
+
 function activeListings(product: PlanningProduct): Listing[] {
   return (product.listings ?? []).filter((row) => row.active !== false);
 }
@@ -127,6 +158,21 @@ function candidateRowsForListing(rows: RawRow[], listing: Listing) {
   return byGoodsKey.filter((row) => optionId(row) === option);
 }
 
+function normalizedListing(row: RawRow): ShoplingCurrentPriceListing {
+  return {
+    goodsKey: goodsKey(row),
+    optionId: optionId(row),
+    ptnGoodsCd: text(row.ptn_goods_cd),
+    productGroup: productGroup(row),
+    baseSalePrice: integer(row.sale_price),
+    optionAmount: integer(row.optAmt),
+    effectiveSalePrice: effectiveSalePrice(row),
+    originalCost: integer(row.org_price),
+    listPrice: integer(row.list_price),
+    saleStatus: text(row.sale_status),
+  };
+}
+
 export function resolveShoplingCurrentPrices(
   products: PlanningProduct[],
   sourceRows: RawRow[],
@@ -134,39 +180,73 @@ export function resolveShoplingCurrentPrices(
   const rows = products
     .filter((product) => product.skuActive !== false)
     .map((product): ShoplingCurrentPriceRow => {
-      const listings = activeListings(product).filter((listing) =>
+      const planningListings = activeListings(product).filter((listing) =>
         GOODS_KEY.test(text(listing.goodsKey)),
       );
-      const prices: number[] = [];
-      let mappedListingCount = 0;
+      const resolved: ShoplingCurrentPriceListing[] = [];
       let unresolvedListingCount = 0;
+      let conflictListingCount = 0;
 
-      for (const listing of listings) {
-        const candidates = candidateRowsForListing(sourceRows, listing);
-        const listingPrices = [...new Set(candidates.map(effectiveSalePrice).filter((price) => price > 0))];
-        if (listingPrices.length !== 1) {
+      for (const listing of planningListings) {
+        const candidates = candidateRowsForListing(sourceRows, listing).filter(
+          (row) => effectiveSalePrice(row) > 0,
+        );
+        const prices = [...new Set(candidates.map(effectiveSalePrice))];
+        if (!candidates.length) {
           unresolvedListingCount += 1;
           continue;
         }
-        mappedListingCount += 1;
-        prices.push(listingPrices[0]);
+        if (prices.length !== 1) {
+          conflictListingCount += 1;
+          continue;
+        }
+        const exact = candidates.find(
+          (row) => effectiveSalePrice(row) === prices[0],
+        );
+        if (!exact) {
+          unresolvedListingCount += 1;
+          continue;
+        }
+        resolved.push(normalizedListing(exact));
       }
 
-      const distinctPrices = [...new Set(prices)].sort((left, right) => left - right);
+      const distinctPrices = [
+        ...new Set(resolved.map((row) => row.effectiveSalePrice)),
+      ].sort((left, right) => left - right);
       const state: ShoplingCurrentPriceState =
-        !listings.length || unresolvedListingCount > 0 || !distinctPrices.length
-          ? "MISSING"
+        conflictListingCount > 0
+          ? "CONFLICT"
+          : !planningListings.length ||
+              unresolvedListingCount > 0 ||
+              !resolved.length
+            ? "MISSING"
+            : "READY";
+      const priceMode =
+        state !== "READY"
+          ? "UNRESOLVED"
           : distinctPrices.length === 1
-            ? "READY"
-            : "CONFLICT";
+            ? "UNIFORM"
+            : "GROUPED";
       return {
         barcode: text(product.barcode).toUpperCase().replace(/\s+/g, ""),
         state,
-        currentSalePrice: state === "READY" ? distinctPrices[0] : 0,
-        goodsKeys: [...new Set(listings.map((listing) => text(listing.goodsKey)))].sort(),
-        mappedListingCount,
+        priceMode,
+        currentSalePrice:
+          state === "READY" && distinctPrices.length === 1
+            ? distinctPrices[0]
+            : 0,
+        goodsKeys: [
+          ...new Set(planningListings.map((listing) => text(listing.goodsKey))),
+        ].sort(),
+        mappedListingCount: resolved.length,
         unresolvedListingCount,
+        conflictListingCount,
         distinctPrices,
+        listings: resolved.sort(
+          (left, right) =>
+            left.goodsKey.localeCompare(right.goodsKey) ||
+            left.optionId.localeCompare(right.optionId),
+        ),
       };
     })
     .sort((left, right) => left.barcode.localeCompare(right.barcode));
@@ -205,13 +285,15 @@ export async function loadShoplingCurrentPriceSnapshot(
   products: PlanningProduct[],
 ): Promise<ShoplingCurrentPriceSnapshot> {
   const config = shoplingReadConfigFromEnv(shoplingEnvironment());
-  const goodsKeys = [...new Set(
-    products.flatMap((product) =>
-      activeListings(product)
-        .map((listing) => text(listing.goodsKey))
-        .filter((key) => GOODS_KEY.test(key)),
+  const goodsKeys = [
+    ...new Set(
+      products.flatMap((product) =>
+        activeListings(product)
+          .map((listing) => text(listing.goodsKey))
+          .filter((key) => GOODS_KEY.test(key)),
+      ),
     ),
-  )].sort((left, right) => Number(left) - Number(right));
+  ].sort((left, right) => Number(left) - Number(right));
   if (!goodsKeys.length) {
     return resolveShoplingCurrentPrices(products, []);
   }
