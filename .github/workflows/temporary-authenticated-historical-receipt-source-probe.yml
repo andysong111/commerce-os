@@ -1,0 +1,64 @@
+name: Temporary Authenticated Historical Receipt Source Probe
+
+on:
+  push:
+    branches:
+      - ops/authenticated-historical-receipt-source-probe-20260809
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RECEIPT_SOURCE_URL: https://china-order-manager.andy123df23.chatgpt.site/api/integrations/price-adjustment-receipts?limit=5
+      RECEIPT_SOURCE_SECRET: ${{ secrets.PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET }}
+    steps:
+      - name: Probe authenticated read-only receipt integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RECEIPT_SOURCE_SECRET:-}" ]; then
+            echo 'SECRET_CONFIGURED=false'
+            exit 3
+          fi
+          echo 'SECRET_CONFIGURED=true'
+          body="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 \
+            -H "Authorization: Bearer ${RECEIPT_SOURCE_SECRET}" \
+            -H 'Accept: application/json' \
+            -o "$body" -w '%{http_code}' "$RECEIPT_SOURCE_URL" || true)"
+          echo "HTTP_STATUS=$code"
+          python - "$body" <<'PY'
+          import json,sys
+          path=sys.argv[1]
+          try:
+              data=json.load(open(path,encoding='utf-8'))
+          except Exception as exc:
+              print('JSON_OK=false')
+              print('JSON_ERROR='+type(exc).__name__)
+              raise SystemExit(0)
+          print('JSON_OK=true')
+          if not isinstance(data,dict):
+              print('OBJECT=false')
+              raise SystemExit(0)
+          print('API_OK='+str(data.get('ok') is True).lower())
+          print('SOURCE_MODE='+str(data.get('sourceMode') or ''))
+          print('SOURCE_WRITES_ENABLED='+str(data.get('sourceWritesEnabled')).lower())
+          rows=data.get('receipts')
+          print('RECEIPT_ROWS='+str(len(rows) if isinstance(rows,list) else -1))
+          print('HAS_MORE='+str(bool(data.get('hasMore'))).lower())
+          print('HAS_NEXT_SINCE='+str(bool(data.get('nextSince'))).lower())
+          print('ERROR_CODE='+str(data.get('code') or ''))
+          PY
+          test "$code" = '200'
+          python - "$body" <<'PY'
+          import json,sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          assert data.get('ok') is True
+          assert data.get('sourceWritesEnabled') is False
+          assert data.get('sourceMode') in ('legacy_confirmed_batch','immutable_inventory_movement')
+          assert isinstance(data.get('receipts'), list)
+          PY
