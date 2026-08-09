@@ -85,15 +85,21 @@ function timestamp(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function latestReceipt(input: { receipts?: Array<{ receivedAt: string; unitCostKrw: number }> }) {
-  return [...(input.receipts ?? [])]
-    .filter(
-      (row) => timestamp(row.receivedAt) !== null && integer(row.unitCostKrw) > 0,
-    )
-    .sort(
-      (left, right) =>
-        (timestamp(right.receivedAt) ?? 0) - (timestamp(left.receivedAt) ?? 0),
-    )[0] ?? null;
+function latestReceipt(input: {
+  receipts?: Array<{ receivedAt: string; unitCostKrw: number }>;
+}) {
+  return (
+    [...(input.receipts ?? [])]
+      .filter(
+        (row) =>
+          timestamp(row.receivedAt) !== null && integer(row.unitCostKrw) > 0,
+      )
+      .sort(
+        (left, right) =>
+          (timestamp(right.receivedAt) ?? 0) -
+          (timestamp(left.receivedAt) ?? 0),
+      )[0] ?? null
+  );
 }
 
 function receiptTriggered(
@@ -115,7 +121,9 @@ function fingerprint(value: unknown) {
 }
 
 function listingPlan(
-  input: Awaited<ReturnType<typeof loadPriceGradeReceiptAugmentedSnapshot>>["snapshot"]["inputs"][number],
+  input: Awaited<
+    ReturnType<typeof loadPriceGradeReceiptAugmentedSnapshot>
+  >["snapshot"]["inputs"][number],
   listing: ShoplingCurrentPriceListing,
   generatedAt: string,
 ): ReceiptPriceListingPlan {
@@ -167,10 +175,20 @@ function listingPlan(
   };
 }
 
+function groupByGoodsKey(plans: ReceiptPriceListingPlan[]) {
+  const grouped = new Map<string, ReceiptPriceListingPlan[]>();
+  for (const plan of plans) {
+    const rows = grouped.get(plan.goodsKey) ?? [];
+    rows.push(plan);
+    grouped.set(plan.goodsKey, rows);
+  }
+  return grouped;
+}
+
 function goodsKeyPlans(
   plans: ReceiptPriceListingPlan[],
 ): ReceiptPriceGoodsKeyPlan[] {
-  const byGoodsKey = Map.groupBy(plans, (row) => row.goodsKey);
+  const byGoodsKey = groupByGoodsKey(plans);
   return [...byGoodsKey.entries()]
     .map(([goodsKey, rows]): ReceiptPriceGoodsKeyPlan => {
       const changed = rows.filter((row) => row.priceChangeRequired);
@@ -181,9 +199,11 @@ function goodsKeyPlans(
       if (blockedRows.length) {
         blockedReason = "가격등급 입력 차단 행이 있습니다.";
       } else if (changed.length && triggered.length !== rows.length) {
-        blockedReason = "같은 goods_key 안에 새 입고 트리거가 없는 옵션이 섞여 있습니다.";
+        blockedReason =
+          "같은 goods_key 안에 새 입고 트리거가 없는 옵션이 섞여 있습니다.";
       } else if (nonzeroBps.length > 1) {
-        blockedReason = "같은 goods_key 안에서 필요한 가격 조정률이 서로 다릅니다.";
+        blockedReason =
+          "같은 goods_key 안에서 필요한 가격 조정률이 서로 다릅니다.";
       }
       const automaticApplyEligible =
         changed.length > 0 &&
