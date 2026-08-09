@@ -21,7 +21,7 @@ export type PurchaseCandidateShoplingIdentityAuditRow = {
   optionIds: string[];
   activeGoodsKeyCount: number;
   activeOptionIdCount: number;
-  state: "IDENTITY_READY" | "NO_ACTIVE_LISTING" | "AMBIGUOUS_GOODS_KEY";
+  state: "IDENTITY_SET_READY" | "NO_ACTIVE_LISTING";
   historicalModelJoinAllowed: false;
   inventoryPromotionAllowed: false;
   purchaseWritesEnabled: false;
@@ -34,9 +34,9 @@ export type PurchaseCandidateShoplingIdentityAudit = {
   state: "READY_READ_ONLY" | "BLOCKED";
   message: string;
   purchaseCandidateCount: number;
-  identityReadyCount: number;
+  identitySetReadyCount: number;
   noActiveListingCount: number;
-  ambiguousGoodsKeyCount: number;
+  multiGoodsKeyCount: number;
   uniqueGoodsKeyCount: number;
   fingerprint: string;
   historicalModelJoinAllowed: false;
@@ -102,12 +102,7 @@ export async function loadPurchaseCandidateShoplingIdentityAudit(): Promise<Purc
             .filter((value): value is string => Boolean(value)),
         ),
       ].sort();
-      const state =
-        goodsKeys.length === 0
-          ? "NO_ACTIVE_LISTING"
-          : goodsKeys.length === 1
-            ? "IDENTITY_READY"
-            : "AMBIGUOUS_GOODS_KEY";
+      const state = goodsKeys.length > 0 ? "IDENTITY_SET_READY" : "NO_ACTIVE_LISTING";
 
       return {
         barcode: key,
@@ -131,7 +126,8 @@ export async function loadPurchaseCandidateShoplingIdentityAudit(): Promise<Purc
     })
     .sort(
       (left, right) =>
-        Number(left.state !== "IDENTITY_READY") - Number(right.state !== "IDENTITY_READY") ||
+        Number(left.state !== "IDENTITY_SET_READY") -
+          Number(right.state !== "IDENTITY_SET_READY") ||
         left.barcode.localeCompare(right.barcode),
     );
 
@@ -153,12 +149,12 @@ export async function loadPurchaseCandidateShoplingIdentityAudit(): Promise<Purc
     generatedAt: new Date().toISOString(),
     state: ready ? "READY_READ_ONLY" : "BLOCKED",
     message: ready
-      ? "현재 발주후보의 B-code를 Product Master planning의 활성 Shopling goods_key/optionId와 읽기 전용으로 연결합니다. 이 결과는 과거 Shopling 가격·모델 자료와 정확한 goods_key 교차검증을 하기 위한 식별 증거이며, goods_key만으로 aaa 모델번호를 추정하거나 재고·발주를 실행하지 않습니다."
+      ? "현재 발주후보의 B-code를 Product Master planning의 활성 Shopling goods_key/optionId 전체 집합과 읽기 전용으로 연결합니다. 하나의 B-code가 여러 상품그룹·판매 listing을 가져 goods_key가 여러 개인 것은 정상 범위이며, 이 전체 집합을 과거 Shopling 가격·모델 자료와 교차검증합니다. goods_key만으로 aaa 모델번호를 추정하거나 재고·발주를 실행하지 않습니다."
       : "현재 발주후보 모델복구 증거 또는 planning 스냅샷이 준비되지 않아 Shopling 식별자 교차검증을 차단합니다.",
     purchaseCandidateCount: rows.length,
-    identityReadyCount: rows.filter((row) => row.state === "IDENTITY_READY").length,
+    identitySetReadyCount: rows.filter((row) => row.state === "IDENTITY_SET_READY").length,
     noActiveListingCount: rows.filter((row) => row.state === "NO_ACTIVE_LISTING").length,
-    ambiguousGoodsKeyCount: rows.filter((row) => row.state === "AMBIGUOUS_GOODS_KEY").length,
+    multiGoodsKeyCount: rows.filter((row) => row.goodsKeys.length > 1).length,
     uniqueGoodsKeyCount: uniqueGoodsKeys.size,
     fingerprint: sha256({
       recoveryFingerprint: recovery.fingerprint,
