@@ -21,16 +21,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          url='https://commerce-os-ops-center.vercel.app/stage8-stocktake-canary'
+          origin='https://commerce-os-ops-center.vercel.app'
+          url="$origin/api/stage8/stocktake-canary"
           body="$(mktemp)"
-          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -o "$body" -w '%{http_code}' "$url")"
-          text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:100000])')"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 90 -H "Origin: $origin" -H 'Sec-Fetch-Site: same-origin' -H 'Accept: application/json' -o "$body" -w '%{http_code}' "$url")"
           echo "HTTP $code"
-          echo '--- SIGNED STOCKTAKE CANARY READINESS ---'
-          echo "$text"
+          python - "$body" <<'PY'
+          import json,sys
+          body=json.load(open(sys.argv[1],encoding='utf-8'))
+          r=body.get('readiness') or {}
+          safe={
+            'ok': body.get('ok'),
+            'state': r.get('state'),
+            'barcode': r.get('barcode'),
+            'modelNo': r.get('modelNo'),
+            'currentInventoryQuantity': r.get('currentInventoryQuantity'),
+            'inventoryVerification': r.get('inventoryVerification'),
+            'inventoryBaselineKind': r.get('inventoryBaselineKind'),
+            'productMasterWriteEnabled': r.get('productMasterWriteEnabled'),
+            'maxWriteRows': r.get('maxWriteRows'),
+            'purchaseWritesEnabled': r.get('purchaseWritesEnabled'),
+            'priceWritesEnabled': r.get('priceWritesEnabled'),
+            'receiptWritesEnabled': r.get('receiptWritesEnabled'),
+          }
+          print(json.dumps(safe,ensure_ascii=False,indent=2))
+          assert body.get('ok') is True
+          assert r.get('state') == 'READY_FOR_COUNT'
+          assert r.get('barcode') == 'BGG1-1'
+          assert r.get('inventoryVerification') == 'UNVERIFIED'
+          assert r.get('inventoryBaselineKind') == 'INITIAL_ZERO'
+          assert r.get('productMasterWriteEnabled') is True
+          assert r.get('maxWriteRows') == 1
+          assert r.get('purchaseWritesEnabled') is False
+          assert r.get('priceWritesEnabled') is False
+          assert r.get('receiptWritesEnabled') is False
+          PY
           test "$code" = '200'
-          echo "$text" | grep -q '첫 재고실사 1건 적용'
-          echo "$text" | grep -q 'READY_FOR_COUNT'
-          echo "$text" | grep -q 'BGG1-1'
-          echo "$text" | grep -q '최대 write 1 SKU'
-          echo "$text" | grep -q '발주 false · 가격 false · 입고원가 false'
