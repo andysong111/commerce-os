@@ -1,0 +1,35 @@
+name: Stage8 Legacy Order History Shadow CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-order-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint legacy order shadow files
+        run: >-
+          npx eslint
+          src/data/stage8LegacyOrderHistoryEvidence.ts
+          src/lib/stage8LegacyOrderHistoryJoinShadow.ts
+          src/app/stage8-legacy-order-history-shadow/page.tsx
+      - name: Test legacy order shadow safety
+        run: node --experimental-strip-types --test tests/stage8LegacyOrderHistoryJoinShadow.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://legacy-order-shadow-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_legacy_order_shadow_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
