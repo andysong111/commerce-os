@@ -1,0 +1,33 @@
+name: Stage8 Full-Coverage Historical Order Evidence CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-order-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint historical order evidence files
+        run: >-
+          npx eslint
+          src/data/stage8FullCoverageHistoricalOrderEvidence.ts
+          src/lib/stage8FullCoverageHistoricalOrderEvidence.ts
+          src/app/stage8-fullcoverage-historical-order-evidence/page.tsx
+      - name: Test historical order evidence safety
+        run: node --experimental-strip-types --test tests/stage8FullCoverageHistoricalOrderEvidence.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://stage8-order-evidence-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_stage8_order_evidence_build
