@@ -13,8 +13,20 @@ test("worker creates a rollout marker so historical receipt events are never bac
   assert.match(worker, /RECEIPT_LIVE_PRICE_PROPOSAL_ROLLOUT/);
   assert.match(worker, /receipt-live-price-proposal-rollout:v1/);
   assert.match(worker, /policy: "new-receipt-events-only"/);
-  assert.match(worker, /started_at: `gt\.\$\{startAt\}`/);
+  assert.match(worker, /return \{ startedAt: rolloutStartedAt, sourceEventId: "" \}/);
+  assert.match(worker, /query\.set\("started_at", `gt\.\$\{cursor\.startedAt\}`\)/);
   assert.match(page, /기존 입고는 소급 가격변경하지 않습니다/);
+});
+
+test("processed receipt cursor advances by receipt started_at plus source_event_id so later events cannot starve", () => {
+  assert.match(worker, /receiptOperationStartedAt/);
+  assert.match(worker, /receiptEventId/);
+  assert.match(worker, /proposalCursor/);
+  assert.match(worker, /started_at\.gt\.\$\{cursor\.startedAt\}/);
+  assert.match(worker, /started_at\.eq\.\$\{cursor\.startedAt\}/);
+  assert.match(worker, /source_event_id\.gt\.\$\{cursor\.sourceEventId\}/);
+  assert.match(worker, /order: "started_at\.asc,source_event_id\.asc"/);
+  assert.match(worker, /MAX_EVENT_SCAN = 100/);
 });
 
 test("each receipt event is idempotently converted into one durable internal proposal", () => {
@@ -26,8 +38,12 @@ test("each receipt event is idempotently converted into one durable internal pro
 });
 
 test("worker proves the exact China batch before any affected Shopling price lookup", () => {
-  const sourceIndex = worker.indexOf("loadConfirmedReceiptBatchSource(event.batchId)");
-  const liveIndex = worker.indexOf("loadShoplingCurrentPriceSnapshot(affectedPlanning)");
+  const sourceIndex = worker.indexOf(
+    "loadConfirmedReceiptBatchSource(event.batchId)",
+  );
+  const liveIndex = worker.indexOf(
+    "loadShoplingCurrentPriceSnapshot(affectedPlanning)",
+  );
   assert.ok(sourceIndex >= 0);
   assert.ok(liveIndex > sourceIndex);
   assert.match(worker, /RECEIPT_LIVE_PRICE_SOURCE_SCOPE_MISMATCH/);
@@ -37,7 +53,10 @@ test("worker proves the exact China batch before any affected Shopling price loo
 test("only affected planning products are queried from Shopling", () => {
   assert.match(worker, /affectedBarcodes/);
   assert.match(worker, /affectedPlanning = planning\.products\.filter/);
-  assert.match(worker, /affectedBarcodes\.has\(barcodeKey\(product\.barcode\)\)/);
+  assert.match(
+    worker,
+    /affectedBarcodes\.has\(barcodeKey\(product\.barcode\)\)/,
+  );
   assert.match(worker, /loadShoplingCurrentPriceSnapshot\(affectedPlanning\)/);
 });
 
