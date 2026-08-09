@@ -1,0 +1,39 @@
+name: Temporary Fast Purchase MVP V2 Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for production fast purchase MVP V2
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/fast-purchase-mvp'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:500000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q 'FAST USE · PROVISIONAL V2 · SPEED FIRST'; then
+              echo '--- FAST PURCHASE MVP V2 PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '수동 발주만 · 자동주문 0'
+              echo "$text" | grep -q '상한편향 절충판정'
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" = '1'
