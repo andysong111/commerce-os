@@ -169,14 +169,23 @@ export async function loadLegacyVerifiedCostReadiness(): Promise<LegacyVerifiedC
   const immediate = rows.filter((row) => row.immediateStocktakeEligible);
   const stableRows = rows.map((row) => ({
     barcode: row.barcode,
+    name: row.name,
+    modelNo: row.modelNo,
     recommendedQty: row.recommendedQty,
     shadowExpectedCost: row.shadowExpectedCost,
+    shadowImpliedUnitCostKrw: row.shadowImpliedUnitCostKrw,
+    productMasterHasConfirmedReceiptCost:
+      row.productMasterHasConfirmedReceiptCost,
     evidenceModelNo: row.evidenceModelNo,
+    evidenceOptionName: row.evidenceOptionName,
     evidenceUnitCostKrw: row.evidenceUnitCostKrw,
     evidenceCostDate: row.evidenceCostDate,
     effectivePurchaseUnitCostKrw: row.effectivePurchaseUnitCostKrw,
+    effectivePurchaseExpectedCost: row.effectivePurchaseExpectedCost,
     purchaseCostTrustSource: row.purchaseCostTrustSource,
     inventoryVerified: row.inventoryVerified,
+    initialZeroUnverified: row.initialZeroUnverified,
+    inventoryRequiresReview: row.inventoryRequiresReview,
     immediateStocktakeEligible: row.immediateStocktakeEligible,
   }));
 
@@ -214,14 +223,19 @@ export async function loadLegacyVerifiedCostReadiness(): Promise<LegacyVerifiedC
       0,
     ),
     fingerprint: fingerprint({
-      priorityGeneratedAt: priority.generatedAt,
-      evidence: [...evidenceByBarcode.values()].map((row) => ({
-        barcode: row.barcode,
-        modelNo: row.modelNo,
-        optionName: row.optionName,
-        unitCostKrw: row.unitCostKrw,
-        costDate: row.costDate,
-      })),
+      priorityState: priority.state,
+      purchaseShadowReady: priority.purchaseShadowReady,
+      managedActiveSkuCount: priority.managedActiveSkuCount,
+      evidence: [...evidenceByBarcode.values()]
+        .map((row) => ({
+          barcode: row.barcode,
+          modelNo: row.modelNo,
+          optionName: row.optionName,
+          unitCostKrw: row.unitCostKrw,
+          costDate: row.costDate,
+          confidence: row.confidence,
+        }))
+        .sort((left, right) => left.barcode.localeCompare(right.barcode)),
       rows: stableRows,
     }),
     priceUseAllowed: false,
