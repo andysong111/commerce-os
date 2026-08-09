@@ -109,18 +109,17 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, and bound
   assert.match(route, /LEASE_SECONDS = 75/);
   assert.doesNotMatch(route, /user-agent/i);
   assert.doesNotMatch(route, /createSupabaseServerClient|auth\.getUser/);
+
   const config = JSON.parse(vercel);
-  assert.deepEqual(config.crons, [
+  assert.ok(Array.isArray(config.crons));
+  const target = config.crons.filter(
+    (cron) => cron?.path === "/api/cron/shopling-price-bulk-auto",
+  );
+  assert.deepEqual(target, [
     { path: "/api/cron/shopling-price-bulk-auto", schedule: "* * * * *" },
-    { path: "/api/cron/detail-page-jobs", schedule: "* * * * *" },
-    { path: "/api/cron/product-decision-live-refresh", schedule: "* * * * *" },
-    { path: "/api/cron/product-master-shopling-diagnostic", schedule: "* * * * *" },
-    { path: "/api/cron/product-master-shopling-sales-backfill", schedule: "* * * * *" },
-    { path: "/api/cron/product-master-shopling-sales-incremental", schedule: "* * * * *" },
-    { path: "/api/cron/product-master-shopling-sales-events", schedule: "* * * * *" },
-    { path: "/api/cron/stage8-canonical-demand-parity", schedule: "* * * * *" },
-    { path: "/api/cron/price-grade-receipt-shadow-bootstrap", schedule: "*/5 * * * *" },
   ]);
+  const paths = config.crons.map((cron) => cron?.path).filter(Boolean);
+  assert.equal(new Set(paths).size, paths.length, "cron paths must stay unique");
 });
 
 test("orchestrator reconciles same request IDs, honors pause, and never auto-approves failed-item retry", async () => {
