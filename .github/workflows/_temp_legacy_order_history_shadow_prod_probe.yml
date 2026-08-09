@@ -1,0 +1,50 @@
+name: Temporary Legacy Order History Shadow Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for production legacy order history shadow page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-legacy-order-history-shadow'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:300000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '과거 중국 발주이력 읽기 전용 연결'; then
+              echo '--- LEGACY ORDER HISTORY SHADOW PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q 'READY_READ_ONLY'
+              echo "$text" | grep -q '복구 정체성 5개'
+              echo "$text" | grep -q '완전연결 4개'
+              echo "$text" | grep -q '누적만 연결 1개'
+              echo "$text" | grep -q '최신수량 사용가능 4개'
+              echo "$text" | grep -q 'Business write 0 · READ ONLY'
+              echo "$text" | grep -q 'ORDER HISTORY ≠ CONFIRMED INBOUND ≠ CURRENT INVENTORY'
+              echo "$text" | grep -q 'BGB1-1 aaa266'
+              echo "$text" | grep -q 'BGD2-1 aaa409'
+              echo "$text" | grep -q 'NEEDS EXACT ROW'
+              echo "$text" | grep -q 'BGE1-1 aaa045'
+              echo "$text" | grep -q 'BGE2-1 aaa045'
+              echo "$text" | grep -q 'BGG1-1 aaa316'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
