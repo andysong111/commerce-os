@@ -1,0 +1,35 @@
+name: Receipt Live Price Canary Preflight CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint preflight files
+        run: >-
+          npx eslint
+          src/lib/receiptLivePriceCanaryPreflight.ts
+          src/app/api/cron/receipt-live-price-canary-preflight/route.ts
+          src/app/stage8-receipt-live-price-canary-preflight/page.tsx
+      - name: Test preflight safety
+        run: node --experimental-strip-types --test tests/receiptLivePriceCanaryPreflight.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://receipt-canary-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_receipt_canary_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
