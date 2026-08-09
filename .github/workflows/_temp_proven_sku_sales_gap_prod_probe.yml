@@ -1,0 +1,43 @@
+name: Temporary Proven SKU Sales Gap Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Wait for production proven SKU sales gap page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-proven-sku-sales-gap-live-audit'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:320000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q 'Canonical 이전 판매공백 · Shopling 읽기 전용 재조회'; then
+              echo '--- PROVEN SKU SALES GAP LIVE AUDIT PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '대상 SKU 3개'
+              echo "$text" | grep -q 'Business write 0 · READ ONLY'
+              echo "$text" | grep -q 'BOUNDED SHOPLING READ · NO INVENTORY PROMOTION'
+              echo "$text" | grep -q 'BGB1-1 aaa266'
+              echo "$text" | grep -q 'BGE2-1 aaa045'
+              echo "$text" | grep -q 'BGG1-1 aaa316'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
