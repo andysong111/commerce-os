@@ -1,0 +1,39 @@
+name: Temporary Provisional Inventory Source Audit Production Probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for production source audit page
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/stage8-provisional-inventory-source-audit'
+          ready=0
+          for i in $(seq 1 75); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 120 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:220000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q '추정재고 원천증거 점검'; then
+              echo '--- PROVISIONAL INVENTORY SOURCE AUDIT ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              echo "$text" | grep -q '재고 write 0 · READ ONLY'
+              echo "$text" | grep -q 'NO STOCKTAKE REQUIRED · NO INVENTORY PROMOTION YET'
+              echo "$text" | grep -q 'BGG1-1'
+              ready=1
+              break
+            fi
+            sleep 8
+          done
+          test "$ready" = '1'
