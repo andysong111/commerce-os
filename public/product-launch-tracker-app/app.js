@@ -15,6 +15,7 @@ function signalDetailPageWorkerReady() {
 
 if (detailPageMode === "worker") {
   await import("./detail-page-dock.js");
+  await import("./detail-page-dock-repair.js");
   signalDetailPageWorkerReady();
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
@@ -35,6 +36,7 @@ if (detailPageMode === "worker") {
   await import("./table-inline-ops-loader.js");
   await import("./table-frozen-columns-fix.js");
   await import("./detail-page-dock.js");
+  await import("./detail-page-dock-repair.js");
   await import("./detail-page-option-guard.js");
   await import("./empty-cell-placeholder-cleanup.js");
   await import("./shopling-upload-ui.js");
