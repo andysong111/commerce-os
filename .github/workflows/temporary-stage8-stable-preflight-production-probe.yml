@@ -29,29 +29,46 @@ jobs:
             test "$code" = '200'
             cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:120000])'
           }
+          extract_fp() {
+            printf '%s' "$1" | grep -oE 'Plan fingerprint · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Plan fingerprint · //'
+          }
+          extract_guard() {
+            printf '%s' "$1" | grep -oE 'Inventory guard · sha256:[a-f0-9]{64}' | head -1 | sed 's/^Inventory guard · //'
+          }
           ready=0
           for i in $(seq 1 45); do
             text1="$(fetch_text || true)"
             echo "PROBE $i"
-            if echo "$text1" | grep -q '상태 READY_FOR_PHYSICAL_COUNT'; then
-              sleep 5
-              text2="$(fetch_text)"
-              echo "$text1" | grep -q 'Canary B-code BGG1-1'
-              echo "$text1" | grep -q 'PM write gate OFF'
-              echo "$text2" | grep -q '상태 READY_FOR_PHYSICAL_COUNT'
-              fp1="$(printf '%s' "$text1" | grep -oE 'Plan fingerprint · sha256:[a-f0-9]{64}' | head -1 | awk '{print $4}')"
-              fp2="$(printf '%s' "$text2" | grep -oE 'Plan fingerprint · sha256:[a-f0-9]{64}' | head -1 | awk '{print $4}')"
-              guard1="$(printf '%s' "$text1" | grep -oE 'Inventory guard · sha256:[a-f0-9]{64}' | head -1 | awk '{print $4}')"
-              guard2="$(printf '%s' "$text2" | grep -oE 'Inventory guard · sha256:[a-f0-9]{64}' | head -1 | awk '{print $4}')"
-              test -n "$fp1" && test "$fp1" = "$fp2"
-              test -n "$guard1" && test "$guard1" = "$guard2"
-              echo "STABLE_PLAN_FINGERPRINT=$fp1"
-              echo "STABLE_INVENTORY_GUARD=$guard1"
-              echo '--- STABLE PREFLIGHT PAGE ---'
-              echo "$text2"
-              ready=1
-              break
+            if ! echo "$text1" | grep -q '상태 READY_FOR_PHYSICAL_COUNT'; then
+              sleep 10
+              continue
             fi
-            sleep 10
+            sleep 5
+            text2="$(fetch_text || true)"
+            fp1="$(extract_fp "$text1" || true)"
+            fp2="$(extract_fp "$text2" || true)"
+            guard1="$(extract_guard "$text1" || true)"
+            guard2="$(extract_guard "$text2" || true)"
+            echo "PLAN_1=$fp1"
+            echo "PLAN_2=$fp2"
+            echo "GUARD_1=$guard1"
+            echo "GUARD_2=$guard2"
+            if ! echo "$text1" | grep -q 'Canary B-code BGG1-1' || \
+               ! echo "$text1" | grep -q 'PM write gate OFF' || \
+               ! echo "$text2" | grep -q '상태 READY_FOR_PHYSICAL_COUNT' || \
+               ! echo "$text2" | grep -q 'Canary B-code BGG1-1' || \
+               ! echo "$text2" | grep -q 'PM write gate OFF' || \
+               [ -z "$fp1" ] || [ "$fp1" != "$fp2" ] || \
+               [ -z "$guard1" ] || [ "$guard1" != "$guard2" ]; then
+              echo 'Preflight inputs changed between reads; retrying.'
+              sleep 10
+              continue
+            fi
+            echo "STABLE_PLAN_FINGERPRINT=$fp1"
+            echo "STABLE_INVENTORY_GUARD=$guard1"
+            echo '--- STABLE PREFLIGHT PAGE ---'
+            echo "$text2"
+            ready=1
+            break
           done
           test "$ready" = '1'
