@@ -1,0 +1,78 @@
+name: Temporary Stage8 Provisional Estimate Source Probe
+
+on:
+  push:
+    branches:
+      - ops/stage8-provisional-estimate-source-probe-20260809
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: >-
+      ${{
+        (github.event_name == 'push' && github.ref_name == 'ops/stage8-provisional-estimate-source-probe-20260809') ||
+        (github.event_name == 'pull_request' && github.head_ref == 'ops/stage8-provisional-estimate-source-probe-20260809')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read existing live product-decision snapshot without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://commerce-os-ops-center.vercel.app'
+          api="$base/api/product-decision-agent/live-refresh"
+          body="$(mktemp)"
+          code="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+            -o "$body" -w '%{http_code}' "$api" \
+            -H "origin: $base" \
+            -H "referer: $base/product-decision-agent/live-refresh" \
+            -H 'accept: application/json')"
+          echo "HTTP=$code"
+          test "$code" = '200'
+          BODY="$body" python - <<'PY'
+          import json, os
+          data=json.load(open(os.environ['BODY'],encoding='utf-8'))
+          assert data.get('ok') is True, data
+          s=data.get('status') or {}
+          snap=s.get('finalSnapshot') or {}
+          products=snap.get('products') or []
+          target=next((row for row in products if str(row.get('barcode') or '').strip().upper()=='BGG1-1'), None)
+          nonzero=[row for row in products if float(row.get('estimatedStock') or 0)>0]
+          known=[row for row in products if row.get('inventoryKnown') is True]
+          safe={
+            'state':s.get('state'),
+            'requestId':s.get('requestId'),
+            'analysisAsOf':s.get('analysisAsOf'),
+            'hasFinalSnapshot':bool(snap),
+            'productCount':len(products),
+            'positiveEstimatedStockCount':len(nonzero),
+            'inventoryKnownCount':len(known),
+            'BGG1-1': None if not target else {
+              'name':target.get('name'),
+              'estimatedStock':target.get('estimatedStock'),
+              'inventoryKnown':target.get('inventoryKnown'),
+              'openCommitment':target.get('openCommitment'),
+              'rawRecommendedQty':target.get('rawRecommendedQty'),
+              'netRequiredRaw':target.get('netRequiredRaw'),
+              'recommendedQty':target.get('recommendedQty'),
+              'status':target.get('status'),
+            },
+            'positiveEstimateSamples':[
+              {
+                'barcode':row.get('barcode'),
+                'name':row.get('name'),
+                'estimatedStock':row.get('estimatedStock'),
+                'inventoryKnown':row.get('inventoryKnown'),
+                'status':row.get('status'),
+              }
+              for row in sorted(nonzero,key=lambda r:float(r.get('estimatedStock') or 0),reverse=True)[:20]
+            ],
+          }
+          print(json.dumps(safe,ensure_ascii=False,indent=2))
+          PY
