@@ -70,6 +70,13 @@ function compilerWorkerSlotForItem(itemId) {
   return (hash >>> 0) % COMPILER_WORKER_SLOTS;
 }
 
+function persistedCompilerWorkerSlot(job) {
+  const value = Number(job?.payload?.compiler_worker_slot);
+  return Number.isInteger(value) && value >= 0 && value < COMPILER_WORKER_SLOTS
+    ? value
+    : null;
+}
+
 function isCompilerJob(job) {
   return job?.payload?.compiler_canary === true;
 }
@@ -77,7 +84,8 @@ function isCompilerJob(job) {
 function workerOwnsJob(job) {
   if (DETAIL_PAGE_MODE !== "worker") return true;
   if (!isCompilerJob(job)) return !COMPILER_WORKER_EXPLICIT;
-  return compilerWorkerSlotForItem(job?.itemId) === COMPILER_WORKER_SLOT;
+  const persistedSlot = persistedCompilerWorkerSlot(job);
+  return (persistedSlot ?? compilerWorkerSlotForItem(job?.itemId)) === COMPILER_WORKER_SLOT;
 }
 
 installStyles();
