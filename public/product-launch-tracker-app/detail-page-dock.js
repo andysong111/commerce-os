@@ -19,6 +19,21 @@ const POLL_INTERVAL_MS = 2500;
 const STALE_WORKER_MS = 8 * 60 * 1000;
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
 const DETAIL_PAGE_MODE = PAGE_PARAMS.get("detail_page_mode") || "standalone";
+const COMPILER_WORKER_SLOT_RAW = PAGE_PARAMS.get("compiler_worker_slot");
+const COMPILER_WORKER_SLOTS = Math.max(
+  1,
+  Math.min(6, Math.floor(Number(PAGE_PARAMS.get("compiler_worker_slots")) || 3)),
+);
+const COMPILER_WORKER_SLOT = COMPILER_WORKER_SLOT_RAW === null
+  ? 0
+  : Math.max(
+      0,
+      Math.min(
+        COMPILER_WORKER_SLOTS - 1,
+        Math.floor(Number(COMPILER_WORKER_SLOT_RAW) || 0),
+      ),
+    );
+const COMPILER_WORKER_EXPLICIT = COMPILER_WORKER_SLOT_RAW !== null;
 const CAN_REGISTER_JOBS = DETAIL_PAGE_MODE !== "worker";
 const CAN_EXECUTE_JOBS = DETAIL_PAGE_MODE !== "client";
 const SHOW_LOCAL_MONITOR = DETAIL_PAGE_MODE === "standalone";
@@ -44,6 +59,26 @@ const jobsById = new Map();
 const workerResumeAt = new Map();
 const finalizerRetryAt = new Map();
 const retryingItems = new Set();
+
+function compilerWorkerSlotForItem(itemId) {
+  const value = String(itemId ?? "").trim();
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % COMPILER_WORKER_SLOTS;
+}
+
+function isCompilerJob(job) {
+  return job?.payload?.compiler_canary === true;
+}
+
+function workerOwnsJob(job) {
+  if (DETAIL_PAGE_MODE !== "worker") return true;
+  if (!isCompilerJob(job)) return !COMPILER_WORKER_EXPLICIT;
+  return compilerWorkerSlotForItem(job?.itemId) === COMPILER_WORKER_SLOT;
+}
 
 installStyles();
 if (CAN_REGISTER_JOBS) installControls();
@@ -386,6 +421,7 @@ async function processNext() {
   if (active) return;
   const renderJob = [...jobsById.values()].find(
     (job) =>
+      workerOwnsJob(job) &&
       job.status === "render_pending" &&
       Date.now() >= (finalizerRetryAt.get(job.jobId) || 0),
   );
@@ -397,7 +433,7 @@ async function processNext() {
   while (queue.length) {
     const next = queue.shift();
     const server = jobsById.get(next.jobId);
-    if (!server || server.status !== "collecting") continue;
+    if (!server || !workerOwnsJob(server) || server.status !== "collecting") continue;
     await openEvidenceCollector({ ...next, sourceRunId: server.sourceRunId || next.sourceRunId || "" });
     return;
   }
@@ -887,10 +923,14 @@ async function syncJobs() {
     if (!response.ok || payload.ok !== true || !Array.isArray(payload.jobs)) return false;
     for (const job of payload.jobs) {
       jobsById.set(job.jobId, job);
-      mirrorServerJob(job);
-      if (job.status === "success") applyDockedJob(job);
+      const ownsJob = workerOwnsJob(job);
+      if (ownsJob) {
+        mirrorServerJob(job);
+        if (job.status === "success") applyDockedJob(job);
+      }
       if (
         CAN_EXECUTE_JOBS &&
+        ownsJob &&
         job.status === "queued" &&
         Date.now() - (workerResumeAt.get(job.jobId) || 0) > 30_000
       ) {
@@ -899,6 +939,7 @@ async function syncJobs() {
       }
       if (
         CAN_EXECUTE_JOBS &&
+        ownsJob &&
         ["queued", "running"].includes(job.status) &&
         Date.now() - Date.parse(job.updatedAt || 0) > STALE_WORKER_MS &&
         Date.now() - (workerResumeAt.get(job.jobId) || 0) > STALE_WORKER_MS
@@ -925,7 +966,7 @@ function queueCollectingJobsFromState({ markLegacyFailed = false } = {}) {
     if (!automation?.jobId || !["queued", "running", "uploading"].includes(automation.status)) continue;
     const job = jobsById.get(automation.jobId);
     if (!job) {
-      if (markLegacyFailed) {
+      if (markLegacyFailed && !COMPILER_WORKER_EXPLICIT) {
         updateAutomation(item.id, {
           status: "failed",
           stage: "legacy_browser_job",
@@ -937,6 +978,7 @@ function queueCollectingJobsFromState({ markLegacyFailed = false } = {}) {
       }
       continue;
     }
+    if (!workerOwnsJob(job)) continue;
     if (
       job.status === "collecting" &&
       active?.jobId !== job.jobId &&
