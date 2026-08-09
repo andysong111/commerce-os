@@ -15,8 +15,9 @@ export default async function Stage8PurchaseCandidateLegacyModelRecoveryPage() {
         description="현재 발주후보의 LEGACY-* 임시 모델번호를 과거 B-code↔aaa 직접 기록 증거로만 복구합니다. 상품명 유사 추정은 사용하지 않으며 이 화면은 재고·발주·가격을 변경하지 않습니다."
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <Metric label="상태" value={recovery.state} />
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+        <Metric label="증거 상태" value={recovery.state} />
+        <Metric label="상위 발주상태" value={recovery.upstreamPurchaseState} />
         <Metric label="발주후보" value={`${recovery.purchaseCandidateCount}개`} />
         <Metric label="EXACT 복구" value={`${recovery.recoveredExactCount}개`} />
         <Metric label="미복구" value={`${recovery.unrecoveredCount}개`} />
@@ -26,6 +27,8 @@ export default async function Stage8PurchaseCandidateLegacyModelRecoveryPage() {
 
       <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950 shadow-sm">
         <strong>DIRECT EVIDENCE ONLY · NO NAME-ONLY GUESSING</strong>
+        <br />
+        {recovery.message}
         <br />
         B-code와 aaa 모델번호가 같은 과거 자료 행에 직접 기록된 경우만 과거 발주이력 연결 후보로 엽니다. 과거 발주수량은 여전히 확정입고가 아니며, 이 단계에서 Product Master 모델번호·재고·중국 발주를 수정하지 않습니다.
         <div className="mt-2 text-xs">Fingerprint · {recovery.fingerprint}</div>
