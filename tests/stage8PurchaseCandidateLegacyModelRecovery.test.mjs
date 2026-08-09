@@ -43,6 +43,14 @@ test("recovery fails closed for missing or conflicting identity evidence", () =>
   assert.doesNotMatch(recoverySource, /fetch\([^)]*method:\s*["'](?:POST|PUT|PATCH|DELETE)/i);
 });
 
+test("read-only evidence readiness is independent from purchase execution readiness", () => {
+  assert.match(recoverySource, /upstreamPurchaseState/);
+  assert.match(recoverySource, /readOnlyEvidenceReady = rows\.length > 0/);
+  assert.match(recoverySource, /state: readOnlyEvidenceReady \? "READY_READ_ONLY" : "BLOCKED"/);
+  assert.match(recoverySource, /상위 발주 실행 준비상태는 BLOCKED/);
+  assert.match(pageSource, /상위 발주상태/);
+});
+
 test("operator page clearly labels direct evidence and zero business writes", () => {
   assert.match(pageSource, /DIRECT EVIDENCE ONLY · NO NAME-ONLY GUESSING/);
   assert.match(pageSource, /Business write/);
