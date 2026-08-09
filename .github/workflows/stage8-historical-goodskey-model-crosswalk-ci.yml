@@ -22,6 +22,7 @@ jobs:
         run: >-
           npx eslint
           src/data/stage8HistoricalGoodsKeyModelEvidence.ts
+          src/data/stage8HistoricalGoodsKeyModelEvidenceExpansion1.ts
           src/lib/stage8HistoricalGoodsKeyModelCrosswalk.ts
           src/app/stage8-historical-goodskey-model-crosswalk/page.tsx
       - name: Test crosswalk safety

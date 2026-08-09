@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [evidence, engine, page] = await Promise.all([
+const [evidence, expansion, engine, page] = await Promise.all([
   readFile("src/data/stage8HistoricalGoodsKeyModelEvidence.ts", "utf8"),
+  readFile("src/data/stage8HistoricalGoodsKeyModelEvidenceExpansion1.ts", "utf8"),
   readFile("src/lib/stage8HistoricalGoodsKeyModelCrosswalk.ts", "utf8"),
   readFile("src/app/stage8-historical-goodskey-model-crosswalk/page.tsx", "utf8"),
 ]);
@@ -11,9 +12,18 @@ const [evidence, engine, page] = await Promise.all([
 test("crosswalk uses current Shopling identity sets and exact historical evidence", () => {
   assert.match(engine, /loadPurchaseCandidateShoplingIdentityAudit/);
   assert.match(engine, /historicalGoodsKeyModelEvidence/);
+  assert.match(engine, /historicalGoodsKeyModelEvidenceExpansion1/);
   assert.match(evidence, /evidenceKind: "ORIGINAL_SHOPLING_MODEL_NO"/);
-  assert.match(evidence, /sourceArtifact:/);
-  assert.match(evidence, /sourceSheet:/);
+  assert.match(expansion, /evidenceKind: "ORIGINAL_SHOPLING_MODEL_NO"/);
+  assert.match(expansion, /sourceArtifact:/);
+  assert.match(expansion, /sourceSheet:/);
+});
+
+test("first expansion contains one exact single-goods-key full-coverage candidate", () => {
+  assert.match(expansion, /goodsKey: "116337"[\s\S]*originalModelNo: "aaa092"/);
+  assert.match(expansion, /BBA2-3 현재 단일 active goods_key와 상품정체성 호환 확인/);
+  assert.match(engine, /singleModelFullCoverageCandidate/);
+  assert.match(engine, /state === "SINGLE_MODEL_FULL_COVERAGE"/);
 });
 
 test("partial coverage and true multi-model B-codes are not collapsed", () => {
