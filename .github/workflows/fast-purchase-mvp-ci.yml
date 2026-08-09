@@ -26,6 +26,7 @@ jobs:
           src/lib/fastPurchaseMvp.ts
           src/lib/fastPurchaseMvpModule.ts
           src/app/fast-purchase-mvp/page.tsx
+          src/components/fast-purchase-mvp/FastPurchaseTriageWorkspace.tsx
           src/lib/opsModuleRegistry.ts
       - name: Build
         run: npm run build
