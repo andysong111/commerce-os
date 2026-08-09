@@ -37,6 +37,7 @@ export type StocktakeCanaryOperatorReadiness = {
   inventoryVerification: string | null;
   inventoryBaselineKind: string | null;
   productMasterWriteEnabled: boolean;
+  opsOperatorWriteEnabled: boolean;
   maxWriteRows: 1;
   purchaseWritesEnabled: false;
   priceWritesEnabled: false;
@@ -51,6 +52,10 @@ function connection() {
   ).replace(/\/$/, "");
   if (!/^https:\/\//.test(baseUrl)) throw new Error("PRODUCT_MASTER_BASE_URL_INVALID");
   return { baseUrl, secret };
+}
+
+export function stocktakeOperatorProxyWriteEnabled() {
+  return process.env.OPS_STAGE8_STOCKTAKE_OPERATOR_WRITE_ENABLED === "true";
 }
 
 function integerQuantity(value: unknown) {
@@ -115,6 +120,7 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
   const plan = await loadStocktakeInterventionPlan();
   const barcode = plan.firstCanaryBarcode;
   const row = barcode ? plan.rows.find((candidate) => candidate.barcode === barcode) ?? null : null;
+  const opsOperatorWriteEnabled = stocktakeOperatorProxyWriteEnabled();
   if (
     plan.state !== "READY_FOR_OPERATOR_COUNT" ||
     !barcode ||
@@ -135,6 +141,7 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
       inventoryVerification: null,
       inventoryBaselineKind: null,
       productMasterWriteEnabled: false,
+      opsOperatorWriteEnabled,
       maxWriteRows: 1,
       purchaseWritesEnabled: false,
       priceWritesEnabled: false,
@@ -167,6 +174,7 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
       inventoryVerification: preview.inventoryVerification,
       inventoryBaselineKind: preview.inventoryBaselineKind,
       productMasterWriteEnabled: false,
+      opsOperatorWriteEnabled,
       maxWriteRows: 1,
       purchaseWritesEnabled: false,
       priceWritesEnabled: false,
@@ -174,12 +182,15 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
     };
   }
 
+  const bothWriteGatesEnabled = preview.writeEnabled && opsOperatorWriteEnabled;
   return {
     generatedAt: new Date().toISOString(),
-    state: preview.writeEnabled ? "READY_FOR_COUNT" : "WRITE_GATE_OFF",
-    message: preview.writeEnabled
+    state: bothWriteGatesEnabled ? "READY_FOR_COUNT" : "WRITE_GATE_OFF",
+    message: bothWriteGatesEnabled
       ? "첫 canary의 실물 수량 1개 값만 입력하면 서명된 정확한 1개 STOCKTAKE를 저장하고 persisted readback을 검증합니다."
-      : "첫 canary와 inventory guard는 일치하지만 Product Master의 1건 STOCKTAKE write 승인이 아직 준비되지 않았습니다.",
+      : preview.writeEnabled
+        ? "Product Master 1건 canary 게이트는 켜져 있지만 Ops Center 브라우저 write 프록시는 별도 게이트로 잠겨 있습니다."
+        : "첫 canary와 inventory guard는 일치하지만 Product Master의 1건 STOCKTAKE write 승인이 아직 준비되지 않았습니다.",
     barcode,
     name: row.name,
     modelNo: row.modelNo,
@@ -190,6 +201,7 @@ export async function loadStocktakeCanaryOperatorReadiness(): Promise<StocktakeC
     inventoryVerification: preview.inventoryVerification,
     inventoryBaselineKind: preview.inventoryBaselineKind,
     productMasterWriteEnabled: preview.writeEnabled,
+    opsOperatorWriteEnabled,
     maxWriteRows: 1,
     purchaseWritesEnabled: false,
     priceWritesEnabled: false,
@@ -202,6 +214,9 @@ export async function applyStocktakeCanaryFromOperator(input: {
   expectedPlanFingerprint: unknown;
   expectedInventoryGuard: unknown;
 }) {
+  if (!stocktakeOperatorProxyWriteEnabled()) {
+    throw new Error("STOCKTAKE_CANARY_OPERATOR_WRITE_GATE_OFF");
+  }
   const physicalQuantity = integerQuantity(input.physicalQuantity);
   const expectedPlanFingerprint = String(input.expectedPlanFingerprint ?? "").trim();
   const expectedInventoryGuard = String(input.expectedInventoryGuard ?? "").trim();
