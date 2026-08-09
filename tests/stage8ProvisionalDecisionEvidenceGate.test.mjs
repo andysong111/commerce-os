@@ -34,8 +34,9 @@ test("the gate never creates a purchase or inventory write", () => {
   assert.match(engine, /purchaseWritesEnabled: false/);
   assert.match(engine, /inventoryWritesEnabled: false/);
   assert.match(page, /ACTUAL DRAFT WRITE 0/);
-  assert.doesNotMatch(engine, /\.insert\(/);
-  assert.doesNotMatch(engine, /\.update\(/);
+  assert.doesNotMatch(engine, /createSupabaseAdminClient/);
+  assert.doesNotMatch(engine, /\.from\(/);
+  assert.doesNotMatch(engine, /\.(insert|upsert|delete)\(/);
   assert.doesNotMatch(engine, /fetch\(/);
 });
 
