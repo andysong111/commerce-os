@@ -1,6 +1,5 @@
 import { DetailPageActiveJobControlsV2 } from "@/components/detail-page-ai-review/DetailPageActiveJobControlsV2";
 import { DetailPageAiReviewWorkspace } from "@/components/detail-page-ai-review/DetailPageAiReviewWorkspace";
-import { DetailPageCompilerCanaryControl } from "@/components/detail-page-ai-review/DetailPageCompilerCanaryControl";
 import { DetailPageRepresentativeDownloadControl } from "@/components/detail-page-ai-review/DetailPageRepresentativeDownloadControl";
 import { DetailPageTerminalJobControls } from "@/components/detail-page-ai-review/DetailPageTerminalJobControls";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,7 +20,6 @@ export default function DetailPageAiReviewPage() {
       </div>
       <DetailPageActiveJobControlsV2 />
       <DetailPageTerminalJobControls />
-      <DetailPageCompilerCanaryControl />
       <DetailPageRepresentativeDownloadControl />
       <DetailPageAiReviewWorkspace />
     </>
