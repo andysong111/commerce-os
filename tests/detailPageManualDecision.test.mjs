@@ -85,13 +85,18 @@ test("v260807 identity conflicts are routed to operator judgment without weakeni
 });
 
 test("v260807 automatic recovery exhaustion becomes a resumable human decision", () => {
+  const current = baseJob();
   const exhausted = baseJob({
     stage: "v3_parallel_assets_ready",
     error:
       "DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED: 현재 저장 단계의 안전한 자동 재개 한도를 사용했습니다.",
     payload: {
-      ...baseJob().payload,
+      ...current.payload,
       recovery_stop_code: "DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED",
+    },
+    result: {
+      ...current.result,
+      v3RepresentativeIdentityGate: { status: "passed" },
     },
   });
   assert.equal(v260807ManualDecisionKind(exhausted), "resume_checkpoint");
