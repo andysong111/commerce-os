@@ -11,9 +11,11 @@ import {
 import {
   canApproveV260807Identity,
   canResumeV260807Checkpoint,
+  canRetryV260807GenerationSafety,
   isV260807RepresentativeRole,
   v260807IdentitySnapshot,
   v260807ManualDecisionKind,
+  v260807SourceAnchorSnapshot,
 } from "@/lib/detailPageManualDecision";
 import { DETAIL_PAGE_STAGED_PIPELINE_VERSION } from "@/lib/detailPageJobRecovery";
 import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
@@ -64,33 +66,135 @@ export async function POST(
     const kind = v260807ManualDecisionKind(manualJob);
     const decidedAt = new Date().toISOString();
 
-    if (action === "resume_checkpoint") {
+    if (action === "resume_checkpoint" || action === "resume_checkpoint_with_anchor") {
       if (kind !== "resume_checkpoint" || !canResumeV260807Checkpoint(manualJob)) {
         return conflict(
           "DETAIL_PAGE_MANUAL_RESUME_NOT_ALLOWED",
-          "v260807 자동 복구 한도 소진 작업만 저장 지점에서 계속할 수 있습니다.",
+          "v260807 안전 재개 대상 작업만 저장 지점에서 계속할 수 있습니다.",
         );
       }
+      const source = v260807SourceAnchorSnapshot(manualJob);
+      const requestedAnchor =
+        action === "resume_checkpoint_with_anchor" ? integer(body.anchorIndex) : -1;
+      if (
+        action === "resume_checkpoint_with_anchor" &&
+        (!source || requestedAnchor < 0 || requestedAnchor >= source.evidenceUrls.length)
+      ) {
+        return invalid("계속 실행에 사용할 1688 기준 원본 번호가 올바르지 않습니다.");
+      }
+      const currentPlan = record(job.result.v3Plan);
+      const nextAnchorIndex =
+        action === "resume_checkpoint_with_anchor" && source
+          ? requestedAnchor
+          : Number(currentPlan.identity_anchor_index);
       const patch = {
         status: "queued",
         stage: "v3_manual_resume_checkpoint",
         message:
-          "사용자 판단 · 기존 생성 자산 유지 · 저장된 마지막 단계에서 계속 실행 대기 중",
+          action === "resume_checkpoint_with_anchor" && source
+            ? `사용자 판단 · 기준 원본 ${source.anchorIndex + 1}번 → ${nextAnchorIndex + 1}번 선택 · 기존 생성 자산 유지 · 저장된 마지막 단계에서 계속 대기 중`
+            : "사용자 판단 · 기존 생성 자산 유지 · 저장된 마지막 단계에서 계속 실행 대기 중",
         progress: clamp(job.progress, 10, 94),
         qa_status: "pending",
         payload: {
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
-          manual_review_decision: "resume_checkpoint",
+          manual_review_decision: action,
           manual_review_decided_at: decidedAt,
           ...freshExecution(decidedAt),
         },
         result: {
+          ...(action === "resume_checkpoint_with_anchor"
+            ? {
+                v3Plan: {
+                  ...currentPlan,
+                  identity_anchor_index: nextAnchorIndex,
+                },
+                v3RepresentativeIdentityPassed: false,
+                v3RepresentativeIdentityRetries: {},
+              }
+            : {}),
           v3ManualDecision: {
-            decision: "resume_checkpoint",
+            decision: action,
             decidedAt,
             previousStage: job.stage,
             previousError: job.error_message,
+            ...(source
+              ? {
+                  previousAnchorIndex: source.anchorIndex,
+                  anchorIndex: nextAnchorIndex,
+                }
+              : {}),
+          },
+        },
+        lease_owner: "",
+        lease_until: null,
+        error_message: "",
+        completed_at: null,
+      };
+      const changed = await withDetailPageStoreRetry(() =>
+        patchDetailPageJob(config.value, job.id, patch),
+      );
+      return success(changed ?? job);
+    }
+
+    if (action === "retry_generation_with_anchor") {
+      if (
+        kind !== "generation_safety_block" ||
+        !canRetryV260807GenerationSafety(manualJob)
+      ) {
+        return conflict(
+          "DETAIL_PAGE_MANUAL_GENERATION_RETRY_NOT_ALLOWED",
+          "v260807 이미지 안전검사 차단 작업에서만 기준 원본을 선택해 실패 이미지를 다시 생성할 수 있습니다.",
+        );
+      }
+      const source = v260807SourceAnchorSnapshot(manualJob);
+      const nextAnchorIndex = integer(body.anchorIndex);
+      if (
+        !source ||
+        nextAnchorIndex < 0 ||
+        nextAnchorIndex >= source.evidenceUrls.length
+      ) {
+        return invalid("재생성에 사용할 1688 기준 원본 번호가 올바르지 않습니다.");
+      }
+      const currentPlan = record(job.result.v3Plan);
+      const previousGate = record(job.result.v3RepresentativeIdentityGate);
+      const patch = {
+        status: "queued",
+        stage: "v3_manual_generation_safety_retry",
+        message:
+          `사용자 판단 · 기준 원본 ${source.anchorIndex + 1}번 → ${nextAnchorIndex + 1}번 선택 · 저장된 성공 자산은 유지하고 안전검사에서 차단된 미저장 이미지만 다시 생성 대기 중`,
+        progress: clamp(job.progress, 10, 94),
+        qa_status: "pending",
+        payload: {
+          attempt: job.attempt + 1,
+          assistant_hidden_at: "",
+          manual_review_decision: "retry_generation_with_anchor",
+          manual_review_decided_at: decidedAt,
+          ...freshExecution(decidedAt),
+        },
+        result: {
+          v3Plan: {
+            ...currentPlan,
+            identity_anchor_index: nextAnchorIndex,
+          },
+          v3RepresentativeIdentityPassed: false,
+          v3RepresentativeIdentityRetries: {},
+          v3RepresentativeIdentityGate: {
+            ...previousGate,
+            previousStatus: previousGate.status,
+            status: "manual_generation_safety_retry_requested",
+            previousAnchorIndex: source.anchorIndex,
+            anchorIndex: nextAnchorIndex,
+            manualGenerationRetryRequestedAt: decidedAt,
+          },
+          v3ManualDecision: {
+            decision: "retry_generation_with_anchor",
+            decidedAt,
+            previousStage: job.stage,
+            previousError: job.error_message,
+            previousAnchorIndex: source.anchorIndex,
+            anchorIndex: nextAnchorIndex,
           },
         },
         lease_owner: "",
