@@ -4,10 +4,13 @@ import test from "node:test";
 import {
   canApproveV260807Identity,
   canResumeV260807Checkpoint,
+  canRetryV260807GenerationSafety,
   isV260807DetailPageJob,
+  v260807GenerationSafetyBlocked,
   v260807IdentitySnapshot,
   v260807ManualDecisionKind,
   v260807ResumeReason,
+  v260807SourceAnchorSnapshot,
 } from "../src/lib/detailPageManualDecision.ts";
 import { withDetailPageStoreRetry } from "../src/lib/detailPageStoreRetry.ts";
 
@@ -34,8 +37,9 @@ function baseJob(overrides = {}) {
       evidence_urls: [
         "https://assets.example.com/source-1.jpg",
         "https://assets.example.com/source-2.jpg",
+        "https://assets.example.com/source-3.jpg",
       ],
-      evidence_names: ["source-1.jpg", "source-2.jpg"],
+      evidence_names: ["source-1.jpg", "source-2.jpg", "source-3.jpg"],
     },
     result: {
       analysis: { product: { normalized_name: "걸이형 모공브러쉬 블랙" } },
@@ -90,7 +94,7 @@ test("v260807 identity conflicts are routed to operator judgment without weakeni
   );
 });
 
-test("current auto-recovery exhaustion wins over a stale identity-gate checkpoint", () => {
+test("current auto-recovery exhaustion keeps source anchor choices while preserving the checkpoint", () => {
   const current = baseJob();
   const exhausted = baseJob({
     stage: "v3_parallel_assets_ready",
@@ -104,6 +108,9 @@ test("current auto-recovery exhaustion wins over a stale identity-gate checkpoin
   assert.equal(v260807ResumeReason(exhausted), "auto_recovery_exhausted");
   assert.equal(v260807ManualDecisionKind(exhausted), "resume_checkpoint");
   assert.equal(canResumeV260807Checkpoint(exhausted), true);
+  const source = v260807SourceAnchorSnapshot(exhausted);
+  assert.equal(source?.anchorIndex, 0);
+  assert.equal(source?.evidenceUrls.length, 3);
 });
 
 test("unknown outcome during v260807 representative identity review becomes a human-resumable checkpoint", () => {
@@ -141,20 +148,43 @@ test("unknown outcome in a paid v260807 generation stage is not automatically ex
   assert.equal(canResumeV260807Checkpoint(unknownGeneration), false);
 });
 
-test("review page exposes the four cost-aware operator choices", () => {
+test("moderation/safety blocks during v3 generation become source-anchor retry decisions", () => {
+  const current = baseJob();
+  const blocked = baseJob({
+    stage: "v3_generation",
+    error:
+      "대표 이미지: 상세페이지 v3 이미지가 안전 검사에서 차단되었습니다. | 부가 이미지 1 · 전체 형태: 상세페이지 v3 이미지가 안전 검사에서 차단되었습니다.",
+    result: {
+      ...current.result,
+      v3Representatives: current.result.v3Representatives.slice(2),
+      v3RepresentativeIdentityGate: {},
+    },
+  });
+  assert.equal(v260807GenerationSafetyBlocked(blocked), true);
+  assert.equal(v260807ManualDecisionKind(blocked), "generation_safety_block");
+  assert.equal(canRetryV260807GenerationSafety(blocked), true);
+  assert.equal(v260807SourceAnchorSnapshot(blocked)?.evidenceNames[1], "source-2.jpg");
+});
+
+test("review page exposes cost-aware choices plus source-anchor selection before early retries", () => {
   assert.match(pageSource, /DetailPageManualDecisionQueue/);
-  assert.match(queueSource, /저장 지점에서 계속/);
+  assert.match(queueSource, /저장 지점에서 바로 계속/);
+  assert.match(queueSource, /선택 기준 원본으로 계속/);
+  assert.match(queueSource, /생성 안전검사 차단/);
+  assert.match(queueSource, /선택 기준으로 실패 이미지만 재생성/);
+  assert.match(queueSource, /1688 상품 본체 기준 원본/);
   assert.match(queueSource, /현재 이미지 승인하고 계속/);
   assert.match(queueSource, /문제 이미지만 재생성/);
   assert.match(queueSource, /기준 원본 변경/);
   assert.match(queueSource, /전체 재생성은 마지막 수단/);
-  assert.match(queueSource, /현재 작업 1건에만 적용/);
   assert.match(queueSource, /manual-review/);
   assert.match(queueSource, /encodeURIComponent\(job\.jobId\)\}\/start/);
 });
 
 test("manual decision API preserves assets and records job-scoped audit decisions", () => {
   assert.match(routeSource, /action === "resume_checkpoint"/);
+  assert.match(routeSource, /action === "resume_checkpoint_with_anchor"/);
+  assert.match(routeSource, /action === "retry_generation_with_anchor"/);
   assert.match(routeSource, /action === "approve_identity"/);
   assert.match(routeSource, /action === "regenerate_identity_asset"/);
   assert.match(routeSource, /action === "change_identity_anchor"/);
@@ -164,7 +194,7 @@ test("manual decision API preserves assets and records job-scoped audit decision
   assert.match(routeSource, /v3RepresentativeIdentityPassed: true/);
   assert.match(routeSource, /v3Representatives: representatives\.filter/);
   assert.match(routeSource, /identity_anchor_index: nextAnchorIndex/);
-  assert.match(routeSource, /v3RepresentativeIdentityRetries: \{\}/);
+  assert.match(routeSource, /manual_generation_safety_retry_requested/);
   assert.match(routeSource, /auto_recovery_count: 0/);
 });
 
