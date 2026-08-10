@@ -1,0 +1,43 @@
+name: Temporary Fast Purchase Internal Draft Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify production V2.3 internal draft UI is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://commerce-os-ops-center.vercel.app/fast-purchase-mvp'
+          ready=0
+          for i in $(seq 1 60); do
+            body="$(mktemp)"
+            out="$(curl -L -sS --connect-timeout 10 --max-time 150 -o "$body" -w '%{http_code} %{time_total}' "$url" || true)"
+            http="$(echo "$out" | awk '{print $1}')"
+            elapsed="$(echo "$out" | awk '{print $2}')"
+            text="$(cat "$body" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:700000])')"
+            echo "PROBE $i HTTP=$http ELAPSED=${elapsed}s"
+            if [ "$http" = '200' ] && echo "$text" | grep -q 'FAST USE · PROVISIONAL V2.3 · OPERATE NOW'; then
+              echo '--- FAST PURCHASE V2.3 INTERNAL DRAFT PRODUCTION ---'
+              echo "$text"
+              echo "ELAPSED_SECONDS=$elapsed"
+              ! echo "$text" | grep -q '빠른 발주안을 불러오지 못했습니다'
+              echo "$text" | grep -q '운영 커버리지 42'
+              echo "$text" | grep -q 'INTERNAL PURCHASE DRAFT · NO EXTERNAL ORDER'
+              echo "$text" | grep -q '내부 발주 Draft 저장'
+              echo "$text" | grep -q '외부 중국 주문 0건'
+              echo "$text" | grep -q '실제 중국 주문·결제는 아직 실행하지 않습니다'
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" = '1'
