@@ -9,6 +9,8 @@ const BARCODE_PATTERN = /^[A-Z]{3}\d+-\d+$/;
 
 export type ProductLaunchPurchaseMetadata = {
   barcode: string;
+  modelNumber: string;
+  productName: string;
   supplierLink: string;
   saleOption: string;
   chinaOption: string;
@@ -48,6 +50,8 @@ export async function loadProductLaunchPurchaseMetadataByBarcode() {
 export function buildMetadataMap(
   summaries: Array<{
     barcode?: unknown;
+    modelNumber?: unknown;
+    productName?: unknown;
     chinaProductLinks?: unknown;
     orderOptions?: unknown;
   }>,
@@ -57,6 +61,8 @@ export function buildMetadataMap(
     const supplierLink = normalizeSupplierLink(
       Array.isArray(summary.chinaProductLinks) ? summary.chinaProductLinks[0] : "",
     );
+    const modelNumber = text(summary.modelNumber);
+    const productName = text(summary.productName);
     const options = Array.isArray(summary.orderOptions)
       ? summary.orderOptions.filter(isRecord)
       : [];
@@ -68,6 +74,8 @@ export function buildMetadataMap(
       optionBarcodes.add(barcode);
       addCandidate(candidates, {
         barcode,
+        modelNumber,
+        productName,
         supplierLink,
         saleOption: text(option.saleOption),
         chinaOption: text(option.chinaOption),
@@ -79,6 +87,8 @@ export function buildMetadataMap(
       const only = options.length === 1 ? options[0] : null;
       addCandidate(candidates, {
         barcode: mainBarcode,
+        modelNumber,
+        productName,
         supplierLink,
         saleOption: text(only?.saleOption),
         chinaOption: text(only?.chinaOption),
@@ -88,6 +98,8 @@ export function buildMetadataMap(
 
   return new Map(
     [...candidates.entries()].map(([barcode, rows]) => {
+      const modelNumbers = uniqueNonEmpty(rows.map((row) => row.modelNumber));
+      const productNames = uniqueNonEmpty(rows.map((row) => row.productName));
       const supplierLinks = uniqueNonEmpty(rows.map((row) => row.supplierLink));
       const saleOptions = uniqueNonEmpty(rows.map((row) => row.saleOption));
       const chinaOptions = uniqueNonEmpty(rows.map((row) => row.chinaOption));
@@ -97,6 +109,8 @@ export function buildMetadataMap(
         barcode,
         {
           barcode,
+          modelNumber: modelNumbers.length === 1 ? modelNumbers[0] : "",
+          productName: productNames.length === 1 ? productNames[0] : "",
           supplierLink: supplierLinks.length === 1 ? supplierLinks[0] : "",
           saleOption: saleOptions.length === 1 ? saleOptions[0] : "",
           chinaOption: chinaOptions.length === 1 ? chinaOptions[0] : "",
