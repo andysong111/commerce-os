@@ -1,6 +1,6 @@
 import { FastPurchaseTriageWorkspace } from "@/components/fast-purchase-mvp/FastPurchaseTriageWorkspace";
 import { PageHeader } from "@/components/PageHeader";
-import { loadFastPurchaseMvp } from "@/lib/fastPurchaseMvp";
+import { loadFastPurchaseMvpResilient } from "@/lib/fastPurchaseMvpResilient";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -9,7 +9,8 @@ export const maxDuration = 180;
 const number = new Intl.NumberFormat("ko-KR");
 
 export default async function FastPurchaseMvpPage() {
-  const report = await loadFastPurchaseMvp();
+  const report = await loadFastPurchaseMvpResilient();
+  const fallback = report.dataMode === "LAST_KNOWN_MANUAL_FALLBACK";
 
   return (
     <div className="space-y-6">
@@ -18,6 +19,22 @@ export default async function FastPurchaseMvpPage() {
         title="빠른 발주안 · MVP"
         description="완벽한 초기재고를 기다리지 않습니다. 시스템판정은 그대로 사용하고, 수동검토 상품은 창고 전수조사 없이 충분·부족·품절 정도만 빠르게 표시해 오늘 주문 예정수량을 직접 정할 수 있게 합니다."
       />
+
+      {fallback ? (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-black tracking-[0.12em] text-amber-700">TEMPORARY LIVE SOURCE FALLBACK</span>
+              <h2 className="mt-1 text-xl font-black text-amber-950">실시간 호출 실패 · 마지막 정상 스냅샷으로 수동검토 계속 가능</h2>
+            </div>
+            <strong className="rounded-full bg-amber-900 px-4 py-2 text-sm text-white">자동발주 0 · 시스템판정 사용 안 함</strong>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-amber-950">
+            실시간 데이터가 일시적으로 끊겨도 화면을 닫지 않습니다. 이 상태에서는 아래 42개 상품의 마지막 정상 `재고0 수요참고`만 보여주며, 시스템 발주·보류 판정은 모두 비활성입니다. 재고 체감과 수동 주문 예정수량만 입력하고, 실시간 연결이 회복되면 새 fingerprint 기준으로 다시 확인합니다.
+          </p>
+          <p className="mt-2 font-mono text-xs text-amber-800">SOURCE ERROR · {report.sourceErrorCode ?? "UNKNOWN"}</p>
+        </section>
+      ) : null}
 
       <section className={`rounded-2xl border p-5 shadow-sm ${report.state === "READY_MVP" ? "border-blue-200 bg-blue-50" : "border-rose-200 bg-rose-50"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -28,12 +45,12 @@ export default async function FastPurchaseMvpPage() {
           <strong className="rounded-full bg-slate-950 px-4 py-2 text-sm text-white">수동 발주만 · 자동주문 0</strong>
         </div>
         <p className="mt-3 text-sm leading-6 text-slate-700">{report.message}</p>
-        <p className="mt-2 text-xs text-slate-500">{new Date(report.generatedAt).toLocaleString("ko-KR")} · {report.mode}</p>
+        <p className="mt-2 text-xs text-slate-500">{new Date(report.generatedAt).toLocaleString("ko-KR")} · {report.mode} · {report.dataMode}</p>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-9">
         <Metric label="평가·검토 상품" value={number.format(report.evaluatedCount)} />
-        <Metric label="시스템 판단" value={number.format(report.systemDecisionCount)} emphasized />
+        <Metric label="시스템 판단" value={number.format(report.systemDecisionCount)} emphasized={!fallback} />
         <Metric label="수동 판단재료" value={number.format(report.manualTriageCount)} emphasized />
         <Metric label="운영 커버리지" value={number.format(report.operationalCoverageCount)} emphasized />
         <Metric label="발주 검토" value={number.format(report.orderReviewCount)} />
@@ -45,7 +62,9 @@ export default async function FastPurchaseMvpPage() {
 
       <section className="rounded-2xl border border-violet-200 bg-violet-50 p-5 text-sm leading-6 text-violet-950">
         <strong>지금은 정확도보다 실제 사용 흐름을 우선합니다.</strong><br />
-        재고증거가 있는 상품은 기존 `TWO_SIDED_BAND` 또는 `CUMULATIVE_UPPER_BIASED` 판단을 그대로 사용합니다. 재고증거가 없는 상품은 `DEMAND_ONLY_ZERO_STOCK_REFERENCE`의 재고 0 가정 수요를 참고상한으로만 보여주고, 아래 작업대에서 사용자가 재고 체감과 주문 예정수량을 직접 입력합니다. 참고상한은 실제 주문수량으로 자동 복사되지 않습니다.
+        {fallback
+          ? "현재는 마지막 정상 스냅샷의 재고0 수요참고만 사용합니다. 수동 판단·수량입력·CSV는 계속 가능하지만 시스템 발주/보류 판정은 사용하지 않습니다."
+          : "재고증거가 있는 상품은 기존 `TWO_SIDED_BAND` 또는 `CUMULATIVE_UPPER_BIASED` 판단을 그대로 사용합니다. 재고증거가 없는 상품은 `DEMAND_ONLY_ZERO_STOCK_REFERENCE`의 재고 0 가정 수요를 참고상한으로만 보여주고, 아래 작업대에서 사용자가 재고 체감과 주문 예정수량을 직접 입력합니다. 참고상한은 실제 주문수량으로 자동 복사되지 않습니다."}
       </section>
 
       <FastPurchaseTriageWorkspace
