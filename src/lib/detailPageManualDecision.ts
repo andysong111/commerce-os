@@ -3,6 +3,11 @@ export type V260807ManualDecisionKind =
   | "identity_conflict"
   | null;
 
+export type V260807ResumeReason =
+  | "auto_recovery_exhausted"
+  | "identity_review_outcome_unknown"
+  | null;
+
 export type ManualDecisionJobLike = {
   status: string;
   stage: string;
@@ -28,6 +33,9 @@ const REPRESENTATIVE_ROLES = new Set([
   "lifestyle_usage",
   "adaptive_support",
 ]);
+const SAFE_UNKNOWN_OUTCOME_STAGES = new Set([
+  "v3_representative_identity_review",
+]);
 
 export function isV260807DetailPageJob(job: ManualDecisionJobLike) {
   const result = record(job.result);
@@ -39,21 +47,40 @@ export function isV260807DetailPageJob(job: ManualDecisionJobLike) {
   );
 }
 
-export function v260807ManualDecisionKind(
+export function v260807ResumeReason(
   job: ManualDecisionJobLike,
-): V260807ManualDecisionKind {
+): V260807ResumeReason {
   if (job.status !== "failed" || !isV260807DetailPageJob(job)) return null;
-
   const payload = record(job.payload);
   const failureText = [
     text(job.error),
     text(payload.recovery_stop_code),
     text(payload.recoveryStopCode),
   ].join(" ");
-  // The current terminal failure is authoritative. A previous identity-gate
-  // result may remain in the merged checkpoint after a later infrastructure
-  // recovery stop, so handle explicit recovery exhaustion first.
+
   if (/DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED/i.test(failureText)) {
+    return "auto_recovery_exhausted";
+  }
+  if (
+    SAFE_UNKNOWN_OUTCOME_STAGES.has(text(job.stage)) &&
+    /DETAIL_PAGE_STEP_OUTCOME_UNKNOWN/i.test(failureText)
+  ) {
+    return "identity_review_outcome_unknown";
+  }
+  return null;
+}
+
+export function v260807ManualDecisionKind(
+  job: ManualDecisionJobLike,
+): V260807ManualDecisionKind {
+  if (job.status !== "failed" || !isV260807DetailPageJob(job)) return null;
+
+  // Current infrastructure stop is authoritative. v260807 identity-review is a
+  // read/verification step, so when its outcome is unknown we still avoid an
+  // automatic retry, but allow the operator to resume from the durable
+  // checkpoint. This does not allow unknown outcomes from image-generation
+  // stages to be replayed.
+  if (v260807ResumeReason(job)) {
     return "resume_checkpoint";
   }
 

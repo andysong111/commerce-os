@@ -7,6 +7,7 @@ import {
   isV260807DetailPageJob,
   v260807IdentitySnapshot,
   v260807ManualDecisionKind,
+  v260807ResumeReason,
 } from "../src/lib/detailPageManualDecision.ts";
 import { withDetailPageStoreRetry } from "../src/lib/detailPageStoreRetry.ts";
 
@@ -100,8 +101,44 @@ test("current auto-recovery exhaustion wins over a stale identity-gate checkpoin
       recovery_stop_code: "DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED",
     },
   });
+  assert.equal(v260807ResumeReason(exhausted), "auto_recovery_exhausted");
   assert.equal(v260807ManualDecisionKind(exhausted), "resume_checkpoint");
   assert.equal(canResumeV260807Checkpoint(exhausted), true);
+});
+
+test("unknown outcome during v260807 representative identity review becomes a human-resumable checkpoint", () => {
+  const current = baseJob();
+  const unknown = baseJob({
+    stage: "v3_representative_identity_review",
+    error:
+      "DETAIL_PAGE_STEP_OUTCOME_UNKNOWN: AI 단계의 성공 여부를 확인할 수 없어 자동 재결제를 차단했습니다.",
+    result: {
+      ...current.result,
+      v3RepresentativeIdentityGate: {
+        status: "manual_anchor_changed",
+        failedRoleId: "main_catalog",
+      },
+    },
+  });
+  assert.equal(v260807ResumeReason(unknown), "identity_review_outcome_unknown");
+  assert.equal(v260807ManualDecisionKind(unknown), "resume_checkpoint");
+  assert.equal(canResumeV260807Checkpoint(unknown), true);
+});
+
+test("unknown outcome in a paid v260807 generation stage is not automatically exposed as resumable", () => {
+  const current = baseJob();
+  const unknownGeneration = baseJob({
+    stage: "v3_generation",
+    error:
+      "DETAIL_PAGE_STEP_OUTCOME_UNKNOWN: AI 단계의 성공 여부를 확인할 수 없어 자동 재결제를 차단했습니다.",
+    result: {
+      ...current.result,
+      v3RepresentativeIdentityGate: { status: "passed" },
+    },
+  });
+  assert.equal(v260807ResumeReason(unknownGeneration), null);
+  assert.equal(v260807ManualDecisionKind(unknownGeneration), null);
+  assert.equal(canResumeV260807Checkpoint(unknownGeneration), false);
 });
 
 test("review page exposes the four cost-aware operator choices", () => {
