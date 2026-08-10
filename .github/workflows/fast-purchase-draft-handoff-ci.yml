@@ -1,0 +1,34 @@
+name: Fast Purchase Draft Handoff CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Test handoff safety
+        run: node --experimental-strip-types --test tests/fastPurchaseDraftHandoff.test.mjs
+      - name: Lint handoff files
+        run: >-
+          npx eslint
+          src/lib/fastPurchaseDraftHandoff.ts
+          src/app/api/fast-purchase/drafts/queue/route.ts
+          src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://fast-purchase-handoff-build.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_fast_purchase_handoff_build
+          SUPABASE_SECRET_KEY: sb_secret_fast_purchase_handoff_build
