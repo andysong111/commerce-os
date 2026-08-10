@@ -24,6 +24,8 @@ jobs:
         run: >-
           npx eslint
           src/lib/fastPurchaseDraftHandoff.ts
+          src/lib/productLaunchPurchaseMetadata.ts
+          src/lib/purchasePlanDraftQueue.ts
           src/app/api/fast-purchase/drafts/queue/route.ts
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
       - name: Build

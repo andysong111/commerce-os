@@ -17,6 +17,9 @@ export type PurchasePlanDraftQueueItem = {
   barcode: string;
   modelNumber: string | null;
   productName: string;
+  saleOption: string;
+  chinaOption: string;
+  supplierLink: string;
   quantity: number;
   unitCostKrw: number;
   reason: string;
@@ -83,6 +86,9 @@ export function normalizePurchasePlanDraftInput(value: unknown) {
       barcode,
       modelNumber: text(item.modelNumber).slice(0, 80) || null,
       productName,
+      saleOption: text(item.saleOption).slice(0, 160),
+      chinaOption: text(item.chinaOption).slice(0, 240),
+      supplierLink: normalizeSupplierLink(item.supplierLink),
       quantity,
       unitCostKrw: Math.max(0, Math.round(Number(item.unitCostKrw) || 0)),
       reason: text(item.reason).slice(0, 300),
@@ -225,6 +231,19 @@ function pruneQueue(queue: QueueState) {
   );
   const keep = rows.slice(0, MAX_QUEUE_ENTRIES);
   queue.entries = Object.fromEntries(keep.map((entry) => [entry.sourceRunId, entry]));
+}
+
+function normalizeSupplierLink(value: unknown) {
+  const candidate = text(value);
+  if (!candidate) return "";
+  if (candidate.length > 4000) throw new Error("중국 주문링크는 4,000자 이하로 입력하세요.");
+  try {
+    const url = new URL(candidate);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("INVALID_PROTOCOL");
+    return url.toString();
+  } catch {
+    throw new Error("중국 주문링크는 올바른 http/https 주소여야 합니다.");
+  }
 }
 
 function text(value: unknown) {
