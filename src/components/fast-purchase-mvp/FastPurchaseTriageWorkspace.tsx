@@ -212,7 +212,13 @@ export function FastPurchaseTriageWorkspace({
       const entry = triage[row.barcode] ?? EMPTY_ENTRY;
       if (
         needle &&
-        ![row.barcode, row.modelNo ?? "", row.productName]
+        ![
+          row.barcode,
+          row.modelName ?? "",
+          row.modelNo ?? "",
+          row.optionName ?? "",
+          row.productName,
+        ]
           .join(" ")
           .normalize("NFKC")
           .toLowerCase()
@@ -238,7 +244,9 @@ export function FastPurchaseTriageWorkspace({
       if (plannedQuantity <= 0) return [];
       return [[
         row.barcode,
+        row.modelName ?? "",
         row.modelNo ?? "",
+        row.optionName ?? "",
         row.productName,
         row.actionLabel,
         row.basis,
@@ -258,8 +266,10 @@ export function FastPurchaseTriageWorkspace({
     downloadCsv([
       [
         "B-code",
+        "모델명",
         "모델번호",
-        "상품명",
+        "옵션명",
+        "판매상품명",
         "시스템판정",
         "근거",
         "위험편향",
@@ -344,7 +354,7 @@ export function FastPurchaseTriageWorkspace({
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="B-code · 모델번호 · 상품명 검색"
+          placeholder="B-code · 모델명 · 모델번호 · 옵션명 · 상품명 검색"
           className="min-w-[260px] flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
         />
         {([
@@ -376,13 +386,12 @@ export function FastPurchaseTriageWorkspace({
       ) : null}
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1900px] text-left text-sm">
+        <table className="min-w-[1850px] text-left text-sm">
           <thead className="border-b border-slate-200 text-xs font-bold text-slate-500">
             <tr>
               <th className="px-3 py-3">판정</th>
-              <th className="px-3 py-3">B-code</th>
-              <th className="px-3 py-3">모델번호</th>
-              <th className="px-3 py-3">상품</th>
+              <th className="px-3 py-3">B-code · 모델/옵션</th>
+              <th className="px-3 py-3">판매상품명</th>
               <th className="px-3 py-3 text-right">시스템 주문검토</th>
               <th className="px-3 py-3 text-right">재고0 수요참고</th>
               <th className="px-3 py-3">빠른 재고판단</th>
@@ -412,11 +421,30 @@ export function FastPurchaseTriageWorkspace({
                         {row.actionLabel}
                       </span>
                     </td>
-                    <td className="px-3 py-4 font-mono font-black text-slate-950">
-                      {row.barcode}
-                    </td>
-                    <td className="px-3 py-4 font-mono text-xs text-slate-600">
-                      {row.modelNo ?? "-"}
+                    <td className="min-w-[300px] px-3 py-4">
+                      <div className="font-mono text-sm font-black text-slate-950">
+                        {row.barcode}
+                      </div>
+                      <div className="mt-2 space-y-1 text-[11px] leading-4 text-slate-600">
+                        <div>
+                          <span className="mr-1 font-bold text-slate-400">모델명</span>
+                          <span className="font-semibold text-slate-800">
+                            {row.modelName || row.productName || "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="mr-1 font-bold text-slate-400">모델번호</span>
+                          <span className="font-mono font-semibold text-slate-700">
+                            {row.modelNo ?? "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="mr-1 font-bold text-slate-400">옵션명</span>
+                          <span className="font-semibold text-slate-700">
+                            {row.optionName || "-"}
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td className="max-w-[340px] px-3 py-4 font-bold text-slate-900">
                       {row.productName}
@@ -546,7 +574,7 @@ export function FastPurchaseTriageWorkspace({
             ) : (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={9}
                   className="px-3 py-10 text-center text-slate-500"
                 >
                   조건에 맞는 상품이 없습니다.
