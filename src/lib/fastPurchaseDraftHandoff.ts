@@ -1,6 +1,7 @@
 import { enqueuePurchasePlanDraft } from "@/lib/purchasePlanDraftQueue";
 import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadProductLaunchPurchaseMetadataByBarcode } from "@/lib/productLaunchPurchaseMetadata";
 
 const DRAFT_ID = /^fast-purchase-draft:[a-f0-9]{20}$/;
 const ORDER_MANAGER_BASE_URL =
@@ -38,9 +39,10 @@ export async function queueFastPurchaseDraftForChina(rawDraftId: unknown) {
     throw new Error("FAST_PURCHASE_HANDOFF_DRAFT_ID_INVALID");
   }
 
-  const [draftState, planning] = await Promise.all([
+  const [draftState, planning, trackerMetadata] = await Promise.all([
     loadFastPurchaseInternalDrafts(),
     loadProductPlanningSnapshot(),
+    loadProductLaunchPurchaseMetadataByBarcode(),
   ]);
   if (draftState.error) {
     throw new Error("FAST_PURCHASE_HANDOFF_LEDGER_UNAVAILABLE");
@@ -66,13 +68,20 @@ export async function queueFastPurchaseDraftForChina(rawDraftId: unknown) {
   const items = draft.lines
     .map((line) => {
       const profile = planningByBarcode.get(line.barcode);
+      const tracker = trackerMetadata.byBarcode.get(line.barcode);
+      const supplierLink = tracker?.conflict ? "" : text(tracker?.supplierLink);
       return {
         barcode: line.barcode,
         modelNumber: handoffModelNumber(profile?.modelNo, line.barcode),
         productName: text(profile?.productName) || line.barcode,
+        saleOption: tracker?.conflict ? "" : text(tracker?.saleOption),
+        chinaOption: tracker?.conflict ? "" : text(tracker?.chinaOption),
+        supplierLink,
         quantity: quantity(line.openQuantity),
         unitCostKrw: 0,
-        reason: `빠른 발주안 내부 Draft ${draftId} · 사용자 확정 RESERVED`,
+        reason: `빠른 발주안 내부 Draft ${draftId} · 사용자 확정 RESERVED${
+          supplierLink ? " · 상품출시진행관리 1번 중국링크 자동연결" : ""
+        }`,
       };
     })
     .filter((item) => item.quantity > 0)
@@ -102,6 +111,7 @@ export async function queueFastPurchaseDraftForChina(rawDraftId: unknown) {
     batchId: result.entry.batchId,
     orderManagerUrl: orderManagerUrl.toString(),
     externalOrderExecuted: false as const,
+    trackerMetadataError: trackerMetadata.error,
     items,
   };
 }
