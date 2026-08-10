@@ -66,7 +66,10 @@ export function FastPurchaseDraftActions({
   };
 
   useEffect(() => {
-    void refreshDrafts();
+    const timer = window.setTimeout(() => {
+      void refreshDrafts();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const saveDraft = async () => {
