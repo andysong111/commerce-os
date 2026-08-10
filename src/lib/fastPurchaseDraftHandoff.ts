@@ -15,6 +15,12 @@ function quantity(value: unknown) {
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
 }
 
+function handoffModelNumber(modelNo: unknown, barcode: string) {
+  const candidate = text(modelNo);
+  if (!candidate || /^LEGACY-/i.test(candidate)) return barcode;
+  return candidate;
+}
+
 function koreanDate(iso: string) {
   const parsed = Date.parse(iso);
   const date = Number.isFinite(parsed) ? new Date(parsed) : new Date();
@@ -62,7 +68,7 @@ export async function queueFastPurchaseDraftForChina(rawDraftId: unknown) {
       const profile = planningByBarcode.get(line.barcode);
       return {
         barcode: line.barcode,
-        modelNumber: text(profile?.modelNo) || line.barcode,
+        modelNumber: handoffModelNumber(profile?.modelNo, line.barcode),
         productName: text(profile?.productName) || line.barcode,
         quantity: quantity(line.openQuantity),
         unitCostKrw: 0,
