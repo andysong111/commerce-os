@@ -12,17 +12,15 @@ const [baselineFile, moduleFile, datedModuleFile, registryFile, dashboardFile, p
     readFile("src/app/page.tsx", "utf8"),
   ]);
 
-test("all three v260807 detail studio cards share one frozen Production v3 contract", () => {
+test("all three v260807 detail studio cards share the current frozen highpoint engine contract", () => {
   assert.match(baselineFile, /engineProfile: "source-first-v3"/);
-  assert.match(baselineFile, /stable\/ops-v3-production-20260809/);
+  assert.match(baselineFile, /stable\/v260807-highpoint-20260810/);
   assert.match(
     baselineFile,
-    /48ee179b4c7cd067c93ddbcfa3fd02a2a349796e/,
+    /bc3666b093e3c05aba605382ca8e3a798e02f42d/,
   );
-  assert.match(
-    baselineFile,
-    /stable\/product-launch-detail-v3-integration-20260809/,
-  );
+  assert.match(baselineFile, /saasProductionBranch: "isolated\/saas-production"/);
+  assert.match(baselineFile, /saasTestBranch: "isolated\/saas-test"/);
   assert.match(moduleFile, /DETAIL_PAGE_V3_BASELINE_NOTE/);
   assert.match(datedModuleFile, /DETAIL_PAGE_V3_BASELINE_NOTE/);
   assert.match(registryFile, /DETAIL_PAGE_V3_BASELINE_NOTE/);
@@ -43,7 +41,7 @@ test("OPS Center v260807 card keeps the production Studio host", () => {
   );
 });
 
-test("SaaS production card keeps its deployment alias while using the shared baseline", () => {
+test("SaaS production card keeps its independent deployment alias while using the exact highpoint engine", () => {
   assert.match(
     registryFile,
     /title: "Commerce OS Detail Page Studio · SaaS 전용 · v260807"/,
@@ -55,7 +53,7 @@ test("SaaS production card keeps its deployment alias while using the shared bas
   assert.match(registryFile, /isolated\/saas-production/);
 });
 
-test("SaaS test card keeps its deployment alias while using the shared baseline", () => {
+test("SaaS test card keeps its independent deployment alias while using the exact highpoint engine", () => {
   assert.match(
     datedModuleFile,
     /id: "detail-page-studio-saas-test-260807"/,
