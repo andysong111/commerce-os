@@ -1,0 +1,107 @@
+name: One-shot Approved Fast Purchase Internal Draft Write
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  write-approved-draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Persist the user-approved 5-SKU 129-unit plan as RESERVED only
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin='https://commerce-os-ops-center.vercel.app'
+          page_url="$origin/fast-purchase-mvp"
+          api_url="$origin/api/fast-purchase/drafts"
+
+          page="$(mktemp)"
+          page_status="$(curl -L -sS --connect-timeout 10 --max-time 150 -o "$page" -w '%{http_code}' "$page_url")"
+          test "$page_status" = '200'
+          text="$(cat "$page" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip())')"
+          echo "$text" | grep -q 'FAST USE · PROVISIONAL V2.3 · OPERATE NOW'
+          echo "$text" | grep -q 'LIVE'
+          echo "$text" | grep -q '운영 커버리지 42'
+          echo "$text" | grep -q 'BAD2-2.*44'
+          echo "$text" | grep -q 'BAC4-2.*32'
+          echo "$text" | grep -q 'BAC6-1.*22'
+          echo "$text" | grep -q 'BAC4-1.*17'
+          echo "$text" | grep -q 'BGE4-2.*14'
+
+          fingerprint="$(echo "$text" | grep -oE 'sha256:[0-9a-f]{64}' | head -1)"
+          test -n "$fingerprint"
+          echo "CURRENT_SOURCE_FINGERPRINT=$fingerprint"
+
+          payload="$(FINGERPRINT="$fingerprint" python - <<'PY'
+          import json, os
+          print(json.dumps({
+            "sourceFingerprint": os.environ["FINGERPRINT"],
+            "dataMode": "LIVE",
+            "lines": [
+              {"barcode":"BAD2-2","plannedQuantity":44,"stockSense":"LOW","referenceDemandQuantity":44,"note":"사용자 최종확정: 재고 매우 부족, 거의 0"},
+              {"barcode":"BAC4-2","plannedQuantity":32,"stockSense":"LOW","referenceDemandQuantity":32,"note":"사용자 최종확정: 배추담요 별도 사이즈 옵션, 재고 매우 부족"},
+              {"barcode":"BAC6-1","plannedQuantity":22,"stockSense":"LOW","referenceDemandQuantity":22,"note":"사용자 최종확정: 재고 매우 부족, 거의 0"},
+              {"barcode":"BAC4-1","plannedQuantity":17,"stockSense":"LOW","referenceDemandQuantity":17,"note":"사용자 최종확정: 배추담요 별도 사이즈 옵션, 재고 매우 부족"},
+              {"barcode":"BGE4-2","plannedQuantity":14,"stockSense":"LOW","referenceDemandQuantity":14,"note":"사용자 최종확정: 재고 매우 부족, 거의 0"}
+            ]
+          }, ensure_ascii=False))
+          PY
+          )"
+
+          result="$(mktemp)"
+          status="$(curl -L -sS --connect-timeout 10 --max-time 180 \
+            -o "$result" -w '%{http_code}' \
+            -X POST "$api_url" \
+            -H "Origin: $origin" \
+            -H "Referer: $page_url" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data-binary "$payload")"
+          echo "POST_STATUS=$status"
+          cat "$result"
+          test "$status" = '200' -o "$status" = '201'
+
+          draft_id="$(python - "$result" <<'PY'
+          import json, sys
+          p=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert p.get('ok') is True, p
+          d=p.get('draft') or {}
+          assert d.get('lineCount') == 5, d
+          assert d.get('totalQuantity') == 129, d
+          assert d.get('externalOrderExecuted') is False, d
+          print(d['draftId'])
+          PY
+          )"
+          echo "DRAFT_ID=$draft_id"
+
+          ledger="$(mktemp)"
+          get_status="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+            -o "$ledger" -w '%{http_code}' \
+            "$api_url" \
+            -H "Origin: $origin" \
+            -H "Referer: $page_url" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -H 'Accept: application/json')"
+          echo "GET_STATUS=$get_status"
+          test "$get_status" = '200'
+          DRAFT_ID="$draft_id" python - "$ledger" <<'PY'
+          import json, os, sys
+          p=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert p.get('ok') is True, p
+          found=[d for d in p.get('drafts',[]) if d.get('draftId') == os.environ['DRAFT_ID']]
+          assert len(found) == 1, found
+          d=found[0]
+          assert d.get('lineCount') == 5, d
+          assert d.get('requestedQuantity') == 129, d
+          assert d.get('orderedQuantity') == 0, d
+          assert d.get('receivedQuantity') == 0, d
+          assert d.get('openQuantity') == 129, d
+          print('INTERNAL_DRAFT_VERIFIED=5_SKU_129_OPEN')
+          print('EXTERNAL_CHINA_ORDER_EXECUTED=false')
+          PY
