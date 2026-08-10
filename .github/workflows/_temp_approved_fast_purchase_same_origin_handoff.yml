@@ -1,0 +1,51 @@
+name: One-shot Approved Fast Purchase Same-Origin Handoff
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handoff-approved-draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Queue approved internal Draft through the deployed same-origin handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin='https://commerce-os-ops-center.vercel.app'
+          page_url="$origin/fast-purchase-mvp"
+          api_url="$origin/api/fast-purchase/drafts/queue"
+          result="$(mktemp)"
+          status="$(curl -L -sS --connect-timeout 10 --max-time 180 \
+            -o "$result" -w '%{http_code}' \
+            -X POST "$api_url" \
+            -H "Origin: $origin" \
+            -H "Referer: $page_url" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -H 'Accept: application/json' \
+            -H 'Content-Type: application/json' \
+            --data-binary '{"draftId":"fast-purchase-draft:82d5c90bbf302be6670e"}')"
+          echo "HANDOFF_STATUS=$status"
+          cat "$result"
+          test "$status" = '200'
+          python - "$result" <<'PY'
+          import json,sys
+          p=json.load(open(sys.argv[1],encoding='utf-8'))
+          assert p.get('ok') is True,p
+          h=p.get('handoff') or {}
+          assert h.get('draftId')=='fast-purchase-draft:82d5c90bbf302be6670e',h
+          assert h.get('lineCount')==5,h
+          assert h.get('queuedQuantity')==129,h
+          assert h.get('queueStatus') in ('PENDING','IMPORTED'),h
+          assert h.get('externalOrderExecuted') is False,h
+          assert 'purchaseDraftRun=fast-purchase-draft%3A82d5c90bbf302be6670e' in h.get('orderManagerUrl',''),h
+          print('CHINA_DRAFT_HANDOFF_VERIFIED=5_SKU_129')
+          print('QUEUE_STATUS='+str(h.get('queueStatus')))
+          print('ALREADY_QUEUED='+str(h.get('alreadyQueued')))
+          print('ALREADY_IMPORTED='+str(h.get('alreadyImported')))
+          print('EXTERNAL_1688_ORDER_EXECUTED=false')
+          PY
