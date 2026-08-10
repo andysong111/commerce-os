@@ -28,6 +28,13 @@ test("China draft keeps actual supplier pricing as a later review step", () => {
   assert.doesNotMatch(handoff, /orderedOn1688|unitPriceCny|payment/i);
 });
 
+test("LEGACY placeholder model numbers are never handed to China order management", () => {
+  assert.match(handoff, /function handoffModelNumber/);
+  assert.match(handoff, /\^LEGACY-/i);
+  assert.match(handoff, /return barcode/);
+  assert.match(handoff, /modelNumber: handoffModelNumber\(profile\?\.modelNo, line\.barcode\)/);
+});
+
 test("handoff deep link carries the exact internal draft run id", () => {
   assert.match(handoff, /purchaseDraftRun/);
   assert.match(handoff, /china-order-manager\.andy123df23\.chatgpt\.site/);
