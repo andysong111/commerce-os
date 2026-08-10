@@ -24,8 +24,8 @@ export type FastPurchaseMvpBasis =
 export type FastPurchaseMvpRow = {
   barcode: string;
   modelNo: string | null;
-  modelName: string | null;
-  optionName: string | null;
+  modelName?: string | null;
+  optionName?: string | null;
   productName: string;
   action: FastPurchaseMvpAction;
   actionLabel: string;
