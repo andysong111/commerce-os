@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [handoff, route, actions] = await Promise.all([
+const [handoff, queue, route, actions] = await Promise.all([
   readFile("src/lib/fastPurchaseDraftHandoff.ts", "utf8"),
+  readFile("src/lib/purchasePlanDraftQueue.ts", "utf8"),
   readFile("src/app/api/fast-purchase/drafts/queue/route.ts", "utf8"),
   readFile("src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx", "utf8"),
 ]);
@@ -33,6 +34,23 @@ test("LEGACY placeholder model numbers are never handed to China order managemen
   assert.match(handoff, /\^LEGACY-/i);
   assert.match(handoff, /return barcode/);
   assert.match(handoff, /modelNumber: handoffModelNumber\(profile\?\.modelNo, line\.barcode\)/);
+});
+
+test("product launch tracker primary supplier link and option metadata are handed to China draft", () => {
+  assert.match(handoff, /loadProductLaunchPurchaseMetadataByBarcode/);
+  assert.match(handoff, /supplierLink/);
+  assert.match(handoff, /saleOption/);
+  assert.match(handoff, /chinaOption/);
+  assert.match(handoff, /상품출시진행관리 1번 중국링크 자동연결/);
+  assert.match(queue, /supplierLink: normalizeSupplierLink\(item\.supplierLink\)/);
+  assert.match(queue, /saleOption: text\(item\.saleOption\)/);
+  assert.match(queue, /chinaOption: text\(item\.chinaOption\)/);
+});
+
+test("tracker metadata failure or conflict does not block the reserved purchase quantity", () => {
+  assert.match(handoff, /trackerMetadataError: trackerMetadata\.error/);
+  assert.match(handoff, /tracker\?\.conflict \? ""/);
+  assert.match(handoff, /quantity: quantity\(line\.openQuantity\)/);
 });
 
 test("handoff deep link carries the exact internal draft run id", () => {
