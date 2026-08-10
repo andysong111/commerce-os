@@ -1,3 +1,4 @@
+import { FastPurchaseDraftActions } from "@/components/fast-purchase-mvp/FastPurchaseDraftActions";
 import { FastPurchaseTriageWorkspace } from "@/components/fast-purchase-mvp/FastPurchaseTriageWorkspace";
 import { PageHeader } from "@/components/PageHeader";
 import { loadFastPurchaseMvpResilient } from "@/lib/fastPurchaseMvpResilient";
@@ -15,9 +16,9 @@ export default async function FastPurchaseMvpPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="COMMERCE OS · FAST PURCHASE MVP V2.2"
+        eyebrow="COMMERCE OS · FAST PURCHASE MVP V2.3"
         title="빠른 발주안 · MVP"
-        description="완벽한 초기재고를 기다리지 않습니다. 시스템판정은 그대로 사용하고, 수동검토 상품은 창고 전수조사 없이 충분·부족·품절 정도만 빠르게 표시해 오늘 주문 예정수량을 직접 정할 수 있게 합니다."
+        description="완벽한 초기재고를 기다리지 않습니다. 시스템판정은 그대로 사용하고, 수동검토 상품은 창고 전수조사 없이 충분·부족·품절 정도만 빠르게 표시해 오늘 주문 예정수량을 직접 정할 수 있게 합니다. 검토가 끝나면 내부 Draft로 고정해 중복발주를 막습니다."
       />
 
       {fallback ? (
@@ -39,10 +40,10 @@ export default async function FastPurchaseMvpPage() {
       <section className={`rounded-2xl border p-5 shadow-sm ${report.state === "READY_MVP" ? "border-blue-200 bg-blue-50" : "border-rose-200 bg-rose-50"}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="text-xs font-black tracking-[0.12em] text-slate-500">FAST USE · PROVISIONAL V2.2 · OPERATE NOW</span>
+            <span className="text-xs font-black tracking-[0.12em] text-slate-500">FAST USE · PROVISIONAL V2.3 · OPERATE NOW</span>
             <h2 className="mt-1 text-2xl font-black text-slate-950">{report.state}</h2>
           </div>
-          <strong className="rounded-full bg-slate-950 px-4 py-2 text-sm text-white">수동 발주만 · 자동주문 0</strong>
+          <strong className="rounded-full bg-slate-950 px-4 py-2 text-sm text-white">내부 Draft 가능 · 외부 자동주문 0</strong>
         </div>
         <p className="mt-3 text-sm leading-6 text-slate-700">{report.message}</p>
         <p className="mt-2 text-xs text-slate-500">{new Date(report.generatedAt).toLocaleString("ko-KR")} · {report.mode} · {report.dataMode}</p>
@@ -72,9 +73,15 @@ export default async function FastPurchaseMvpPage() {
         sourceFingerprint={report.fingerprint}
       />
 
+      <FastPurchaseDraftActions
+        rows={report.rows}
+        sourceFingerprint={report.fingerprint}
+        dataMode={report.dataMode}
+      />
+
       <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
         <strong>운영 경계</strong><br />
-        이 화면의 빠른 재고판단·메모·주문 예정수량은 현재 브라우저에만 저장됩니다. CSV를 만들어도 중국 주문·결제는 자동 실행되지 않으며 Product Master 재고도 변경하지 않습니다. 실제 품절이 확인된 상품은 기존 정책대로 `SOLD_OUT_RESET=0` 기준점을 만들고, 이후 신규 입고·판매가 쌓일수록 수동판단 비중을 줄입니다.
+        빠른 재고판단·메모·주문 예정수량은 브라우저에서 편집하고, `내부 발주 Draft 저장`을 눌렀을 때만 Ops Center 원장에 RESERVED 약정으로 고정됩니다. 내부 Draft는 다음 발주안의 미입고 수량에 반영되어 중복발주를 막지만 중국 주문·결제는 자동 실행하지 않습니다. 실제 품절이 확인된 상품은 기존 정책대로 `SOLD_OUT_RESET=0` 기준점을 만들고, 이후 신규 입고·판매가 쌓일수록 수동판단 비중을 줄입니다.
       </section>
 
       <p className="break-all text-xs text-slate-400">Fingerprint · {report.fingerprint}</p>
