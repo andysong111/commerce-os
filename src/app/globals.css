@@ -369,3 +369,42 @@ button:not(:disabled) {
   padding: 20mm;
   text-align: center;
 }
+
+/* Keep the persistent work assistant almost out of the way when collapsed. */
+aside[aria-label="실시간 작업 도우미"]:has(
+    button[aria-label="작업 도우미 펼치기"]
+  ) {
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+}
+
+aside[aria-label="실시간 작업 도우미"]:has(
+    button[aria-label="작업 도우미 펼치기"]
+  ) > header {
+  width: 48px;
+  height: 48px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: inherit;
+}
+
+aside[aria-label="실시간 작업 도우미"]:has(
+    button[aria-label="작업 도우미 펼치기"]
+  ) > header > div {
+  display: none;
+}
+
+aside[aria-label="실시간 작업 도우미"]
+  button[aria-label="작업 도우미 펼치기"] {
+  width: 48px;
+  height: 48px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+aside[aria-label="실시간 작업 도우미"]
+  button[aria-label="작업 도우미 펼치기"]:hover {
+  background: #334155;
+}
