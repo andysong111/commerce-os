@@ -1,6 +1,7 @@
 export type V260807ManualDecisionKind =
   | "resume_checkpoint"
   | "identity_conflict"
+  | "generation_safety_block"
   | null;
 
 export type V260807ResumeReason =
@@ -16,14 +17,17 @@ export type ManualDecisionJobLike = {
   result?: Record<string, unknown>;
 };
 
-export type V260807IdentitySnapshot = {
-  failedRoleId: string;
-  reason: string;
+export type V260807SourceAnchorSnapshot = {
   anchorIndex: number;
   anchorUrl: string;
-  failedAssetUrl: string;
   evidenceUrls: string[];
   evidenceNames: string[];
+};
+
+export type V260807IdentitySnapshot = V260807SourceAnchorSnapshot & {
+  failedRoleId: string;
+  reason: string;
+  failedAssetUrl: string;
 };
 
 const REPRESENTATIVE_ROLES = new Set([
@@ -36,6 +40,8 @@ const REPRESENTATIVE_ROLES = new Set([
 const SAFE_UNKNOWN_OUTCOME_STAGES = new Set([
   "v3_representative_identity_review",
 ]);
+const GENERATION_SAFETY_BLOCK_PATTERN =
+  /moderation_blocked|safety\s*(?:check|filter|review).*block|안전\s*검사에서\s*차단|이미지가\s*안전\s*검사에서\s*차단/i;
 
 export function isV260807DetailPageJob(job: ManualDecisionJobLike) {
   const result = record(job.result);
@@ -70,6 +76,15 @@ export function v260807ResumeReason(
   return null;
 }
 
+export function v260807GenerationSafetyBlocked(job: ManualDecisionJobLike) {
+  return Boolean(
+    job.status === "failed" &&
+      isV260807DetailPageJob(job) &&
+      text(job.stage) === "v3_generation" &&
+      GENERATION_SAFETY_BLOCK_PATTERN.test(text(job.error)),
+  );
+}
+
 export function v260807ManualDecisionKind(
   job: ManualDecisionJobLike,
 ): V260807ManualDecisionKind {
@@ -78,10 +93,18 @@ export function v260807ManualDecisionKind(
   // Current infrastructure stop is authoritative. v260807 identity-review is a
   // read/verification step, so when its outcome is unknown we still avoid an
   // automatic retry, but allow the operator to resume from the durable
-  // checkpoint. This does not allow unknown outcomes from image-generation
+  // checkpoint. This does not allow unknown outcomes from paid generation
   // stages to be replayed.
   if (v260807ResumeReason(job)) {
     return "resume_checkpoint";
+  }
+
+  // A moderation/safety rejection occurs before the rejected image is stored.
+  // It is therefore different from a later identity conflict: there is no bad
+  // asset to approve, but the operator can choose a better 1688 identity anchor
+  // and retry only the still-missing generation roles.
+  if (v260807GenerationSafetyBlocked(job)) {
+    return "generation_safety_block";
   }
 
   const result = record(job.result);
@@ -95,47 +118,72 @@ export function v260807ManualDecisionKind(
   return null;
 }
 
+export function v260807SourceAnchorSnapshot(
+  job: ManualDecisionJobLike,
+): V260807SourceAnchorSnapshot | null {
+  if (!isV260807DetailPageJob(job)) return null;
+  const result = record(job.result);
+  const plan = record(result.v3Plan);
+  const payload = record(job.payload);
+  const evidenceUrls = stringList(payload.evidence_urls, 60);
+  const evidenceNames = stringList(payload.evidence_names, 60);
+  if (!evidenceUrls.length || plan.schema_version !== "detail_page_v3_plan") {
+    return null;
+  }
+  const anchorIndex = boundedIndex(plan.identity_anchor_index, evidenceUrls.length);
+  return {
+    anchorIndex,
+    anchorUrl: evidenceUrls[anchorIndex] || "",
+    evidenceUrls,
+    evidenceNames,
+  };
+}
+
 export function v260807IdentitySnapshot(
   job: ManualDecisionJobLike,
 ): V260807IdentitySnapshot | null {
   if (v260807ManualDecisionKind(job) !== "identity_conflict") return null;
+  const source = v260807SourceAnchorSnapshot(job);
+  if (!source) return null;
   const result = record(job.result);
   const gate = record(result.v3RepresentativeIdentityGate);
-  const plan = record(result.v3Plan);
-  const payload = record(job.payload);
   const failedRoleId = text(gate.failedRoleId || gate.failed_role_id);
   if (!REPRESENTATIVE_ROLES.has(failedRoleId)) return null;
 
-  const evidenceUrls = stringList(payload.evidence_urls, 60);
-  const evidenceNames = stringList(payload.evidence_names, 60);
-  const anchorIndex = boundedIndex(plan.identity_anchor_index, evidenceUrls.length);
   const representatives = array(result.v3Representatives);
   const failedRepresentative = representatives
     .map(record)
     .find((item) => text(item.roleId || item.role_id) === failedRoleId);
 
   return {
+    ...source,
     failedRoleId,
     reason: text(gate.reason) || text(job.error),
-    anchorIndex,
-    anchorUrl: evidenceUrls[anchorIndex] || "",
     failedAssetUrl: safeUrl(
       failedRepresentative?.assetUrl ||
         failedRepresentative?.asset_url ||
         failedRepresentative?.url,
     ),
-    evidenceUrls,
-    evidenceNames,
   };
 }
 
 export function canResumeV260807Checkpoint(job: ManualDecisionJobLike) {
   if (v260807ManualDecisionKind(job) !== "resume_checkpoint") return false;
-  const payload = record(job.payload);
   const result = record(job.result);
   const analysis = record(result.analysis);
   return Boolean(
-    stringList(payload.evidence_urls, 60).length > 0 &&
+    v260807SourceAnchorSnapshot(job) &&
+      analysis.product &&
+      record(result.v3Plan).schema_version === "detail_page_v3_plan",
+  );
+}
+
+export function canRetryV260807GenerationSafety(job: ManualDecisionJobLike) {
+  if (v260807ManualDecisionKind(job) !== "generation_safety_block") return false;
+  const result = record(job.result);
+  const analysis = record(result.analysis);
+  return Boolean(
+    v260807SourceAnchorSnapshot(job) &&
       analysis.product &&
       record(result.v3Plan).schema_version === "detail_page_v3_plan",
   );
