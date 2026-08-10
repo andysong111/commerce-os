@@ -16,6 +16,7 @@ import {
   v260807ManualDecisionKind,
 } from "@/lib/detailPageManualDecision";
 import { DETAIL_PAGE_STAGED_PIPELINE_VERSION } from "@/lib/detailPageJobRecovery";
+import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
 
 export async function POST(
   request: NextRequest,
@@ -38,7 +39,9 @@ export async function POST(
   }
 
   try {
-    const job = await readDetailPageJob(config.value, jobId);
+    const job = await withDetailPageStoreRetry(() =>
+      readDetailPageJob(config.value, jobId),
+    );
     if (!job || job.owner_id !== identity.value.userId) {
       return Response.json(
         {
@@ -68,7 +71,7 @@ export async function POST(
           "v260807 자동 복구 한도 소진 작업만 저장 지점에서 계속할 수 있습니다.",
         );
       }
-      const changed = await patchDetailPageJob(config.value, job.id, {
+      const patch = {
         status: "queued",
         stage: "v3_manual_resume_checkpoint",
         message:
@@ -94,7 +97,10 @@ export async function POST(
         lease_until: null,
         error_message: "",
         completed_at: null,
-      });
+      };
+      const changed = await withDetailPageStoreRetry(() =>
+        patchDetailPageJob(config.value, job.id, patch),
+      );
       return success(changed ?? job);
     }
 
@@ -121,7 +127,7 @@ export async function POST(
         );
       }
       const previousGate = record(job.result.v3RepresentativeIdentityGate);
-      const changed = await patchDetailPageJob(config.value, job.id, {
+      const patch = {
         status: "queued",
         stage: "v3_manual_identity_approved",
         message:
@@ -157,7 +163,10 @@ export async function POST(
         lease_until: null,
         error_message: "",
         completed_at: null,
-      });
+      };
+      const changed = await withDetailPageStoreRetry(() =>
+        patchDetailPageJob(config.value, job.id, patch),
+      );
       return success(changed ?? job);
     }
 
@@ -176,7 +185,7 @@ export async function POST(
         );
       }
       const previousGate = record(job.result.v3RepresentativeIdentityGate);
-      const changed = await patchDetailPageJob(config.value, job.id, {
+      const patch = {
         status: "queued",
         stage: "v3_manual_identity_regeneration",
         message:
@@ -212,7 +221,10 @@ export async function POST(
         lease_until: null,
         error_message: "",
         completed_at: null,
-      });
+      };
+      const changed = await withDetailPageStoreRetry(() =>
+        patchDetailPageJob(config.value, job.id, patch),
+      );
       return success(changed ?? job);
     }
 
@@ -233,7 +245,7 @@ export async function POST(
         );
       }
       const previousGate = record(job.result.v3RepresentativeIdentityGate);
-      const changed = await patchDetailPageJob(config.value, job.id, {
+      const patch = {
         status: "queued",
         stage: "v3_manual_identity_anchor_changed",
         message:
@@ -274,7 +286,10 @@ export async function POST(
         lease_until: null,
         error_message: "",
         completed_at: null,
-      });
+      };
+      const changed = await withDetailPageStoreRetry(() =>
+        patchDetailPageJob(config.value, job.id, patch),
+      );
       return success(changed ?? job);
     }
 

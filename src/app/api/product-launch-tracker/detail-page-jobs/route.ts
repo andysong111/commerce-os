@@ -8,9 +8,21 @@ import {
   resolveDetailPageJobIdentity,
   searchDetailPageJobs,
 } from "@/lib/detailPageJobServer";
+import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
 
 const MAX_RECENT_JOBS = 50;
 const COMPILER_WORKER_SLOT_COUNT = 3;
+const JOB_LIST_CACHE_TTL_MS = 1_500;
+const JOB_LIST_CACHE_MAX_KEYS = 40;
+
+type DetailPageJobList = Awaited<ReturnType<typeof listDetailPageJobs>>;
+type JobListCacheEntry = {
+  expiresAt: number;
+  jobs: DetailPageJobList;
+  inFlight?: Promise<DetailPageJobList>;
+};
+
+const jobListCache = new Map<string, JobListCacheEntry>();
 
 export async function GET(request: NextRequest) {
   const identity = await resolveDetailPageJobIdentity(request);
@@ -19,18 +31,11 @@ export async function GET(request: NextRequest) {
   if (!config.ok) return Response.json(config.body, { status: config.status });
   try {
     const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
-    const jobs = query
-      ? await searchDetailPageJobs(
-          config.value,
-          identity.value.userId,
-          query,
-          MAX_RECENT_JOBS,
-        )
-      : await listDetailPageJobs(
-          config.value,
-          identity.value.userId,
-          MAX_RECENT_JOBS,
-        );
+    const jobs = await cachedDetailPageJobs(
+      config.value,
+      identity.value.userId,
+      query,
+    );
     return Response.json({
       ok: true,
       scope: query ? "search" : "recent",
@@ -159,6 +164,7 @@ export async function POST(request: NextRequest) {
       completed_at: null,
     });
     if (!job) throw new Error("생성한 작업을 다시 읽지 못했습니다.");
+    invalidateDetailPageJobListCache(identity.value.userId);
     return Response.json(
       {
         ok: true,
@@ -184,6 +190,57 @@ export async function POST(request: NextRequest) {
       },
       { status: duplicate ? 409 : 500 },
     );
+  }
+}
+
+async function cachedDetailPageJobs(
+  config: Parameters<typeof listDetailPageJobs>[0],
+  ownerId: string,
+  query: string,
+) {
+  const normalizedQuery = query.trim();
+  const key = `${ownerId}:${normalizedQuery.toLocaleLowerCase("ko-KR")}`;
+  const now = Date.now();
+  const cached = jobListCache.get(key);
+  if (cached?.inFlight) return cached.inFlight;
+  if (cached && cached.expiresAt > now) return cached.jobs;
+
+  const request = withDetailPageStoreRetry(() =>
+    normalizedQuery
+      ? searchDetailPageJobs(
+          config,
+          ownerId,
+          normalizedQuery,
+          MAX_RECENT_JOBS,
+        )
+      : listDetailPageJobs(config, ownerId, MAX_RECENT_JOBS),
+  );
+
+  if (jobListCache.size >= JOB_LIST_CACHE_MAX_KEYS) {
+    jobListCache.clear();
+  }
+  jobListCache.set(key, {
+    expiresAt: 0,
+    jobs: cached?.jobs ?? [],
+    inFlight: request,
+  });
+
+  try {
+    const jobs = await request;
+    jobListCache.set(key, {
+      expiresAt: Date.now() + JOB_LIST_CACHE_TTL_MS,
+      jobs,
+    });
+    return jobs;
+  } catch (error) {
+    jobListCache.delete(key);
+    throw error;
+  }
+}
+
+function invalidateDetailPageJobListCache(ownerId: string) {
+  for (const key of jobListCache.keys()) {
+    if (key.startsWith(`${ownerId}:`)) jobListCache.delete(key);
   }
 }
 

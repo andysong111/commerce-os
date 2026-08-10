@@ -8,6 +8,7 @@ import {
   v260807IdentitySnapshot,
   v260807ManualDecisionKind,
 } from "../src/lib/detailPageManualDecision.ts";
+import { withDetailPageStoreRetry } from "../src/lib/detailPageStoreRetry.ts";
 
 const pageSource = await readFile("src/app/detail-page-ai-review/page.tsx", "utf8");
 const queueSource = await readFile(
@@ -16,6 +17,10 @@ const queueSource = await readFile(
 );
 const routeSource = await readFile(
   "src/app/api/product-launch-tracker/detail-page-jobs/[jobId]/manual-review/route.ts",
+  "utf8",
+);
+const jobsRouteSource = await readFile(
+  "src/app/api/product-launch-tracker/detail-page-jobs/route.ts",
   "utf8",
 );
 
@@ -124,4 +129,29 @@ test("manual decision API preserves assets and records job-scoped audit decision
   assert.match(routeSource, /identity_anchor_index: nextAnchorIndex/);
   assert.match(routeSource, /v3RepresentativeIdentityRetries: \{\}/);
   assert.match(routeSource, /auto_recovery_count: 0/);
+});
+
+test("v260807 manual-review storage reads and writes retry transient 504 timeouts", async () => {
+  assert.match(routeSource, /withDetailPageStoreRetry/);
+  assert.match(routeSource, /readDetailPageJob\(config\.value, jobId\)/);
+  assert.match(routeSource, /patchDetailPageJob\(config\.value, job\.id, patch\)/);
+
+  let attempts = 0;
+  const result = await withDetailPageStoreRetry(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw new Error("상세페이지 작업 저장소 요청에 실패했습니다. status=504");
+    }
+    return "saved";
+  }, 2);
+  assert.equal(result, "saved");
+  assert.equal(attempts, 2);
+});
+
+test("detail-page list polling is de-duplicated briefly and retries statement timeouts", () => {
+  assert.match(jobsRouteSource, /JOB_LIST_CACHE_TTL_MS = 1_500/);
+  assert.match(jobsRouteSource, /cachedDetailPageJobs/);
+  assert.match(jobsRouteSource, /cached\?\.inFlight/);
+  assert.match(jobsRouteSource, /withDetailPageStoreRetry/);
+  assert.match(jobsRouteSource, /jobListCache\.set/);
 });
