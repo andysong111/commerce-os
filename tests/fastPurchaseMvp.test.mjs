@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, resilient, page, workspace, registry, policy] = await Promise.all([
+const [engine, resilient, page, workspace, registry, policy, trackerMetadata] = await Promise.all([
   readFile("src/lib/fastPurchaseMvp.ts", "utf8"),
   readFile("src/lib/fastPurchaseMvpResilient.ts", "utf8"),
   readFile("src/app/fast-purchase-mvp/page.tsx", "utf8"),
   readFile("src/components/fast-purchase-mvp/FastPurchaseTriageWorkspace.tsx", "utf8"),
   readFile("src/lib/opsModuleRegistry.ts", "utf8"),
   readFile("docs/fast-purchase-mvp-operating-policy.md", "utf8"),
+  readFile("src/lib/productLaunchPurchaseMetadata.ts", "utf8"),
 ]);
 
 test("v2.1 engine still reuses existing diagnostics and purchase inputs", () => {
@@ -62,6 +63,27 @@ test("last-known fallback keeps all current 42 candidates as manual triage mater
   assert.ok(resilient.includes('barcode: "BCA4-1"'));
   assert.ok(resilient.includes("manualTriageCount: rows.length"));
   assert.ok(resilient.includes("operationalCoverageCount: rows.length"));
+});
+
+test("fast purchase rows reuse product launch tracker model number model name and option by B-code", () => {
+  assert.ok(engine.includes("loadProductLaunchPurchaseMetadataByBarcode"));
+  assert.ok(engine.includes("tracker?.modelNumber"));
+  assert.ok(engine.includes("tracker?.productName"));
+  assert.ok(engine.includes("tracker?.saleOption"));
+  assert.ok(trackerMetadata.includes("modelNumber: string"));
+  assert.ok(trackerMetadata.includes("productName: string"));
+  assert.ok(trackerMetadata.includes("modelNumber = text(summary.modelNumber)"));
+  assert.ok(trackerMetadata.includes("productName = text(summary.productName)"));
+});
+
+test("B-code cell shows model name model number and option name together", () => {
+  assert.ok(workspace.includes("B-code · 모델/옵션"));
+  assert.ok(workspace.includes("모델명"));
+  assert.ok(workspace.includes("모델번호"));
+  assert.ok(workspace.includes("옵션명"));
+  assert.ok(workspace.includes("row.modelName"));
+  assert.ok(workspace.includes("row.modelNo"));
+  assert.ok(workspace.includes("row.optionName"));
 });
 
 test("manual triage stores only local browser judgment and never posts business state", () => {
