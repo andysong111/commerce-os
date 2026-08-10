@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, page, workspace, registry, policy] = await Promise.all([
+const [engine, resilient, page, workspace, registry, policy] = await Promise.all([
   readFile("src/lib/fastPurchaseMvp.ts", "utf8"),
+  readFile("src/lib/fastPurchaseMvpResilient.ts", "utf8"),
   readFile("src/app/fast-purchase-mvp/page.tsx", "utf8"),
   readFile("src/components/fast-purchase-mvp/FastPurchaseTriageWorkspace.tsx", "utf8"),
   readFile("src/lib/opsModuleRegistry.ts", "utf8"),
@@ -31,6 +32,35 @@ test("v2.2 page delegates operational judgment to the browser triage workspace",
   assert.ok(page.includes("FAST USE · PROVISIONAL V2.2 · OPERATE NOW"));
   assert.ok(page.includes("수동 발주만 · 자동주문 0"));
   assert.ok(page.includes("브라우저에만 저장"));
+});
+
+test("transient live failures retry before opening a manual-only last-known fallback", () => {
+  assert.ok(resilient.includes("const LOAD_ATTEMPTS = 2"));
+  assert.ok(resilient.includes("await loadFastPurchaseMvp()"));
+  assert.ok(resilient.includes('dataMode: "LIVE"'));
+  assert.ok(resilient.includes('dataMode: "LAST_KNOWN_MANUAL_FALLBACK"'));
+  assert.ok(resilient.includes("fallbackReport(errorCode(lastError))"));
+  assert.ok(page.includes("실시간 호출 실패 · 마지막 정상 스냅샷으로 수동검토 계속 가능"));
+});
+
+test("last-known fallback never carries a system order or system hold decision", () => {
+  assert.ok(resilient.includes('action: "DEMAND_ONLY_REVIEW"'));
+  assert.ok(resilient.includes("recommendedQuantity: 0"));
+  assert.ok(resilient.includes("systemDecisionCount: 0"));
+  assert.ok(resilient.includes("orderReviewCount: 0"));
+  assert.ok(resilient.includes("holdCount: 0"));
+  assert.ok(resilient.includes("automaticPurchaseEnabled: false"));
+  assert.ok(resilient.includes("purchaseWritesEnabled: false"));
+  assert.ok(resilient.includes("inventoryWritesEnabled: false"));
+});
+
+test("last-known fallback keeps all current 42 candidates as manual triage material", () => {
+  const matches = resilient.match(/referenceDemandQuantity:\s*\d+\s*\}/g) ?? [];
+  assert.equal(matches.length, 42);
+  assert.ok(resilient.includes('barcode: "BGG1-1"'));
+  assert.ok(resilient.includes('barcode: "BCA4-1"'));
+  assert.ok(resilient.includes("manualTriageCount: rows.length"));
+  assert.ok(resilient.includes("operationalCoverageCount: rows.length"));
 });
 
 test("manual triage stores only local browser judgment and never posts business state", () => {

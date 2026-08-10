@@ -24,6 +24,7 @@ jobs:
         run: >-
           npx eslint
           src/lib/fastPurchaseMvp.ts
+          src/lib/fastPurchaseMvpResilient.ts
           src/lib/fastPurchaseMvpModule.ts
           src/app/fast-purchase-mvp/page.tsx
           src/components/fast-purchase-mvp/FastPurchaseTriageWorkspace.tsx
