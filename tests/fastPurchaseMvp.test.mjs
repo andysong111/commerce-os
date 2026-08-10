@@ -27,11 +27,12 @@ test("stable bands upper-biased fallback and demand-only reference remain unchan
   assert.ok(engine.includes("referenceDemandQuantity: integer(purchase.recommendedQty)"));
 });
 
-test("v2.2 page delegates operational judgment to the browser triage workspace", () => {
+test("v2.3 page keeps browser triage and adds internal draft without external auto-order", () => {
   assert.ok(page.includes("FastPurchaseTriageWorkspace"));
-  assert.ok(page.includes("FAST USE · PROVISIONAL V2.2 · OPERATE NOW"));
-  assert.ok(page.includes("수동 발주만 · 자동주문 0"));
-  assert.ok(page.includes("브라우저에만 저장"));
+  assert.ok(page.includes("FastPurchaseDraftActions"));
+  assert.ok(page.includes("FAST USE · PROVISIONAL V2.3 · OPERATE NOW"));
+  assert.ok(page.includes("내부 Draft 가능 · 외부 자동주문 0"));
+  assert.ok(page.includes("내부 발주 Draft 저장"));
 });
 
 test("transient live failures retry before opening a manual-only last-known fallback", () => {
@@ -122,7 +123,7 @@ test("workspace can export only current positive system orders or explicitly pla
   assert.ok(workspace.includes("중국 주문을 자동 실행하지 않습니다"));
 });
 
-test("fast mode remains no-write and reports operational coverage", () => {
+test("fast mode remains no-write until explicit internal draft save and still reports operational coverage", () => {
   assert.ok(engine.includes("automaticPurchaseEnabled: false"));
   assert.ok(engine.includes("purchaseWritesEnabled: false"));
   assert.ok(engine.includes("inventoryWritesEnabled: false"));
