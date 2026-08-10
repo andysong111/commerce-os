@@ -1,0 +1,57 @@
+name: Temporary Fast Purchase Draft Effect Production Probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify saved internal Draft is visible and affects open commitments
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin='https://commerce-os-ops-center.vercel.app'
+          page_url="$origin/fast-purchase-mvp"
+          api_url="$origin/api/fast-purchase/drafts"
+
+          page="$(mktemp)"
+          page_status="$(curl -L -sS --connect-timeout 10 --max-time 180 -o "$page" -w '%{http_code}' "$page_url")"
+          test "$page_status" = '200'
+          text="$(cat "$page" | python -c 'import html,re,sys; raw=sys.stdin.read(); raw=re.sub(r"<script[\s\S]*?</script>"," ",raw,flags=re.I); raw=re.sub(r"<style[\s\S]*?</style>"," ",raw,flags=re.I); raw=re.sub(r"<[^>]+>"," ",raw); print(re.sub(r"\s+"," ",html.unescape(raw)).strip()[:700000])')"
+          echo '--- FAST PURCHASE AFTER INTERNAL DRAFT ---'
+          echo "$text"
+          echo "$text" | grep -q 'FAST USE · PROVISIONAL V2.3 · OPERATE NOW'
+          echo "$text" | grep -q '내부 발주 Draft 저장'
+          echo "$text" | grep -q '활성 내부 Draft 1건'
+          echo "$text" | grep -q '현재 미입고 약정 129개'
+          echo "$text" | grep -q '외부 중국 주문 0건'
+
+          ledger="$(mktemp)"
+          get_status="$(curl -L -sS --connect-timeout 10 --max-time 120 \
+            -o "$ledger" -w '%{http_code}' "$api_url" \
+            -H "Origin: $origin" \
+            -H "Referer: $page_url" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -H 'Accept: application/json')"
+          test "$get_status" = '200'
+          python - "$ledger" <<'PY'
+          import json, sys
+          p=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert p.get('ok') is True, p
+          drafts=[d for d in p.get('drafts',[]) if d.get('draftId')=='fast-purchase-draft:82d5c90bbf302be6670e']
+          assert len(drafts)==1, drafts
+          d=drafts[0]
+          assert d.get('lineCount')==5, d
+          assert d.get('requestedQuantity')==129, d
+          assert d.get('orderedQuantity')==0, d
+          assert d.get('receivedQuantity')==0, d
+          assert d.get('openQuantity')==129, d
+          print('DRAFT_EFFECT_VERIFIED=RESERVED_OPEN_129')
+          print('EXTERNAL_ORDER=0')
+          PY
