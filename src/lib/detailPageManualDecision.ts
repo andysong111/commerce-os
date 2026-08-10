@@ -44,6 +44,19 @@ export function v260807ManualDecisionKind(
 ): V260807ManualDecisionKind {
   if (job.status !== "failed" || !isV260807DetailPageJob(job)) return null;
 
+  const payload = record(job.payload);
+  const failureText = [
+    text(job.error),
+    text(payload.recovery_stop_code),
+    text(payload.recoveryStopCode),
+  ].join(" ");
+  // The current terminal failure is authoritative. A previous identity-gate
+  // result may remain in the merged checkpoint after a later infrastructure
+  // recovery stop, so handle explicit recovery exhaustion first.
+  if (/DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED/i.test(failureText)) {
+    return "resume_checkpoint";
+  }
+
   const result = record(job.result);
   const gate = record(result.v3RepresentativeIdentityGate);
   if (
@@ -51,16 +64,6 @@ export function v260807ManualDecisionKind(
     gate.status === "hard_identity_failed_after_retry"
   ) {
     return "identity_conflict";
-  }
-
-  const payload = record(job.payload);
-  const failureText = [
-    text(job.error),
-    text(payload.recovery_stop_code),
-    text(payload.recoveryStopCode),
-  ].join(" ");
-  if (/DETAIL_PAGE_AUTO_RECOVERY_EXHAUSTED/i.test(failureText)) {
-    return "resume_checkpoint";
   }
   return null;
 }
