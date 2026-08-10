@@ -1,5 +1,6 @@
 import { DetailPageActiveJobControlsV2 } from "@/components/detail-page-ai-review/DetailPageActiveJobControlsV2";
 import { DetailPageAiReviewWorkspace } from "@/components/detail-page-ai-review/DetailPageAiReviewWorkspace";
+import { DetailPageManualDecisionQueue } from "@/components/detail-page-ai-review/DetailPageManualDecisionQueue";
 import { DetailPageRepresentativeDownloadControl } from "@/components/detail-page-ai-review/DetailPageRepresentativeDownloadControl";
 import { DetailPageTerminalJobControls } from "@/components/detail-page-ai-review/DetailPageTerminalJobControls";
 import { PageHeader } from "@/components/PageHeader";
@@ -16,8 +17,9 @@ export default function DetailPageAiReviewPage() {
       <div className="mb-5 flex flex-wrap gap-2 text-xs font-bold text-slate-600">
         <span className="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700">2.5초 자동 새로고침</span>
         <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">정상 체크포인트 보존</span>
-        <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">전체 재생성은 확인 후 실행</span>
+        <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">애매한 예외만 사용자 판단</span>
       </div>
+      <DetailPageManualDecisionQueue />
       <DetailPageActiveJobControlsV2 />
       <DetailPageTerminalJobControls />
       <DetailPageRepresentativeDownloadControl />
