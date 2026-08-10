@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { calculateNetRequirement } from "@/lib/productDecisionEngine/netRequirement";
 import type { SalesOrderGroup } from "@/lib/productDecisionEngine/salesOrder";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadProductLaunchPurchaseMetadataByBarcode } from "@/lib/productLaunchPurchaseMetadata";
 import { loadCanonicalPurchaseShadow } from "@/lib/stage8CanonicalPurchaseShadow";
 import { loadProvisionalInventoryDiagnostics } from "@/lib/stage8ProvisionalInventoryDiagnostics";
 
@@ -23,6 +24,8 @@ export type FastPurchaseMvpBasis =
 export type FastPurchaseMvpRow = {
   barcode: string;
   modelNo: string | null;
+  modelName: string | null;
+  optionName: string | null;
   productName: string;
   action: FastPurchaseMvpAction;
   actionLabel: string;
@@ -115,6 +118,8 @@ function actionPriority(action: FastPurchaseMvpAction) {
 function baseCommon(input: {
   barcode: string;
   modelNo: string | null;
+  modelName: string | null;
+  optionName: string | null;
   productName: string;
   inventoryBandLow?: number | null;
   inventoryBandHigh?: number | null;
@@ -124,6 +129,8 @@ function baseCommon(input: {
   return {
     barcode: input.barcode,
     modelNo: input.modelNo,
+    modelName: input.modelName,
+    optionName: input.optionName,
     productName: input.productName,
     referenceDemandQuantity: 0,
     planningInventoryQuantity: null,
@@ -142,10 +149,11 @@ function baseCommon(input: {
 }
 
 export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
-  const [diagnostics, purchaseShadow, planning] = await Promise.all([
+  const [diagnostics, purchaseShadow, planning, trackerMetadata] = await Promise.all([
     loadProvisionalInventoryDiagnostics(),
     loadCanonicalPurchaseShadow(),
     loadProductPlanningSnapshot(),
+    loadProductLaunchPurchaseMetadataByBarcode(),
   ]);
   const purchaseProducts = purchaseShadow.snapshot?.products ?? [];
   const purchaseByBarcode = new Map(
@@ -158,9 +166,14 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
   );
 
   const diagnosticRows = diagnostics.rows.map((row): FastPurchaseMvpRow => {
+    const key = barcode(row.barcode);
+    const tracker = trackerMetadata.byBarcode.get(key);
+    const profile = planningByBarcode.get(key);
     const common = baseCommon({
-      barcode: row.barcode,
-      modelNo: row.modelNo,
+      barcode: key,
+      modelNo: tracker?.modelNumber || row.modelNo,
+      modelName: tracker?.productName || row.productName,
+      optionName: tracker?.saleOption || text(profile?.optionName) || null,
       productName: row.productName,
       inventoryBandLow: row.diagnosticLowQuantity,
       inventoryBandHigh: row.diagnosticHighQuantity,
@@ -221,8 +234,7 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
       };
     }
 
-    const purchase = purchaseByBarcode.get(row.barcode);
-    const profile = planningByBarcode.get(row.barcode);
+    const purchase = purchaseByBarcode.get(key);
     const fallbackInventory = row.cumulativeResidualCandidate;
     const fallbackEligible =
       row.state !== "IDENTITY_BLOCKED" &&
@@ -289,23 +301,31 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
         integer(purchase.recommendedQty) > 0
       );
     })
-    .map((purchase) => ({
-      ...baseCommon({
-        barcode: barcode(purchase.barcode),
-        modelNo: text(purchase.modelNo) || null,
-        productName: text(purchase.name) || barcode(purchase.barcode),
-      }),
-      action: "DEMAND_ONLY_REVIEW" as const,
-      actionLabel: "수요만 수동검토",
-      basis: "DEMAND_ONLY_ZERO_STOCK_REFERENCE" as const,
-      riskBias: "OVER_ORDER_IF_MISUSED" as const,
-      recommendedQuantity: 0,
-      referenceDemandQuantity: integer(purchase.recommendedQty),
-      reason:
-        "판매수요와 중국 미입고 약정까지 반영한 기존 발주안은 양수이지만 현재 재고 증거가 없습니다. 표시된 수량은 재고 0 가정의 참고상한일 뿐 실제 주문수량이 아닙니다. 사용자가 상품을 보고 재고가 충분하다고 기억하면 보류하고, 부족하다고 판단할 때만 수동으로 수량을 정합니다.",
-      usableForTodayDecision: false,
-      manualTriageReady: true,
-    }));
+    .map((purchase) => {
+      const key = barcode(purchase.barcode);
+      const tracker = trackerMetadata.byBarcode.get(key);
+      const profile = planningByBarcode.get(key);
+      const fallbackProductName = text(purchase.name) || key;
+      return {
+        ...baseCommon({
+          barcode: key,
+          modelNo: tracker?.modelNumber || text(purchase.modelNo) || null,
+          modelName: tracker?.productName || fallbackProductName,
+          optionName: tracker?.saleOption || text(profile?.optionName) || null,
+          productName: fallbackProductName,
+        }),
+        action: "DEMAND_ONLY_REVIEW" as const,
+        actionLabel: "수요만 수동검토",
+        basis: "DEMAND_ONLY_ZERO_STOCK_REFERENCE" as const,
+        riskBias: "OVER_ORDER_IF_MISUSED" as const,
+        recommendedQuantity: 0,
+        referenceDemandQuantity: integer(purchase.recommendedQty),
+        reason:
+          "판매수요와 중국 미입고 약정까지 반영한 기존 발주안은 양수이지만 현재 재고 증거가 없습니다. 표시된 수량은 재고 0 가정의 참고상한일 뿐 실제 주문수량이 아닙니다. 사용자가 상품을 보고 재고가 충분하다고 기억하면 보류하고, 부족하다고 판단할 때만 수동으로 수량을 정합니다.",
+        usableForTodayDecision: false,
+        manualTriageReady: true,
+      };
+    });
 
   const rows = [...diagnosticRows, ...demandOnlyRows].sort(
     (left, right) =>
