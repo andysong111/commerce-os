@@ -171,6 +171,8 @@ test("review page exposes cost-aware choices plus source-anchor selection before
   assert.match(queueSource, /저장 지점에서 바로 계속/);
   assert.match(queueSource, /선택 기준 원본으로 계속/);
   assert.match(queueSource, /생성 안전검사 차단/);
+  assert.match(queueSource, /생성 이미지 없음/);
+  assert.match(queueSource, /서버에 반환·저장되지 않았습니다/);
   assert.match(queueSource, /선택 기준으로 실패 이미지만 재생성/);
   assert.match(queueSource, /1688 상품 본체 기준 원본/);
   assert.match(queueSource, /현재 이미지 승인하고 계속/);

@@ -358,12 +358,15 @@ function GenerationSafetyBlockCard({
       </p>
 
       {source ? (
-        <div className="mt-4 grid gap-4 xl:grid-cols-[360px_1fr]">
-          <CompareImage
-            label={`재생성 기준 원본 · ${selectedAnchor + 1}번`}
-            url={source.evidenceUrls[selectedAnchor] || source.anchorUrl}
-          />
-          <div className="flex flex-col justify-end gap-3">
+        <>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <CompareImage
+              label={`재생성 기준 원본 · ${selectedAnchor + 1}번`}
+              url={source.evidenceUrls[selectedAnchor] || source.anchorUrl}
+            />
+            <MissingGeneratedImageCard />
+          </div>
+          <div className="mt-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <SourceAnchorSelect
               jobId={job.jobId}
               source={source}
@@ -375,12 +378,12 @@ function GenerationSafetyBlockCard({
               type="button"
               disabled={busy || !canRetryV260807GenerationSafety(job)}
               onClick={() => onRetry(selectedAnchor)}
-              className="self-start rounded-lg bg-orange-700 px-4 py-2.5 text-sm font-black text-white hover:bg-orange-800 disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-orange-700 px-4 py-2.5 text-sm font-black text-white hover:bg-orange-800 disabled:opacity-40"
             >
               {busy ? "재생성 요청 중…" : "선택 기준으로 실패 이미지만 재생성"}
             </button>
           </div>
-        </div>
+        </>
       ) : (
         <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">
           저장된 1688 기준 원본 목록을 확인하지 못해 부분 재생성을 시작할 수 없습니다.
@@ -540,6 +543,25 @@ function CompareImage({ label, url }: { label: string; url: string }) {
           저장 이미지 미확인
         </div>
       )}
+    </div>
+  );
+}
+
+function MissingGeneratedImageCard() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-orange-200 bg-orange-50">
+      <div className="border-b border-orange-200 bg-white px-3 py-2 text-xs font-black text-slate-600">
+        문제 생성 이미지
+      </div>
+      <div className="flex h-64 flex-col items-center justify-center px-6 text-center">
+        <p className="text-base font-black text-orange-900">생성 이미지 없음</p>
+        <p className="mt-2 text-sm font-bold leading-6 text-orange-800">
+          안전검사 단계에서 차단되어 이미지가 서버에 반환·저장되지 않았습니다.
+        </p>
+        <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+          왼쪽에서 정확한 1688 원본을 선택하면 이미 저장된 정상 자산은 유지하고 실패한 이미지만 다시 생성합니다.
+        </p>
+      </div>
     </div>
   );
 }
