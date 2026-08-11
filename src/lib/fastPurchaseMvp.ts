@@ -3,6 +3,7 @@ import { calculateNetRequirement } from "@/lib/productDecisionEngine/netRequirem
 import type { SalesOrderGroup } from "@/lib/productDecisionEngine/salesOrder";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
 import { loadProductLaunchPurchaseMetadataByBarcode } from "@/lib/productLaunchPurchaseMetadata";
+import { loadShoplingCurrentModelSnapshot } from "@/lib/shopling/shoplingCurrentModelIdentity";
 import { loadCanonicalPurchaseShadow } from "@/lib/stage8CanonicalPurchaseShadow";
 import { loadProvisionalInventoryDiagnostics } from "@/lib/stage8ProvisionalInventoryDiagnostics";
 
@@ -165,14 +166,80 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
       .map((row) => [barcode(row.barcode), row] as const),
   );
 
+  const candidateBarcodes = new Set(
+    [
+      ...diagnostics.rows.map((row) => barcode(row.barcode)),
+      ...purchaseProducts
+        .filter(
+          (purchase) =>
+            (purchase.status === "발주 추천" || purchase.status === "소량 검토") &&
+            integer(purchase.recommendedQty) > 0,
+        )
+        .map((purchase) => barcode(purchase.barcode)),
+    ].filter(Boolean),
+  );
+  const goodsKeysByBarcode = new Map<string, string[]>();
+  for (const key of candidateBarcodes) {
+    const profile = planningByBarcode.get(key);
+    const goodsKeys = [
+      ...new Set(
+        (profile?.listings ?? [])
+          .filter((listing) => listing.active !== false)
+          .map((listing) => text(listing.goodsKey))
+          .filter((goodsKey) => /^\d+$/.test(goodsKey)),
+      ),
+    ].sort((left, right) => Number(left) - Number(right));
+    goodsKeysByBarcode.set(key, goodsKeys);
+  }
+
+  const liveShoplingByBarcode = new Map<
+    string,
+    { modelNo: string | null; modelName: string | null }
+  >();
+  try {
+    const goodsKeys = [
+      ...new Set([...goodsKeysByBarcode.values()].flat()),
+    ].sort((left, right) => Number(left) - Number(right));
+    if (goodsKeys.length) {
+      const live = await loadShoplingCurrentModelSnapshot(goodsKeys);
+      const liveByGoodsKey = new Map(
+        live.rows.map((row) => [row.goodsKey, row] as const),
+      );
+      for (const [key, barcodeGoodsKeys] of goodsKeysByBarcode) {
+        const sourceRows = barcodeGoodsKeys
+          .map((goodsKey) => liveByGoodsKey.get(goodsKey))
+          .filter((row): row is NonNullable<typeof row> => Boolean(row));
+        const exactModelNos = [
+          ...new Set(
+            sourceRows
+              .filter((row) => row.state === "EXACT_AAA")
+              .flatMap((row) => row.modelNos.map(text).filter(Boolean)),
+          ),
+        ].sort();
+        const modelNames = [
+          ...new Set(
+            sourceRows.flatMap((row) => row.modelNames.map(text).filter(Boolean)),
+          ),
+        ].sort((left, right) => left.localeCompare(right, "ko"));
+        liveShoplingByBarcode.set(key, {
+          modelNo: exactModelNos.length === 1 ? exactModelNos[0] : null,
+          modelName: modelNames.length ? modelNames.join(" / ") : null,
+        });
+      }
+    }
+  } catch {
+    // Display-only Shopling identity lookup must never block the purchase workspace.
+  }
+
   const diagnosticRows = diagnostics.rows.map((row): FastPurchaseMvpRow => {
     const key = barcode(row.barcode);
     const tracker = trackerMetadata.byBarcode.get(key);
     const profile = planningByBarcode.get(key);
+    const liveShopling = liveShoplingByBarcode.get(key);
     const common = baseCommon({
       barcode: key,
-      modelNo: tracker?.modelNumber || row.modelNo,
-      modelName: tracker?.productName || row.productName,
+      modelNo: liveShopling?.modelNo || tracker?.modelNumber || row.modelNo,
+      modelName: liveShopling?.modelName || null,
       optionName: tracker?.saleOption || text(profile?.optionName) || null,
       productName: row.productName,
       inventoryBandLow: row.diagnosticLowQuantity,
@@ -305,12 +372,14 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
       const key = barcode(purchase.barcode);
       const tracker = trackerMetadata.byBarcode.get(key);
       const profile = planningByBarcode.get(key);
+      const liveShopling = liveShoplingByBarcode.get(key);
       const fallbackProductName = text(purchase.name) || key;
       return {
         ...baseCommon({
           barcode: key,
-          modelNo: tracker?.modelNumber || text(purchase.modelNo) || null,
-          modelName: tracker?.productName || fallbackProductName,
+          modelNo:
+            liveShopling?.modelNo || tracker?.modelNumber || text(purchase.modelNo) || null,
+          modelName: liveShopling?.modelName || null,
           optionName: tracker?.saleOption || text(profile?.optionName) || null,
           productName: fallbackProductName,
         }),
