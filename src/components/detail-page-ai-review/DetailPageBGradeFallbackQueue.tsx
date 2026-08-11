@@ -14,6 +14,7 @@ const DECORATE_MS = 500;
 const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
 const COMPLETED_A_GRADE_TO_B_GRADE_ACTION = "rerun_completed_as_b_grade";
 const INLINE_ACTION_ATTR = "data-b-grade-inline-action";
+const INLINE_ACTION_JOB_ATTR = "data-b-grade-inline-job";
 
 export function DetailPageBGradeFallbackQueue() {
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
@@ -45,14 +46,7 @@ export function DetailPageBGradeFallbackQueue() {
   }, [refresh]);
 
   const targets = useMemo(
-    () =>
-      jobs.filter(
-        (job) =>
-          v260807ManualDecisionKind(job) === "generation_safety_block" ||
-          isBGradeFailed(job) ||
-          isCompletedBGrade(job) ||
-          isCompletedAGradeEligible(job),
-      ),
+    () => selectLatestBGradeTargetPerProduct(jobs),
     [jobs],
   );
 
@@ -63,7 +57,6 @@ export function DetailPageBGradeFallbackQueue() {
       const retry = isBGradeFailed(job);
       const completedBGrade = isCompletedBGrade(job);
       const completedAGrade = isCompletedAGradeEligible(job);
-      const completed = completedBGrade || completedAGrade;
       const confirmed = window.confirm(
         completedBGrade
           ? `"${name}"은 B급 검수 통과 완료 작업입니다.\n\n현재 상품출시진행관리에 연결된 결과는 그대로 유지한 채 저장된 1688 원본·상품 분석·판매옵션을 재사용해 B급 엔진으로 다시 생성합니다. 새 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
@@ -156,26 +149,42 @@ export function DetailPageBGradeFallbackQueue() {
         (element): element is HTMLButtonElement =>
           element instanceof HTMLButtonElement,
       );
-      const targetIds = new Set(targets.map((job) => job.jobId));
+      const targetKeys = new Set(targets.map(productActionKey));
 
       document
         .querySelectorAll<HTMLElement>(`[${INLINE_ACTION_ATTR}]`)
         .forEach((element) => {
-          const jobId = element.getAttribute(INLINE_ACTION_ATTR) || "";
-          if (!targetIds.has(jobId) || !list.contains(element)) {
+          const productKey = element.getAttribute(INLINE_ACTION_ATTR) || "";
+          if (!targetKeys.has(productKey) || !list.contains(element)) {
             element.remove();
           }
         });
 
       for (const job of targets) {
+        const productKey = productActionKey(job);
         const card = cards.find((candidate) =>
           (candidate.textContent || "").includes(job.itemId),
         );
         if (!card) continue;
 
-        let action = card.querySelector<HTMLElement>(
-          `[${INLINE_ACTION_ATTR}="${job.jobId}"]`,
+        const duplicateActions = Array.from(
+          card.querySelectorAll<HTMLElement>(`[${INLINE_ACTION_ATTR}]`),
         );
+        let action = duplicateActions.find(
+          (candidate) => candidate.getAttribute(INLINE_ACTION_ATTR) === productKey,
+        );
+        for (const duplicate of duplicateActions) {
+          if (duplicate !== action) duplicate.remove();
+        }
+
+        if (
+          action &&
+          action.getAttribute(INLINE_ACTION_JOB_ATTR) !== job.jobId
+        ) {
+          action.remove();
+          action = undefined;
+        }
+
         const completedBGrade = isCompletedBGrade(job);
         const completedAGrade = isCompletedAGradeEligible(job);
         const completed = completedBGrade || completedAGrade;
@@ -191,7 +200,8 @@ export function DetailPageBGradeFallbackQueue() {
 
         if (!action) {
           action = document.createElement("span");
-          action.setAttribute(INLINE_ACTION_ATTR, job.jobId);
+          action.setAttribute(INLINE_ACTION_ATTR, productKey);
+          action.setAttribute(INLINE_ACTION_JOB_ATTR, job.jobId);
           action.setAttribute("role", "button");
           action.setAttribute(
             "aria-label",
@@ -242,6 +252,46 @@ export function DetailPageBGradeFallbackQueue() {
   // Intentionally no standalone B-grade queue UI. The action is injected as a
   // compact control inside each eligible job card in the scrollable review list.
   return null;
+}
+
+function selectLatestBGradeTargetPerProduct(jobs: DetailPageReviewJob[]) {
+  const latestByProduct = new Map<string, DetailPageReviewJob>();
+  for (const job of jobs) {
+    if (!isEligibleBGradeTarget(job)) continue;
+    const key = productActionKey(job);
+    const current = latestByProduct.get(key);
+    if (!current || isNewerJob(job, current)) {
+      latestByProduct.set(key, job);
+    }
+  }
+  return [...latestByProduct.values()];
+}
+
+function isEligibleBGradeTarget(job: DetailPageReviewJob) {
+  return (
+    v260807ManualDecisionKind(job) === "generation_safety_block" ||
+    isBGradeFailed(job) ||
+    isCompletedBGrade(job) ||
+    isCompletedAGradeEligible(job)
+  );
+}
+
+function productActionKey(job: DetailPageReviewJob) {
+  return String(job.itemId || job.jobId).trim();
+}
+
+function isNewerJob(candidate: DetailPageReviewJob, current: DetailPageReviewJob) {
+  const candidateTime = jobTimestamp(candidate);
+  const currentTime = jobTimestamp(current);
+  if (candidateTime !== currentTime) return candidateTime > currentTime;
+  return Number(candidate.attempt || 0) >= Number(current.attempt || 0);
+}
+
+function jobTimestamp(job: DetailPageReviewJob) {
+  const parsed = Date.parse(
+    String(job.updatedAt || job.completedAt || job.startedAt || job.createdAt || ""),
+  );
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function isCompletedAGradeEligible(job: DetailPageReviewJob) {
