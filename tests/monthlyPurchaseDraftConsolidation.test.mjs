@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [lib, route, component, page] = await Promise.all([
+const [lib, route, component, page, metadata] = await Promise.all([
   readFile("src/lib/monthlyPurchaseDraftConsolidation.ts", "utf8"),
   readFile(
     "src/app/api/china-order-manager/monthly-finalize/route.ts",
@@ -13,6 +13,7 @@ const [lib, route, component, page] = await Promise.all([
     "utf8",
   ),
   readFile("src/app/china-order-manager/page.tsx", "utf8"),
+  readFile("src/lib/monthlyPurchaseDraftDisplayMetadata.ts", "utf8"),
 ]);
 
 test("monthly finalization closes legacy same-month drafts and creates one new RESERVED draft", () => {
@@ -40,6 +41,21 @@ test("final quantities are operator-controlled but bounded and limited to barcod
   assert.match(component, /추가 후보/);
   assert.match(component, /최종 수량/);
   assert.match(component, /selected: Boolean\(base\)/);
+});
+
+test("monthly consolidation shows B-code with model number, model name, and fixed sale option", () => {
+  assert.match(page, /loadMonthlyDraftDisplayMetadata/);
+  assert.match(page, /metadataByBarcode=\{consolidationMetadata\.byBarcode\}/);
+  assert.match(metadata, /loadProductLaunchPurchaseMetadataByBarcode/);
+  assert.match(metadata, /loadShoplingCurrentModelSnapshot/);
+  assert.match(metadata, /modelNo:/);
+  assert.match(metadata, /modelName:/);
+  assert.match(metadata, /saleOption:/);
+  assert.match(component, /B-code · 모델번호 · 모델명 · 옵션명/);
+  assert.match(component, /모델번호/);
+  assert.match(component, /모델명/);
+  assert.match(component, /옵션명/);
+  assert.doesNotMatch(component, /상품명/);
 });
 
 test("China order manager surfaces the monthly consolidation workspace only when multiple current-cycle drafts remain", () => {

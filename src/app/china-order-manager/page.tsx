@@ -5,6 +5,7 @@ import { loadChinaOrderLedger } from "@/lib/chinaOrderLedger";
 import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadChinaOrderInternalStatus } from "@/lib/integrations/chinaOrderManager";
 import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
+import { loadMonthlyDraftDisplayMetadata } from "@/lib/monthlyPurchaseDraftDisplayMetadata";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,6 +48,14 @@ export default async function ChinaOrderManagerPage() {
   const currentCycleActiveDrafts = activeDrafts.filter(
     (draft) => draft.cycleMonth === currentCycleMonth,
   );
+  const consolidationMetadata =
+    currentCycleActiveDrafts.length > 1
+      ? await loadMonthlyDraftDisplayMetadata(
+          currentCycleActiveDrafts.flatMap((draft) =>
+            draft.lines.map((line) => line.barcode),
+          ),
+        )
+      : { byBarcode: {}, warnings: [] };
 
   return (
     <div className="space-y-6">
@@ -101,7 +110,10 @@ export default async function ChinaOrderManagerPage() {
       </section>
 
       {currentCycleActiveDrafts.length > 1 ? (
-        <MonthlyDraftConsolidation drafts={currentCycleActiveDrafts} />
+        <MonthlyDraftConsolidation
+          drafts={currentCycleActiveDrafts}
+          metadataByBarcode={consolidationMetadata.byBarcode}
+        />
       ) : null}
 
       <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
