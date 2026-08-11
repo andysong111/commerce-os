@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, resilient, page, workspace, registry, policy, trackerMetadata] = await Promise.all([
+const [
+  engine,
+  resilient,
+  page,
+  workspace,
+  registry,
+  policy,
+  trackerMetadata,
+  shoplingIdentity,
+] = await Promise.all([
   readFile("src/lib/fastPurchaseMvp.ts", "utf8"),
   readFile("src/lib/fastPurchaseMvpResilient.ts", "utf8"),
   readFile("src/app/fast-purchase-mvp/page.tsx", "utf8"),
@@ -10,6 +19,7 @@ const [engine, resilient, page, workspace, registry, policy, trackerMetadata] = 
   readFile("src/lib/opsModuleRegistry.ts", "utf8"),
   readFile("docs/fast-purchase-mvp-operating-policy.md", "utf8"),
   readFile("src/lib/productLaunchPurchaseMetadata.ts", "utf8"),
+  readFile("src/lib/shopling/shoplingCurrentModelIdentity.ts", "utf8"),
 ]);
 
 test("v2.1 engine still reuses existing diagnostics and purchase inputs", () => {
@@ -65,15 +75,28 @@ test("last-known fallback keeps all current 42 candidates as manual triage mater
   assert.ok(resilient.includes("operationalCoverageCount: rows.length"));
 });
 
-test("fast purchase rows reuse product launch tracker model number model name and option by B-code", () => {
-  assert.ok(engine.includes("loadProductLaunchPurchaseMetadataByBarcode"));
-  assert.ok(engine.includes("tracker?.modelNumber"));
-  assert.ok(engine.includes("tracker?.productName"));
+test("fast purchase uses live Shopling model_nm instead of product title as model name", () => {
+  assert.ok(engine.includes("loadShoplingCurrentModelSnapshot"));
+  assert.ok(engine.includes("row.modelNames"));
+  assert.ok(engine.includes('modelNames.join(" / ")'));
+  assert.ok(engine.includes("modelName: liveShopling?.modelName || null"));
+  assert.doesNotMatch(engine, /modelName:\s*tracker\?\.productName/);
+  assert.doesNotMatch(engine, /modelName:\s*tracker\?\.productName\s*\|\|\s*fallbackProductName/);
+  assert.ok(shoplingIdentity.includes('"model_nm"'));
+});
+
+test("fast purchase keeps live exact model number first and tracker option as fallback metadata", () => {
+  assert.ok(engine.includes("liveShopling?.modelNo || tracker?.modelNumber"));
   assert.ok(engine.includes("tracker?.saleOption"));
   assert.ok(trackerMetadata.includes("modelNumber: string"));
-  assert.ok(trackerMetadata.includes("productName: string"));
-  assert.ok(trackerMetadata.includes("modelNumber = text(summary.modelNumber)"));
-  assert.ok(trackerMetadata.includes("productName = text(summary.productName)"));
+  assert.ok(trackerMetadata.includes("saleOption: string"));
+});
+
+test("display-only Shopling identity failure never blocks purchase judgment", () => {
+  assert.ok(engine.includes("try {"));
+  assert.ok(engine.includes("Display-only Shopling identity lookup must never block the purchase workspace"));
+  assert.ok(engine.includes("purchaseWritesEnabled: false"));
+  assert.ok(engine.includes("inventoryWritesEnabled: false"));
 });
 
 test("B-code cell shows model name model number and option name together", () => {
