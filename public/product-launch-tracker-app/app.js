@@ -29,11 +29,20 @@ if (detailPageMode === "worker") {
     }
   });
 } else {
-  // Guard only the optimized page-list GET: 10s timeout + one automatic retry.
-  // All item saves, dialogs, category AI, China-order mapping and other features keep their existing fetch behavior.
-  await import("./optimized-page-fetch-guard.js");
-  // The optimized app owns list loading, paging, lazy details and item-scoped saves.
-  await import("./optimized-app.js");
+  // Do not abort or replace the list request. If a cold start is slow, only show a
+  // passive status message while the existing optimized app keeps waiting normally.
+  const slowListTimer = window.setTimeout(() => {
+    const status = document.querySelector("#save-status");
+    if (status?.textContent === "불러오는 중") {
+      status.textContent = "목록 응답 지연 · 서버 응답을 기다리는 중";
+    }
+  }, 8_000);
+  try {
+    // The optimized app owns list loading, paging, lazy details and item-scoped saves.
+    await import("./optimized-app.js");
+  } finally {
+    window.clearTimeout(slowListTimer);
+  }
   // Optimized tracker owns the active detail dialog, so B-code China purchasing
   // metadata must mount on that path rather than the retired legacy extension.
   await import("./optimized-china-order-mapping.js");
