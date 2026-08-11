@@ -87,10 +87,10 @@ export async function POST(
     const decidedAt = new Date().toISOString();
     const executionId = randomUUID();
     const decision = completedBGradeRerun
-      ? "rerun_completed_b_grade_hybrid_v2"
+      ? "rerun_completed_b_grade_source_only"
       : bGradeRetry
-        ? "retry_b_grade_hybrid_v2"
-        : "run_b_grade_hybrid_v2";
+        ? "retry_b_grade_source_only"
+        : "run_b_grade_source_only";
     const trigger = completedBGradeRerun
       ? "completed_b_grade_rerun"
       : bGradeRetry
@@ -105,10 +105,10 @@ export async function POST(
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
         message: completedBGradeRerun
-          ? "사용자 요청 · 기존 검수 통과 결과 보존 · 최신 B급 하이브리드 엔진 재생성 대기 중"
+          ? "사용자 요청 · 기존 검수 통과 결과 보존 · B급 원본 조립 재생성 대기 중"
           : bGradeRetry
-            ? "사용자 승인 · 기존 1688 원본 유지 · 최신 B급 하이브리드 엔진 재실행 대기 중"
-            : "사용자 승인 · B급 하이브리드 엔진 대기 중 · 원본 중심 조립 + 후킹포인트 AI 1장만 시도합니다.",
+            ? "사용자 승인 · 기존 1688 원본 유지 · B급 원본 조립 재실행 대기 중"
+            : "사용자 승인 · B급 원본 조립 대기 중 · 새 AI 이미지 생성 없이 저장된 1688 원본만 사용합니다.",
         progress: completedBGradeRerun
           ? 35
           : Math.max(30, Math.min(90, Number(job.progress) || 0)),
@@ -116,8 +116,6 @@ export async function POST(
         payload: {
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
-          // Routing flag name is retained for backward compatibility. The
-          // current Studio implementation behind it is b-grade-hybrid-v2.
           v3_b_grade_source_only: true,
           v3_b_grade_requested_at: decidedAt,
           manual_review_decision: decision,
@@ -140,11 +138,10 @@ export async function POST(
             ? { bGradeRerunBackup: completedBackup }
             : {}),
           bGradeEngineRequest: {
-            id: "b-grade-hybrid-v2",
+            id: "source-only-b-grade-v1",
             qualityTier: "B",
-            sourceFirst: true,
-            aiImageGeneration: "hook-only",
-            hookFallback: "seller-source",
+            sourceOnly: true,
+            aiImageGeneration: false,
             requestedAt: decidedAt,
             trigger,
             anchorIndex: source.anchorIndex,
@@ -178,7 +175,7 @@ export async function POST(
         message:
           error instanceof Error
             ? error.message
-            : "B급 하이브리드 전환을 저장하지 못했습니다.",
+            : "B급 원본 조립 전환을 저장하지 못했습니다.",
       },
       { status: 500 },
     );
@@ -208,10 +205,10 @@ function isCompletedBGrade(job: {
   const engine = record(result.bGradeEngine);
   const request = record(result.bGradeEngineRequest);
   return (
-    engine.id === "b-grade-hybrid-v2" ||
     engine.id === "source-only-b-grade-v1" ||
-    request.id === "b-grade-hybrid-v2" ||
     request.id === "source-only-b-grade-v1" ||
+    engine.id === "b-grade-hybrid-v2" ||
+    request.id === "b-grade-hybrid-v2" ||
     (result.qualityTier === "B" && result.bGradeSourceFirst === true) ||
     (result.qualityTier === "B" && result.bGradeSourceOnly === true) ||
     result.representativeQualityProof === "seller-source-only-no-ai-generation"
