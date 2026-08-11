@@ -375,6 +375,23 @@ function editableFrom(value: unknown): Partial<EditableLine> {
   return output;
 }
 
+function mergeSavedLine(
+  baseLine: InternalChinaPurchaseDraftLine,
+  savedValue: unknown,
+): InternalChinaPurchaseDraftLine {
+  const saved = editableFrom(savedValue);
+  return {
+    ...baseLine,
+    ...saved,
+    // Product-launch metadata is the durable purchasing source of truth. Old
+    // saved blanks must not hide links/options that were filled in later.
+    // A non-empty operator override remains preserved.
+    saleOption: text(saved.saleOption) || baseLine.saleOption,
+    chinaOption: text(saved.chinaOption) || baseLine.chinaOption,
+    supplierLink: text(saved.supplierLink) || baseLine.supplierLink,
+  };
+}
+
 function mergeSnapshot(
   base: InternalChinaPurchaseDraft,
   snapshot: Record<string, unknown>,
@@ -390,7 +407,7 @@ function mergeSnapshot(
   const exchangeRate = decimal(snapshot.exchangeRateKrwPerCny);
   const lines = base.lines.map((line) => {
     const saved = byBarcode.get(line.barcode);
-    return saved ? { ...line, ...editableFrom(saved) } : line;
+    return saved ? mergeSavedLine(line, saved) : line;
   });
   return {
     ...base,
