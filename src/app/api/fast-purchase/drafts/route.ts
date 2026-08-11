@@ -71,7 +71,9 @@ export async function POST(request: Request) {
             ? "발주 기준 데이터가 변경되었습니다. 화면을 새로고침한 뒤 현재 기준으로 다시 확인하세요."
             : code === "FAST_PURCHASE_DRAFT_REFERENCE_CHANGED"
               ? "재고0 수요참고 값이 변경되었습니다. 화면을 새로고침한 뒤 다시 확인하세요."
-              : "내부 발주 Draft 저장 조건을 확인하지 못했습니다.",
+              : code === "FAST_PURCHASE_DRAFT_QUANTITY_EXCEEDED"
+                ? "주문 예정수량은 SKU당 최대 9,999개까지 입력할 수 있습니다."
+                : "내부 발주 Draft 저장 조건을 확인하지 못했습니다.",
       },
       {
         status: conflict ? 409 : 400,
