@@ -17,7 +17,7 @@ test("optimized product-launch path loads the B-code China order mapping extensi
     loader,
     /await import\("\.\/optimized-china-order-mapping\.js"\)/,
   );
-  assert.match(page, /20260811-china-order-map-v2/);
+  assert.match(page, /20260811-china-order-map-v3/);
 });
 
 test("active product detail mounts B-code fixed sale options with China link and option inputs", () => {

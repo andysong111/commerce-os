@@ -80,6 +80,37 @@ test("1번 링크를 상세페이지 엔진 대표 필드로 함께 저장한다
   assert.deepEqual(readChinaProductLinks(item), item.chinaProductLinks);
 });
 
+test("단일 옵션의 옵션 바코드가 비어 있으면 상품 기준 B-code를 중국 주문 매핑에 사용하고 저장한다", () => {
+  const links = ["https://detail.1688.com/offer/single.html"];
+  const item = {
+    id: "single-option",
+    barcode: "BCB7-1",
+    chinaProductLinks: links,
+    orderOptions: [
+      { id: "o1", barcode: "", saleOption: "블랙" },
+    ],
+  };
+  const mappings = readChinaOrderOptionMappings(item);
+  assert.equal(mappings.length, 1);
+  assert.equal(mappings[0].barcode, "BCB7-1");
+  assert.equal(mappings[0].saleOption, "블랙");
+
+  const next = applyChinaOrderOptionMappings(
+    item,
+    [
+      {
+        ...mappings[0],
+        supplierLink: links[0],
+        chinaOption: "黑色",
+      },
+    ],
+    links,
+  );
+  assert.equal(next.orderOptions[0].barcode, "BCB7-1");
+  assert.equal(next.orderOptions[0].chinaOption, "黑色");
+  assert.equal(next.orderOptions[0].supplierLink, links[0]);
+});
+
 test("각 B-code는 서로 다른 1688 링크와 중국옵션을 저장할 수 있다", () => {
   const links = [
     "https://detail.1688.com/offer/a.html",
