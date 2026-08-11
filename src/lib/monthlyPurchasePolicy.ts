@@ -1,7 +1,7 @@
 import {
   normalizeShoplingOrder,
   type ShoplingRawRow,
-} from "@/lib/shopling/shoplingNormalize";
+} from "./shopling/shoplingNormalize.ts";
 
 const SEOUL_OFFSET_MS = 9 * 60 * 60 * 1000;
 
