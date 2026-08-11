@@ -71,22 +71,25 @@ test("planning snapshot is frozen by deterministic content fingerprint and drift
     /planning\.generatedAt !== request\.planningGeneratedAt/,
   );
   assert.match(workflow, /PRODUCT_MASTER_PLANNING_CHANGED/);
-  assert.match(workflow, /planning\.products\.length !== request\.planningProductCount/);
+  assert.match(
+    workflow,
+    /planning\.products\.length !== request\.planningProductCount/,
+  );
   assert.match(workflow, /storeTerminalFailure\(request, "planning"/);
 });
 
 test("each Shopling chunk performs one bounded HTTP attempt and worker retries are the only retry layer", () => {
-  assert.match(shoplingClient, /postShoplingXml\(this\.url\(resource\), xml/);
+  assert.match(
+    shoplingClient,
+    /postShoplingXml\(this\.url\(resource\), xml/,
+  );
   assert.match(shoplingClient, /timeoutMs: 45_000/);
   assert.match(shoplingTransport, /AbortSignal\.timeout\(timeoutMs\)/);
   assert.match(shoplingTransport, /requestHandle\.setTimeout\(timeoutMs/);
   assert.match(shoplingTransport, /isShoplingWeakDhFailure\(error\)/);
   assert.doesNotMatch(shoplingClient + shoplingTransport, /for \(let attempt/);
   assert.doesNotMatch(shoplingClient + shoplingTransport, /await delay\(/);
-  assert.equal(
-    (shoplingTransport.match(/await fetch\(url,/g) ?? []).length,
-    1,
-  );
+  assert.equal((shoplingTransport.match(/await fetch\(url,/g) ?? []).length, 1);
 });
 
 test("final live result remains a shadow snapshot and compares against the verified baseline", () => {
@@ -103,6 +106,7 @@ test("same-origin operator API creates requests and exposes a manual one-step fa
   assert.match(api, /action.*run-next/s);
   assert.match(api, /runProductDecisionLiveRefreshStep/);
   assert.match(api, /alreadyActive/);
+  assert.match(api, /loadMonthlyPurchaseCycleGate/);
   assert.doesNotMatch(api, /x-commerce-os-integration-secret/);
 });
 
@@ -119,17 +123,24 @@ test("cron is bearer protected, idles when credentials are missing and is schedu
   );
 });
 
-test("operator UI can be closed while the worker continues and never claims to place orders", () => {
-  assert.match(page, /운영 전환 전 그림자 계산/);
-  assert.match(page, /실제 1688 주문·결제·중국 전송·재고변경은 실행하지 않습니다/);
-  assert.match(control, /화면을 닫아도 1분 예약 Worker/);
+test("monthly operator UI can be closed while the worker continues and never claims to place orders", () => {
+  assert.match(page, /월간 발주안 계산/);
+  assert.match(
+    page,
+    /실제 1688 주문·결제·중국 전송·재고변경은 이 계산 화면에서 실행하지 않습니다/,
+  );
+  assert.match(control, /화면을 닫아도 예약 Worker/);
   assert.match(control, /실제 주문 쓰기 차단/);
-  assert.match(control, /최신 판매로 그림자 발주안 만들기/);
+  assert.match(control, /발주안 만들기/);
+  assert.match(control, /월 1회/);
 });
 
 test("workflow has no Shopling write, inventory mutation or actual order path", () => {
   assert.doesNotMatch(workflow, /shopling.*(?:update|modify|write)/i);
   assert.doesNotMatch(workflow, /1688/i);
   assert.doesNotMatch(workflow, /inventory.*(?:update|write)/i);
-  assert.doesNotMatch(workflow, /method:\s*"PUT"|method:\s*"PATCH"|method:\s*"DELETE"/);
+  assert.doesNotMatch(
+    workflow,
+    /method:\s*"PUT"|method:\s*"PATCH"|method:\s*"DELETE"/,
+  );
 });
