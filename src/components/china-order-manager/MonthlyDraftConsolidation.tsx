@@ -27,6 +27,13 @@ type Draft = {
   lines: DraftLine[];
 };
 
+type DisplayMetadata = {
+  barcode: string;
+  modelNo: string;
+  modelName: string;
+  saleOption: string;
+};
+
 type Entry = {
   selected: boolean;
   quantity: number;
@@ -95,7 +102,13 @@ function initialEntries(
   ) as Record<string, Entry>;
 }
 
-export function MonthlyDraftConsolidation({ drafts }: { drafts: Draft[] }) {
+export function MonthlyDraftConsolidation({
+  drafts,
+  metadataByBarcode = {},
+}: {
+  drafts: Draft[];
+  metadataByBarcode?: Record<string, DisplayMetadata>;
+}) {
   const router = useRouter();
   const rows = useMemo(() => buildRows(drafts), [drafts]);
   const defaultBase = useMemo(() => chooseDefaultBase(drafts), [drafts]);
@@ -269,11 +282,11 @@ export function MonthlyDraftConsolidation({ drafts }: { drafts: Draft[] }) {
       ) : null}
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-amber-200 bg-white">
-        <table className="min-w-[920px] w-full text-left text-sm">
+        <table className="min-w-[1260px] w-full text-left text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-500">
             <tr>
               <th className="px-3 py-3">포함</th>
-              <th className="px-3 py-3">B-code</th>
+              <th className="px-3 py-3">B-code · 모델번호 · 모델명 · 옵션명</th>
               <th className="px-3 py-3">기준 Draft</th>
               <th className="px-3 py-3">기존 Draft별 미입고</th>
               <th className="px-3 py-3 text-right">최종 수량</th>
@@ -288,6 +301,7 @@ export function MonthlyDraftConsolidation({ drafts }: { drafts: Draft[] }) {
               const base = row.sources.find(
                 (source) => source.draftId === baseDraftId,
               );
+              const metadata = metadataByBarcode[row.barcode];
               return (
                 <tr key={row.barcode} className={entry.selected ? "" : "bg-slate-50/70"}>
                   <td className="px-3 py-3">
@@ -300,13 +314,24 @@ export function MonthlyDraftConsolidation({ drafts }: { drafts: Draft[] }) {
                       aria-label={`${row.barcode} 최종 발주 포함`}
                     />
                   </td>
-                  <td className="px-3 py-3 font-mono font-black text-slate-950">
-                    {row.barcode}
-                    {!base ? (
-                      <span className="ml-2 rounded-full bg-amber-100 px-2 py-1 font-sans text-[11px] font-black text-amber-800">
-                        추가 후보
+                  <td className="px-3 py-3 text-slate-950">
+                    <div className="flex min-w-[520px] flex-wrap items-center gap-x-3 gap-y-1">
+                      <strong className="font-mono font-black">{row.barcode}</strong>
+                      {!base ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-black text-amber-800">
+                          추가 후보
+                        </span>
+                      ) : null}
+                      <span className="text-xs text-slate-600">
+                        모델번호 <strong className="text-slate-900">{metadata?.modelNo || "-"}</strong>
                       </span>
-                    ) : null}
+                      <span className="text-xs text-slate-600">
+                        모델명 <strong className="text-slate-900">{metadata?.modelName || "-"}</strong>
+                      </span>
+                      <span className="text-xs text-slate-600">
+                        옵션명 <strong className="text-slate-900">{metadata?.saleOption || "-"}</strong>
+                      </span>
+                    </div>
                   </td>
                   <td className="px-3 py-3 font-semibold text-slate-700">
                     {base ? `${base.quantity.toLocaleString("ko-KR")}개` : "없음"}
