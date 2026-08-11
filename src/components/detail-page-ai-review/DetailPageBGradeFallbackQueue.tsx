@@ -6,12 +6,13 @@ import { v260807ManualDecisionKind } from "@/lib/detailPageManualDecision";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const POLL_MS = 2_500;
+const DECORATE_MS = 500;
 const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
+const INLINE_ACTION_ATTR = "data-b-grade-inline-action";
 
 export function DetailPageBGradeFallbackQueue() {
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
   const [busyJobId, setBusyJobId] = useState("");
-  const [notice, setNotice] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -49,190 +50,182 @@ export function DetailPageBGradeFallbackQueue() {
     [jobs],
   );
 
-  async function runBGrade(job: DetailPageReviewJob) {
-    if (busyJobId) return;
-    const name = productName(job);
-    const retry = isBGradeFailed(job);
-    const completed = isCompletedBGrade(job);
-    if (
-      !window.confirm(
+  const runBGrade = useCallback(
+    async (job: DetailPageReviewJob) => {
+      if (busyJobId) return;
+      const name = productName(job);
+      const retry = isBGradeFailed(job);
+      const completed = isCompletedBGrade(job);
+      const confirmed = window.confirm(
         completed
-          ? `"${name}"은 B급 엔진으로 검수 통과한 완료 작업입니다.\n\n현재 상품출시진행관리에 연결된 결과는 그대로 유지한 채, 저장된 1688 원본·상품 분석·판매옵션을 재사용해 B급 엔진으로 다시 생성합니다. 새 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
+          ? `"${name}"은 B급 검수 통과 완료 작업입니다.\n\n현재 상품출시진행관리에 연결된 결과는 그대로 유지한 채 저장된 1688 원본·상품 분석·판매옵션을 재사용해 B급 엔진으로 다시 생성합니다. 새 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
           : retry
-            ? `"${name}"의 B급 작업이 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고, 상세페이지 원본 조립과 대표·부가 one-shot AI 실험을 다시 실행합니다. 실패한 실행의 자동 재결제는 하지 않습니다.\n\nB급 엔진을 다시 실행하시겠습니까?`
-            : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 상세페이지 본문은 저장된 1688 원본을 중심으로 조립하고, 대표·부가 이미지는 제한된 one-shot AI 실험을 사용합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
-      )
-    ) {
-      return;
-    }
-
-    setBusyJobId(job.jobId);
-    setNotice(
-      completed
-        ? "현재 검수 통과 결과를 보존하고 B급 재생성을 준비합니다."
-        : retry
-          ? "기존 원본과 분석을 유지하고 B급 작업을 다시 시작합니다."
-          : "B급 엔진 전환을 저장하고 서버 작업을 시작합니다.",
-    );
-    try {
-      const response = await fetch(
-        `${JOBS_API}/${encodeURIComponent(job.jobId)}/b-grade`,
-        {
-          method: "POST",
-          cache: "no-store",
-          credentials: "same-origin",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(
-            completed ? { action: COMPLETED_B_GRADE_RERUN_ACTION } : {},
-          ),
-        },
+            ? `"${name}"의 B급 작업이 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고 B급 엔진을 다시 실행합니다. 실패한 실행의 자동 재결제는 하지 않습니다.\n\nB급 엔진 다시 실행하시겠습니까?`
+            : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 저장된 1688 원본을 중심으로 상세페이지를 조립하고 대표이미지 1장만 생성합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
       );
-      const body = (await response.json().catch(() => ({}))) as {
-        ok?: boolean;
-        message?: string;
-      };
-      if (!response.ok || body.ok !== true) {
-        throw new Error(body.message || "B급 엔진 전환을 저장하지 못했습니다.");
-      }
+      if (!confirmed) return;
 
-      const startResponse = await fetch(
-        `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
-        {
-          method: "POST",
-          cache: "no-store",
-          credentials: "same-origin",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
+      setBusyJobId(job.jobId);
+      try {
+        const response = await fetch(
+          `${JOBS_API}/${encodeURIComponent(job.jobId)}/b-grade`,
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(
+              completed ? { action: COMPLETED_B_GRADE_RERUN_ACTION } : {},
+            ),
           },
-          body: JSON.stringify({ action: "b_grade_source_only" }),
-        },
-      );
-      const startBody = (await startResponse.json().catch(() => ({}))) as {
-        ok?: boolean;
-        message?: string;
-      };
-      if (!startResponse.ok || startBody.ok !== true) {
-        throw new Error(
-          startBody.message || "B급 서버 작업을 시작하지 못했습니다.",
         );
-      }
-      setNotice(
-        completed
-          ? "B급 엔진 재생성을 시작했습니다. 새 결과가 성공하기 전까지 기존 상품상세 결과는 유지됩니다."
-          : "B급 엔진을 다시 시작했습니다. 저장된 1688 원본과 분석을 재사용합니다.",
-      );
-      await refresh();
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "B급 엔진 전환을 실행하지 못했습니다.",
-      );
-      await refresh();
-    } finally {
-      setBusyJobId("");
-    }
-  }
+        const body = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+        };
+        if (!response.ok || body.ok !== true) {
+          throw new Error(body.message || "B급 엔진 전환을 저장하지 못했습니다.");
+        }
 
-  if (!targets.length) return null;
-
-  const completedCount = targets.filter(isCompletedBGrade).length;
-  const recoveryCount = targets.length - completedCount;
-
-  return (
-    <section className="mb-5 rounded-2xl border border-orange-300 bg-orange-50 p-4 shadow-sm sm:p-5">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs font-black tracking-[0.14em] text-orange-700">
-            Commerce OS Detail Page Studio · v260807 · B급 원본 조립
-          </p>
-          <h2 className="mt-1 text-lg font-black text-orange-950">
-            B급 엔진 실행·재생성 {targets.length}건
-          </h2>
-          <p className="mt-1 text-sm font-semibold leading-6 text-orange-900">
-            A급 생성이 안전검사에서 차단되는 상품은 저장된 1688 원본을 중심으로 조립합니다. 완료되거나 중단된 B급 결과도 같은 원본·분석·판매옵션을 재사용해 다시 만들 수 있습니다.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
-            {recoveryCount ? (
-              <span className="rounded-full bg-orange-100 px-2.5 py-1 text-orange-800">
-                복구 대상 {recoveryCount}건
-              </span>
-            ) : null}
-            {completedCount ? (
-              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">
-                검수 통과 B급 재생성 {completedCount}건
-              </span>
-            ) : null}
-          </div>
-        </div>
-        <span className="shrink-0 rounded-full border border-orange-300 bg-white px-3 py-1.5 text-xs font-black text-orange-800">
-          기존 A급 엔진은 변경 없음
-        </span>
-      </div>
-
-      {notice ? (
-        <p className="mt-3 rounded-lg bg-white px-3 py-2 text-sm font-bold text-orange-800">
-          {notice}
-        </p>
-      ) : null}
-
-      <div className="mt-4 grid gap-3">
-        {targets.map((job) => {
-          const retry = isBGradeFailed(job);
-          const completed = isCompletedBGrade(job);
-          return (
-            <article
-              key={job.jobId}
-              className="flex flex-col gap-3 rounded-xl border border-orange-200 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
-            >
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-black text-slate-950">{productName(job)}</h3>
-                  {completed ? (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-black text-emerald-800">
-                      B급 검수 통과
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-1 text-xs font-bold text-slate-500">{job.itemId}</p>
-                <p className="mt-2 text-sm font-semibold text-slate-700">
-                  {completed
-                    ? "현재 완료 결과를 보존한 채 같은 1688 원본·분석·판매옵션으로 B급 엔진을 다시 실행할 수 있습니다. 새 결과가 성공한 뒤에만 상품상세를 교체합니다."
-                    : retry
-                      ? "이 작업은 이전 B급 실행에서 중단되었습니다. 저장된 원본과 분석을 그대로 유지하고 다시 실행할 수 있습니다."
-                      : "안전검사에서 차단되어 B급 엔진으로 실행하시겠습니까? 상세페이지 본문은 1688 원본을 중심으로 유지합니다."}
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={Boolean(busyJobId)}
-                onClick={() => void runBGrade(job)}
-                className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-40 ${
-                  completed
-                    ? "bg-emerald-700 hover:bg-emerald-800"
-                    : "bg-orange-700 hover:bg-orange-800"
-                }`}
-              >
-                {busyJobId === job.jobId
-                  ? completed
-                    ? "B급 재생성 시작 중…"
-                    : "B급 엔진 전환 중…"
-                  : completed
-                    ? "B급 엔진으로 재생성"
-                    : retry
-                      ? "B급 엔진 다시 실행"
-                      : "B급 엔진으로 실행"}
-              </button>
-            </article>
+        const startResponse = await fetch(
+          `${JOBS_API}/${encodeURIComponent(job.jobId)}/start`,
+          {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ action: "b_grade_source_only" }),
+          },
+        );
+        const startBody = (await startResponse.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+        };
+        if (!startResponse.ok || startBody.ok !== true) {
+          throw new Error(
+            startBody.message || "B급 서버 작업을 시작하지 못했습니다.",
           );
-        })}
-      </div>
-    </section>
+        }
+        await refresh();
+      } catch (error) {
+        window.alert(
+          error instanceof Error
+            ? error.message
+            : "B급 엔진 전환을 실행하지 못했습니다.",
+        );
+        await refresh();
+      } finally {
+        setBusyJobId("");
+      }
+    },
+    [busyJobId, refresh],
   );
+
+  useEffect(() => {
+    function decorateVisibleCards() {
+      const list = Array.from(document.querySelectorAll("div")).find((element) => {
+        const className = element.getAttribute("class") || "";
+        return (
+          className.includes("max-h-[760px]") &&
+          className.includes("overflow-y-auto")
+        );
+      });
+      if (!list) return;
+
+      const cards = Array.from(list.children).filter(
+        (element): element is HTMLButtonElement =>
+          element instanceof HTMLButtonElement,
+      );
+      const targetIds = new Set(targets.map((job) => job.jobId));
+
+      document
+        .querySelectorAll<HTMLElement>(`[${INLINE_ACTION_ATTR}]`)
+        .forEach((element) => {
+          const jobId = element.getAttribute(INLINE_ACTION_ATTR) || "";
+          if (!targetIds.has(jobId) || !list.contains(element)) {
+            element.remove();
+          }
+        });
+
+      for (const job of targets) {
+        const card = cards.find((candidate) =>
+          (candidate.textContent || "").includes(job.itemId),
+        );
+        if (!card) continue;
+
+        let action = card.querySelector<HTMLElement>(
+          `[${INLINE_ACTION_ATTR}="${job.jobId}"]`,
+        );
+        const completed = isCompletedBGrade(job);
+        const retry = isBGradeFailed(job);
+        const busy = busyJobId === job.jobId;
+        const label = busy
+          ? "B급 재생성 중…"
+          : completed
+            ? "B급으로 재생성"
+            : retry
+              ? "B급 다시 실행"
+              : "B급으로 실행";
+
+        if (!action) {
+          action = document.createElement("span");
+          action.setAttribute(INLINE_ACTION_ATTR, job.jobId);
+          action.setAttribute("role", "button");
+          action.setAttribute(
+            "aria-label",
+            completed ? "B급 엔진으로 재생성" : "B급 엔진으로 실행",
+          );
+          action.style.display = "inline-flex";
+          action.style.alignItems = "center";
+          action.style.justifyContent = "center";
+          action.style.marginTop = "10px";
+          action.style.padding = "5px 9px";
+          action.style.borderRadius = "7px";
+          action.style.fontSize = "11px";
+          action.style.fontWeight = "900";
+          action.style.lineHeight = "1.2";
+          action.style.color = "white";
+          action.style.boxShadow = "0 1px 2px rgba(15,23,42,.12)";
+          action.style.cursor = "pointer";
+          action.style.userSelect = "none";
+          action.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          });
+          action.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void runBGrade(job);
+          });
+          card.appendChild(action);
+        }
+
+        action.textContent = label;
+        action.style.background = completed ? "#047857" : "#c2410c";
+        action.style.opacity = busy ? "0.55" : "1";
+        action.style.pointerEvents = busy ? "none" : "auto";
+      }
+    }
+
+    decorateVisibleCards();
+    const interval = window.setInterval(decorateVisibleCards, DECORATE_MS);
+    return () => {
+      window.clearInterval(interval);
+      document
+        .querySelectorAll<HTMLElement>(`[${INLINE_ACTION_ATTR}]`)
+        .forEach((element) => element.remove());
+    };
+  }, [busyJobId, runBGrade, targets]);
+
+  // Intentionally no standalone B-grade queue UI. The action is injected as a
+  // compact control inside each eligible job card in the scrollable review list.
+  return null;
 }
 
 function isCompletedBGrade(job: DetailPageReviewJob) {
