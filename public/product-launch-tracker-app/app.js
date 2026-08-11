@@ -34,6 +34,10 @@ if (detailPageMode === "worker") {
   // Optimized tracker owns the active detail dialog, so B-code China purchasing
   // metadata must mount on that path rather than the retired legacy extension.
   await import("./optimized-china-order-mapping.js");
+  // One-time spreadsheet migration: copy the current stock-sheet 1688 links and
+  // China option names into matching unfinished launch items without deleting
+  // any existing extra links or unrelated item data.
+  await import("./stock-sheet-china-order-sync-20260812.js");
 
   // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
