@@ -33,6 +33,15 @@ test("v260807 review page offers B-grade hybrid fallback, retry, and completed-r
   assert.match(prompt, /새 결과가 성공한 뒤에만 상품상세를 교체/);
 });
 
+test("completed rerun also recognizes legacy source-only B-grade results already in production", () => {
+  assert.match(prompt, /source-only-b-grade-v1/);
+  assert.match(prompt, /bGradeSourceOnly === true/);
+  assert.match(prompt, /seller-source-only-no-ai-generation/);
+  assert.match(requestRoute, /source-only-b-grade-v1/);
+  assert.match(requestRoute, /bGradeSourceOnly === true/);
+  assert.match(requestRoute, /seller-source-only-no-ai-generation/);
+});
+
 test("B-grade request stays job-scoped and records the hybrid-v2 contract", () => {
   assert.match(requestRoute, /v260807ManualDecisionKind/);
   assert.match(requestRoute, /DETAIL_PAGE_B_GRADE_NOT_ALLOWED/);
