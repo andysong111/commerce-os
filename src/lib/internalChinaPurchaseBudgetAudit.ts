@@ -82,9 +82,13 @@ function quantity(value: unknown) {
 export async function loadInternalChinaPurchaseBudgetAudit(
   draftId: string,
 ): Promise<InternalChinaPurchaseBudgetAudit> {
-  const cycle = monthlyPurchaseCycleFor();
-  const [draft, shadow, planning, ledger, calendarRevenue] = await Promise.all([
-    loadInternalChinaPurchaseDraft(draftId),
+  // The budget month belongs to the Draft's own purchase cycle, not the day on
+  // which somebody happens to reopen this screen later. An August Draft must
+  // keep July's frozen budget even when reviewed again in September.
+  const draft = await loadInternalChinaPurchaseDraft(draftId);
+  const cycle = monthlyPurchaseCycleFor(draft.sourceUpdatedAt);
+
+  const [shadow, planning, ledger, calendarRevenue] = await Promise.all([
     loadCanonicalPurchaseShadow(),
     loadProductPlanningSnapshot(),
     loadChinaOrderLedger(),
