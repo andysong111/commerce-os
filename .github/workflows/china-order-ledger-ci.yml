@@ -8,6 +8,7 @@ on:
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
       - "src/lib/monthlyPurchaseDraftConsolidation.ts"
+      - "src/lib/monthlyPurchaseDraftDisplayMetadata.ts"
       - "src/lib/shopling/calendarMonthRevenue.ts"
       - "src/app/api/china-order-ledger/**"
       - "src/app/api/china-order-manager/**"
@@ -48,6 +49,7 @@ jobs:
           src/lib/internalChinaPurchaseBudgetAudit.ts
           src/lib/monthlyPurchasePolicy.ts
           src/lib/monthlyPurchaseDraftConsolidation.ts
+          src/lib/monthlyPurchaseDraftDisplayMetadata.ts
           src/lib/shopling/calendarMonthRevenue.ts
           src/app/api/china-order-ledger/events/route.ts
           "src/app/api/china-order-manager/drafts/[draftId]/route.ts"
