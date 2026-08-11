@@ -3,6 +3,7 @@ import {
   generateReliableShoplingCategoryRecommendations,
   isRetryableCategoryOutputError,
 } from "@/lib/shoplingCategoryRecommendationRunner";
+import { generateNaverFirstShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverFirst";
 import { parseProductCategoryInputs } from "@/lib/shoplingCategoryScoring";
 import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
 
@@ -32,10 +33,20 @@ export async function POST(request: NextRequest) {
         !Array.isArray(body) &&
         (body as Record<string, unknown>).retryFailedIndividually,
     );
-    const generated = await generateReliableShoplingCategoryRecommendations(
-      inputs,
-      { timeoutMs: 60_000, retryFailedIndividually },
-    );
+    const categoryMode = String(
+      process.env.SHOPLING_CATEGORY_MODE || "naver_first",
+    )
+      .trim()
+      .toLocaleLowerCase("en-US");
+    const generated =
+      categoryMode === "legacy"
+        ? await generateReliableShoplingCategoryRecommendations(inputs, {
+            timeoutMs: 60_000,
+            retryFailedIndividually,
+          })
+        : await generateNaverFirstShoplingCategoryRecommendations(inputs, {
+            timeoutMs: 22_000,
+          });
 
     const generatedById = new Map(
       generated.results.map((row) => [row.itemId, row]),
@@ -65,6 +76,7 @@ export async function POST(request: NextRequest) {
     console.info(
       JSON.stringify({
         event: "shopling_category_batch_complete",
+        categoryMode,
         inputCount: inputs.length,
         resultCount: results.length,
         failureCount: failures.length,
@@ -83,6 +95,7 @@ export async function POST(request: NextRequest) {
       console.warn(
         JSON.stringify({
           event: "shopling_category_item_failed",
+          categoryMode,
           itemId: failure.itemId,
           modelNumber: failure.modelNumber,
           stage: failure.stage,
@@ -97,6 +110,7 @@ export async function POST(request: NextRequest) {
       {
         ok: true,
         ...generated,
+        categoryMode,
         complete: failures.length === 0,
         results,
         failures,
@@ -108,7 +122,7 @@ export async function POST(request: NextRequest) {
       error instanceof Error ? error.message : "AI 카테고리 추천에 실패했습니다.";
     const message =
       error instanceof DOMException && error.name === "AbortError"
-        ? "AI 카테고리 분석 제한시간을 초과했습니다. 완료된 상품은 보존하고 실패한 상품만 다시 실행하세요."
+        ? "카테고리 검색 제한시간을 초과했습니다. 완료된 상품은 보존하고 실패한 상품만 다시 실행하세요."
         : isRetryableCategoryOutputError(error)
           ? "AI 응답이 중간에서 잘렸습니다. 완료된 상품은 보존하고 실패한 상품만 다시 실행하세요."
           : rawMessage;
