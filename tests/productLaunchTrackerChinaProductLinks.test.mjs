@@ -151,9 +151,16 @@ test("B-code 주문링크는 상품상세에 저장된 중국 링크 중에서�
 });
 
 test("중국 링크 UI는 5칸·1번 고정·B-code 주문매핑·서버 저장·상세 재열기를 지원한다", async () => {
-  const ui = await readFile(
+  const legacyUi = await readFile(
     new URL(
       "../public/product-launch-tracker-app/china-product-links.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const activeUi = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/optimized-china-order-mapping.js",
       import.meta.url,
     ),
     "utf8",
@@ -162,23 +169,30 @@ test("중국 링크 UI는 5칸·1번 고정·B-code 주문매핑·서버 저장�
     new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
     "utf8",
   );
-  assert.match(ui, /MAX_CHINA_PRODUCT_LINKS/);
-  assert.match(ui, /1번으로 고정/);
-  assert.match(ui, /상세페이지 엔진용 1번/);
-  assert.match(ui, /B-code별 중국 주문 매핑/);
-  assert.match(ui, /data-china-order-link-select/);
-  assert.match(ui, /data-china-order-option-input/);
-  assert.match(ui, /applyChinaOrderOptionMappings/);
-  assert.match(ui, /TRACKER_STATE_ENDPOINT/);
-  assert.match(ui, /REOPEN_ITEM_KEY/);
-  assert.doesNotMatch(ui, /MutationObserver/);
-  assert.match(app, /china-product-links\.js/);
+  assert.match(legacyUi, /MAX_CHINA_PRODUCT_LINKS/);
+  assert.match(legacyUi, /1번으로 고정/);
+  assert.match(legacyUi, /상세페이지 엔진용 1번/);
+  assert.match(activeUi, /B-code별 중국 주문 매핑/);
+  assert.match(activeUi, /data-optimized-china-order-link-select/);
+  assert.match(activeUi, /data-optimized-china-order-option-input/);
+  assert.match(activeUi, /applyChinaOrderOptionMappings/);
+  assert.match(activeUi, /mode: "item"/);
+  assert.match(activeUi, /operation: "patch_item"/);
+  assert.doesNotMatch(activeUi, /MutationObserver/);
+  assert.match(app, /optimized-china-order-mapping\.js/);
 });
 
 test("기본 상세 저장의 preventDefault 이후에도 중국 링크와 주문옵션을 저장하고 저장 버튼을 화면에 고정한다", async () => {
   const ui = await readFile(
     new URL(
       "../public/product-launch-tracker-app/china-product-links.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const activeUi = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/optimized-china-order-mapping.js",
       import.meta.url,
     ),
     "utf8",
@@ -198,6 +212,8 @@ test("기본 상세 저장의 preventDefault 이후에도 중국 링크와 주�
   );
   assert.match(ui, /if \(detailDialog\?\.open\) return/);
   assert.match(ui, /sameChinaOrderOptionMappings/);
+  assert.match(activeUi, /waitForMainSave/);
+  assert.match(activeUi, /if \(detailDialog\?\.open\)/);
   assert.match(html, /class="button button-primary detail-floating-save" value="save"/);
   assert.match(styles, /\.detail-floating-save\s*\{[^}]*position: fixed/s);
 });
