@@ -82,11 +82,11 @@ test("reserved quantity and sale option remain source-owned while order-time cos
   assert.match(engine, /unitPriceCny/);
   assert.match(engine, /freightGroupId/);
   assert.match(engine, /domesticChinaFreightCny/);
-  assert.match(
+  assert.match(workspace, /옵션 · \{line\.saleOption \|\| "-"\}/);
+  assert.doesNotMatch(
     workspace,
-    /옵션 · \{line\.saleOption \|\| "-"\}/,
+    /updateLine\(line\.barcode,\s*\{\s*saleOption:/,
   );
-  assert.doesNotMatch(workspace, /onChange=.*saleOption/s);
   assert.match(
     workspace,
     /수량은[\s\S]*RESERVED로 확정되어 이 화면에서는 변경하지 않습니다/,
