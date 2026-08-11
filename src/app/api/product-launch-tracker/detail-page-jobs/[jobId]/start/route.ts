@@ -21,6 +21,8 @@ import { isDetailPageTestJob } from "@/lib/detailPageTestStudio";
 
 const COMPILER_CANARY_ACTION = "compiler_v1_canary";
 const COMPILER_CANARY_PARAMETER = "compiler_v1_canary";
+const B_GRADE_ACTION = "b_grade_source_only";
+const B_GRADE_PARAMETER = "b_grade_source_only";
 const TERMINAL_STATUSES = new Set(["success", "failed", "cancelled"]);
 
 export async function POST(
@@ -65,6 +67,8 @@ export async function POST(
     const persistedCompilerCanary =
       job.payload.compiler_canary === true && !TERMINAL_STATUSES.has(job.status);
     const compilerCanary = explicitCompilerCanary || persistedCompilerCanary;
+    const bGradeSourceOnly =
+      command.action === B_GRADE_ACTION || job.payload.v3_b_grade_source_only === true;
     const recoverableFinalAssembly = isRecoverableServerFinalAssemblyJob({
       status: job.status,
       stage: job.stage,
@@ -247,6 +251,9 @@ export async function POST(
     if (compilerCanary) {
       workerUrl.searchParams.set(COMPILER_CANARY_PARAMETER, "1");
     }
+    if (bGradeSourceOnly) {
+      workerUrl.searchParams.set(B_GRADE_PARAMETER, "1");
+    }
     const dispatchId = randomUUID();
     const reservation = await reserveDetailPageJobDispatch(
       config.value,
@@ -258,6 +265,7 @@ export async function POST(
         jobId: runnableJob.id,
         executionId: String(runnableJob.payload.execution_id ?? ""),
         compilerCanary,
+        bGradeSourceOnly,
         reason: reservation.reason,
       });
       if (reservation.reason === "missing") {
@@ -291,6 +299,7 @@ export async function POST(
       dispatchId,
       executionId: String(runnableJob.payload.execution_id ?? ""),
       compilerCanary,
+      bGradeSourceOnly,
     });
     const callbackUrl = buildProtectedOpsCallbackUrl(
       request.url,
@@ -337,10 +346,13 @@ export async function POST(
       workerId: body.workerId,
       dispatchId,
       engineProfile:
-        compilerCanary && body?.engineProfile
+        bGradeSourceOnly && body?.engineProfile
           ? body.engineProfile
-          : body?.engineProfile || "source-first-v3",
+          : compilerCanary && body?.engineProfile
+            ? body.engineProfile
+            : body?.engineProfile || "source-first-v3",
       compilerCanary,
+      bGradeSourceOnly,
     });
   } catch (error) {
     return Response.json(
