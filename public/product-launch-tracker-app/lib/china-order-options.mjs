@@ -28,11 +28,12 @@ export function readChinaOrderOptionMappings(item) {
   const links = readChinaProductLinks(source);
   const fallbackLink = links[0] ?? "";
   const options = Array.isArray(source.orderOptions) ? source.orderOptions : [];
+  const singleOptionBarcode = options.length === 1 ? barcode(source.barcode) : "";
   return options.map((entry, index) => {
     const option = record(entry);
     return {
       id: text(option.id) || `option-${index + 1}`,
-      barcode: barcode(option.barcode),
+      barcode: barcode(option.barcode) || singleOptionBarcode,
       saleOption: text(option.saleOption ?? option.value),
       chinaOption: text(option.chinaOption),
       supplierLink: linkOrBlank(option.supplierLink) || fallbackLink,
@@ -75,16 +76,17 @@ export function applyChinaOrderOptionMappings(
     mappings.filter((row) => row.barcode).map((row) => [row.barcode, row]),
   );
   const current = Array.isArray(source.orderOptions) ? source.orderOptions : [];
+  const singleOptionBarcode = current.length === 1 ? barcode(source.barcode) : "";
   const orderOptions = current.map((entry, index) => {
     const option = record(entry);
     const id = text(option.id) || `option-${index + 1}`;
-    const code = barcode(option.barcode);
+    const code = barcode(option.barcode) || singleOptionBarcode;
     const mapped = byId.get(id) || (code ? byBarcode.get(code) : undefined);
     if (!mapped) return option;
     return {
       ...option,
       id,
-      barcode: code,
+      barcode: code || mapped.barcode,
       saleOption: text(option.saleOption ?? option.value),
       chinaOption: mapped.chinaOption,
       supplierLink: mapped.supplierLink,
@@ -100,13 +102,15 @@ export function applyChinaOrderOptionMappings(
 }
 
 export function sameChinaOrderOptionMappings(item, values, availableLinks) {
-  const current = readChinaOrderOptionMappings(item).map(({ id, barcode, saleOption, chinaOption, supplierLink }) => ({
-    id,
-    barcode,
-    saleOption,
-    chinaOption,
-    supplierLink,
-  }));
+  const current = readChinaOrderOptionMappings(item).map(
+    ({ id, barcode, saleOption, chinaOption, supplierLink }) => ({
+      id,
+      barcode,
+      saleOption,
+      chinaOption,
+      supplierLink,
+    }),
+  );
   const next = normalizeChinaOrderOptionMappings(values, availableLinks);
   return JSON.stringify(current) === JSON.stringify(next);
 }
