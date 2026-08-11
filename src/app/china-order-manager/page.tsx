@@ -75,7 +75,7 @@ export default async function ChinaOrderManagerPage() {
             </p>
           </div>
           <span className="rounded-full border border-emerald-300 bg-white px-3 py-1 text-xs font-black text-emerald-800">
-            GPT Site 운영경로 제거 진행
+            GPT Site 운영경로 제거 · 실제 재고·가격 쓰기 차단
           </span>
         </div>
       </section>
