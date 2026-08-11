@@ -48,13 +48,16 @@ export async function POST(
       payload: job.payload,
       result: job.result,
     };
-    if (v260807ManualDecisionKind(manualJob) !== "generation_safety_block") {
+    const safetyBlocked =
+      v260807ManualDecisionKind(manualJob) === "generation_safety_block";
+    const bGradeRetry = isBGradeSourceOnlyFailed(job);
+    if (!safetyBlocked && !bGradeRetry) {
       return Response.json(
         {
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_NOT_ALLOWED",
           message:
-            "v260807 AI 이미지 생성 안전검사에서 차단된 작업만 B급 원본 조립으로 전환할 수 있습니다.",
+            "v260807 AI 이미지 생성 안전검사에서 차단되었거나 B급 원본 조립 자체가 실패한 작업만 B급 원본 조립으로 실행할 수 있습니다.",
         },
         { status: 409 },
       );
@@ -77,8 +80,9 @@ export async function POST(
       patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
-        message:
-          "사용자 승인 · B급 원본 조립 대기 중 · AI 이미지 생성 없이 1688 원본만 사용합니다.",
+        message: bGradeRetry
+          ? "사용자 승인 · 기존 1688 원본 유지 · 수정된 B급 원본 조립 재실행 대기 중"
+          : "사용자 승인 · B급 원본 조립 대기 중 · AI 이미지 생성 없이 1688 원본만 사용합니다.",
         progress: Math.max(30, Math.min(90, Number(job.progress) || 0)),
         qa_status: "pending",
         payload: {
@@ -86,7 +90,9 @@ export async function POST(
           assistant_hidden_at: "",
           v3_b_grade_source_only: true,
           v3_b_grade_requested_at: decidedAt,
-          manual_review_decision: "run_b_grade_source_only",
+          manual_review_decision: bGradeRetry
+            ? "retry_b_grade_source_only"
+            : "run_b_grade_source_only",
           manual_review_decided_at: decidedAt,
           pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
           execution_id: executionId,
@@ -107,11 +113,15 @@ export async function POST(
             qualityTier: "B",
             sourceOnly: true,
             requestedAt: decidedAt,
-            trigger: "generation_safety_block",
+            trigger: bGradeRetry
+              ? "b_grade_source_only_retry"
+              : "generation_safety_block",
             anchorIndex: source.anchorIndex,
           },
           v3ManualDecision: {
-            decision: "run_b_grade_source_only",
+            decision: bGradeRetry
+              ? "retry_b_grade_source_only"
+              : "run_b_grade_source_only",
             decidedAt,
             previousStage: job.stage,
             previousError: job.error_message,
@@ -143,4 +153,16 @@ export async function POST(
       { status: 500 },
     );
   }
+}
+
+function isBGradeSourceOnlyFailed(job: {
+  status: string;
+  stage: string;
+  error_message: string;
+}) {
+  return (
+    job.status === "failed" &&
+    job.stage === "v3_b_grade_source_only" &&
+    /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error_message || "")
+  );
 }
