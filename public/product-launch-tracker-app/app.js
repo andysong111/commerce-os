@@ -30,6 +30,9 @@ if (detailPageMode === "worker") {
 } else {
   // The optimized app owns list loading, paging, lazy details and item-scoped saves.
   await import("./optimized-app.js");
+  // Optimized tracker owns the active detail dialog, so B-code China purchasing
+  // metadata must mount on that path rather than the retired legacy extension.
+  await import("./optimized-china-order-mapping.js");
 
   // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
