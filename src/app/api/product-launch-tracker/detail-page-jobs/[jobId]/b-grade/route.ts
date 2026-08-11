@@ -50,14 +50,14 @@ export async function POST(
     };
     const safetyBlocked =
       v260807ManualDecisionKind(manualJob) === "generation_safety_block";
-    const bGradeRetry = isBGradeSourceOnlyFailed(job);
+    const bGradeRetry = isBGradeFailed(job);
     if (!safetyBlocked && !bGradeRetry) {
       return Response.json(
         {
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_NOT_ALLOWED",
           message:
-            "v260807 AI 이미지 생성 안전검사에서 차단되었거나 B급 원본 조립 자체가 실패한 작업만 B급 원본 조립으로 실행할 수 있습니다.",
+            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나 이전 B급 엔진 실행이 실패한 작업만 B급 하이브리드 엔진으로 실행할 수 있습니다.",
         },
         { status: 409 },
       );
@@ -68,7 +68,7 @@ export async function POST(
         {
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_SOURCE_MISSING",
-          message: "B급 원본 조립에 사용할 1688 원본을 확인하지 못했습니다.",
+          message: "B급 엔진에 사용할 1688 원본을 확인하지 못했습니다.",
         },
         { status: 409 },
       );
@@ -81,18 +81,20 @@ export async function POST(
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
         message: bGradeRetry
-          ? "사용자 승인 · 기존 1688 원본 유지 · 수정된 B급 원본 조립 재실행 대기 중"
-          : "사용자 승인 · B급 원본 조립 대기 중 · AI 이미지 생성 없이 1688 원본만 사용합니다.",
+          ? "사용자 승인 · 기존 1688 원본 유지 · 최신 B급 하이브리드 엔진 재실행 대기 중"
+          : "사용자 승인 · B급 하이브리드 엔진 대기 중 · 원본 중심 조립 + 후킹포인트 AI 1장만 시도합니다.",
         progress: Math.max(30, Math.min(90, Number(job.progress) || 0)),
         qa_status: "pending",
         payload: {
           attempt: job.attempt + 1,
           assistant_hidden_at: "",
+          // Routing flag name is retained for backward compatibility. The
+          // current Studio implementation behind it is b-grade-hybrid-v2.
           v3_b_grade_source_only: true,
           v3_b_grade_requested_at: decidedAt,
           manual_review_decision: bGradeRetry
-            ? "retry_b_grade_source_only"
-            : "run_b_grade_source_only",
+            ? "retry_b_grade_hybrid_v2"
+            : "run_b_grade_hybrid_v2",
           manual_review_decided_at: decidedAt,
           pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
           execution_id: executionId,
@@ -109,19 +111,21 @@ export async function POST(
         },
         result: {
           bGradeEngineRequest: {
-            id: "source-only-b-grade-v1",
+            id: "b-grade-hybrid-v2",
             qualityTier: "B",
-            sourceOnly: true,
+            sourceFirst: true,
+            aiImageGeneration: "hook-only",
+            hookFallback: "seller-source",
             requestedAt: decidedAt,
             trigger: bGradeRetry
-              ? "b_grade_source_only_retry"
+              ? "b_grade_retry"
               : "generation_safety_block",
             anchorIndex: source.anchorIndex,
           },
           v3ManualDecision: {
             decision: bGradeRetry
-              ? "retry_b_grade_source_only"
-              : "run_b_grade_source_only",
+              ? "retry_b_grade_hybrid_v2"
+              : "run_b_grade_hybrid_v2",
             decidedAt,
             previousStage: job.stage,
             previousError: job.error_message,
@@ -148,21 +152,23 @@ export async function POST(
         message:
           error instanceof Error
             ? error.message
-            : "B급 원본 조립 전환을 저장하지 못했습니다.",
+            : "B급 하이브리드 전환을 저장하지 못했습니다.",
       },
       { status: 500 },
     );
   }
 }
 
-function isBGradeSourceOnlyFailed(job: {
+function isBGradeFailed(job: {
   status: string;
   stage: string;
   error_message: string;
 }) {
   return (
     job.status === "failed" &&
-    job.stage === "v3_b_grade_source_only" &&
-    /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error_message || "")
+    ((job.stage === "v3_b_grade_source_only" &&
+      /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error_message || "")) ||
+      (job.stage === "v3_b_grade_hybrid" &&
+        /B_GRADE_HYBRID_FAILED/i.test(job.error_message || "")))
   );
 }
