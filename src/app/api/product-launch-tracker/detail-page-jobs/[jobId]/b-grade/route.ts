@@ -209,8 +209,12 @@ function isCompletedBGrade(job: {
   const request = record(result.bGradeEngineRequest);
   return (
     engine.id === "b-grade-hybrid-v2" ||
+    engine.id === "source-only-b-grade-v1" ||
     request.id === "b-grade-hybrid-v2" ||
-    (result.qualityTier === "B" && result.bGradeSourceFirst === true)
+    request.id === "source-only-b-grade-v1" ||
+    (result.qualityTier === "B" && result.bGradeSourceFirst === true) ||
+    (result.qualityTier === "B" && result.bGradeSourceOnly === true) ||
+    result.representativeQualityProof === "seller-source-only-no-ai-generation"
   );
 }
 
@@ -220,12 +224,18 @@ function completedBGradeBackup(job: {
 }) {
   const result = record(job.result);
   const engine = record(result.bGradeEngine);
+  const request = record(result.bGradeEngineRequest);
   return {
     detailImageUrl: text(result.detailImageUrl),
     mainImageUrl: text(result.mainImageUrl),
     additionalImageUrls: stringList(result.additionalImageUrls, 4),
     completedAt: job.completed_at ?? "",
-    engineId: text(engine.id) || "b-grade-hybrid-v2",
+    engineId:
+      text(engine.id) ||
+      text(request.id) ||
+      (result.bGradeSourceOnly === true
+        ? "source-only-b-grade-v1"
+        : "b-grade-hybrid-v2"),
     hookAiUsed: result.bGradeHookAiUsed === true,
     hookAiStatus: text(result.bGradeHookAiStatus),
   };
