@@ -26,6 +26,7 @@ type StoredTriageResult = {
 };
 
 const STORAGE_KEY = "commerceOs.fastPurchaseMvp.triage.v1";
+const MANUAL_QUANTITY_MAX = 9_999;
 const number = new Intl.NumberFormat("ko-KR");
 const EMPTY_ENTRY: TriageEntry = {
   stockSense: "UNKNOWN",
@@ -65,10 +66,9 @@ function quantity(value: unknown) {
 
 function clampManualQuantity(row: FastPurchaseMvpRow, value: unknown) {
   const planned = quantity(value);
-  if (row.action === "DEMAND_ONLY_REVIEW") {
-    return Math.min(planned, quantity(row.referenceDemandQuantity));
-  }
-  return planned;
+  return isManual(row.action)
+    ? Math.min(planned, MANUAL_QUANTITY_MAX)
+    : 0;
 }
 
 function effectivePlannedQuantity(row: FastPurchaseMvpRow, entry: TriageEntry) {
@@ -309,8 +309,9 @@ export function FastPurchaseTriageWorkspace({
           <p className="mt-1 max-w-4xl text-sm leading-6 text-slate-500">
             수동검토 상품은 창고를 전수조사하지 말고 기억·현장 체감으로
             `충분 / 부족 / 품절`만 빠르게 표시하세요. 주문 예정수량은 직접
-            확정합니다. 판단과 메모는 이 브라우저에만 저장되며 Commerce OS
-            서버, Product Master, 중국 주문에는 쓰지 않습니다.
+            확정하며 SKU당 최대 9,999개까지 입력할 수 있습니다. 재고0 수요참고는
+            판단 보조값이며 주문수량 상한이 아닙니다. 판단과 메모는 이 브라우저에만
+            저장되며 Commerce OS 서버, Product Master, 중국 주문에는 쓰지 않습니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -408,10 +409,7 @@ export function FastPurchaseTriageWorkspace({
                 const systemOrderQuantity = isSystemOrder(row.action)
                   ? row.recommendedQuantity
                   : 0;
-                const manualMax =
-                  row.action === "DEMAND_ONLY_REVIEW"
-                    ? quantity(row.referenceDemandQuantity)
-                    : undefined;
+                const manualMax = manual ? MANUAL_QUANTITY_MAX : undefined;
                 return (
                   <tr key={row.barcode} className="align-top">
                     <td className="px-3 py-4">
@@ -429,7 +427,7 @@ export function FastPurchaseTriageWorkspace({
                         <div>
                           <span className="mr-1 font-bold text-slate-400">모델명</span>
                           <span className="font-semibold text-slate-800">
-                            {row.modelName || row.productName || "-"}
+                            {row.modelName || "-"}
                           </span>
                         </div>
                         <div>
@@ -535,9 +533,9 @@ export function FastPurchaseTriageWorkspace({
                                 )
                               }
                               className="rounded-lg border border-orange-300 bg-orange-50 px-2 py-1.5 text-[11px] font-bold text-orange-900"
-                              title="재고 0 가정 참고상한을 주문 예정수량 입력칸에 복사합니다. 실제 주문은 실행하지 않습니다."
+                              title="재고 0 가정 수요 참고값을 주문 예정수량 입력칸에 복사합니다. 필요하면 9,999개까지 더 크게 수정할 수 있습니다. 실제 주문은 실행하지 않습니다."
                             >
-                              참고상한 넣기
+                              참고수량 넣기
                             </button>
                           ) : null}
                         </div>
@@ -586,10 +584,10 @@ export function FastPurchaseTriageWorkspace({
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
-        `참고상한 넣기`는 수량 입력을 돕는 버튼일 뿐 주문 실행이 아닙니다.
-        `수요만 수동검토` 행은 주문 예정수량을 재고0 참고상한보다 크게 저장하거나
-        내보낼 수 없습니다. 발주 기준 fingerprint가 바뀌면 이전 브라우저 계획은
-        자동 초기화되어 재확인을 요구합니다.
+        `참고수량 넣기`는 재고 0 가정 수요값을 입력칸에 복사하는 보조 기능일 뿐
+        주문 실행이 아닙니다. 이 참고값은 상한이 아니며 부족/품절로 판단한 수동검토
+        상품은 SKU당 최대 9,999개까지 직접 입력·저장·CSV 내보내기할 수 있습니다.
+        발주 기준 fingerprint가 바뀌면 이전 브라우저 계획은 자동 초기화되어 재확인을 요구합니다.
       </div>
       <p className="break-all text-[11px] text-slate-400">
         Source fingerprint · {sourceFingerprint}
