@@ -299,7 +299,6 @@ async function searchNaverShoppingCategory(
           {
             type: "web_search",
             search_context_size: "low",
-            filters: { allowed_domains: ["naver.com"] },
           },
         ],
         tool_choice: "required",
@@ -312,6 +311,7 @@ async function searchNaverShoppingCategory(
               text: [
                 "당신은 네이버 쇼핑 카테고리 확인 담당자다.",
                 "주어진 모델명을 그대로 네이버에서 검색하고 쇼핑 영역/네이버 쇼핑 결과에서 동일하거나 가장 동일한 상품을 찾는다.",
+                "웹 검색 쿼리는 site:naver.com, site:shopping.naver.com 또는 site:search.shopping.naver.com 제한어를 사용해 네이버 결과를 우선 확인한다.",
                 "그 상품에서 실제 확인되는 카테고리 경로만 기록한다.",
                 "네이버 쇼핑 이외의 쇼핑몰 카테고리나 일반 상식으로 카테고리를 추론하지 않는다.",
                 "색상·수량·규격 차이는 무시해도 되지만 제품 종류와 용도가 다른 상품은 근거로 쓰지 않는다.",
