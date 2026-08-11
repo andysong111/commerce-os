@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
 import { loadChinaOrderLedger } from "@/lib/chinaOrderLedger";
+import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadChinaOrderInternalStatus } from "@/lib/integrations/chinaOrderManager";
 
 export const dynamic = "force-dynamic";
@@ -31,38 +32,50 @@ function statusTone(value: string) {
 }
 
 export default async function ChinaOrderManagerPage() {
-  const [status, ledger] = await Promise.all([
+  const [status, ledger, internalDraftState] = await Promise.all([
     loadChinaOrderInternalStatus(),
     loadChinaOrderLedger(),
+    loadFastPurchaseInternalDrafts(),
   ]);
   const commitments = ledger.commitments.slice(0, 100);
+  const activeDrafts = internalDraftState.drafts.filter(
+    (draft) => draft.openQuantity > 0,
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="COMMERCE OS · 중국 발주·입고 내부 이전"
         title="중국 발주·입고 관리"
-        description="주문초안·실주문·부분입고·정상입고·파손·누락을 불변 이벤트로 기록하고, 발주 추천이 차감할 미입고 수량을 자동 계산합니다. 실제 재고 증가와 가격변경은 별도 승인 전까지 차단합니다."
+        description="빠른 발주안의 내부 Draft부터 실제 1688 주문 준비·실주문 기록·부분입고·정상입고까지 Ops Center 안으로 통합합니다. GPT Site는 운영 경로에서 사용하지 않습니다."
         actions={
-          <Link
-            href="/china-orders"
-            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700"
-          >
-            내부 원가계산 열기
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/fast-purchase-mvp"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50"
+            >
+              빠른 발주안
+            </Link>
+            <Link
+              href="/china-orders"
+              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700"
+            >
+              원가계산 참고화면
+            </Link>
+          </div>
         }
       />
 
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-950">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <strong className="block text-base">중국 주문·입고 이벤트 원장 연결</strong>
+            <strong className="block text-base">Ops Center Native 중국 주문 흐름</strong>
             <p className="mt-1 leading-6">
-              같은 sourceEventId는 한 번만 저장합니다. 입고수량과 취소·파손·누락 해제수량을 누적해 남은 미입고 수량만 발주 추천에 제공합니다.
+              내부 발주 Draft의 RESERVED 수량을 직접 열어 B-code·옵션·1688 링크를 재사용하고 위안단가·중국내 운임을 입력합니다. 실제 1688 주문 후에만 ORDERED로 기록하며 이 화면 자체가 외부 주문·결제를 실행하지 않습니다.
             </p>
           </div>
           <span className="rounded-full border border-emerald-300 bg-white px-3 py-1 text-xs font-black text-emerald-800">
-            실제 재고·가격 쓰기 차단
+            GPT Site 운영경로 제거 진행
           </span>
         </div>
       </section>
@@ -75,10 +88,54 @@ export default async function ChinaOrderManagerPage() {
         <StatusCard label="남은 미입고" value={number.format(ledger.totalOpenQuantity)} note="다음 발주안 차감" emphasized />
       </section>
 
-      {ledger.error || status.error ? (
+      <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <span className="text-xs font-black tracking-[0.12em] text-blue-700">FAST PURCHASE → INTERNAL CHINA ORDER</span>
+            <h2 className="mt-1 text-lg font-black text-slate-950">활성 내부 발주 Draft</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              여기서 바로 중국 주문초안을 열면 외부 Site 중계 없이 Ops Center 내부 주문 준비 화면으로 이동합니다.
+            </p>
+          </div>
+          <strong className="text-sm text-blue-800">
+            {activeDrafts.length}건 · 미입고 {number.format(
+              activeDrafts.reduce((sum, draft) => sum + draft.openQuantity, 0),
+            )}개
+          </strong>
+        </div>
+        <div className="mt-4 space-y-2">
+          {activeDrafts.length ? (
+            activeDrafts.slice(0, 10).map((draft) => (
+              <div
+                key={draft.draftId}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3"
+              >
+                <div>
+                  <strong className="font-mono text-xs text-slate-950">{draft.draftId}</strong>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {draft.lineCount} SKU · 미입고 {number.format(draft.openQuantity)}개 · 실주문 기록 {number.format(draft.orderedQuantity)}개 · {new Date(draft.updatedAt).toLocaleString("ko-KR")}
+                  </p>
+                </div>
+                <Link
+                  href={`/china-order-manager/drafts/${encodeURIComponent(draft.draftId)}`}
+                  className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-blue-800"
+                >
+                  Ops Center 중국 주문초안 열기
+                </Link>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-xl border border-blue-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+              현재 열려 있는 내부 발주 Draft가 없습니다. 빠른 발주안에서 부족·품절 수량을 저장하면 여기에 나타납니다.
+            </p>
+          )}
+        </div>
+      </section>
+
+      {ledger.error || status.error || internalDraftState.error ? (
         <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
           <strong>운영원장 조회 안내</strong>
-          <p className="mt-2 break-words">{ledger.error || status.error}</p>
+          <p className="mt-2 break-words">{ledger.error || status.error || internalDraftState.error}</p>
         </section>
       ) : null}
 
@@ -134,7 +191,7 @@ export default async function ChinaOrderManagerPage() {
               ) : (
                 <tr>
                   <td colSpan={8} className="px-3 py-10 text-center text-slate-500">
-                    아직 Ops Center 원장으로 들어온 중국 주문·입고 이벤트가 없습니다. 기존 Site 연동 이벤트부터 순차 이전합니다.
+                    아직 Ops Center 원장으로 들어온 중국 주문·입고 이벤트가 없습니다.
                   </td>
                 </tr>
               )}
@@ -144,9 +201,9 @@ export default async function ChinaOrderManagerPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <ActionCard title="중국주문 원가계산" description="상품마스터의 모델·옵션을 연결하고 중국내 운임과 환율을 배분해 옵션별 최종 원가를 계산합니다." href="/china-orders" action="원가계산 열기" state="사용 가능" />
+        <ActionCard title="빠른 발주안" description="판매·추정재고·미입고 약정을 반영해 이번 주문 필요량을 만들고 내부 RESERVED Draft로 고정합니다." href="/fast-purchase-mvp" action="빠른 발주안 열기" state="사용 가능" />
         <ActionCard title="운영 안전센터" description="입고확정 이벤트, 실패·재시도, 가격분석 후속 연동과 불확실 상태를 확인합니다." href="/operations" action="운영 이력 보기" state="읽기 전용" />
-        <ActionCard title="발주 추천" description="현재 원장의 남은 미입고 수량이 다음 발주안에서 중복 차감되는지 확인합니다." href="/product-decision-agent" action="발주 추천 보기" state="자체 엔진 연결 중" />
+        <ActionCard title="원가계산 참고화면" description="기존 Ops Center 초기 원가계산 화면입니다. 실제 운영 발주는 위 활성 내부 Draft에서 직접 여세요." href="/china-orders" action="원가계산 참고" state="보조 화면" />
       </section>
     </div>
   );
