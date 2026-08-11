@@ -6,6 +6,7 @@ import { v260807ManualDecisionKind } from "@/lib/detailPageManualDecision";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const POLL_MS = 2_500;
+const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
 
 export function DetailPageBGradeFallbackQueue() {
   const [jobs, setJobs] = useState<DetailPageReviewJob[]>([]);
@@ -37,12 +38,13 @@ export function DetailPageBGradeFallbackQueue() {
     return () => window.clearInterval(interval);
   }, [refresh]);
 
-  const blocked = useMemo(
+  const targets = useMemo(
     () =>
       jobs.filter(
         (job) =>
           v260807ManualDecisionKind(job) === "generation_safety_block" ||
-          isBGradeFailed(job),
+          isBGradeFailed(job) ||
+          isCompletedBGrade(job),
       ),
     [jobs],
   );
@@ -51,11 +53,14 @@ export function DetailPageBGradeFallbackQueue() {
     if (busyJobId) return;
     const name = productName(job);
     const retry = isBGradeFailed(job);
+    const completed = isCompletedBGrade(job);
     if (
       !window.confirm(
-        retry
-          ? `"${name}"의 B급 엔진 작업이 구성 단계에서 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고, 최신 B급 하이브리드 규칙으로 다시 실행합니다. 후킹포인트만 AI 1장을 시도하며 차단되면 자동으로 원본 사용예시로 전환합니다.\n\nB급 엔진을 다시 실행하시겠습니까?`
-          : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 대표·부가·포인트·사용·옵션을 1688 원본 중심으로 조립하고, 후킹포인트에만 일반적인 불편 사용장면 AI 1장을 시도합니다. 후킹 AI도 차단되면 전체를 실패시키지 않고 원본형 후킹으로 자동 전환합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
+        completed
+          ? `"${name}"은 B급 엔진으로 검수 통과한 완료 작업입니다.\n\n현재 상품출시진행관리에 연결된 결과는 그대로 유지한 채, 저장된 1688 원본·상품 분석·판매옵션을 재사용해 최신 B급 하이브리드 엔진으로 다시 생성합니다. 새 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
+          : retry
+            ? `"${name}"의 B급 엔진 작업이 구성 단계에서 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고, 최신 B급 하이브리드 규칙으로 다시 실행합니다. 후킹포인트만 AI 1장을 시도하며 차단되면 자동으로 원본 사용예시로 전환합니다.\n\nB급 엔진을 다시 실행하시겠습니까?`
+            : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 대표·부가·포인트·사용·옵션을 1688 원본 중심으로 조립하고, 후킹포인트에만 일반적인 불편 사용장면 AI 1장을 시도합니다. 후킹 AI도 차단되면 전체를 실패시키지 않고 원본형 후킹으로 자동 전환합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
       )
     ) {
       return;
@@ -63,9 +68,11 @@ export function DetailPageBGradeFallbackQueue() {
 
     setBusyJobId(job.jobId);
     setNotice(
-      retry
-        ? "기존 자산을 유지하고 최신 B급 하이브리드 엔진을 다시 시작합니다."
-        : "B급 하이브리드 전환을 저장하고 서버 작업을 시작합니다.",
+      completed
+        ? "현재 검수 통과 결과를 보존하고 최신 B급 하이브리드 엔진 재생성을 준비합니다."
+        : retry
+          ? "기존 자산을 유지하고 최신 B급 하이브리드 엔진을 다시 시작합니다."
+          : "B급 하이브리드 전환을 저장하고 서버 작업을 시작합니다.",
     );
     try {
       const response = await fetch(
@@ -74,7 +81,13 @@ export function DetailPageBGradeFallbackQueue() {
           method: "POST",
           cache: "no-store",
           credentials: "same-origin",
-          headers: { Accept: "application/json" },
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            completed ? { action: COMPLETED_B_GRADE_RERUN_ACTION } : {},
+          ),
         },
       );
       const body = (await response.json().catch(() => ({}))) as {
@@ -108,7 +121,9 @@ export function DetailPageBGradeFallbackQueue() {
         );
       }
       setNotice(
-        "B급 하이브리드 엔진을 시작했습니다. 후킹포인트 AI는 최대 1회 보정 후 실패하면 자동으로 1688 원본형 후킹으로 전환합니다.",
+        completed
+          ? "B급 엔진 재생성을 시작했습니다. 새 결과가 성공하기 전까지 기존 상품상세 결과는 유지됩니다."
+          : "B급 하이브리드 엔진을 시작했습니다. 후킹포인트 AI는 최대 1회 보정 후 실패하면 자동으로 1688 원본형 후킹으로 전환합니다.",
       );
       await refresh();
     } catch (error) {
@@ -123,7 +138,10 @@ export function DetailPageBGradeFallbackQueue() {
     }
   }
 
-  if (!blocked.length) return null;
+  if (!targets.length) return null;
+
+  const completedCount = targets.filter(isCompletedBGrade).length;
+  const recoveryCount = targets.length - completedCount;
 
   return (
     <section className="mb-5 rounded-2xl border border-orange-300 bg-orange-50 p-4 shadow-sm sm:p-5">
@@ -133,11 +151,23 @@ export function DetailPageBGradeFallbackQueue() {
             Commerce OS Detail Page Studio · v260807 · B급 하이브리드
           </p>
           <h2 className="mt-1 text-lg font-black text-orange-950">
-            B급 엔진 대상 {blocked.length}건
+            B급 엔진 실행·재생성 {targets.length}건
           </h2>
           <p className="mt-1 text-sm font-semibold leading-6 text-orange-900">
-            A급 생성이 안전검사에서 반복 차단되는 상품의 최후 안정망입니다. 대표·부가·본문·옵션은 1688 원본을 우선 사용하고, 판매력을 보완할 후킹포인트에만 일반적인 불편 장면 AI 1장을 제한적으로 사용합니다. 후킹 AI 실패는 전체 실패 사유가 아닙니다.
+            안전검사 차단·B급 실패 작업은 복구할 수 있고, 이미 검수 통과한 B급 결과도 저장된 1688 원본과 분석을 재사용해 최신 B급 엔진으로 다시 생성할 수 있습니다. 완료 결과는 새 재생성이 성공하기 전까지 그대로 유지합니다.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
+            {recoveryCount ? (
+              <span className="rounded-full bg-orange-100 px-2.5 py-1 text-orange-800">
+                복구 대상 {recoveryCount}건
+              </span>
+            ) : null}
+            {completedCount ? (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">
+                검수 통과 B급 재생성 {completedCount}건
+              </span>
+            ) : null}
+          </div>
         </div>
         <span className="shrink-0 rounded-full border border-orange-300 bg-white px-3 py-1.5 text-xs font-black text-orange-800">
           기존 A급 엔진은 변경 없음
@@ -151,39 +181,69 @@ export function DetailPageBGradeFallbackQueue() {
       ) : null}
 
       <div className="mt-4 grid gap-3">
-        {blocked.map((job) => {
+        {targets.map((job) => {
           const retry = isBGradeFailed(job);
+          const completed = isCompletedBGrade(job);
           return (
             <article
               key={job.jobId}
               className="flex flex-col gap-3 rounded-xl border border-orange-200 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
             >
               <div>
-                <h3 className="font-black text-slate-950">{productName(job)}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-black text-slate-950">{productName(job)}</h3>
+                  {completed ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-black text-emerald-800">
+                      B급 검수 통과
+                    </span>
+                  ) : null}
+                </div>
                 <p className="mt-1 text-xs font-bold text-slate-500">{job.itemId}</p>
                 <p className="mt-2 text-sm font-semibold text-slate-700">
-                  {retry
-                    ? "이 작업은 이전 B급 조립에서 중단되었습니다. 저장된 원본과 분석을 그대로 유지하고 최신 B급 하이브리드 규칙으로 다시 실행할 수 있습니다."
-                    : "안전검사에서 차단되어 B급 엔진으로 실행하시겠습니까? 대표·부가·본문은 원본 중심으로 유지하고 후킹포인트만 일반적인 불편 장면 AI를 1장 시도합니다."}
+                  {completed
+                    ? "현재 완료 결과를 보존한 채 같은 1688 원본·분석·판매옵션으로 최신 B급 엔진을 다시 실행할 수 있습니다. 새 결과가 성공한 뒤에만 상품상세를 교체합니다."
+                    : retry
+                      ? "이 작업은 이전 B급 조립에서 중단되었습니다. 저장된 원본과 분석을 그대로 유지하고 최신 B급 하이브리드 규칙으로 다시 실행할 수 있습니다."
+                      : "안전검사에서 차단되어 B급 엔진으로 실행하시겠습니까? 대표·부가·본문은 원본 중심으로 유지하고 후킹포인트만 일반적인 불편 장면 AI를 1장 시도합니다."}
                 </p>
               </div>
               <button
                 type="button"
                 disabled={Boolean(busyJobId)}
                 onClick={() => void runBGrade(job)}
-                className="shrink-0 rounded-lg bg-orange-700 px-4 py-2.5 text-sm font-black text-white hover:bg-orange-800 disabled:cursor-wait disabled:opacity-40"
+                className={`shrink-0 rounded-lg px-4 py-2.5 text-sm font-black text-white disabled:cursor-wait disabled:opacity-40 ${
+                  completed
+                    ? "bg-emerald-700 hover:bg-emerald-800"
+                    : "bg-orange-700 hover:bg-orange-800"
+                }`}
               >
                 {busyJobId === job.jobId
-                  ? "B급 엔진 전환 중…"
-                  : retry
-                    ? "B급 엔진 다시 실행"
-                    : "B급 엔진으로 실행"}
+                  ? completed
+                    ? "B급 재생성 시작 중…"
+                    : "B급 엔진 전환 중…"
+                  : completed
+                    ? "B급 엔진으로 재생성"
+                    : retry
+                      ? "B급 엔진 다시 실행"
+                      : "B급 엔진으로 실행"}
               </button>
             </article>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function isCompletedBGrade(job: DetailPageReviewJob) {
+  if (job.status !== "success") return false;
+  const result = record(job.result);
+  const engine = record(result.bGradeEngine);
+  const request = record(result.bGradeEngineRequest);
+  return (
+    engine.id === "b-grade-hybrid-v2" ||
+    request.id === "b-grade-hybrid-v2" ||
+    (result.qualityTier === "B" && result.bGradeSourceFirst === true)
   );
 }
 

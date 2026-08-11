@@ -9,11 +9,14 @@ import {
   resolveDetailPageJobIdentity,
 } from "@/lib/detailPageJobServer";
 import {
+  isV260807DetailPageJob,
   v260807ManualDecisionKind,
   v260807SourceAnchorSnapshot,
 } from "@/lib/detailPageManualDecision";
 import { DETAIL_PAGE_STAGED_PIPELINE_VERSION } from "@/lib/detailPageJobRecovery";
 import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
+
+const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
 
 export async function POST(
   request: NextRequest,
@@ -30,6 +33,10 @@ export async function POST(
       { status: 400 },
     );
   }
+
+  const command = (await request.json().catch(() => ({}))) as {
+    action?: string;
+  };
 
   try {
     const job = await withDetailPageStoreRetry(() =>
@@ -51,13 +58,16 @@ export async function POST(
     const safetyBlocked =
       v260807ManualDecisionKind(manualJob) === "generation_safety_block";
     const bGradeRetry = isBGradeFailed(job);
-    if (!safetyBlocked && !bGradeRetry) {
+    const completedBGradeRerun =
+      command.action === COMPLETED_B_GRADE_RERUN_ACTION &&
+      isCompletedBGrade(job);
+    if (!safetyBlocked && !bGradeRetry && !completedBGradeRerun) {
       return Response.json(
         {
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_NOT_ALLOWED",
           message:
-            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나 이전 B급 엔진 실행이 실패한 작업만 B급 하이브리드 엔진으로 실행할 수 있습니다.",
+            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나, 이전 B급 엔진 실행이 실패했거나, 검수 통과한 B급 결과를 명시적으로 재생성하는 작업만 허용됩니다.",
         },
         { status: 409 },
       );
@@ -76,14 +86,32 @@ export async function POST(
 
     const decidedAt = new Date().toISOString();
     const executionId = randomUUID();
+    const decision = completedBGradeRerun
+      ? "rerun_completed_b_grade_hybrid_v2"
+      : bGradeRetry
+        ? "retry_b_grade_hybrid_v2"
+        : "run_b_grade_hybrid_v2";
+    const trigger = completedBGradeRerun
+      ? "completed_b_grade_rerun"
+      : bGradeRetry
+        ? "b_grade_retry"
+        : "generation_safety_block";
+    const completedBackup = completedBGradeRerun
+      ? completedBGradeBackup(job)
+      : null;
+
     const changed = await withDetailPageStoreRetry(() =>
       patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
-        message: bGradeRetry
-          ? "사용자 승인 · 기존 1688 원본 유지 · 최신 B급 하이브리드 엔진 재실행 대기 중"
-          : "사용자 승인 · B급 하이브리드 엔진 대기 중 · 원본 중심 조립 + 후킹포인트 AI 1장만 시도합니다.",
-        progress: Math.max(30, Math.min(90, Number(job.progress) || 0)),
+        message: completedBGradeRerun
+          ? "사용자 요청 · 기존 검수 통과 결과 보존 · 최신 B급 하이브리드 엔진 재생성 대기 중"
+          : bGradeRetry
+            ? "사용자 승인 · 기존 1688 원본 유지 · 최신 B급 하이브리드 엔진 재실행 대기 중"
+            : "사용자 승인 · B급 하이브리드 엔진 대기 중 · 원본 중심 조립 + 후킹포인트 AI 1장만 시도합니다.",
+        progress: completedBGradeRerun
+          ? 35
+          : Math.max(30, Math.min(90, Number(job.progress) || 0)),
         qa_status: "pending",
         payload: {
           attempt: job.attempt + 1,
@@ -92,9 +120,7 @@ export async function POST(
           // current Studio implementation behind it is b-grade-hybrid-v2.
           v3_b_grade_source_only: true,
           v3_b_grade_requested_at: decidedAt,
-          manual_review_decision: bGradeRetry
-            ? "retry_b_grade_hybrid_v2"
-            : "run_b_grade_hybrid_v2",
+          manual_review_decision: decision,
           manual_review_decided_at: decidedAt,
           pipeline_version: DETAIL_PAGE_STAGED_PIPELINE_VERSION,
           execution_id: executionId,
@@ -110,6 +136,9 @@ export async function POST(
           worker_dispatch_until: "",
         },
         result: {
+          ...(completedBackup
+            ? { bGradeRerunBackup: completedBackup }
+            : {}),
           bGradeEngineRequest: {
             id: "b-grade-hybrid-v2",
             qualityTier: "B",
@@ -117,16 +146,13 @@ export async function POST(
             aiImageGeneration: "hook-only",
             hookFallback: "seller-source",
             requestedAt: decidedAt,
-            trigger: bGradeRetry
-              ? "b_grade_retry"
-              : "generation_safety_block",
+            trigger,
             anchorIndex: source.anchorIndex,
           },
           v3ManualDecision: {
-            decision: bGradeRetry
-              ? "retry_b_grade_hybrid_v2"
-              : "run_b_grade_hybrid_v2",
+            decision,
             decidedAt,
+            previousStatus: job.status,
             previousStage: job.stage,
             previousError: job.error_message,
           },
@@ -159,6 +185,52 @@ export async function POST(
   }
 }
 
+function isCompletedBGrade(job: {
+  status: string;
+  stage: string;
+  error_message: string;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+}) {
+  if (job.status !== "success") return false;
+  if (
+    !isV260807DetailPageJob({
+      status: job.status,
+      stage: job.stage,
+      error: job.error_message,
+      payload: job.payload,
+      result: job.result,
+    })
+  ) {
+    return false;
+  }
+  const result = record(job.result);
+  const engine = record(result.bGradeEngine);
+  const request = record(result.bGradeEngineRequest);
+  return (
+    engine.id === "b-grade-hybrid-v2" ||
+    request.id === "b-grade-hybrid-v2" ||
+    (result.qualityTier === "B" && result.bGradeSourceFirst === true)
+  );
+}
+
+function completedBGradeBackup(job: {
+  completed_at: string | null;
+  result: Record<string, unknown>;
+}) {
+  const result = record(job.result);
+  const engine = record(result.bGradeEngine);
+  return {
+    detailImageUrl: text(result.detailImageUrl),
+    mainImageUrl: text(result.mainImageUrl),
+    additionalImageUrls: stringList(result.additionalImageUrls, 4),
+    completedAt: job.completed_at ?? "",
+    engineId: text(engine.id) || "b-grade-hybrid-v2",
+    hookAiUsed: result.bGradeHookAiUsed === true,
+    hookAiStatus: text(result.bGradeHookAiStatus),
+  };
+}
+
 function isBGradeFailed(job: {
   status: string;
   stage: string;
@@ -171,4 +243,21 @@ function isBGradeFailed(job: {
       (job.stage === "v3_b_grade_hybrid" &&
         /B_GRADE_HYBRID_FAILED/i.test(job.error_message || "")))
   );
+}
+
+function stringList(value: unknown, max: number) {
+  return (Array.isArray(value) ? value : [])
+    .map(text)
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
