@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const [lib, route, component, page] = await Promise.all([
+  readFile("src/lib/monthlyPurchaseDraftConsolidation.ts", "utf8"),
+  readFile(
+    "src/app/api/china-order-manager/monthly-finalize/route.ts",
+    "utf8",
+  ),
+  readFile(
+    "src/components/china-order-manager/MonthlyDraftConsolidation.tsx",
+    "utf8",
+  ),
+  readFile("src/app/china-order-manager/page.tsx", "utf8"),
+]);
+
+test("monthly finalization closes legacy same-month drafts and creates one new RESERVED draft", () => {
+  assert.match(lib, /monthlyFinal: true/);
+  assert.match(lib, /status: "CANCELLED"/);
+  assert.match(lib, /status: "RESERVED"/);
+  assert.match(lib, /supersededByDraftId/);
+  assert.match(lib, /supersedesDraftIds/);
+  assert.match(lib, /externalOrderExecuted: false/);
+  assert.match(lib, /resolution=ignore-duplicates/);
+});
+
+test("monthly finalization refuses to rewrite drafts that already progressed beyond RESERVED", () => {
+  assert.match(lib, /row\.status !== "RESERVED"/);
+  assert.match(lib, /row\.orderedQuantity > 0/);
+  assert.match(lib, /row\.receivedQuantity > 0/);
+  assert.match(lib, /MONTHLY_PURCHASE_FINAL_SOURCE_ALREADY_PROGRESSING/);
+});
+
+test("final quantities are operator-controlled but bounded and limited to barcodes in the active monthly drafts", () => {
+  assert.match(lib, /MANUAL_QUANTITY_MAX = 9_999/);
+  assert.match(lib, /allowedBarcodes\.has\(code\)/);
+  assert.match(lib, /MONTHLY_PURCHASE_FINAL_QUANTITY_INVALID/);
+  assert.match(component, /기준 밖 추가후보/);
+  assert.match(component, /추가 후보/);
+  assert.match(component, /최종 수량/);
+  assert.match(component, /selected: Boolean\(base\)/);
+});
+
+test("China order manager surfaces the monthly consolidation workspace only when multiple current-cycle drafts remain", () => {
+  assert.match(page, /currentCycleActiveDrafts\.length > 1/);
+  assert.match(page, /MonthlyDraftConsolidation/);
+  assert.match(component, /선택 수량으로 월간 최종화/);
+  assert.match(component, /기존 Draft는 삭제하지 않고 CANCELLED 이력으로 보존/);
+});
+
+test("monthly finalization API is same-origin only and never places a 1688 order", () => {
+  assert.match(route, /isSameOriginOpsRequest/);
+  assert.match(route, /consolidateMonthlyPurchaseDrafts/);
+  assert.match(route, /실제 1688 주문·결제는 실행하지 않았습니다/);
+  assert.doesNotMatch(route, /placeOrder|payOrder|checkout/i);
+});
