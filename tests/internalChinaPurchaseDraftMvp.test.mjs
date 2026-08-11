@@ -2,17 +2,25 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, workspace, route, page, manager, fastActions] = await Promise.all([
-  readFile("src/lib/internalChinaPurchaseDraft.ts", "utf8"),
-  readFile(
-    "src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx",
-    "utf8",
-  ),
-  readFile("src/app/api/china-order-manager/drafts/[draftId]/route.ts", "utf8"),
-  readFile("src/app/china-order-manager/drafts/[draftId]/page.tsx", "utf8"),
-  readFile("src/app/china-order-manager/page.tsx", "utf8"),
-  readFile("src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx", "utf8"),
-]);
+const [engine, workspace, route, page, manager, fastActions, trackerMetadata] =
+  await Promise.all([
+    readFile("src/lib/internalChinaPurchaseDraft.ts", "utf8"),
+    readFile(
+      "src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx",
+      "utf8",
+    ),
+    readFile(
+      "src/app/api/china-order-manager/drafts/[draftId]/route.ts",
+      "utf8",
+    ),
+    readFile("src/app/china-order-manager/drafts/[draftId]/page.tsx", "utf8"),
+    readFile("src/app/china-order-manager/page.tsx", "utf8"),
+    readFile(
+      "src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx",
+      "utf8",
+    ),
+    readFile("src/lib/productLaunchPurchaseMetadata.ts", "utf8"),
+  ]);
 
 test("internal China draft starts from the existing fast-purchase RESERVED ledger", () => {
   assert.match(engine, /loadChinaOrderLedger/);
@@ -32,11 +40,25 @@ test("B-code metadata is reused from Product Master tracker and live Shopling mo
   assert.match(engine, /live\?\.modelName/);
 });
 
-test("saved blank purchase metadata does not hide tracker data added later", () => {
+test("product launch metadata uses each option B-code supplier link before the product-level fallback", () => {
+  assert.match(trackerMetadata, /normalizeSupplierLink\(option\.supplierLink\)/);
+  assert.match(trackerMetadata, /fallbackSupplierLink/);
+  assert.match(trackerMetadata, /saleOption: text\(option\.saleOption\)/);
+  assert.match(trackerMetadata, /chinaOption: text\(option\.chinaOption\)/);
+  assert.match(trackerMetadata, /barcode = normalizeBarcode\(option\.barcode\)/);
+});
+
+test("tracker B-code metadata is authoritative while old saved blanks remain a fallback", () => {
   assert.match(engine, /function mergeSavedLine/);
-  assert.match(engine, /saleOption: text\(saved\.saleOption\) \|\| baseLine\.saleOption/);
-  assert.match(engine, /chinaOption: text\(saved\.chinaOption\) \|\| baseLine\.chinaOption/);
-  assert.match(engine, /supplierLink: text\(saved\.supplierLink\) \|\| baseLine\.supplierLink/);
+  assert.match(engine, /saleOption: baseLine\.saleOption/);
+  assert.match(
+    engine,
+    /chinaOption: baseLine\.chinaOption \|\| text\(saved\.chinaOption\)/,
+  );
+  assert.match(
+    engine,
+    /supplierLink: baseLine\.supplierLink \|\| text\(saved\.supplierLink\)/,
+  );
   assert.match(engine, /return saved \? mergeSavedLine\(line, saved\) : line/);
 });
 
@@ -48,19 +70,51 @@ test("operator prep is persisted in the existing operation ledger without a sche
   assert.match(engine, /externalOrderExecuted: false/);
 });
 
-test("reserved quantity remains locked while price freight option and supplier metadata are editable", () => {
+test("reserved quantity and sale option remain source-owned while order-time cost and freight stay editable", () => {
   assert.match(engine, /INTERNAL_CHINA_QUANTITY_LOCKED/);
+  assert.match(engine, /type EditableLine = Pick/);
+  assert.doesNotMatch(
+    engine.match(/type EditableLine = Pick<[\s\S]*?>;/)?.[0] ?? "",
+    /saleOption/,
+  );
+  assert.match(engine, /saleOption: line\.saleOption/);
   assert.match(engine, /supplierLink/);
   assert.match(engine, /unitPriceCny/);
   assert.match(engine, /freightGroupId/);
   assert.match(engine, /domesticChinaFreightCny/);
-  assert.match(workspace, /수량은 빠른 발주안에서 RESERVED로 확정된 값이므로 여기서는 변경하지 않습니다/);
+  assert.match(
+    workspace,
+    /옵션 · \{line\.saleOption \|\| "-"\}/,
+  );
+  assert.doesNotMatch(workspace, /onChange=.*saleOption/s);
+  assert.match(
+    workspace,
+    /수량은[\s\S]*RESERVED로 확정되어 이 화면에서는 변경하지 않습니다/,
+  );
+});
+
+test("exchange input is removed and internal standard cost is system-owned", () => {
+  assert.match(engine, /INTERNAL_CHINA_FIXED_KRW_PER_CNY = 230/);
+  assert.match(engine, /INTERNAL_CHINA_ORDER_COST_MULTIPLIER/);
+  assert.match(engine, /internalOrderCostMultiplier/);
+  assert.doesNotMatch(workspace, /적용 환율 KRW\/CNY/);
+  assert.match(workspace, /내부기준원가/);
+  assert.match(workspace, /실주문 원가 × 내부 주문 수수료율/);
+});
+
+test("product name column is removed and B-code model and sale option share one identity cell", () => {
+  assert.match(workspace, /B-code \/ 모델 \/ 옵션/);
+  assert.doesNotMatch(workspace, /<th className="px-3 py-3">상품명<\/th>/);
+  assert.match(workspace, /line\.modelName/);
+  assert.match(workspace, /line\.modelNo/);
+  assert.match(workspace, /line\.saleOption/);
 });
 
 test("actual ORDERED ledger transition requires operator confirmation and mandatory order evidence", () => {
   assert.match(engine, /blockingOrderIssues/);
   assert.match(engine, /위안단가/);
   assert.match(engine, /1688 링크/);
+  assert.match(workspace, /중국옵션/);
   assert.match(engine, /status: "ORDERED"/);
   assert.match(engine, /orderedQuantity: line\.quantity/);
   assert.match(workspace, /window\.confirm/);
@@ -90,4 +144,5 @@ test("fast purchase and China manager now route to the Ops Center native draft p
   assert.match(manager, /GPT Site는 운영 경로에서 사용하지 않습니다/);
   assert.match(page, /OPS CENTER NATIVE CHINA ORDER MVP/);
   assert.match(page, /기존 GPT Site의 주문 준비 단계를 대체/);
+  assert.match(page, /budgetAudit=\{budgetAudit\}/);
 });
