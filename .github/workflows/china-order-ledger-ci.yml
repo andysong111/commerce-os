@@ -7,6 +7,7 @@ on:
       - "src/lib/internalChinaPurchaseDraft.ts"
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
+      - "src/lib/monthlyPurchaseDraftConsolidation.ts"
       - "src/lib/shopling/calendarMonthRevenue.ts"
       - "src/app/api/china-order-ledger/**"
       - "src/app/api/china-order-manager/**"
@@ -17,6 +18,7 @@ on:
       - "tests/internalChinaPurchaseDraftMvp.test.mjs"
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
       - "tests/monthlyPurchasePolicy.test.mjs"
+      - "tests/monthlyPurchaseDraftConsolidation.test.mjs"
       - ".github/workflows/china-order-ledger-ci.yml"
   workflow_dispatch:
 
@@ -45,18 +47,22 @@ jobs:
           src/lib/internalChinaPurchaseDraft.ts
           src/lib/internalChinaPurchaseBudgetAudit.ts
           src/lib/monthlyPurchasePolicy.ts
+          src/lib/monthlyPurchaseDraftConsolidation.ts
           src/lib/shopling/calendarMonthRevenue.ts
           src/app/api/china-order-ledger/events/route.ts
           "src/app/api/china-order-manager/drafts/[draftId]/route.ts"
+          src/app/api/china-order-manager/monthly-finalize/route.ts
           src/app/china-order-manager/page.tsx
           "src/app/china-order-manager/drafts/[draftId]/page.tsx"
           src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx
           src/components/china-order-manager/InternalChinaPurchaseBudgetAudit.tsx
+          src/components/china-order-manager/MonthlyDraftConsolidation.tsx
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
+          tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Run China order ledger and monthly budget tests
         run: >-
           node --experimental-strip-types --test
@@ -64,6 +70,7 @@ jobs:
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
+          tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
