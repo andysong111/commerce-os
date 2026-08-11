@@ -99,7 +99,7 @@ test("display-only Shopling identity failure never blocks purchase judgment", ()
   assert.ok(engine.includes("inventoryWritesEnabled: false"));
 });
 
-test("B-code cell shows model name model number and option name together", () => {
+test("B-code cell shows model name model number and option name together without substituting product title for missing model name", () => {
   assert.ok(workspace.includes("B-code · 모델/옵션"));
   assert.ok(workspace.includes("모델명"));
   assert.ok(workspace.includes("모델번호"));
@@ -107,6 +107,7 @@ test("B-code cell shows model name model number and option name together", () =>
   assert.ok(workspace.includes("row.modelName"));
   assert.ok(workspace.includes("row.modelNo"));
   assert.ok(workspace.includes("row.optionName"));
+  assert.doesNotMatch(workspace, /row\.modelName\s*\|\|\s*row\.productName/);
 });
 
 test("manual triage stores only local browser judgment and never posts business state", () => {
@@ -139,22 +140,23 @@ test("browser plans are tied to the exact source fingerprint and invalidated whe
   assert.ok(workspace.includes("sourceFingerprint,"));
 });
 
-test("demand-only manual quantity can never exceed its displayed zero-stock reference ceiling", () => {
+test("manual planned quantity can exceed the demand reference but is capped at 9999", () => {
+  assert.ok(workspace.includes("const MANUAL_QUANTITY_MAX = 9_999"));
   assert.ok(workspace.includes("function clampManualQuantity"));
-  assert.ok(workspace.includes('row.action === "DEMAND_ONLY_REVIEW"'));
-  assert.ok(
-    workspace.includes(
-      "Math.min(planned, quantity(row.referenceDemandQuantity))",
-    ),
-  );
+  assert.ok(workspace.includes("Math.min(planned, MANUAL_QUANTITY_MAX)"));
+  assert.ok(workspace.includes("manual ? MANUAL_QUANTITY_MAX : undefined"));
   assert.ok(workspace.includes("max={manualMax}"));
-  assert.match(workspace, /plannedQuantity:\s*row\.referenceDemandQuantity/);
+  assert.doesNotMatch(
+    workspace,
+    /Math\.min\(planned, quantity\(row\.referenceDemandQuantity\)\)/,
+  );
 });
 
-test("zero-stock demand reference is separated from planned quantity and requires an explicit click to copy", () => {
+test("zero-stock demand reference is a copyable guide rather than the order ceiling", () => {
   assert.ok(workspace.includes("재고0 수요참고"));
   assert.ok(workspace.includes("주문 예정수량"));
-  assert.ok(workspace.includes("참고상한 넣기"));
+  assert.ok(workspace.includes("참고수량 넣기"));
+  assert.ok(workspace.includes("이 참고값은 상한이 아니며"));
   assert.ok(workspace.includes('entry.stockSense === "LOW"'));
   assert.ok(workspace.includes('entry.stockSense === "OUT"'));
   assert.ok(workspace.includes("referenceDemandQuantity"));
