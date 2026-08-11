@@ -53,3 +53,17 @@ test("sourcing center surfaces the live next action without blocking manual navi
   assert.match(page, /각 단계 버튼은 정상적으로 열립니다/);
   assert.match(page, /TEST_READY 후보만 보는 구조/);
 });
+
+test("sourcing center separates upstream funnel counts from final decision counts", () => {
+  assert.match(page, /confirmedOpportunityCandidates/);
+  assert.match(page, /supplyAnchorResolvedCandidates/);
+  assert.match(page, /complexityRejectedCandidates/);
+  assert.match(page, /supplyPendingCandidates/);
+  assert.match(page, /decisionCandidates/);
+  assert.match(page, /처음 검증 후보/);
+  assert.match(page, /공급상품 확정/);
+  assert.match(page, /운영복잡 제외/);
+  assert.match(page, /공급 선택 대기/);
+  assert.match(page, /최종 판단 대상/);
+  assert.match(page, /단순 합계로 더하지 않습니다/);
+});
