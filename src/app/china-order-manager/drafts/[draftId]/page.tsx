@@ -13,7 +13,9 @@ type PageProps = {
   params: Promise<{ draftId: string }>;
 };
 
-export default async function InternalChinaPurchaseDraftPage({ params }: PageProps) {
+export default async function InternalChinaPurchaseDraftPage({
+  params,
+}: PageProps) {
   const { draftId: rawDraftId } = await params;
   const draftId = decodeURIComponent(rawDraftId);
   let draft;
@@ -76,7 +78,10 @@ export default async function InternalChinaPurchaseDraftPage({ params }: PagePro
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
 
-      <InternalChinaPurchaseDraftWorkspace initialDraft={draft} />
+      <InternalChinaPurchaseDraftWorkspace
+        initialDraft={draft}
+        budgetAudit={budgetAudit}
+      />
     </div>
   );
 }
