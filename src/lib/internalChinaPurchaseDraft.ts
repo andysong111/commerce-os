@@ -4,6 +4,7 @@ import {
   loadChinaOrderLedger,
   normalizeChinaOrderCommitmentEvent,
 } from "@/lib/chinaOrderLedger";
+import { DEFAULT_PURCHASE_COST_MULTIPLIER } from "@/lib/productDecisionEngine/portfolio";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
 import { loadProductLaunchPurchaseMetadataByBarcode } from "@/lib/productLaunchPurchaseMetadata";
 import { loadShoplingCurrentModelSnapshot } from "@/lib/shopling/shoplingCurrentModelIdentity";
@@ -14,13 +15,15 @@ import {
 
 export const INTERNAL_CHINA_PURCHASE_PREP_OPERATION_TYPE =
   "INTERNAL_CHINA_PURCHASE_PREP";
+export const INTERNAL_CHINA_FIXED_KRW_PER_CNY = 230;
+export const INTERNAL_CHINA_ORDER_COST_MULTIPLIER =
+  DEFAULT_PURCHASE_COST_MULTIPLIER;
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
 const PREP_SOURCE = "ops-center-internal-china-order";
 const DRAFT_ID = /^fast-purchase-draft:[a-f0-9]{20}$/;
 const BARCODE = /^[A-Z]{3}\d+-\d+$/;
 const MANUAL_QUANTITY_MAX = 9_999;
-const DEFAULT_EXCHANGE_RATE_KRW_PER_CNY = 230;
 
 export type InternalChinaPurchaseDraftStatus = "DRAFT" | "ORDERED";
 
@@ -44,6 +47,7 @@ export type InternalChinaPurchaseDraft = {
   draftId: string;
   status: InternalChinaPurchaseDraftStatus;
   exchangeRateKrwPerCny: number;
+  internalOrderCostMultiplier: number;
   lineCount: number;
   totalQuantity: number;
   createdFrom: "FAST_PURCHASE_RESERVED";
@@ -55,6 +59,8 @@ export type InternalChinaPurchaseDraft = {
 };
 
 export type InternalChinaPurchaseDraftInput = {
+  // Kept only so an older browser payload remains backward compatible. The
+  // operator can no longer change the internal KRW/CNY basis from this page.
   exchangeRateKrwPerCny?: unknown;
   lines?: Array<{
     barcode?: unknown;
@@ -78,7 +84,6 @@ type StoredPrepRow = {
 
 type EditableLine = Pick<
   InternalChinaPurchaseDraftLine,
-  | "saleOption"
   | "chinaOption"
   | "supplierLink"
   | "unitPriceCny"
@@ -161,7 +166,9 @@ function supabaseConnection() {
 
 async function currentCommitments(draftId: string) {
   const ledger = await loadChinaOrderLedger();
-  if (ledger.error) throw new Error(`CHINA_ORDER_LEDGER_UNAVAILABLE:${ledger.error}`);
+  if (ledger.error) {
+    throw new Error(`CHINA_ORDER_LEDGER_UNAVAILABLE:${ledger.error}`);
+  }
   const commitments = ledger.commitments
     .filter(
       (row) =>
@@ -196,18 +203,26 @@ async function readSavedPrep(draftId: string) {
   const row = result.data as StoredPrepRow;
   const resultSnapshot = object(row.result_snapshot);
   const snapshot = object(resultSnapshot.snapshot);
-  if (text(snapshot.draftId) !== draftId || !Array.isArray(snapshot.lines)) return null;
+  if (text(snapshot.draftId) !== draftId || !Array.isArray(snapshot.lines)) {
+    return null;
+  }
   return {
     snapshot,
     savedAt:
-      text(row.updated_at) || text(row.started_at) || text(snapshot.savedAt) || null,
+      text(row.updated_at) ||
+      text(row.started_at) ||
+      text(snapshot.savedAt) ||
+      null,
   };
 }
 
 async function buildMetadataByBarcode(barcodes: string[]) {
   const warnings: string[] = [];
-  let planning: Awaited<ReturnType<typeof loadProductPlanningSnapshot>> | null = null;
-  let tracker: Awaited<ReturnType<typeof loadProductLaunchPurchaseMetadataByBarcode>> | null = null;
+  let planning: Awaited<ReturnType<typeof loadProductPlanningSnapshot>> | null =
+    null;
+  let tracker: Awaited<
+    ReturnType<typeof loadProductLaunchPurchaseMetadataByBarcode>
+  > | null = null;
 
   try {
     planning = await loadProductPlanningSnapshot();
@@ -220,7 +235,9 @@ async function buildMetadataByBarcode(barcodes: string[]) {
   }
   try {
     tracker = await loadProductLaunchPurchaseMetadataByBarcode();
-    if (tracker.error) warnings.push(`상품출시 구매정보 경고: ${tracker.error}`);
+    if (tracker.error) {
+      warnings.push(`상품출시 구매정보 경고: ${tracker.error}`);
+    }
   } catch (error) {
     warnings.push(
       `상품출시 구매정보를 불러오지 못했습니다: ${
@@ -257,7 +274,9 @@ async function buildMetadataByBarcode(barcodes: string[]) {
   if (allGoodsKeys.length) {
     try {
       const live = await loadShoplingCurrentModelSnapshot(allGoodsKeys);
-      const byGoodsKey = new Map(live.rows.map((row) => [row.goodsKey, row] as const));
+      const byGoodsKey = new Map(
+        live.rows.map((row) => [row.goodsKey, row] as const),
+      );
       for (const [barcode, goodsKeys] of goodsKeysByBarcode) {
         const sourceRows = goodsKeys
           .map((goodsKey) => byGoodsKey.get(goodsKey))
@@ -271,7 +290,9 @@ async function buildMetadataByBarcode(barcodes: string[]) {
         ];
         const modelNames = [
           ...new Set(
-            sourceRows.flatMap((row) => row.modelNames.map(text).filter(Boolean)),
+            sourceRows.flatMap((row) =>
+              row.modelNames.map(text).filter(Boolean),
+            ),
           ),
         ];
         liveByBarcode.set(barcode, {
@@ -291,44 +312,48 @@ async function buildMetadataByBarcode(barcodes: string[]) {
   return { planningByBarcode, tracker, liveByBarcode, warnings };
 }
 
-async function buildBaseDraft(draftIdInput: unknown): Promise<InternalChinaPurchaseDraft> {
+async function buildBaseDraft(
+  draftIdInput: unknown,
+): Promise<InternalChinaPurchaseDraft> {
   const draftId = validDraftId(draftIdInput);
   const commitments = await currentCommitments(draftId);
   const barcodes = commitments.map((row) => row.barcode);
   const { planningByBarcode, tracker, liveByBarcode, warnings } =
     await buildMetadataByBarcode(barcodes);
 
-  const lines = commitments.map((commitment): InternalChinaPurchaseDraftLine => {
-    const barcode = commitment.barcode;
-    const profile = planningByBarcode.get(barcode);
-    const trackerRow = tracker?.byBarcode.get(barcode);
-    const live = liveByBarcode.get(barcode);
-    const trackerUsable = trackerRow && !trackerRow.conflict ? trackerRow : null;
-    const modelNo =
-      live?.modelNo ||
-      normalizedModelNo(trackerRow?.modelNumber, "") ||
-      normalizedModelNo(profile?.modelNo, barcode);
-    return {
-      barcode,
-      modelNo,
-      modelName: live?.modelName || "",
-      productName:
-        text(profile?.productName) || text(trackerRow?.productName) || barcode,
-      saleOption:
-        text(trackerUsable?.saleOption) || text(profile?.optionName) || "",
-      chinaOption: text(trackerUsable?.chinaOption),
-      supplierLink: text(trackerUsable?.supplierLink),
-      quantity: Math.min(
-        MANUAL_QUANTITY_MAX,
-        commitment.openQuantity || commitment.committedQuantity,
-      ),
-      unitPriceCny: 0,
-      freightGroupId: "",
-      domesticChinaFreightCny: 0,
-      orderNumber: "",
-      note: "",
-    };
-  });
+  const lines = commitments.map(
+    (commitment): InternalChinaPurchaseDraftLine => {
+      const barcode = commitment.barcode;
+      const profile = planningByBarcode.get(barcode);
+      const trackerRow = tracker?.byBarcode.get(barcode);
+      const live = liveByBarcode.get(barcode);
+      const trackerUsable = trackerRow && !trackerRow.conflict ? trackerRow : null;
+      const modelNo =
+        live?.modelNo ||
+        normalizedModelNo(trackerRow?.modelNumber, "") ||
+        normalizedModelNo(profile?.modelNo, barcode);
+      return {
+        barcode,
+        modelNo,
+        modelName: live?.modelName || "",
+        productName:
+          text(profile?.productName) || text(trackerRow?.productName) || barcode,
+        saleOption:
+          text(trackerUsable?.saleOption) || text(profile?.optionName) || "",
+        chinaOption: text(trackerUsable?.chinaOption),
+        supplierLink: text(trackerUsable?.supplierLink),
+        quantity: Math.min(
+          MANUAL_QUANTITY_MAX,
+          commitment.openQuantity || commitment.committedQuantity,
+        ),
+        unitPriceCny: 0,
+        freightGroupId: "",
+        domesticChinaFreightCny: 0,
+        orderNumber: "",
+        note: "",
+      };
+    },
+  );
 
   const ordered = commitments.every(
     (row) =>
@@ -344,7 +369,8 @@ async function buildBaseDraft(draftIdInput: unknown): Promise<InternalChinaPurch
   return {
     draftId,
     status: ordered ? "ORDERED" : "DRAFT",
-    exchangeRateKrwPerCny: DEFAULT_EXCHANGE_RATE_KRW_PER_CNY,
+    exchangeRateKrwPerCny: INTERNAL_CHINA_FIXED_KRW_PER_CNY,
+    internalOrderCostMultiplier: INTERNAL_CHINA_ORDER_COST_MULTIPLIER,
     lineCount: lines.length,
     totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
     createdFrom: "FAST_PURCHASE_RESERVED",
@@ -359,18 +385,27 @@ async function buildBaseDraft(draftIdInput: unknown): Promise<InternalChinaPurch
 function editableFrom(value: unknown): Partial<EditableLine> {
   const row = object(value);
   const output: Partial<EditableLine> = {};
-  if ("saleOption" in row) output.saleOption = text(row.saleOption).slice(0, 160);
-  if ("chinaOption" in row) output.chinaOption = text(row.chinaOption).slice(0, 240);
-  if ("supplierLink" in row) output.supplierLink = normalizeSupplierLink(row.supplierLink);
-  if ("unitPriceCny" in row) output.unitPriceCny = Math.min(1_000_000, decimal(row.unitPriceCny));
-  if ("freightGroupId" in row) output.freightGroupId = text(row.freightGroupId).slice(0, 100);
+  if ("chinaOption" in row) {
+    output.chinaOption = text(row.chinaOption).slice(0, 240);
+  }
+  if ("supplierLink" in row) {
+    output.supplierLink = normalizeSupplierLink(row.supplierLink);
+  }
+  if ("unitPriceCny" in row) {
+    output.unitPriceCny = Math.min(1_000_000, decimal(row.unitPriceCny));
+  }
+  if ("freightGroupId" in row) {
+    output.freightGroupId = text(row.freightGroupId).slice(0, 100);
+  }
   if ("domesticChinaFreightCny" in row) {
     output.domesticChinaFreightCny = Math.min(
       1_000_000,
       decimal(row.domesticChinaFreightCny),
     );
   }
-  if ("orderNumber" in row) output.orderNumber = text(row.orderNumber).slice(0, 160);
+  if ("orderNumber" in row) {
+    output.orderNumber = text(row.orderNumber).slice(0, 160);
+  }
   if ("note" in row) output.note = text(row.note).slice(0, 300);
   return output;
 }
@@ -383,12 +418,11 @@ function mergeSavedLine(
   return {
     ...baseLine,
     ...saved,
-    // Product-launch metadata is the durable purchasing source of truth. Old
-    // saved blanks must not hide links/options that were filled in later.
-    // A non-empty operator override remains preserved.
-    saleOption: text(saved.saleOption) || baseLine.saleOption,
-    chinaOption: text(saved.chinaOption) || baseLine.chinaOption,
-    supplierLink: text(saved.supplierLink) || baseLine.supplierLink,
+    // B-code -> 판매옵션은 상품출시/Product Master의 기준값이며 이 주문 화면에서
+    // 수정하지 않는다. 중국옵션과 링크도 tracker에 값이 생기면 tracker가 우선한다.
+    saleOption: baseLine.saleOption,
+    chinaOption: baseLine.chinaOption || text(saved.chinaOption),
+    supplierLink: baseLine.supplierLink || text(saved.supplierLink),
   };
 }
 
@@ -404,15 +438,15 @@ function mergeSnapshot(
       .map((row) => [normalizeBarcode(row.barcode), row] as const)
       .filter(([barcode]) => BARCODE.test(barcode)),
   );
-  const exchangeRate = decimal(snapshot.exchangeRateKrwPerCny);
   const lines = base.lines.map((line) => {
     const saved = byBarcode.get(line.barcode);
     return saved ? mergeSavedLine(line, saved) : line;
   });
   return {
     ...base,
-    exchangeRateKrwPerCny:
-      exchangeRate > 0 ? exchangeRate : base.exchangeRateKrwPerCny,
+    // Internal conversion/cost policy is system-owned, not operator editable.
+    exchangeRateKrwPerCny: INTERNAL_CHINA_FIXED_KRW_PER_CNY,
+    internalOrderCostMultiplier: INTERNAL_CHINA_ORDER_COST_MULTIPLIER,
     savedAt,
     lines,
   } satisfies InternalChinaPurchaseDraft;
@@ -434,10 +468,6 @@ function mergeInput(
       .map((value) => [normalizeBarcode(value.barcode), value] as const)
       .filter(([barcode]) => BARCODE.test(barcode)),
   );
-  const exchangeRate = decimal(input.exchangeRateKrwPerCny);
-  if (exchangeRate <= 0 || exchangeRate > 10_000) {
-    throw new Error("INTERNAL_CHINA_EXCHANGE_RATE_INVALID");
-  }
   const lines = base.lines.map((line) => {
     const incoming = byBarcode.get(line.barcode);
     if (!incoming) return line;
@@ -445,11 +475,17 @@ function mergeInput(
     if (requestedQuantity && requestedQuantity !== line.quantity) {
       throw new Error(`INTERNAL_CHINA_QUANTITY_LOCKED:${line.barcode}`);
     }
-    return { ...line, ...editableFrom(incoming) };
+    return {
+      ...line,
+      ...editableFrom(incoming),
+      // The sale option is always resolved from the B-code source metadata.
+      saleOption: line.saleOption,
+    };
   });
   return {
     ...base,
-    exchangeRateKrwPerCny: exchangeRate,
+    exchangeRateKrwPerCny: INTERNAL_CHINA_FIXED_KRW_PER_CNY,
+    internalOrderCostMultiplier: INTERNAL_CHINA_ORDER_COST_MULTIPLIER,
     lines,
   } satisfies InternalChinaPurchaseDraft;
 }
@@ -477,6 +513,7 @@ async function storePrepSnapshot(snapshot: InternalChinaPurchaseDraft) {
           input_snapshot: {
             draftId: snapshot.draftId,
             exchangeRateKrwPerCny: snapshot.exchangeRateKrwPerCny,
+            internalOrderCostMultiplier: snapshot.internalOrderCostMultiplier,
             lineCount: snapshot.lineCount,
             totalQuantity: snapshot.totalQuantity,
           },
@@ -564,6 +601,7 @@ async function storeOrderedEvents(draft: InternalChinaPurchaseDraft) {
         freightGroupId: line.freightGroupId,
         domesticChinaFreightCny: line.domesticChinaFreightCny,
         exchangeRateKrwPerCny: draft.exchangeRateKrwPerCny,
+        internalOrderCostMultiplier: draft.internalOrderCostMultiplier,
         orderNumber: line.orderNumber,
         operatorNote: line.note,
         externalOrderExecuted: false,
@@ -626,7 +664,9 @@ export async function markInternalChinaPurchaseDraftOrdered(
   draft = mergeInput(draft, input);
   const issues = blockingOrderIssues(draft);
   if (issues.length) {
-    throw new Error(`INTERNAL_CHINA_ORDER_REQUIRED:${issues.slice(0, 12).join(", ")}`);
+    throw new Error(
+      `INTERNAL_CHINA_ORDER_REQUIRED:${issues.slice(0, 12).join(", ")}`,
+    );
   }
   await storePrepSnapshot(draft);
   const stored = await storeOrderedEvents(draft);
