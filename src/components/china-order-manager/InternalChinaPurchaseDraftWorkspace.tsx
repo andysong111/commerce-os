@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { InternalChinaPurchaseBudgetAudit } from "@/lib/internalChinaPurchaseBudgetAudit";
 import type {
   InternalChinaPurchaseDraft,
   InternalChinaPurchaseDraftLine,
@@ -32,9 +34,12 @@ function validHttpUrl(value: string) {
 
 export function InternalChinaPurchaseDraftWorkspace({
   initialDraft,
+  budgetAudit,
 }: {
   initialDraft: InternalChinaPurchaseDraft;
+  budgetAudit: InternalChinaPurchaseBudgetAudit;
 }) {
+  const router = useRouter();
   const [draft, setDraft] = useState(initialDraft);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -49,60 +54,97 @@ export function InternalChinaPurchaseDraftWorkspace({
       current.freight += decimal(line.domesticChinaFreightCny);
       groups.set(key, current);
     }
+
     const byBarcode = new Map<
       string,
       {
         freightPerUnitCny: number;
         finalUnitCny: number;
-        finalUnitKrw: number;
+        actualUnitKrw: number;
+        internalStandardUnitKrw: number;
         totalCny: number;
         totalKrw: number;
+        internalStandardTotalKrw: number;
       }
     >();
+
     let productCny = 0;
     let freightCny = 0;
     let totalCny = 0;
     let totalKrw = 0;
+    let internalStandardTotalKrw = 0;
+
     for (const line of draft.lines) {
       const group = groups.get(lineKey(line)) ?? { quantity: 0, freight: 0 };
       const freightPerUnitCny =
         group.quantity > 0 ? group.freight / group.quantity : 0;
       const finalUnitCny = decimal(line.unitPriceCny) + freightPerUnitCny;
       const rowTotalCny = finalUnitCny * line.quantity;
-      const finalUnitKrw = finalUnitCny * draft.exchangeRateKrwPerCny;
+      const actualUnitKrw = finalUnitCny * draft.exchangeRateKrwPerCny;
       const rowTotalKrw = rowTotalCny * draft.exchangeRateKrwPerCny;
+      const internalStandardUnitKrw =
+        actualUnitKrw * draft.internalOrderCostMultiplier;
+      const rowInternalStandardTotalKrw =
+        rowTotalKrw * draft.internalOrderCostMultiplier;
+
       byBarcode.set(line.barcode, {
         freightPerUnitCny,
         finalUnitCny,
-        finalUnitKrw,
+        actualUnitKrw,
+        internalStandardUnitKrw,
         totalCny: rowTotalCny,
         totalKrw: rowTotalKrw,
+        internalStandardTotalKrw: rowInternalStandardTotalKrw,
       });
+
       productCny += decimal(line.unitPriceCny) * line.quantity;
       totalCny += rowTotalCny;
       totalKrw += rowTotalKrw;
+      internalStandardTotalKrw += rowInternalStandardTotalKrw;
     }
+
     freightCny = [...groups.values()].reduce(
       (sum, group) => sum + group.freight,
       0,
     );
-    return { byBarcode, productCny, freightCny, totalCny, totalKrw };
-  }, [draft]);
+
+    const productKrw = productCny * draft.exchangeRateKrwPerCny;
+    const budgetKrw = budgetAudit.productOrderBudgetKrw;
+    const budgetUsedPercent =
+      budgetKrw > 0 ? Math.round((productKrw / budgetKrw) * 10_000) / 100 : 0;
+    const budgetRemainingKrw = Math.max(0, budgetKrw - productKrw);
+    const budgetOverKrw = Math.max(0, productKrw - budgetKrw);
+    const actualPriceCount = draft.lines.filter(
+      (line) => decimal(line.unitPriceCny) > 0,
+    ).length;
+
+    return {
+      byBarcode,
+      productCny,
+      productKrw,
+      freightCny,
+      totalCny,
+      totalKrw,
+      internalStandardTotalKrw,
+      budgetUsedPercent,
+      budgetRemainingKrw,
+      budgetOverKrw,
+      actualPriceCount,
+    };
+  }, [budgetAudit.productOrderBudgetKrw, draft]);
 
   const requiredIssues = useMemo(() => {
     const issues: string[] = [];
     for (const line of draft.lines) {
       if (line.unitPriceCny <= 0) issues.push(`${line.barcode} 위안단가`);
       if (!line.supplierLink) issues.push(`${line.barcode} 1688 링크`);
+      if (!line.chinaOption.trim()) issues.push(`${line.barcode} 중국옵션`);
     }
     return issues;
   }, [draft.lines]);
 
-  const optionalReviewCount = useMemo(
-    () =>
-      draft.lines.filter(
-        (line) => !line.chinaOption.trim() || !line.saleOption.trim(),
-      ).length,
+  const optionReviewCount = useMemo(
+    () => draft.lines.filter((line) => !line.chinaOption.trim()).length,
     [draft.lines],
   );
 
@@ -121,11 +163,9 @@ export function InternalChinaPurchaseDraftWorkspace({
 
   function payload() {
     return {
-      exchangeRateKrwPerCny: draft.exchangeRateKrwPerCny,
       lines: draft.lines.map((line) => ({
         barcode: line.barcode,
         quantity: line.quantity,
-        saleOption: line.saleOption,
         chinaOption: line.chinaOption,
         supplierLink: line.supplierLink,
         unitPriceCny: line.unitPriceCny,
@@ -163,7 +203,11 @@ export function InternalChinaPurchaseDraftWorkspace({
         return;
       }
       setDraft(body.draft);
-      setNotice(body.message || "중국 발주초안을 저장했습니다.");
+      setNotice(
+        body.message ||
+          "중국 발주초안을 저장했습니다. 실제 위안단가를 월간 발주예산 검증에도 반영합니다.",
+      );
+      router.refresh();
     } catch {
       setNotice("중국 발주초안 저장 요청이 일시적으로 실패했습니다.");
     } finally {
@@ -213,6 +257,7 @@ export function InternalChinaPurchaseDraftWorkspace({
       }
       setDraft(body.draft);
       setNotice(body.message || "실제 주문완료로 원장에 기록했습니다.");
+      router.refresh();
     } catch {
       setNotice(
         "실제 주문완료 기록 요청이 일시적으로 실패했습니다. 1688에서 실제 주문했는지 먼저 확인한 뒤 다시 시도하세요.",
@@ -225,11 +270,25 @@ export function InternalChinaPurchaseDraftWorkspace({
   return (
     <div className="space-y-5">
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="상태" value={draft.status === "ORDERED" ? "실주문 기록" : "주문 준비"} />
+        <Metric
+          label="상태"
+          value={draft.status === "ORDERED" ? "실주문 기록" : "주문 준비"}
+        />
         <Metric label="SKU" value={`${number.format(draft.lineCount)}개`} />
-        <Metric label="총 주문수량" value={`${number.format(draft.totalQuantity)}개`} />
-        <Metric label="필수 확인" value={`${number.format(requiredIssues.length)}건`} danger={requiredIssues.length > 0} />
-        <Metric label="예상 지급액" value={`${number.format(Math.round(calculations.totalKrw))}원`} emphasized />
+        <Metric
+          label="총 주문수량"
+          value={`${number.format(draft.totalQuantity)}개`}
+        />
+        <Metric
+          label="필수 확인"
+          value={`${number.format(requiredIssues.length)}건`}
+          danger={requiredIssues.length > 0}
+        />
+        <Metric
+          label="내부기준원가"
+          value={`${number.format(Math.round(calculations.internalStandardTotalKrw))}원`}
+          emphasized
+        />
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -241,29 +300,29 @@ export function InternalChinaPurchaseDraftWorkspace({
             <h2 className="mt-1 text-xl font-black text-slate-950">
               실제 1688 주문 준비
             </h2>
-            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              B-code·판매옵션·중국옵션·1688 링크는 기존 Commerce OS 데이터를 재사용합니다. 노란 입력값인 위안단가와 실제 중국내 운임만 주문 화면에서 확인해 채우면 됩니다. 수량은 빠른 발주안에서 RESERVED로 확정된 값이므로 여기서는 변경하지 않습니다.
+            <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
+              판매옵션은 B-code에 이미 고정된 기준값을 표시만 합니다. 1688 기준링크와
+              중국옵션은 상품출시진행관리 상품상세의 B-code별 중국 주문 매핑에서
+              자동으로 가져옵니다. 실제 주문 시에는 위안단가와 중국내 운임을 확인해
+              입력하고, 링크·중국옵션이 실제 1688 화면과 다를 때만 보정하세요. 수량은
+              빠른 발주안에서 RESERVED로 확정되어 이 화면에서는 변경하지 않습니다.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
-            <label className="text-xs font-bold text-slate-600">
-              적용 환율 KRW/CNY
-              <input
-                type="number"
-                min={1}
-                max={10000}
-                step="0.01"
-                disabled={draft.status !== "DRAFT"}
-                value={draft.exchangeRateKrwPerCny}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    exchangeRateKrwPerCny: decimal(event.target.value),
-                  }))
-                }
-                className="mt-1 block w-32 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-right font-black outline-none focus:border-amber-500 disabled:bg-slate-100"
-              />
-            </label>
+            <div className="min-w-[230px] rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+              <span className="block text-xs font-bold text-emerald-700">
+                내부기준원가
+              </span>
+              <strong className="mt-0.5 block text-right text-base font-black text-emerald-950">
+                {number.format(
+                  Math.round(calculations.internalStandardTotalKrw),
+                )}
+                원
+              </strong>
+              <span className="mt-0.5 block text-[11px] text-emerald-700">
+                실주문 원가 × 내부 주문 수수료율 {draft.internalOrderCostMultiplier.toFixed(2)}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => void saveDraft()}
@@ -275,7 +334,11 @@ export function InternalChinaPurchaseDraftWorkspace({
             <button
               type="button"
               onClick={() => void markOrdered()}
-              disabled={ordering || draft.status !== "DRAFT" || requiredIssues.length > 0}
+              disabled={
+                ordering ||
+                draft.status !== "DRAFT" ||
+                requiredIssues.length > 0
+              }
               className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {draft.status === "ORDERED"
@@ -300,21 +363,41 @@ export function InternalChinaPurchaseDraftWorkspace({
         ) : null}
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <SubMetric label="상품금액" value={`${cny.format(calculations.productCny)} CNY`} />
-          <SubMetric label="중국내 운임" value={`${cny.format(calculations.freightCny)} CNY`} />
-          <SubMetric label="합계" value={`${cny.format(calculations.totalCny)} CNY`} />
-          <SubMetric label="옵션 확인 권장" value={`${number.format(optionalReviewCount)} SKU`} />
+          <SubMetric
+            label="상품금액"
+            value={`${cny.format(calculations.productCny)} CNY`}
+          />
+          <SubMetric
+            label="중국내 운임"
+            value={`${cny.format(calculations.freightCny)} CNY`}
+          />
+          <SubMetric
+            label="실주문 원가"
+            value={`${number.format(Math.round(calculations.totalKrw))}원`}
+          />
+          <SubMetric
+            label="중국옵션 확인 필요"
+            value={`${number.format(optionReviewCount)} SKU`}
+          />
+        </div>
+
+        <div
+          className={`mt-4 rounded-xl border px-4 py-3 text-xs leading-5 ${
+            calculations.budgetOverKrw > 0
+              ? "border-rose-300 bg-rose-50 text-rose-950"
+              : "border-blue-200 bg-blue-50 text-blue-950"
+          }`}
+        >
+          <strong>실시간 월간 발주예산 검증</strong> · 실제 위안단가 입력 완료 {calculations.actualPriceCount}/{draft.lineCount} SKU · 현재 입력 상품대금 {number.format(Math.round(calculations.productKrw))}원 · 상품대금 한도 {number.format(budgetAudit.productOrderBudgetKrw)}원 · 사용률 {calculations.budgetUsedPercent.toLocaleString("ko-KR")}% · {calculations.budgetOverKrw > 0 ? `초과 ${number.format(Math.round(calculations.budgetOverKrw))}원` : `잔여 ${number.format(Math.round(calculations.budgetRemainingKrw))}원`}. 입력 중에는 이 값이 즉시 바뀌며, `발주초안 저장` 후 위의 월간 예산 카드에도 실제 1688 단가가 우선 반영됩니다.
         </div>
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[2200px] text-left text-xs">
+          <table className="min-w-[2100px] text-left text-xs">
             <thead className="border-b border-slate-200 bg-slate-50 font-bold text-slate-500">
               <tr>
-                <th className="px-3 py-3">B-code / 모델</th>
-                <th className="px-3 py-3">상품명</th>
-                <th className="px-3 py-3">판매옵션</th>
+                <th className="px-3 py-3">B-code / 모델 / 옵션</th>
                 <th className="px-3 py-3">중국옵션</th>
                 <th className="px-3 py-3">1688 기준 링크</th>
                 <th className="px-3 py-3 text-right">수량</th>
@@ -323,7 +406,8 @@ export function InternalChinaPurchaseDraftWorkspace({
                 <th className="px-3 py-3 text-right">중국내 운임</th>
                 <th className="px-3 py-3 text-right">개당 운임</th>
                 <th className="px-3 py-3 text-right">최종단가 CNY</th>
-                <th className="px-3 py-3 text-right">최종단가 KRW</th>
+                <th className="px-3 py-3 text-right">실주문원가 KRW</th>
+                <th className="px-3 py-3 text-right">내부기준원가 KRW</th>
                 <th className="px-3 py-3">1688 주문번호</th>
                 <th className="px-3 py-3">메모</th>
               </tr>
@@ -333,45 +417,125 @@ export function InternalChinaPurchaseDraftWorkspace({
                 const calc = calculations.byBarcode.get(line.barcode)!;
                 const editable = draft.status === "DRAFT";
                 return (
-                  <tr key={line.barcode} className="align-top hover:bg-slate-50/70">
-                    <td className="min-w-[250px] px-3 py-3">
-                      <strong className="font-mono text-sm text-slate-950">{line.barcode}</strong>
-                      <span className="mt-1 block font-semibold text-slate-700">{line.modelName || "모델명 -"}</span>
-                      <span className="mt-1 block font-mono text-[11px] text-slate-400">{line.modelNo}</span>
+                  <tr
+                    key={line.barcode}
+                    className="align-top hover:bg-slate-50/70"
+                  >
+                    <td className="min-w-[280px] px-3 py-3">
+                      <strong className="font-mono text-sm text-slate-950">
+                        {line.barcode}
+                      </strong>
+                      <span className="mt-1 block font-semibold text-slate-700">
+                        {line.modelName || "모델명 -"}
+                      </span>
+                      <span className="mt-1 block font-mono text-[11px] text-slate-400">
+                        {line.modelNo}
+                      </span>
+                      <span className="mt-2 inline-flex rounded-md bg-blue-50 px-2 py-1 font-bold text-blue-800">
+                        옵션 · {line.saleOption || "-"}
+                      </span>
                     </td>
-                    <td className="max-w-[300px] px-3 py-3 font-semibold text-slate-800">{line.productName}</td>
-                    <td className="px-2 py-2">
-                      <Input value={line.saleOption} disabled={!editable} onChange={(value) => updateLine(line.barcode, { saleOption: value })} />
+                    <td className="min-w-[190px] px-2 py-2">
+                      <Input
+                        value={line.chinaOption}
+                        disabled={!editable}
+                        required={!line.chinaOption.trim()}
+                        placeholder="상품출시진행관리에서 자동입력"
+                        onChange={(value) =>
+                          updateLine(line.barcode, { chinaOption: value })
+                        }
+                      />
                     </td>
-                    <td className="px-2 py-2">
-                      <Input value={line.chinaOption} disabled={!editable} warning={!line.chinaOption.trim()} onChange={(value) => updateLine(line.barcode, { chinaOption: value })} />
-                    </td>
-                    <td className="min-w-[360px] px-2 py-2">
+                    <td className="min-w-[380px] px-2 py-2">
                       <div className="flex gap-2">
-                        <Input value={line.supplierLink} disabled={!editable} required={!line.supplierLink} onChange={(value) => updateLine(line.barcode, { supplierLink: value })} />
+                        <Input
+                          value={line.supplierLink}
+                          disabled={!editable}
+                          required={!line.supplierLink}
+                          placeholder="B-code별 1688 링크 자동입력"
+                          onChange={(value) =>
+                            updateLine(line.barcode, { supplierLink: value })
+                          }
+                        />
                         {validHttpUrl(line.supplierLink) ? (
-                          <a href={line.supplierLink} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-2 font-black text-emerald-800 hover:bg-emerald-100">1688 열기</a>
+                          <a
+                            href={line.supplierLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-2 font-black text-emerald-800 hover:bg-emerald-100"
+                          >
+                            1688 열기
+                          </a>
                         ) : null}
                       </div>
                     </td>
-                    <td className="px-3 py-3 text-right text-sm font-black text-slate-950">{number.format(line.quantity)}</td>
-                    <td className="px-2 py-2">
-                      <NumberInput value={line.unitPriceCny} disabled={!editable} required={line.unitPriceCny <= 0} onChange={(value) => updateLine(line.barcode, { unitPriceCny: value })} />
+                    <td className="px-3 py-3 text-right text-sm font-black text-slate-950">
+                      {number.format(line.quantity)}
                     </td>
                     <td className="px-2 py-2">
-                      <Input value={line.freightGroupId} disabled={!editable} placeholder="같은 공급처면 동일 그룹" onChange={(value) => updateLine(line.barcode, { freightGroupId: value })} />
+                      <NumberInput
+                        value={line.unitPriceCny}
+                        disabled={!editable}
+                        required={line.unitPriceCny <= 0}
+                        onChange={(value) =>
+                          updateLine(line.barcode, { unitPriceCny: value })
+                        }
+                      />
                     </td>
                     <td className="px-2 py-2">
-                      <NumberInput value={line.domesticChinaFreightCny} disabled={!editable} onChange={(value) => updateLine(line.barcode, { domesticChinaFreightCny: value })} />
+                      <Input
+                        value={line.freightGroupId}
+                        disabled={!editable}
+                        placeholder="같은 공급처면 동일 그룹"
+                        onChange={(value) =>
+                          updateLine(line.barcode, { freightGroupId: value })
+                        }
+                      />
                     </td>
-                    <td className="px-3 py-3 text-right font-semibold text-slate-600">{cny.format(calc.freightPerUnitCny)}</td>
-                    <td className="px-3 py-3 text-right font-black text-emerald-800">{cny.format(calc.finalUnitCny)}</td>
-                    <td className="px-3 py-3 text-right font-black text-blue-800">{number.format(Math.round(calc.finalUnitKrw))}원</td>
                     <td className="px-2 py-2">
-                      <Input value={line.orderNumber} disabled={!editable} placeholder="주문 후 입력 가능" onChange={(value) => updateLine(line.barcode, { orderNumber: value })} />
+                      <NumberInput
+                        value={line.domesticChinaFreightCny}
+                        disabled={!editable}
+                        onChange={(value) =>
+                          updateLine(line.barcode, {
+                            domesticChinaFreightCny: value,
+                          })
+                        }
+                      />
+                    </td>
+                    <td className="px-3 py-3 text-right font-semibold text-slate-600">
+                      {cny.format(calc.freightPerUnitCny)}
+                    </td>
+                    <td className="px-3 py-3 text-right font-black text-emerald-800">
+                      {cny.format(calc.finalUnitCny)}
+                    </td>
+                    <td className="px-3 py-3 text-right font-black text-blue-800">
+                      {number.format(Math.round(calc.actualUnitKrw))}원
+                    </td>
+                    <td className="px-3 py-3 text-right font-black text-violet-800">
+                      {number.format(
+                        Math.round(calc.internalStandardUnitKrw),
+                      )}
+                      원
                     </td>
                     <td className="px-2 py-2">
-                      <Input value={line.note} disabled={!editable} onChange={(value) => updateLine(line.barcode, { note: value })} />
+                      <Input
+                        value={line.orderNumber}
+                        disabled={!editable}
+                        placeholder="주문 후 입력 가능"
+                        onChange={(value) =>
+                          updateLine(line.barcode, { orderNumber: value })
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <Input
+                        value={line.note}
+                        disabled={!editable}
+                        onChange={(value) =>
+                          updateLine(line.barcode, { note: value })
+                        }
+                      />
                     </td>
                   </tr>
                 );
@@ -382,7 +546,11 @@ export function InternalChinaPurchaseDraftWorkspace({
       </section>
 
       <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-950">
-        <strong>운영 규칙</strong> · `1688 주문완료 후 기록`은 외부 주문 버튼이 아닙니다. 실제 1688에서 주문·결제를 마친 뒤에만 눌러 Commerce OS의 RESERVED 약정을 ORDERED로 전환합니다. 위안단가와 1688 링크는 전 SKU 필수이며, 중국옵션·운임그룹은 실제 주문 화면과 다르면 반드시 수정하세요.
+        <strong>운영 규칙</strong> · 판매옵션은 B-code 기준정보이며 이 화면에서
+        수정하지 않습니다. 상품출시진행관리에서 B-code별 1688 링크와 중국옵션을
+        저장하면 아직 주문 전인 기존 Draft에도 새로고침 시 자동 보충됩니다.
+        `1688 주문완료 후 기록`은 외부 주문 버튼이 아니며 실제 1688에서 주문·결제를
+        마친 뒤에만 눌러 Commerce OS의 RESERVED 약정을 ORDERED로 전환합니다.
       </section>
     </div>
   );
@@ -459,9 +627,27 @@ function Metric({
   danger?: boolean;
 }) {
   return (
-    <article className={`rounded-2xl border bg-white p-4 shadow-sm ${danger ? "border-amber-300" : emphasized ? "border-blue-300" : "border-slate-200"}`}>
+    <article
+      className={`rounded-2xl border bg-white p-4 shadow-sm ${
+        danger
+          ? "border-amber-300"
+          : emphasized
+            ? "border-blue-300"
+            : "border-slate-200"
+      }`}
+    >
       <span className="text-xs font-semibold text-slate-500">{label}</span>
-      <strong className={`mt-1 block text-xl ${danger ? "text-amber-700" : emphasized ? "text-blue-700" : "text-slate-950"}`}>{value}</strong>
+      <strong
+        className={`mt-1 block text-xl ${
+          danger
+            ? "text-amber-700"
+            : emphasized
+              ? "text-blue-700"
+              : "text-slate-950"
+        }`}
+      >
+        {value}
+      </strong>
     </article>
   );
 }

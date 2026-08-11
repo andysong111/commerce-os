@@ -23,6 +23,10 @@ export type InternalChinaPurchaseBudgetAuditLine = {
   barcode: string;
   quantity: number;
   referenceUnitCostKrw: number;
+  actualUnitPriceCny: number;
+  actualUnitCostKrw: number;
+  effectiveUnitCostKrw: number;
+  costSource: "ACTUAL_1688" | "REFERENCE" | "MISSING";
   estimatedProductCostKrw: number;
   engineRecommendedQuantity: number;
   engineExpectedCostKrw: number;
@@ -45,6 +49,7 @@ export type InternalChinaPurchaseBudgetAudit = {
   productOrderBudgetKrw: number;
   engineExpectedSpendKrw: number;
   selectedDraftEstimatedProductCostKrw: number;
+  selectedDraftDomesticChinaFreightKrw: number;
   selectedDraftEstimatedLandedCostKrw: number;
   selectedDraftBudgetRemainingKrw: number;
   selectedDraftBudgetOverKrw: number;
@@ -54,6 +59,8 @@ export type InternalChinaPurchaseBudgetAudit = {
   otherActiveDraftQuantity: number;
   otherActiveDraftCount: number;
   missingCostBarcodes: string[];
+  actualPriceCount: number;
+  referencePriceCount: number;
   quantityChangedFromEngineCount: number;
   quantityAboveEngineCount: number;
   quantityBelowEngineCount: number;
@@ -72,6 +79,11 @@ function barcode(value: unknown) {
 function money(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function decimal(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function quantity(value: unknown) {
@@ -138,15 +150,32 @@ export async function loadInternalChinaPurchaseBudgetAudit(
 
   const lines: InternalChinaPurchaseBudgetAuditLine[] = draft.lines.map((line) => {
     const key = barcode(line.barcode);
-    const unitCost = referenceUnitCostKrw(key);
+    const referenceUnitCost = referenceUnitCostKrw(key);
+    const actualUnitPriceCny = decimal(line.unitPriceCny);
+    const actualUnitCostKrw = money(
+      actualUnitPriceCny * draft.exchangeRateKrwPerCny,
+    );
+    const effectiveUnitCostKrw = actualUnitCostKrw || referenceUnitCost;
+    const costSource: InternalChinaPurchaseBudgetAuditLine["costSource"] =
+      actualUnitCostKrw > 0
+        ? "ACTUAL_1688"
+        : referenceUnitCost > 0
+          ? "REFERENCE"
+          : "MISSING";
     const engine = engineByBarcode.get(key);
     const engineRecommendedQuantity = quantity(engine?.recommendedQty);
     const engineExpectedCostKrw = money(engine?.expectedCost);
     return {
       barcode: key,
       quantity: quantity(line.quantity),
-      referenceUnitCostKrw: unitCost,
-      estimatedProductCostKrw: money(unitCost * quantity(line.quantity)),
+      referenceUnitCostKrw: referenceUnitCost,
+      actualUnitPriceCny,
+      actualUnitCostKrw,
+      effectiveUnitCostKrw,
+      costSource,
+      estimatedProductCostKrw: money(
+        effectiveUnitCostKrw * quantity(line.quantity),
+      ),
       engineRecommendedQuantity,
       engineExpectedCostKrw,
       quantityDeltaFromEngine:
@@ -155,14 +184,27 @@ export async function loadInternalChinaPurchaseBudgetAudit(
   });
 
   const missingCostBarcodes = lines
-    .filter((line) => line.referenceUnitCostKrw <= 0)
+    .filter((line) => line.costSource === "MISSING")
     .map((line) => line.barcode);
+  const actualPriceCount = lines.filter(
+    (line) => line.costSource === "ACTUAL_1688",
+  ).length;
+  const referencePriceCount = lines.filter(
+    (line) => line.costSource === "REFERENCE",
+  ).length;
   const selectedDraftEstimatedProductCostKrw = lines.reduce(
     (sum, line) => sum + line.estimatedProductCostKrw,
     0,
   );
+  const selectedDraftDomesticChinaFreightKrw = money(
+    draft.lines.reduce(
+      (sum, line) => sum + decimal(line.domesticChinaFreightCny),
+      0,
+    ) * draft.exchangeRateKrwPerCny,
+  );
   const selectedDraftEstimatedLandedCostKrw = money(
-    selectedDraftEstimatedProductCostKrw * purchaseCostMultiplier,
+    (selectedDraftEstimatedProductCostKrw + selectedDraftDomesticChinaFreightKrw) *
+      purchaseCostMultiplier,
   );
   const selectedDraftBudgetRemainingKrw = Math.max(
     0,
@@ -193,6 +235,8 @@ export async function loadInternalChinaPurchaseBudgetAudit(
   let otherActiveDraftEstimatedProductCostKrw = 0;
   let otherActiveDraftQuantity = 0;
   for (const commitment of activeCommitments) {
+    // Other Drafts are only a collision warning here. Their detailed 1688 prep
+    // may not be saved, so use the stable reference cost for this side panel.
     const unitCost = referenceUnitCostKrw(barcode(commitment.barcode));
     const estimated = money(unitCost * quantity(commitment.openQuantity));
     allActiveDraftEstimatedProductCostKrw += estimated;
@@ -233,13 +277,14 @@ export async function loadInternalChinaPurchaseBudgetAudit(
     budgetMonthRangeEnd: budgetRange.end,
     budgetMonthRevenueKrw,
     budgetRevenueError: calendarRevenue.error,
-    basisLabel: `${koreanMonthLabel(cycle.budgetMonth)} 1일~말일 정상매출 ${budgetMonthRevenueKrw.toLocaleString("ko-KR")}원 ÷ 2 · 배송대행 포함 배수 ${purchaseCostMultiplier.toFixed(2)}`,
+    basisLabel: `${koreanMonthLabel(cycle.budgetMonth)} 1일~말일 정상매출 ${budgetMonthRevenueKrw.toLocaleString("ko-KR")}원 ÷ 2 · 내부 주문 수수료율 ${purchaseCostMultiplier.toFixed(2)}`,
     recent30RevenueKrw,
     grossCogsBudgetKrw,
     purchaseCostMultiplier,
     productOrderBudgetKrw,
     engineExpectedSpendKrw,
     selectedDraftEstimatedProductCostKrw,
+    selectedDraftDomesticChinaFreightKrw,
     selectedDraftEstimatedLandedCostKrw,
     selectedDraftBudgetRemainingKrw,
     selectedDraftBudgetOverKrw,
@@ -252,6 +297,8 @@ export async function loadInternalChinaPurchaseBudgetAudit(
       activeDraftIds.size - (activeDraftIds.has(draft.draftId) ? 1 : 0),
     ),
     missingCostBarcodes,
+    actualPriceCount,
+    referencePriceCount,
     quantityChangedFromEngineCount,
     quantityAboveEngineCount,
     quantityBelowEngineCount,

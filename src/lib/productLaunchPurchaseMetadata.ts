@@ -42,7 +42,10 @@ export async function loadProductLaunchPurchaseMetadataByBarcode() {
   } catch (error) {
     return {
       byBarcode: new Map<string, ProductLaunchPurchaseMetadata>(),
-      error: error instanceof Error ? error.message : "PRODUCT_LAUNCH_PURCHASE_METADATA_UNAVAILABLE",
+      error:
+        error instanceof Error
+          ? error.message
+          : "PRODUCT_LAUNCH_PURCHASE_METADATA_UNAVAILABLE",
     };
   }
 }
@@ -58,9 +61,10 @@ export function buildMetadataMap(
 ) {
   const candidates = new Map<string, Candidate[]>();
   for (const summary of summaries) {
-    const supplierLink = normalizeSupplierLink(
-      Array.isArray(summary.chinaProductLinks) ? summary.chinaProductLinks[0] : "",
-    );
+    const summaryLinks = Array.isArray(summary.chinaProductLinks)
+      ? summary.chinaProductLinks.map(normalizeSupplierLink).filter(Boolean)
+      : [];
+    const fallbackSupplierLink = summaryLinks[0] ?? "";
     const modelNumber = text(summary.modelNumber);
     const productName = text(summary.productName);
     const options = Array.isArray(summary.orderOptions)
@@ -72,6 +76,10 @@ export function buildMetadataMap(
       const barcode = normalizeBarcode(option.barcode);
       if (!BARCODE_PATTERN.test(barcode)) continue;
       optionBarcodes.add(barcode);
+      const supplierLink =
+        normalizeSupplierLink(option.supplierLink) ||
+        supplierLinkByIndex(option, summaryLinks) ||
+        fallbackSupplierLink;
       addCandidate(candidates, {
         barcode,
         modelNumber,
@@ -89,7 +97,10 @@ export function buildMetadataMap(
         barcode: mainBarcode,
         modelNumber,
         productName,
-        supplierLink,
+        supplierLink:
+          normalizeSupplierLink(only?.supplierLink) ||
+          supplierLinkByIndex(only, summaryLinks) ||
+          fallbackSupplierLink,
         saleOption: text(only?.saleOption),
         chinaOption: text(only?.chinaOption),
       });
@@ -104,7 +115,9 @@ export function buildMetadataMap(
       const saleOptions = uniqueNonEmpty(rows.map((row) => row.saleOption));
       const chinaOptions = uniqueNonEmpty(rows.map((row) => row.chinaOption));
       const conflict =
-        supplierLinks.length > 1 || saleOptions.length > 1 || chinaOptions.length > 1;
+        supplierLinks.length > 1 ||
+        saleOptions.length > 1 ||
+        chinaOptions.length > 1;
       return [
         barcode,
         {
@@ -123,6 +136,18 @@ export function buildMetadataMap(
 
 function addCandidate(map: Map<string, Candidate[]>, candidate: Candidate) {
   map.set(candidate.barcode, [...(map.get(candidate.barcode) ?? []), candidate]);
+}
+
+function supplierLinkByIndex(
+  option: Record<string, unknown> | null,
+  links: string[],
+) {
+  if (!option) return "";
+  const raw = option.supplierLinkIndex ?? option.chinaProductLinkIndex;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) return "";
+  const zeroBased = parsed >= 1 ? parsed - 1 : parsed;
+  return links[zeroBased] ?? "";
 }
 
 function normalizeSupplierLink(value: unknown) {
