@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { InternalChinaPurchaseBudgetAudit } from "@/components/china-order-manager/InternalChinaPurchaseBudgetAudit";
 import { InternalChinaPurchaseDraftWorkspace } from "@/components/china-order-manager/InternalChinaPurchaseDraftWorkspace";
 import { PageHeader } from "@/components/PageHeader";
+import { loadInternalChinaPurchaseBudgetAudit } from "@/lib/internalChinaPurchaseBudgetAudit";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +17,12 @@ export default async function InternalChinaPurchaseDraftPage({ params }: PagePro
   const { draftId: rawDraftId } = await params;
   const draftId = decodeURIComponent(rawDraftId);
   let draft;
+  let budgetAudit;
   try {
-    draft = await loadInternalChinaPurchaseDraft(draftId);
+    [draft, budgetAudit] = await Promise.all([
+      loadInternalChinaPurchaseDraft(draftId),
+      loadInternalChinaPurchaseBudgetAudit(draftId),
+    ]);
   } catch (error) {
     return (
       <div className="space-y-6">
@@ -67,6 +73,8 @@ export default async function InternalChinaPurchaseDraftPage({ params }: PagePro
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
         <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 이 화면은 기존 GPT Site의 주문 준비 단계를 대체하는 Ops Center 내부 MVP입니다.
       </section>
+
+      <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
 
       <InternalChinaPurchaseDraftWorkspace initialDraft={draft} />
     </div>
