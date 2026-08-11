@@ -2,12 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DetailPageReviewJob } from "@/lib/detailPageAiReview";
-import { v260807ManualDecisionKind } from "@/lib/detailPageManualDecision";
+import {
+  isV260807DetailPageJob,
+  v260807ManualDecisionKind,
+  v260807SourceAnchorSnapshot,
+} from "@/lib/detailPageManualDecision";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
 const POLL_MS = 2_500;
 const DECORATE_MS = 500;
 const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
+const COMPLETED_A_GRADE_TO_B_GRADE_ACTION = "rerun_completed_as_b_grade";
 const INLINE_ACTION_ATTR = "data-b-grade-inline-action";
 
 export function DetailPageBGradeFallbackQueue() {
@@ -45,7 +50,8 @@ export function DetailPageBGradeFallbackQueue() {
         (job) =>
           v260807ManualDecisionKind(job) === "generation_safety_block" ||
           isBGradeFailed(job) ||
-          isCompletedBGrade(job),
+          isCompletedBGrade(job) ||
+          isCompletedAGradeEligible(job),
       ),
     [jobs],
   );
@@ -55,13 +61,17 @@ export function DetailPageBGradeFallbackQueue() {
       if (busyJobId) return;
       const name = productName(job);
       const retry = isBGradeFailed(job);
-      const completed = isCompletedBGrade(job);
+      const completedBGrade = isCompletedBGrade(job);
+      const completedAGrade = isCompletedAGradeEligible(job);
+      const completed = completedBGrade || completedAGrade;
       const confirmed = window.confirm(
-        completed
+        completedBGrade
           ? `"${name}"은 B급 검수 통과 완료 작업입니다.\n\n현재 상품출시진행관리에 연결된 결과는 그대로 유지한 채 저장된 1688 원본·상품 분석·판매옵션을 재사용해 B급 엔진으로 다시 생성합니다. 새 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
-          : retry
-            ? `"${name}"의 B급 작업이 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고 B급 엔진을 다시 실행합니다. 실패한 실행의 자동 재결제는 하지 않습니다.\n\nB급 엔진 다시 실행하시겠습니까?`
-            : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 저장된 1688 원본을 중심으로 상세페이지를 조립하고 대표이미지 1장만 생성합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
+          : completedAGrade
+            ? `"${name}"은 일반 엔진 검수 통과 완료 작업입니다.\n\n현재 A급 결과는 그대로 보존한 채 저장된 1688 원본·상품 분석·판매옵션을 재사용해 B급 엔진으로 새로 제작합니다. 새 B급 결과가 성공한 뒤에만 현재 결과를 교체합니다.\n\nB급 엔진으로 재생성하시겠습니까?`
+            : retry
+              ? `"${name}"의 B급 작업이 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고 B급 엔진을 다시 실행합니다. 실패한 실행의 자동 재결제는 하지 않습니다.\n\nB급 엔진 다시 실행하시겠습니까?`
+              : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 저장된 1688 원본을 중심으로 상세페이지를 조립하고 대표이미지 1장만 생성합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
       );
       if (!confirmed) return;
 
@@ -78,7 +88,11 @@ export function DetailPageBGradeFallbackQueue() {
               "Content-Type": "application/json",
             },
             body: JSON.stringify(
-              completed ? { action: COMPLETED_B_GRADE_RERUN_ACTION } : {},
+              completedBGrade
+                ? { action: COMPLETED_B_GRADE_RERUN_ACTION }
+                : completedAGrade
+                  ? { action: COMPLETED_A_GRADE_TO_B_GRADE_ACTION }
+                  : {},
             ),
           },
         );
@@ -162,7 +176,9 @@ export function DetailPageBGradeFallbackQueue() {
         let action = card.querySelector<HTMLElement>(
           `[${INLINE_ACTION_ATTR}="${job.jobId}"]`,
         );
-        const completed = isCompletedBGrade(job);
+        const completedBGrade = isCompletedBGrade(job);
+        const completedAGrade = isCompletedAGradeEligible(job);
+        const completed = completedBGrade || completedAGrade;
         const retry = isBGradeFailed(job);
         const busy = busyJobId === job.jobId;
         const label = busy
@@ -226,6 +242,12 @@ export function DetailPageBGradeFallbackQueue() {
   // Intentionally no standalone B-grade queue UI. The action is injected as a
   // compact control inside each eligible job card in the scrollable review list.
   return null;
+}
+
+function isCompletedAGradeEligible(job: DetailPageReviewJob) {
+  if (job.status !== "success" || isCompletedBGrade(job)) return false;
+  if (!isV260807DetailPageJob(job)) return false;
+  return Boolean(v260807SourceAnchorSnapshot(job)?.evidenceUrls.length);
 }
 
 function isCompletedBGrade(job: DetailPageReviewJob) {
