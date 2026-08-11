@@ -1,0 +1,55 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const registry = await readFile(
+  new URL("../src/lib/opsModuleRegistry.ts", import.meta.url),
+  "utf8",
+);
+const page = await readFile(
+  new URL("../src/app/sourcing-center/page.tsx", import.meta.url),
+  "utf8",
+);
+
+test("Ops dashboard exposes one easy-language sourcing center card", () => {
+  assert.match(registry, /module\.id === "sourcing-engine"/);
+  assert.match(registry, /title: "소싱센터"/);
+  assert.match(registry, /route: "\/sourcing-center"/);
+  assert.match(registry, /actionLabel: "소싱센터 열기"/);
+  assert.match(registry, /전체 소싱 흐름 · 한눈에 보기/);
+});
+
+test("sourcing center opens the full sourcing pipeline in plain Korean", () => {
+  const requiredRoutes = [
+    "/collector-setup",
+    "/extension-preview",
+    "/candidate-processing",
+    "/naver-validation",
+    "/shopping-insight",
+    "/market-demand-score",
+    "/supply-evidence-1688",
+    "/direct-offer-resolver",
+    "/supply-fact-resolver",
+    "/profitability-plan",
+    "/market-price-check",
+    "/decision-readiness",
+    "/ai-detail-preflight",
+    "/test-order-plan",
+  ];
+  for (const route of requiredRoutes) assert.match(page, new RegExp(route.replaceAll("/", "\\/")));
+
+  assert.match(page, /1688 후보 수집부터 한국 수요 확인/);
+  assert.match(page, /실제 공급상품 고르기/);
+  assert.match(page, /정확한 옵션·단가 확인/);
+  assert.match(page, /수익이 남는지 계산/);
+  assert.match(page, /AI 상세페이지 2장 시험/);
+  assert.match(page, /소액 테스트 발주 계획/);
+});
+
+test("sourcing center surfaces the live next action without blocking manual navigation", () => {
+  assert.match(page, /\/api\/pipeline-status/);
+  assert.match(page, /지금 할 일/);
+  assert.match(page, /실시간 상태를 읽지 못했습니다/);
+  assert.match(page, /각 단계 버튼은 정상적으로 열립니다/);
+  assert.match(page, /TEST_READY 후보만 보는 구조/);
+});
