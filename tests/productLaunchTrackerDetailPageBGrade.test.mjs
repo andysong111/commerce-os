@@ -18,12 +18,13 @@ const [page, prompt, requestRoute, startRoute] = await Promise.all([
   ),
 ]);
 
-test("v260807 review page offers source-only B-grade fallback, retry, and completed-result rerun", () => {
+test("v260807 review page offers B-grade fallback, retry, and completed-result rerun", () => {
   assert.match(page, /DetailPageBGradeFallbackQueue/);
   assert.match(prompt, /generation_safety_block/);
   assert.match(prompt, /B_GRADE_SOURCE_ONLY_FAILED/);
   assert.match(prompt, /B_GRADE_HYBRID_FAILED/);
-  assert.match(prompt, /새 AI 이미지를 만들지 않고 저장된 1688 원본/);
+  assert.match(prompt, /DETAIL_PAGE_STEP_OUTCOME_UNKNOWN/);
+  assert.match(prompt, /v3_b_grade_source_only_assembly/);
   assert.match(prompt, /B급 엔진으로 실행/);
   assert.match(prompt, /B급 엔진 다시 실행/);
   assert.match(prompt, /B급 엔진으로 재생성/);
@@ -43,7 +44,14 @@ test("completed rerun recognizes both historical hybrid and source-only B-grade 
   assert.match(requestRoute, /seller-source-only-no-ai-generation/);
 });
 
-test("new B-grade requests record the rolled-back source-only contract", () => {
+test("B-grade request route accepts the unknown-outcome stop from B-grade assembly", () => {
+  assert.match(requestRoute, /DETAIL_PAGE_STEP_OUTCOME_UNKNOWN/);
+  assert.match(requestRoute, /v3_b_grade_source_only_assembly/);
+  assert.match(requestRoute, /isBGradeFailed/);
+  assert.match(requestRoute, /retry_b_grade_source_only/);
+});
+
+test("new B-grade requests keep the source-only detail contract", () => {
   assert.match(requestRoute, /v260807ManualDecisionKind/);
   assert.match(requestRoute, /DETAIL_PAGE_B_GRADE_NOT_ALLOWED/);
   assert.match(requestRoute, /isBGradeFailed/);
@@ -54,7 +62,6 @@ test("new B-grade requests record the rolled-back source-only contract", () => {
   assert.match(requestRoute, /id: "source-only-b-grade-v1"/);
   assert.match(requestRoute, /sourceOnly: true/);
   assert.match(requestRoute, /aiImageGeneration: false/);
-  assert.match(requestRoute, /retry_b_grade_source_only/);
   assert.match(requestRoute, /run_b_grade_source_only/);
   assert.match(requestRoute, /rerun_completed_b_grade_source_only/);
 });
