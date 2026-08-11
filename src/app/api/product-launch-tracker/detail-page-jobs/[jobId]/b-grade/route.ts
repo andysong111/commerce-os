@@ -17,6 +17,7 @@ import { DETAIL_PAGE_STAGED_PIPELINE_VERSION } from "@/lib/detailPageJobRecovery
 import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
 
 const COMPLETED_B_GRADE_RERUN_ACTION = "rerun_completed_b_grade";
+const COMPLETED_A_GRADE_TO_B_GRADE_ACTION = "rerun_completed_as_b_grade";
 
 export async function POST(
   request: NextRequest,
@@ -61,13 +62,21 @@ export async function POST(
     const completedBGradeRerun =
       command.action === COMPLETED_B_GRADE_RERUN_ACTION &&
       isCompletedBGrade(job);
-    if (!safetyBlocked && !bGradeRetry && !completedBGradeRerun) {
+    const completedAGradeConversion =
+      command.action === COMPLETED_A_GRADE_TO_B_GRADE_ACTION &&
+      isCompletedAGradeEligible(job);
+    if (
+      !safetyBlocked &&
+      !bGradeRetry &&
+      !completedBGradeRerun &&
+      !completedAGradeConversion
+    ) {
       return Response.json(
         {
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_NOT_ALLOWED",
           message:
-            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나, 이전 B급 엔진 실행이 실패·중단되었거나, 검수 통과한 B급 결과를 명시적으로 재생성하는 작업만 허용됩니다.",
+            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나, 이전 B급 엔진 실행이 실패·중단되었거나, 검수 통과한 A급/B급 결과를 명시적으로 B급으로 재생성하는 작업만 허용됩니다.",
         },
         { status: 409 },
       );
@@ -88,28 +97,36 @@ export async function POST(
     const executionId = randomUUID();
     const decision = completedBGradeRerun
       ? "rerun_completed_b_grade_source_only"
-      : bGradeRetry
-        ? "retry_b_grade_source_only"
-        : "run_b_grade_source_only";
+      : completedAGradeConversion
+        ? "rerun_completed_a_grade_as_b_grade"
+        : bGradeRetry
+          ? "retry_b_grade_source_only"
+          : "run_b_grade_source_only";
     const trigger = completedBGradeRerun
       ? "completed_b_grade_rerun"
-      : bGradeRetry
-        ? "b_grade_retry"
-        : "generation_safety_block";
-    const completedBackup = completedBGradeRerun
-      ? completedBGradeBackup(job)
-      : null;
+      : completedAGradeConversion
+        ? "completed_a_grade_to_b_grade"
+        : bGradeRetry
+          ? "b_grade_retry"
+          : "generation_safety_block";
+    const completedBackup =
+      completedBGradeRerun || completedAGradeConversion
+        ? completedResultBackup(job)
+        : null;
+    const completedRerun = completedBGradeRerun || completedAGradeConversion;
 
     const changed = await withDetailPageStoreRetry(() =>
       patchDetailPageJob(config.value, job.id, {
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
         message: completedBGradeRerun
-          ? "사용자 요청 · 기존 검수 통과 결과 보존 · B급 재생성 대기 중"
-          : bGradeRetry
-            ? "사용자 승인 · 기존 1688 원본 유지 · B급 재실행 대기 중"
-            : "사용자 승인 · B급 원본 조립 대기 중",
-        progress: completedBGradeRerun
+          ? "사용자 요청 · 기존 B급 검수 통과 결과 보존 · B급 재생성 대기 중"
+          : completedAGradeConversion
+            ? "사용자 요청 · 기존 A급 검수 통과 결과 보존 · B급 재생성 대기 중"
+            : bGradeRetry
+              ? "사용자 승인 · 기존 1688 원본 유지 · B급 재실행 대기 중"
+              : "사용자 승인 · B급 원본 조립 대기 중",
+        progress: completedRerun
           ? 35
           : Math.max(30, Math.min(90, Number(job.progress) || 0)),
         qa_status: "pending",
@@ -182,6 +199,27 @@ export async function POST(
   }
 }
 
+function isCompletedAGradeEligible(job: {
+  status: string;
+  stage: string;
+  error_message: string;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown>;
+}) {
+  if (job.status !== "success" || isCompletedBGrade(job)) return false;
+  const manualJob = {
+    status: job.status,
+    stage: job.stage,
+    error: job.error_message,
+    payload: job.payload,
+    result: job.result,
+  };
+  return Boolean(
+    isV260807DetailPageJob(manualJob) &&
+      v260807SourceAnchorSnapshot(manualJob)?.evidenceUrls.length,
+  );
+}
+
 function isCompletedBGrade(job: {
   status: string;
   stage: string;
@@ -215,13 +253,14 @@ function isCompletedBGrade(job: {
   );
 }
 
-function completedBGradeBackup(job: {
+function completedResultBackup(job: {
   completed_at: string | null;
   result: Record<string, unknown>;
 }) {
   const result = record(job.result);
   const engine = record(result.bGradeEngine);
   const request = record(result.bGradeEngineRequest);
+  const engineProfile = record(result.engineProfile);
   return {
     detailImageUrl: text(result.detailImageUrl),
     mainImageUrl: text(result.mainImageUrl),
@@ -230,9 +269,10 @@ function completedBGradeBackup(job: {
     engineId:
       text(engine.id) ||
       text(request.id) ||
+      text(engineProfile.id) ||
       (result.bGradeSourceOnly === true
         ? "source-only-b-grade-v1"
-        : "b-grade-hybrid-v2"),
+        : "source-first-v3"),
     hookAiUsed: result.bGradeHookAiUsed === true,
     hookAiStatus: text(result.bGradeHookAiStatus),
   };
