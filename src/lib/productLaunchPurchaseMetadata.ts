@@ -64,7 +64,9 @@ export function buildMetadataMap(
     const summaryLinks = Array.isArray(summary.chinaProductLinks)
       ? summary.chinaProductLinks.map(normalizeSupplierLink).filter(Boolean)
       : [];
-    const fallbackSupplierLink = summaryLinks[0] ?? "";
+    // Purchase policy: all B-codes under the same model use the product-level
+    // fixed #1 China link. Per-B-code supplier links are intentionally ignored.
+    const fixedFirstSupplierLink = summaryLinks[0] ?? "";
     const modelNumber = text(summary.modelNumber);
     const productName = text(summary.productName);
     const options = Array.isArray(summary.orderOptions)
@@ -76,15 +78,11 @@ export function buildMetadataMap(
       const barcode = normalizeBarcode(option.barcode);
       if (!BARCODE_PATTERN.test(barcode)) continue;
       optionBarcodes.add(barcode);
-      const supplierLink =
-        normalizeSupplierLink(option.supplierLink) ||
-        supplierLinkByIndex(option, summaryLinks) ||
-        fallbackSupplierLink;
       addCandidate(candidates, {
         barcode,
         modelNumber,
         productName,
-        supplierLink,
+        supplierLink: fixedFirstSupplierLink,
         saleOption: text(option.saleOption),
         chinaOption: text(option.chinaOption),
       });
@@ -97,10 +95,7 @@ export function buildMetadataMap(
         barcode: mainBarcode,
         modelNumber,
         productName,
-        supplierLink:
-          normalizeSupplierLink(only?.supplierLink) ||
-          supplierLinkByIndex(only, summaryLinks) ||
-          fallbackSupplierLink,
+        supplierLink: fixedFirstSupplierLink,
         saleOption: text(only?.saleOption),
         chinaOption: text(only?.chinaOption),
       });
@@ -136,18 +131,6 @@ export function buildMetadataMap(
 
 function addCandidate(map: Map<string, Candidate[]>, candidate: Candidate) {
   map.set(candidate.barcode, [...(map.get(candidate.barcode) ?? []), candidate]);
-}
-
-function supplierLinkByIndex(
-  option: Record<string, unknown> | null,
-  links: string[],
-) {
-  if (!option) return "";
-  const raw = option.supplierLinkIndex ?? option.chinaProductLinkIndex;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) return "";
-  const zeroBased = parsed >= 1 ? parsed - 1 : parsed;
-  return links[zeroBased] ?? "";
 }
 
 function normalizeSupplierLink(value: unknown) {
