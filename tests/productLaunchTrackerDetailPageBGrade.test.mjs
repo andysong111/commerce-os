@@ -18,13 +18,12 @@ const [page, prompt, requestRoute, startRoute] = await Promise.all([
   ),
 ]);
 
-test("v260807 review page offers B-grade hybrid fallback, retry, and completed-result rerun", () => {
+test("v260807 review page offers source-only B-grade fallback, retry, and completed-result rerun", () => {
   assert.match(page, /DetailPageBGradeFallbackQueue/);
   assert.match(prompt, /generation_safety_block/);
   assert.match(prompt, /B_GRADE_SOURCE_ONLY_FAILED/);
   assert.match(prompt, /B_GRADE_HYBRID_FAILED/);
-  assert.match(prompt, /후킹포인트에만 일반적인 불편 사용장면 AI 1장을/);
-  assert.match(prompt, /후킹 AI 실패는 전체 실패 사유가 아닙니다/);
+  assert.match(prompt, /새 AI 이미지를 만들지 않고 저장된 1688 원본/);
   assert.match(prompt, /B급 엔진으로 실행/);
   assert.match(prompt, /B급 엔진 다시 실행/);
   assert.match(prompt, /B급 엔진으로 재생성/);
@@ -33,16 +32,18 @@ test("v260807 review page offers B-grade hybrid fallback, retry, and completed-r
   assert.match(prompt, /새 결과가 성공한 뒤에만 상품상세를 교체/);
 });
 
-test("completed rerun also recognizes legacy source-only B-grade results already in production", () => {
+test("completed rerun recognizes both historical hybrid and source-only B-grade results", () => {
   assert.match(prompt, /source-only-b-grade-v1/);
+  assert.match(prompt, /b-grade-hybrid-v2/);
   assert.match(prompt, /bGradeSourceOnly === true/);
   assert.match(prompt, /seller-source-only-no-ai-generation/);
   assert.match(requestRoute, /source-only-b-grade-v1/);
+  assert.match(requestRoute, /b-grade-hybrid-v2/);
   assert.match(requestRoute, /bGradeSourceOnly === true/);
   assert.match(requestRoute, /seller-source-only-no-ai-generation/);
 });
 
-test("B-grade request stays job-scoped and records the hybrid-v2 contract", () => {
+test("new B-grade requests record the rolled-back source-only contract", () => {
   assert.match(requestRoute, /v260807ManualDecisionKind/);
   assert.match(requestRoute, /DETAIL_PAGE_B_GRADE_NOT_ALLOWED/);
   assert.match(requestRoute, /isBGradeFailed/);
@@ -50,12 +51,12 @@ test("B-grade request stays job-scoped and records the hybrid-v2 contract", () =
   assert.match(requestRoute, /B_GRADE_SOURCE_ONLY_FAILED/);
   assert.match(requestRoute, /B_GRADE_HYBRID_FAILED/);
   assert.match(requestRoute, /v3_b_grade_source_only: true/);
-  assert.match(requestRoute, /b-grade-hybrid-v2/);
-  assert.match(requestRoute, /aiImageGeneration: "hook-only"/);
-  assert.match(requestRoute, /hookFallback: "seller-source"/);
-  assert.match(requestRoute, /retry_b_grade_hybrid_v2/);
-  assert.match(requestRoute, /run_b_grade_hybrid_v2/);
-  assert.match(requestRoute, /rerun_completed_b_grade_hybrid_v2/);
+  assert.match(requestRoute, /id: "source-only-b-grade-v1"/);
+  assert.match(requestRoute, /sourceOnly: true/);
+  assert.match(requestRoute, /aiImageGeneration: false/);
+  assert.match(requestRoute, /retry_b_grade_source_only/);
+  assert.match(requestRoute, /run_b_grade_source_only/);
+  assert.match(requestRoute, /rerun_completed_b_grade_source_only/);
 });
 
 test("completed B-grade rerun preserves the previous successful artifact snapshot until replacement succeeds", () => {
