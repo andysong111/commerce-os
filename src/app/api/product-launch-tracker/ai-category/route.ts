@@ -46,6 +46,10 @@ export async function POST(request: NextRequest) {
           })
         : await generateNaverFirstShoplingCategoryRecommendations(inputs, {
             timeoutMs: 22_000,
+            // 새 기본 방식은 '모델명 -> 네이버 쇼핑 카테고리 확인 -> 샵플링 경로 유사도 매칭'만 수행합니다.
+            // 기존 gpt-5-mini 설정을 상속하면 간단한 검색에도 reasoning 토큰이 출력 한도를 소모할 수 있어
+            // 네이버 확인 단계는 빠른 비추론 모델로 고정합니다. 기존 legacy 엔진은 그대로 보존됩니다.
+            model: process.env.OPENAI_NAVER_CATEGORY_MODEL || "gpt-4.1-mini",
           });
 
     const generatedById = new Map(
