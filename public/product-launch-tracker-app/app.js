@@ -29,6 +29,9 @@ if (detailPageMode === "worker") {
     }
   });
 } else {
+  // Guard only the optimized page-list GET: 10s timeout + one automatic retry.
+  // All item saves, dialogs, category AI, China-order mapping and other features keep their existing fetch behavior.
+  await import("./optimized-page-fetch-guard.js");
   // The optimized app owns list loading, paging, lazy details and item-scoped saves.
   await import("./optimized-app.js");
   // Optimized tracker owns the active detail dialog, so B-code China purchasing

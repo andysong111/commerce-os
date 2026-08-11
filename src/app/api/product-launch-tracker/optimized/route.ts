@@ -256,12 +256,21 @@ async function loadCachedIndex(
     };
   }
 
+  // Cold start: read the full saved state once. Previously this path first read
+  // a lightweight timestamp row and then fetched the same owner's full state,
+  // creating two sequential Supabase round trips before the first table render.
+  if (!existing) {
+    return loadAndCacheFullState(config, ownerId);
+  }
+
+  // Warm cache: keep the cheap timestamp check so page/filter changes can reuse
+  // the in-memory index without re-downloading the full payload when unchanged.
   const stamp = await readStateStamp(config, ownerId);
   if (!stamp) {
     cache.delete(ownerId);
     return null;
   }
-  if (existing && existing.updatedAt === stamp.updatedAt) {
+  if (existing.updatedAt === stamp.updatedAt) {
     existing.checkedAt = now;
     existing.accessedAt = now;
     existing.schemaVersion = stamp.schemaVersion;
@@ -272,6 +281,13 @@ async function loadCachedIndex(
     };
   }
 
+  return loadAndCacheFullState(config, ownerId);
+}
+
+async function loadAndCacheFullState(
+  config: { supabaseUrl: string; secretKey: string },
+  ownerId: string,
+) {
   const row = (await readProductLaunchState(config, ownerId)) as StoredRow | null;
   if (!row || !isRecord(row.state_payload)) return null;
   const index = buildProductLaunchTrackerIndex(
