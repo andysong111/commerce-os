@@ -49,6 +49,7 @@ export type InternalChinaPurchaseBudgetAudit = {
   productOrderBudgetKrw: number;
   engineExpectedSpendKrw: number;
   selectedDraftEstimatedProductCostKrw: number;
+  selectedDraftDomesticChinaFreightKrw: number;
   selectedDraftEstimatedLandedCostKrw: number;
   selectedDraftBudgetRemainingKrw: number;
   selectedDraftBudgetOverKrw: number;
@@ -195,8 +196,15 @@ export async function loadInternalChinaPurchaseBudgetAudit(
     (sum, line) => sum + line.estimatedProductCostKrw,
     0,
   );
+  const selectedDraftDomesticChinaFreightKrw = money(
+    draft.lines.reduce(
+      (sum, line) => sum + decimal(line.domesticChinaFreightCny),
+      0,
+    ) * draft.exchangeRateKrwPerCny,
+  );
   const selectedDraftEstimatedLandedCostKrw = money(
-    selectedDraftEstimatedProductCostKrw * purchaseCostMultiplier,
+    (selectedDraftEstimatedProductCostKrw + selectedDraftDomesticChinaFreightKrw) *
+      purchaseCostMultiplier,
   );
   const selectedDraftBudgetRemainingKrw = Math.max(
     0,
@@ -276,6 +284,7 @@ export async function loadInternalChinaPurchaseBudgetAudit(
     productOrderBudgetKrw,
     engineExpectedSpendKrw,
     selectedDraftEstimatedProductCostKrw,
+    selectedDraftDomesticChinaFreightKrw,
     selectedDraftEstimatedLandedCostKrw,
     selectedDraftBudgetRemainingKrw,
     selectedDraftBudgetOverKrw,
