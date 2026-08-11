@@ -32,6 +32,14 @@ test("B-code metadata is reused from Product Master tracker and live Shopling mo
   assert.match(engine, /live\?\.modelName/);
 });
 
+test("saved blank purchase metadata does not hide tracker data added later", () => {
+  assert.match(engine, /function mergeSavedLine/);
+  assert.match(engine, /saleOption: text\(saved\.saleOption\) \|\| baseLine\.saleOption/);
+  assert.match(engine, /chinaOption: text\(saved\.chinaOption\) \|\| baseLine\.chinaOption/);
+  assert.match(engine, /supplierLink: text\(saved\.supplierLink\) \|\| baseLine\.supplierLink/);
+  assert.match(engine, /return saved \? mergeSavedLine\(line, saved\) : line/);
+});
+
 test("operator prep is persisted in the existing operation ledger without a schema migration", () => {
   assert.match(engine, /INTERNAL_CHINA_PURCHASE_PREP/);
   assert.match(engine, /commerce_operation_runs/);
