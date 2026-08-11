@@ -7,6 +7,25 @@ import type { CommerceModule } from "@/lib/moduleRegistry";
 
 const isolatedBaseModules: readonly CommerceModule[] = extendedModuleRegistry.map(
   (module) => {
+    if (module.id === "sourcing-engine") {
+      return {
+        ...module,
+        title: "소싱센터",
+        navigationLabel: "소싱센터",
+        description:
+          "1688 후보 수집부터 한국 수요, 실제 공급상품·SKU, 수익성, 시장가격, AI 상세페이지 사전검사, 소액 테스트 발주까지 전체 소싱 순서를 한 화면에서 확인하고 필요한 단계로 바로 이동합니다.",
+        route: "/sourcing-center",
+        category: "소싱",
+        inputType: "1688 후보, NAVER 수요, 실제 공급상품·SKU, 계획원가, 한국 시장가격, AI 상세페이지 검사결과",
+        outputType: "현재 다음 행동, 단계별 통과·탈락 흐름, TEST_READY까지의 전체 소싱 진행상태",
+        historySupport: true,
+        externalProject: false,
+        note: "소싱엔진의 실제 계산·검증 화면은 독립 Production에서 실행하고, OPS Center 소싱센터는 쉬운 용어의 통합 입구와 현재 다음 행동을 제공합니다.",
+        helperNote: "전체 소싱 흐름 · 한눈에 보기",
+        actionLabel: "소싱센터 열기",
+        safetyBadge: "TEST_READY 전 실제 발주 없음",
+      };
+    }
     if (module.id !== "detail-page-studio") return module;
     return {
       ...module,
