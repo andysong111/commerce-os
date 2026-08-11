@@ -42,7 +42,7 @@ export function DetailPageBGradeFallbackQueue() {
       jobs.filter(
         (job) =>
           v260807ManualDecisionKind(job) === "generation_safety_block" ||
-          isBGradeSourceOnlyFailed(job),
+          isBGradeFailed(job),
       ),
     [jobs],
   );
@@ -50,12 +50,12 @@ export function DetailPageBGradeFallbackQueue() {
   async function runBGrade(job: DetailPageReviewJob) {
     if (busyJobId) return;
     const name = productName(job);
-    const retry = isBGradeSourceOnlyFailed(job);
+    const retry = isBGradeFailed(job);
     if (
       !window.confirm(
         retry
-          ? `"${name}"의 B급 원본 조립이 구성 검사에서 중단되었습니다.\n\n기존 1688 원본과 상품 분석은 그대로 유지하고, 수정된 B급 조립 규칙으로 다시 실행합니다. 새 AI 이미지는 생성하지 않습니다.\n\nB급 원본 조립을 다시 실행하시겠습니까?`
-          : `"${name}"은 AI 이미지 안전검사에서 차단되었습니다.\n\nB급 엔진으로 전환하면 새 AI 이미지를 만들지 않고 1688 원본 사진만 사용해 대표·부가 이미지와 상세페이지를 조립합니다.\n\nB급 원본 조립으로 실행하시겠습니까?`,
+          ? `"${name}"의 B급 엔진 작업이 구성 단계에서 중단되었습니다.\n\n기존 1688 원본·상품 분석·판매옵션은 그대로 유지하고, 최신 B급 하이브리드 규칙으로 다시 실행합니다. 후킹포인트만 AI 1장을 시도하며 차단되면 자동으로 원본 사용예시로 전환합니다.\n\nB급 엔진을 다시 실행하시겠습니까?`
+          : `"${name}"은 A급 AI 이미지 생성 안전검사에서 차단되었습니다.\n\nB급 엔진은 대표·부가·포인트·사용·옵션을 1688 원본 중심으로 조립하고, 후킹포인트에만 일반적인 불편 사용장면 AI 1장을 시도합니다. 후킹 AI도 차단되면 전체를 실패시키지 않고 원본형 후킹으로 자동 전환합니다.\n\nB급 엔진으로 실행하시겠습니까?`,
       )
     ) {
       return;
@@ -64,8 +64,8 @@ export function DetailPageBGradeFallbackQueue() {
     setBusyJobId(job.jobId);
     setNotice(
       retry
-        ? "기존 1688 원본을 유지하고 수정된 B급 조립을 다시 시작합니다."
-        : "B급 원본 조립 전환을 저장하고 서버 작업을 시작합니다.",
+        ? "기존 자산을 유지하고 최신 B급 하이브리드 엔진을 다시 시작합니다."
+        : "B급 하이브리드 전환을 저장하고 서버 작업을 시작합니다.",
     );
     try {
       const response = await fetch(
@@ -82,7 +82,7 @@ export function DetailPageBGradeFallbackQueue() {
         message?: string;
       };
       if (!response.ok || body.ok !== true) {
-        throw new Error(body.message || "B급 원본 조립 전환을 저장하지 못했습니다.");
+        throw new Error(body.message || "B급 엔진 전환을 저장하지 못했습니다.");
       }
 
       const startResponse = await fetch(
@@ -104,18 +104,18 @@ export function DetailPageBGradeFallbackQueue() {
       };
       if (!startResponse.ok || startBody.ok !== true) {
         throw new Error(
-          startBody.message || "B급 원본 조립 서버 작업을 시작하지 못했습니다.",
+          startBody.message || "B급 하이브리드 서버 작업을 시작하지 못했습니다.",
         );
       }
       setNotice(
-        "B급 원본 조립을 시작했습니다. 기존 1688 원본만 사용하며 AI 이미지 생성비용은 추가되지 않습니다.",
+        "B급 하이브리드 엔진을 시작했습니다. 후킹포인트 AI는 최대 1회 보정 후 실패하면 자동으로 1688 원본형 후킹으로 전환합니다.",
       );
       await refresh();
     } catch (error) {
       setNotice(
         error instanceof Error
           ? error.message
-          : "B급 원본 조립 전환을 실행하지 못했습니다.",
+          : "B급 엔진 전환을 실행하지 못했습니다.",
       );
       await refresh();
     } finally {
@@ -130,13 +130,13 @@ export function DetailPageBGradeFallbackQueue() {
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs font-black tracking-[0.14em] text-orange-700">
-            Commerce OS Detail Page Studio · v260807 · B급 원본 조립
+            Commerce OS Detail Page Studio · v260807 · B급 하이브리드
           </p>
           <h2 className="mt-1 text-lg font-black text-orange-950">
-            B급 원본 조립 대상 {blocked.length}건
+            B급 엔진 대상 {blocked.length}건
           </h2>
           <p className="mt-1 text-sm font-semibold leading-6 text-orange-900">
-            AI 이미지 생성이 안전검사에서 차단된 상품은 1688 원본만으로 조립할 수 있습니다. B급 조립 자체가 구성 검사에서 중단된 경우에도 원본과 분석을 버리지 않고 수정된 조립 규칙으로 다시 실행합니다.
+            A급 생성이 안전검사에서 반복 차단되는 상품의 최후 안정망입니다. 대표·부가·본문·옵션은 1688 원본을 우선 사용하고, 판매력을 보완할 후킹포인트에만 일반적인 불편 장면 AI 1장을 제한적으로 사용합니다. 후킹 AI 실패는 전체 실패 사유가 아닙니다.
           </p>
         </div>
         <span className="shrink-0 rounded-full border border-orange-300 bg-white px-3 py-1.5 text-xs font-black text-orange-800">
@@ -152,7 +152,7 @@ export function DetailPageBGradeFallbackQueue() {
 
       <div className="mt-4 grid gap-3">
         {blocked.map((job) => {
-          const retry = isBGradeSourceOnlyFailed(job);
+          const retry = isBGradeFailed(job);
           return (
             <article
               key={job.jobId}
@@ -163,8 +163,8 @@ export function DetailPageBGradeFallbackQueue() {
                 <p className="mt-1 text-xs font-bold text-slate-500">{job.itemId}</p>
                 <p className="mt-2 text-sm font-semibold text-slate-700">
                   {retry
-                    ? "이 작업은 B급 원본 조립 중 구성 검사에서 중단되었습니다. 기존 원본을 그대로 유지하고 수정된 B급 조립 규칙으로 다시 실행할 수 있습니다."
-                    : "안전검사에서 차단되어 B급 엔진으로 실행하시겠습니까? 기존 원본·분석·판매옵션은 유지하고 AI 생성 단계만 건너뜁니다."}
+                    ? "이 작업은 이전 B급 조립에서 중단되었습니다. 저장된 원본과 분석을 그대로 유지하고 최신 B급 하이브리드 규칙으로 다시 실행할 수 있습니다."
+                    : "안전검사에서 차단되어 B급 엔진으로 실행하시겠습니까? 대표·부가·본문은 원본 중심으로 유지하고 후킹포인트만 일반적인 불편 장면 AI를 1장 시도합니다."}
                 </p>
               </div>
               <button
@@ -176,8 +176,8 @@ export function DetailPageBGradeFallbackQueue() {
                 {busyJobId === job.jobId
                   ? "B급 엔진 전환 중…"
                   : retry
-                    ? "B급 원본 조립 다시 실행"
-                    : "B급 원본 조립으로 실행"}
+                    ? "B급 엔진 다시 실행"
+                    : "B급 엔진으로 실행"}
               </button>
             </article>
           );
@@ -187,11 +187,13 @@ export function DetailPageBGradeFallbackQueue() {
   );
 }
 
-function isBGradeSourceOnlyFailed(job: DetailPageReviewJob) {
+function isBGradeFailed(job: DetailPageReviewJob) {
   return (
     job.status === "failed" &&
-    job.stage === "v3_b_grade_source_only" &&
-    /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error || "")
+    ((job.stage === "v3_b_grade_source_only" &&
+      /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error || "")) ||
+      (job.stage === "v3_b_grade_hybrid" &&
+        /B_GRADE_HYBRID_FAILED/i.test(job.error || "")))
   );
 }
 
