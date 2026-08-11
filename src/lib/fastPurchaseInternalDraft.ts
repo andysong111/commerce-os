@@ -5,6 +5,7 @@ import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
 const MAX_LINES = 100;
+const MANUAL_QUANTITY_MAX = 9_999;
 const BARCODE = /^B[A-Z]{2}\d+-\d+$/;
 
 export type FastPurchaseDraftStockSense = "LOW" | "OUT";
@@ -102,12 +103,12 @@ export async function createFastPurchaseInternalDraft(
     }
     const plannedQuantity = quantity(raw.plannedQuantity);
     if (plannedQuantity <= 0) throw new Error(`FAST_PURCHASE_DRAFT_QUANTITY_REQUIRED:${key}`);
+    if (plannedQuantity > MANUAL_QUANTITY_MAX) {
+      throw new Error(`FAST_PURCHASE_DRAFT_QUANTITY_EXCEEDED:${key}`);
+    }
     const currentReference = quantity(current.referenceDemandQuantity);
     if (quantity(raw.referenceDemandQuantity) !== currentReference) {
       throw new Error(`FAST_PURCHASE_DRAFT_REFERENCE_CHANGED:${key}`);
-    }
-    if (current.action === "DEMAND_ONLY_REVIEW" && plannedQuantity > currentReference) {
-      throw new Error(`FAST_PURCHASE_DRAFT_REFERENCE_EXCEEDED:${key}`);
     }
     return {
       barcode: key,

@@ -5,6 +5,7 @@ import type { FastPurchaseMvpDataMode } from "@/lib/fastPurchaseMvpResilient";
 import type { FastPurchaseMvpRow } from "@/lib/fastPurchaseMvp";
 
 const STORAGE_KEY = "commerceOs.fastPurchaseMvp.triage.v1";
+const MANUAL_QUANTITY_MAX = 9_999;
 
 type StockSense = "UNKNOWN" | "ENOUGH" | "LOW" | "OUT";
 type StoredEntry = { stockSense?: StockSense; plannedQuantity?: number; note?: string };
@@ -104,10 +105,10 @@ export function FastPurchaseDraftActions({
       const row = rowByBarcode.get(barcode);
       if (!row || !isManual(row)) return [];
       if (entry.stockSense !== "LOW" && entry.stockSense !== "OUT") return [];
-      let plannedQuantity = integer(entry.plannedQuantity);
-      if (row.action === "DEMAND_ONLY_REVIEW") {
-        plannedQuantity = Math.min(plannedQuantity, integer(row.referenceDemandQuantity));
-      }
+      const plannedQuantity = Math.min(
+        integer(entry.plannedQuantity),
+        MANUAL_QUANTITY_MAX,
+      );
       if (plannedQuantity <= 0) return [];
       return [{
         barcode,

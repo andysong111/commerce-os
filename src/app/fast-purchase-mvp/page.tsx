@@ -65,7 +65,7 @@ export default async function FastPurchaseMvpPage() {
         <strong>지금은 정확도보다 실제 사용 흐름을 우선합니다.</strong><br />
         {fallback
           ? "현재는 마지막 정상 스냅샷의 재고0 수요참고만 사용합니다. 수동 판단·수량입력·CSV는 계속 가능하지만 시스템 발주/보류 판정은 사용하지 않습니다."
-          : "재고증거가 있는 상품은 기존 `TWO_SIDED_BAND` 또는 `CUMULATIVE_UPPER_BIASED` 판단을 그대로 사용합니다. 재고증거가 없는 상품은 `DEMAND_ONLY_ZERO_STOCK_REFERENCE`의 재고 0 가정 수요를 참고상한으로만 보여주고, 아래 작업대에서 사용자가 재고 체감과 주문 예정수량을 직접 입력합니다. 참고상한은 실제 주문수량으로 자동 복사되지 않습니다."}
+          : "재고증거가 있는 상품은 기존 `TWO_SIDED_BAND` 또는 `CUMULATIVE_UPPER_BIASED` 판단을 그대로 사용합니다. 재고증거가 없는 상품은 `DEMAND_ONLY_ZERO_STOCK_REFERENCE`의 재고 0 가정 수요를 참고값으로 보여주고, 아래 작업대에서 사용자가 재고 체감과 주문 예정수량을 직접 입력합니다. 이 참고값은 주문수량 상한이 아니며, 부족/품절로 판단한 상품은 SKU당 최대 9,999개까지 직접 입력할 수 있습니다."}
       </section>
 
       <FastPurchaseTriageWorkspace
