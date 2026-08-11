@@ -18,7 +18,7 @@ const [page, prompt, requestRoute, startRoute] = await Promise.all([
   ),
 ]);
 
-test("v260807 review page offers B-grade fallback, retry, and completed-result rerun", () => {
+test("v260807 review page offers B-grade fallback, retry, completed B-grade rerun, and completed A-grade conversion", () => {
   assert.match(page, /DetailPageBGradeFallbackQueue/);
   assert.match(prompt, /generation_safety_block/);
   assert.match(prompt, /B_GRADE_SOURCE_ONLY_FAILED/);
@@ -27,21 +27,39 @@ test("v260807 review page offers B-grade fallback, retry, and completed-result r
   assert.match(prompt, /v3_b_grade_source_only_assembly/);
   assert.match(prompt, /B급 엔진으로 실행/);
   assert.match(prompt, /B급 엔진 다시 실행/);
-  assert.match(prompt, /B급 엔진으로 재생성/);
-  assert.match(prompt, /B급 검수 통과/);
+  assert.match(prompt, /B급으로 재생성/);
   assert.match(prompt, /rerun_completed_b_grade/);
-  assert.match(prompt, /새 결과가 성공한 뒤에만 상품상세를 교체/);
+  assert.match(prompt, /rerun_completed_as_b_grade/);
+  assert.match(prompt, /일반 엔진 검수 통과 완료 작업/);
+  assert.match(prompt, /isCompletedAGradeEligible/);
+  assert.match(prompt, /v260807SourceAnchorSnapshot/);
 });
 
-test("completed rerun recognizes both historical hybrid and source-only B-grade results", () => {
+test("completed rerun recognizes historical B-grade results and ordinary v260807 A-grade results", () => {
   assert.match(prompt, /source-only-b-grade-v1/);
   assert.match(prompt, /b-grade-hybrid-v2/);
   assert.match(prompt, /bGradeSourceOnly === true/);
   assert.match(prompt, /seller-source-only-no-ai-generation/);
+  assert.match(prompt, /isV260807DetailPageJob/);
   assert.match(requestRoute, /source-only-b-grade-v1/);
   assert.match(requestRoute, /b-grade-hybrid-v2/);
-  assert.match(requestRoute, /bGradeSourceOnly === true/);
-  assert.match(requestRoute, /seller-source-only-no-ai-generation/);
+  assert.match(requestRoute, /isCompletedAGradeEligible/);
+  assert.match(requestRoute, /isV260807DetailPageJob/);
+  assert.match(requestRoute, /v260807SourceAnchorSnapshot/);
+});
+
+test("completed A-grade conversion preserves the current successful artifacts until B-grade succeeds", () => {
+  assert.match(requestRoute, /COMPLETED_A_GRADE_TO_B_GRADE_ACTION = "rerun_completed_as_b_grade"/);
+  assert.match(requestRoute, /completedAGradeConversion/);
+  assert.match(requestRoute, /rerun_completed_a_grade_as_b_grade/);
+  assert.match(requestRoute, /completed_a_grade_to_b_grade/);
+  assert.match(requestRoute, /기존 A급 검수 통과 결과 보존/);
+  assert.match(requestRoute, /completedResultBackup/);
+  assert.match(requestRoute, /bGradeRerunBackup/);
+  assert.match(requestRoute, /detailImageUrl/);
+  assert.match(requestRoute, /mainImageUrl/);
+  assert.match(requestRoute, /additionalImageUrls/);
+  assert.match(requestRoute, /source-first-v3/);
 });
 
 test("B-grade request route accepts the unknown-outcome stop from B-grade assembly", () => {
@@ -64,6 +82,7 @@ test("new B-grade requests keep the source-only detail contract", () => {
   assert.match(requestRoute, /aiImageGeneration: false/);
   assert.match(requestRoute, /run_b_grade_source_only/);
   assert.match(requestRoute, /rerun_completed_b_grade_source_only/);
+  assert.match(requestRoute, /rerun_completed_a_grade_as_b_grade/);
 });
 
 test("completed B-grade rerun preserves the previous successful artifact snapshot until replacement succeeds", () => {
@@ -74,7 +93,7 @@ test("completed B-grade rerun preserves the previous successful artifact snapsho
   assert.match(requestRoute, /mainImageUrl/);
   assert.match(requestRoute, /additionalImageUrls/);
   assert.match(requestRoute, /completed_b_grade_rerun/);
-  assert.match(requestRoute, /progress: completedBGradeRerun/);
+  assert.match(requestRoute, /progress: completedRerun/);
 });
 
 test("start route keeps the dedicated B-grade routing flag separate from normal source-first-v3", () => {
