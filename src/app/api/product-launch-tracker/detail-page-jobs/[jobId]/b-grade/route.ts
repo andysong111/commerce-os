@@ -67,7 +67,7 @@ export async function POST(
           ok: false,
           code: "DETAIL_PAGE_B_GRADE_NOT_ALLOWED",
           message:
-            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나, 이전 B급 엔진 실행이 실패했거나, 검수 통과한 B급 결과를 명시적으로 재생성하는 작업만 허용됩니다.",
+            "v260807 A급 AI 이미지 생성이 안전검사에서 차단되었거나, 이전 B급 엔진 실행이 실패·중단되었거나, 검수 통과한 B급 결과를 명시적으로 재생성하는 작업만 허용됩니다.",
         },
         { status: 409 },
       );
@@ -105,10 +105,10 @@ export async function POST(
         status: "queued",
         stage: "v3_b_grade_source_only_requested",
         message: completedBGradeRerun
-          ? "사용자 요청 · 기존 검수 통과 결과 보존 · B급 원본 조립 재생성 대기 중"
+          ? "사용자 요청 · 기존 검수 통과 결과 보존 · B급 재생성 대기 중"
           : bGradeRetry
-            ? "사용자 승인 · 기존 1688 원본 유지 · B급 원본 조립 재실행 대기 중"
-            : "사용자 승인 · B급 원본 조립 대기 중 · 새 AI 이미지 생성 없이 저장된 1688 원본만 사용합니다.",
+            ? "사용자 승인 · 기존 1688 원본 유지 · B급 재실행 대기 중"
+            : "사용자 승인 · B급 원본 조립 대기 중",
         progress: completedBGradeRerun
           ? 35
           : Math.max(30, Math.min(90, Number(job.progress) || 0)),
@@ -243,12 +243,16 @@ function isBGradeFailed(job: {
   stage: string;
   error_message: string;
 }) {
+  const error = job.error_message || "";
   return (
     job.status === "failed" &&
     ((job.stage === "v3_b_grade_source_only" &&
-      /B_GRADE_SOURCE_ONLY_FAILED/i.test(job.error_message || "")) ||
+      /B_GRADE_SOURCE_ONLY_FAILED/i.test(error)) ||
       (job.stage === "v3_b_grade_hybrid" &&
-        /B_GRADE_HYBRID_FAILED/i.test(job.error_message || "")))
+        /B_GRADE_HYBRID_FAILED/i.test(error)) ||
+      (["v3_b_grade_source_only", "v3_b_grade_source_only_assembly"].includes(
+        job.stage,
+      ) && /DETAIL_PAGE_STEP_OUTCOME_UNKNOWN/i.test(error)))
   );
 }
 
