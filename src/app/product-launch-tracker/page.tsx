@@ -1,6 +1,8 @@
 import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
+const PRODUCT_LAUNCH_ASSET_VERSION = "20260811-china-order-map-v2";
+
 export default async function ProductLaunchTrackerPage({
   searchParams,
 }: {
@@ -10,7 +12,10 @@ export default async function ProductLaunchTrackerPage({
   const itemId = Array.isArray(resolved.detailPageItem)
     ? resolved.detailPageItem[0]
     : resolved.detailPageItem;
-  const iframeParams = new URLSearchParams({ detail_page_mode: "client" });
+  const iframeParams = new URLSearchParams({
+    detail_page_mode: "client",
+    asset_version: PRODUCT_LAUNCH_ASSET_VERSION,
+  });
   if (itemId) iframeParams.set("open_item", itemId.slice(0, 160));
 
   return (
