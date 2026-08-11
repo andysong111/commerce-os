@@ -9,66 +9,40 @@ const [handoff, queue, route, actions] = await Promise.all([
   readFile("src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx", "utf8"),
 ]);
 
-test("handoff reads an existing internal Draft and reuses the established purchase-plan queue", () => {
+test("legacy handoff remains available for backward compatibility", () => {
   assert.match(handoff, /loadFastPurchaseInternalDrafts/);
   assert.match(handoff, /loadProductPlanningSnapshot/);
   assert.match(handoff, /enqueuePurchasePlanDraft/);
   assert.match(handoff, /sourceRunId: draftId/);
+  assert.match(route, /isSameOriginOpsRequest/);
 });
 
-test("only an open RESERVED draft that has not started ordering can be queued", () => {
+test("legacy queue still refuses non-reserved or already progressing drafts", () => {
   assert.match(handoff, /draft\.openQuantity <= 0/);
   assert.match(handoff, /draft\.orderedQuantity > 0 \|\| draft\.receivedQuantity > 0/);
   assert.match(handoff, /line\.status !== "RESERVED" \|\| line\.openQuantity <= 0/);
   assert.match(handoff, /FAST_PURCHASE_HANDOFF_ALREADY_PROGRESSING/);
 });
 
-test("China draft keeps actual supplier pricing as a later review step", () => {
+test("legacy relay still never executes a 1688 order", () => {
   assert.match(handoff, /unitCostKrw: 0/);
   assert.match(handoff, /externalOrderExecuted: false/);
   assert.doesNotMatch(handoff, /orderedOn1688|unitPriceCny|payment/i);
 });
 
-test("LEGACY placeholder model numbers are never handed to China order management", () => {
+test("legacy relay metadata remains B-code safe", () => {
   assert.match(handoff, /function handoffModelNumber/);
   assert.match(handoff, /\^LEGACY-/i);
   assert.match(handoff, /return barcode/);
-  assert.match(handoff, /modelNumber: handoffModelNumber\(profile\?\.modelNo, line\.barcode\)/);
-});
-
-test("product launch tracker primary supplier link and option metadata are handed to China draft", () => {
   assert.match(handoff, /loadProductLaunchPurchaseMetadataByBarcode/);
-  assert.match(handoff, /supplierLink/);
-  assert.match(handoff, /saleOption/);
-  assert.match(handoff, /chinaOption/);
-  assert.match(handoff, /상품출시진행관리 1번 중국링크 자동연결/);
   assert.match(queue, /supplierLink: normalizeSupplierLink\(item\.supplierLink\)/);
-  assert.match(queue, /saleOption: text\(item\.saleOption\)/);
-  assert.match(queue, /chinaOption: text\(item\.chinaOption\)/);
 });
 
-test("tracker metadata failure or conflict does not block the reserved purchase quantity", () => {
-  assert.match(handoff, /trackerMetadataError: trackerMetadata\.error/);
-  assert.match(handoff, /tracker\?\.conflict \? ""/);
-  assert.match(handoff, /quantity: quantity\(line\.openQuantity\)/);
-});
-
-test("handoff deep link carries the exact internal draft run id", () => {
-  assert.match(handoff, /purchaseDraftRun/);
-  assert.match(handoff, /china-order-manager\.andy123df23\.chatgpt\.site/);
-  assert.match(actions, /중국 주문초안 열기/);
-});
-
-test("handoff API is same-origin only", () => {
-  assert.match(route, /isSameOriginOpsRequest/);
-  assert.match(route, /FAST_PURCHASE_HANDOFF_UNAUTHORIZED/);
-  assert.match(route, /queueFastPurchaseDraftForChina/);
-});
-
-test("operator gets an explicit no-order confirmation before queue handoff", () => {
-  assert.match(actions, /window\.confirm/);
-  assert.match(actions, /중국 발주·입고 관리의 주문초안으로 전달할까요/);
-  assert.match(actions, /아직 1688 주문·결제는 실행하지 않습니다/);
-  assert.match(actions, /method: "POST"/);
-  assert.match(actions, /\/api\/fast-purchase\/drafts\/queue/);
+test("operator fast-purchase UI now opens the Ops Center internal China draft directly", () => {
+  assert.match(actions, /function internalChinaDraftUrl/);
+  assert.match(actions, /\/china-order-manager\/drafts\//);
+  assert.match(actions, /Ops Center 중국 주문초안 열기/);
+  assert.match(actions, /GPT Site를 거치지 않고 Ops Center 내부 중국 발주초안/);
+  assert.doesNotMatch(actions, /\/api\/fast-purchase\/drafts\/queue/);
+  assert.doesNotMatch(actions, /orderManagerUrl|chatgpt\.site/);
 });

@@ -4,9 +4,14 @@ on:
   pull_request:
     paths:
       - "src/lib/chinaOrderLedger.ts"
+      - "src/lib/internalChinaPurchaseDraft.ts"
       - "src/app/api/china-order-ledger/**"
+      - "src/app/api/china-order-manager/**"
       - "src/app/china-order-manager/**"
+      - "src/components/china-order-manager/**"
+      - "src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx"
       - "tests/chinaOrderLedger.test.mjs"
+      - "tests/internalChinaPurchaseDraftMvp.test.mjs"
       - ".github/workflows/china-order-ledger-ci.yml"
   workflow_dispatch:
 
@@ -28,17 +33,24 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint China order ledger
+      - name: Lint China order ledger and internal order MVP
         run: >-
           npx eslint
           src/lib/chinaOrderLedger.ts
+          src/lib/internalChinaPurchaseDraft.ts
           src/app/api/china-order-ledger/events/route.ts
+          "src/app/api/china-order-manager/drafts/[draftId]/route.ts"
           src/app/china-order-manager/page.tsx
+          "src/app/china-order-manager/drafts/[draftId]/page.tsx"
+          src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx
+          src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           tests/chinaOrderLedger.test.mjs
+          tests/internalChinaPurchaseDraftMvp.test.mjs
       - name: Run China order ledger tests
         run: >-
           node --experimental-strip-types --test
           tests/chinaOrderLedger.test.mjs
+          tests/internalChinaPurchaseDraftMvp.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
