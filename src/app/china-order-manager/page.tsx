@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { MonthlyDraftConsolidation } from "@/components/china-order-manager/MonthlyDraftConsolidation";
 import { PageHeader } from "@/components/PageHeader";
 import { loadChinaOrderLedger } from "@/lib/chinaOrderLedger";
 import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadChinaOrderInternalStatus } from "@/lib/integrations/chinaOrderManager";
+import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +42,10 @@ export default async function ChinaOrderManagerPage() {
   const commitments = ledger.commitments.slice(0, 100);
   const activeDrafts = internalDraftState.drafts.filter(
     (draft) => draft.openQuantity > 0,
+  );
+  const currentCycleMonth = seoulCalendarMonth(new Date());
+  const currentCycleActiveDrafts = activeDrafts.filter(
+    (draft) => draft.cycleMonth === currentCycleMonth,
   );
 
   return (
@@ -83,10 +89,20 @@ export default async function ChinaOrderManagerPage() {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatusCard label="발주 줄" value={number.format(ledger.totalCommitments)} note="고유 source line" />
         <StatusCard label="진행 중" value={number.format(ledger.activeCommitments)} note="미입고 잔량 보유" />
-        <StatusCard label="총 주문수량" value={number.format(ledger.totalOrderedQuantity || ledger.totalRequestedQuantity)} note="실주문 우선" />
+        <StatusCard
+          label="총 주문수량"
+          value={number.format(
+            ledger.totalOrderedQuantity || ledger.totalOpenQuantity,
+          )}
+          note="실주문 우선 · 미주문은 활성 Draft"
+        />
         <StatusCard label="정상입고" value={number.format(ledger.totalReceivedQuantity)} note="누적 입고수량" />
         <StatusCard label="남은 미입고" value={number.format(ledger.totalOpenQuantity)} note="다음 발주안 차감" emphasized />
       </section>
+
+      {currentCycleActiveDrafts.length > 1 ? (
+        <MonthlyDraftConsolidation drafts={currentCycleActiveDrafts} />
+      ) : null}
 
       <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
         <div className="flex flex-wrap items-end justify-between gap-3">
