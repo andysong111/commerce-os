@@ -18,6 +18,13 @@ type PipelineStatus = {
   nextActionLabel: string;
   nextHref: string;
   reason: string;
+  funnel?: {
+    confirmedOpportunityCandidates: number;
+    supplyAnchorResolvedCandidates: number;
+    complexityRejectedCandidates: number;
+    supplyPendingCandidates: number;
+    decisionCandidates: number;
+  } | null;
 };
 
 type SourcingStage = {
@@ -257,10 +264,50 @@ export default async function SourcingCenterPage() {
             </a>
           ) : null}
         </div>
-        {status ? (
+
+        {status?.funnel ? (
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-bold text-blue-900">후보가 어디에서 줄었는지</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              <div className="rounded-xl border border-blue-100 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-500">처음 검증 후보</p>
+                <p className="mt-1 text-2xl font-black text-slate-950">{status.funnel.confirmedOpportunityCandidates}</p>
+                <p className="mt-1 text-[11px] text-slate-400">한국 수요검증 통과</p>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-500">공급상품 확정</p>
+                <p className="mt-1 text-2xl font-black text-slate-950">{status.funnel.supplyAnchorResolvedCandidates}</p>
+                <p className="mt-1 text-[11px] text-slate-400">실제 1688 offer 연결</p>
+              </div>
+              <div className="rounded-xl border border-rose-100 bg-rose-50 p-3">
+                <p className="text-xs font-semibold text-rose-700">운영복잡 제외</p>
+                <p className="mt-1 text-2xl font-black text-rose-950">{status.funnel.complexityRejectedCandidates}</p>
+                <p className="mt-1 text-[11px] text-rose-500">옵션·구성 복잡</p>
+              </div>
+              <div className="rounded-xl border border-amber-100 bg-amber-50 p-3">
+                <p className="text-xs font-semibold text-amber-700">공급 선택 대기</p>
+                <p className="mt-1 text-2xl font-black text-amber-950">{status.funnel.supplyPendingCandidates}</p>
+                <p className="mt-1 text-[11px] text-amber-600">아직 공급상품 미확정</p>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-500">최종 판단 대상</p>
+                <p className="mt-1 text-2xl font-black text-slate-950">{status.funnel.decisionCandidates}</p>
+                <p className="mt-1 text-[11px] text-slate-400">수익성·시장가격·AI 단계</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-500">최종 탈락</p>
+                <p className="mt-1 text-2xl font-black text-slate-950">{status.terminalRejectedCandidates}</p>
+                <p className="mt-1 text-[11px] text-slate-400">현재 최종 판단 풀 기준</p>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-blue-800">
+              ‘공급상품 확정·운영복잡 제외·공급 선택 대기’는 같은 공급선택 단계의 분기입니다. ‘최종 판단 대상·최종 탈락’은 그 다음 단계 숫자라 단순 합계로 더하지 않습니다.
+            </p>
+          </div>
+        ) : status ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-blue-100 bg-white p-3">
-              <p className="text-xs font-semibold text-slate-500">전체 후보</p>
+              <p className="text-xs font-semibold text-slate-500">최종 판단 대상</p>
               <p className="mt-1 text-2xl font-black text-slate-950">{status.totalCandidates}</p>
             </div>
             <div className="rounded-xl border border-blue-100 bg-white p-3">
