@@ -35,6 +35,17 @@ test("v260807 review page offers B-grade fallback, retry, completed B-grade reru
   assert.match(prompt, /v260807SourceAnchorSnapshot/);
 });
 
+test("B-grade card action is deduplicated by product and keeps only the newest eligible job", () => {
+  assert.match(prompt, /selectLatestBGradeTargetPerProduct/);
+  assert.match(prompt, /latestByProduct = new Map/);
+  assert.match(prompt, /productActionKey\(job\)/);
+  assert.match(prompt, /INLINE_ACTION_JOB_ATTR/);
+  assert.match(prompt, /duplicateActions/);
+  assert.match(prompt, /if \(duplicate !== action\) duplicate\.remove\(\)/);
+  assert.match(prompt, /isNewerJob/);
+  assert.match(prompt, /jobTimestamp/);
+});
+
 test("completed rerun recognizes historical B-grade results and ordinary v260807 A-grade results", () => {
   assert.match(prompt, /source-only-b-grade-v1/);
   assert.match(prompt, /b-grade-hybrid-v2/);
