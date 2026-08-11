@@ -1,10 +1,15 @@
 import { loadChinaOrderLedger } from "@/lib/chinaOrderLedger";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
 import {
+  koreanMonthLabel,
+  monthlyPurchaseCycleFor,
+} from "@/lib/monthlyPurchasePolicy";
+import {
   DEFAULT_PURCHASE_COST_MULTIPLIER,
   calculateProductOrderBudget,
 } from "@/lib/productDecisionEngine/portfolio";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadCalendarMonthNormalRevenue } from "@/lib/shopling/calendarMonthRevenue";
 import { loadCanonicalPurchaseShadow } from "@/lib/stage8CanonicalPurchaseShadow";
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
@@ -27,6 +32,12 @@ export type InternalChinaPurchaseBudgetAuditLine = {
 export type InternalChinaPurchaseBudgetAudit = {
   generatedAt: string;
   analysisAsOf: string | null;
+  cycleMonth: string;
+  budgetMonth: string;
+  budgetMonthRangeStart: string;
+  budgetMonthRangeEnd: string;
+  budgetMonthRevenueKrw: number;
+  budgetRevenueError: string | null;
   basisLabel: string;
   recent30RevenueKrw: number;
   grossCogsBudgetKrw: number;
@@ -71,20 +82,30 @@ function quantity(value: unknown) {
 export async function loadInternalChinaPurchaseBudgetAudit(
   draftId: string,
 ): Promise<InternalChinaPurchaseBudgetAudit> {
-  const [draft, shadow, planning, ledger] = await Promise.all([
+  const cycle = monthlyPurchaseCycleFor();
+  const [draft, shadow, planning, ledger, calendarRevenue] = await Promise.all([
     loadInternalChinaPurchaseDraft(draftId),
     loadCanonicalPurchaseShadow(),
     loadProductPlanningSnapshot(),
     loadChinaOrderLedger(),
+    loadCalendarMonthNormalRevenue(cycle.budgetMonth)
+      .then((value) => ({ value, error: null as string | null }))
+      .catch((error) => ({
+        value: null,
+        error:
+          error instanceof Error
+            ? error.message
+            : "CALENDAR_MONTH_REVENUE_UNAVAILABLE",
+      })),
   ]);
 
   const snapshot = shadow.snapshot;
   const recent30RevenueKrw = money(shadow.recent30Revenue);
-  const grossCogsBudgetKrw = money(recent30RevenueKrw / 2);
+  const budgetMonthRevenueKrw = money(calendarRevenue.value?.revenueKrw);
+  const grossCogsBudgetKrw = money(budgetMonthRevenueKrw / 2);
   const purchaseCostMultiplier = DEFAULT_PURCHASE_COST_MULTIPLIER;
   const productOrderBudgetKrw = money(
-    snapshot?.budget ??
-      calculateProductOrderBudget(grossCogsBudgetKrw, purchaseCostMultiplier),
+    calculateProductOrderBudget(grossCogsBudgetKrw, purchaseCostMultiplier),
   );
   const engineExpectedSpendKrw = money(snapshot?.expectedSpend);
 
@@ -188,18 +209,27 @@ export async function loadInternalChinaPurchaseBudgetAudit(
   ).length;
 
   const status: InternalChinaPurchaseBudgetAuditStatus =
-    missingCostBarcodes.length > 0 || productOrderBudgetKrw <= 0
+    calendarRevenue.error ||
+    budgetMonthRevenueKrw <= 0 ||
+    missingCostBarcodes.length > 0 ||
+    productOrderBudgetKrw <= 0
       ? "COST_REVIEW"
       : selectedDraftEstimatedProductCostKrw > productOrderBudgetKrw
         ? "OVER_BUDGET"
         : "WITHIN_BUDGET";
 
+  const budgetRange = calendarRevenue.value?.range ?? cycle.budgetRange;
+
   return {
     generatedAt: new Date().toISOString(),
     analysisAsOf: shadow.analysisAsOf,
-    basisLabel:
-      snapshot?.budgetBasis ||
-      `최근30일 정상매출 ${recent30RevenueKrw.toLocaleString("ko-KR")}원 ÷ 2 · 배송대행 포함 배수 ${purchaseCostMultiplier.toFixed(2)}`,
+    cycleMonth: cycle.cycleMonth,
+    budgetMonth: cycle.budgetMonth,
+    budgetMonthRangeStart: budgetRange.start,
+    budgetMonthRangeEnd: budgetRange.end,
+    budgetMonthRevenueKrw,
+    budgetRevenueError: calendarRevenue.error,
+    basisLabel: `${koreanMonthLabel(cycle.budgetMonth)} 1일~말일 정상매출 ${budgetMonthRevenueKrw.toLocaleString("ko-KR")}원 ÷ 2 · 배송대행 포함 배수 ${purchaseCostMultiplier.toFixed(2)}`,
     recent30RevenueKrw,
     grossCogsBudgetKrw,
     purchaseCostMultiplier,
