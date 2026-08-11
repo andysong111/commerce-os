@@ -31,7 +31,7 @@ test("중국 상품링크는 최대 5개로 정규화하고 중복을 제거한�
   assert.equal(links[4], "https://detail.1688.com/offer/5.html");
 });
 
-test("선택한 링크를 상세페이지 엔진용 1번으로 고정한다", () => {
+test("선택한 링크를 상세페이지 엔진과 발주 기준용 1번으로 고정한다", () => {
   const pinned = promoteChinaProductLink(
     [
       "https://detail.1688.com/offer/1.html",
@@ -80,38 +80,30 @@ test("1번 링크를 상세페이지 엔진 대표 필드로 함께 저장한다
   assert.deepEqual(readChinaProductLinks(item), item.chinaProductLinks);
 });
 
-test("단일 옵션의 옵션 바코드가 비어 있으면 상품 기준 B-code를 중국 주문 매핑에 사용하고 저장한다", () => {
-  const links = ["https://detail.1688.com/offer/single.html"];
+test("단일 옵션의 옵션 바코드가 비어 있으면 상품 기준 B-code를 중국옵션 매핑에 사용하고 저장한다", () => {
   const item = {
     id: "single-option",
     barcode: "BCB7-1",
-    chinaProductLinks: links,
-    orderOptions: [
-      { id: "o1", barcode: "", saleOption: "블랙" },
-    ],
+    chinaProductLinks: ["https://detail.1688.com/offer/single.html"],
+    orderOptions: [{ id: "o1", barcode: "", saleOption: "블랙" }],
   };
   const mappings = readChinaOrderOptionMappings(item);
   assert.equal(mappings.length, 1);
   assert.equal(mappings[0].barcode, "BCB7-1");
   assert.equal(mappings[0].saleOption, "블랙");
 
-  const next = applyChinaOrderOptionMappings(
-    item,
-    [
-      {
-        ...mappings[0],
-        supplierLink: links[0],
-        chinaOption: "黑色",
-      },
-    ],
-    links,
-  );
+  const next = applyChinaOrderOptionMappings(item, [
+    {
+      ...mappings[0],
+      chinaOption: "黑色",
+    },
+  ]);
   assert.equal(next.orderOptions[0].barcode, "BCB7-1");
   assert.equal(next.orderOptions[0].chinaOption, "黑色");
-  assert.equal(next.orderOptions[0].supplierLink, links[0]);
+  assert.equal(next.orderOptions[0].supplierLink, undefined);
 });
 
-test("각 B-code는 서로 다른 1688 링크와 중국옵션을 저장할 수 있다", () => {
+test("각 B-code는 중국옵션만 따로 저장하고 주문링크는 상품 1번 링크를 공통 사용한다", () => {
   const links = [
     "https://detail.1688.com/offer/a.html",
     "https://detail.1688.com/offer/b.html",
@@ -126,62 +118,55 @@ test("각 B-code는 서로 다른 1688 링크와 중국옵션을 저장할 수 �
     },
     links,
   );
-  const next = applyChinaOrderOptionMappings(
-    base,
-    [
-      {
-        id: "o1",
-        barcode: "BAC4-1",
-        saleOption: "사이즈: A",
-        supplierLink: links[0],
-        chinaOption: "中国规格A",
-      },
-      {
-        id: "o2",
-        barcode: "BAC4-2",
-        saleOption: "사이즈: B",
-        supplierLink: links[1],
-        chinaOption: "中国规格B",
-      },
-    ],
-    links,
-  );
+  const next = applyChinaOrderOptionMappings(base, [
+    {
+      id: "o1",
+      barcode: "BAC4-1",
+      saleOption: "사이즈: A",
+      supplierLink: links[1],
+      chinaOption: "中国规格A",
+    },
+    {
+      id: "o2",
+      barcode: "BAC4-2",
+      saleOption: "사이즈: B",
+      supplierLink: links[1],
+      chinaOption: "中国规格B",
+    },
+  ]);
   const mappings = readChinaOrderOptionMappings(next);
   assert.deepEqual(
-    mappings.map((row) => [row.barcode, row.saleOption, row.supplierLink, row.chinaOption]),
+    mappings.map((row) => [row.barcode, row.saleOption, row.chinaOption]),
     [
-      ["BAC4-1", "사이즈: A", links[0], "中国规格A"],
-      ["BAC4-2", "사이즈: B", links[1], "中国规格B"],
+      ["BAC4-1", "사이즈: A", "中国规格A"],
+      ["BAC4-2", "사이즈: B", "中国规格B"],
     ],
   );
-  assert.equal(sameChinaOrderOptionMappings(next, mappings, links), true);
+  assert.deepEqual(next.chinaProductLinks, links);
+  assert.equal(next.orderOptions[0].supplierLink, undefined);
+  assert.equal(next.orderOptions[1].supplierLink, undefined);
+  assert.equal(sameChinaOrderOptionMappings(next, mappings), true);
 });
 
-test("B-code 주문링크는 상품상세에 저장된 중국 링크 중에서만 선택한다", () => {
-  assert.throws(
-    () =>
-      applyChinaOrderOptionMappings(
-        {
-          orderOptions: [
-            { id: "o1", barcode: "BAC4-1", saleOption: "A" },
-          ],
-        },
-        [
-          {
-            id: "o1",
-            barcode: "BAC4-1",
-            saleOption: "A",
-            supplierLink: "https://detail.1688.com/offer/not-saved.html",
-            chinaOption: "红色",
-          },
-        ],
-        ["https://detail.1688.com/offer/saved.html"],
-      ),
-    /중국 상품링크 목록에 없습니다/,
-  );
+test("B-code 중국옵션 입력에 과거 supplierLink 값이 들어와도 매핑 계약에서는 제거한다", () => {
+  const item = {
+    orderOptions: [{ id: "o1", barcode: "BAC4-1", saleOption: "A" }],
+  };
+  const next = applyChinaOrderOptionMappings(item, [
+    {
+      id: "o1",
+      barcode: "BAC4-1",
+      saleOption: "A",
+      supplierLink: "https://detail.1688.com/offer/old-option-link.html",
+      chinaOption: "红色",
+    },
+  ]);
+  const mapping = readChinaOrderOptionMappings(next)[0];
+  assert.equal(mapping.chinaOption, "红色");
+  assert.equal("supplierLink" in mapping, false);
 });
 
-test("중국 링크 UI는 5칸·1번 고정·B-code 주문매핑·서버 저장·상세 재열기를 지원한다", async () => {
+test("중국 링크 UI는 5칸·1번 고정을 유지하고 active B-code UI는 중국옵션만 저장한다", async () => {
   const legacyUi = await readFile(
     new URL(
       "../public/product-launch-tracker-app/china-product-links.js",
@@ -202,10 +187,10 @@ test("중국 링크 UI는 5칸·1번 고정·B-code 주문매핑·서버 저장�
   );
   assert.match(legacyUi, /MAX_CHINA_PRODUCT_LINKS/);
   assert.match(legacyUi, /1번으로 고정/);
-  assert.match(legacyUi, /상세페이지 엔진용 1번/);
-  assert.match(activeUi, /B-code별 중국 주문 매핑/);
-  assert.match(activeUi, /data-optimized-china-order-link-select/);
+  assert.match(activeUi, /B-code별 중국옵션/);
+  assert.doesNotMatch(activeUi, /data-optimized-china-order-link-select/);
   assert.match(activeUi, /data-optimized-china-order-option-input/);
+  assert.match(activeUi, /고정 1번 중국 상품링크/);
   assert.match(activeUi, /applyChinaOrderOptionMappings/);
   assert.match(activeUi, /mode: "item"/);
   assert.match(activeUi, /operation: "patch_item"/);
@@ -213,7 +198,7 @@ test("중국 링크 UI는 5칸·1번 고정·B-code 주문매핑·서버 저장�
   assert.match(app, /optimized-china-order-mapping\.js/);
 });
 
-test("기본 상세 저장의 preventDefault 이후에도 중국 링크와 주문옵션을 저장하고 저장 버튼을 화면에 고정한다", async () => {
+test("기본 상세 저장의 preventDefault 이후에도 중국옵션을 저장하고 저장 버튼을 화면에 고정한다", async () => {
   const ui = await readFile(
     new URL(
       "../public/product-launch-tracker-app/china-product-links.js",
@@ -241,8 +226,6 @@ test("기본 상세 저장의 preventDefault 이후에도 중국 링크와 주�
     ui,
     /event\.defaultPrevented \|\| event\.submitter\?\.value !== "save"/,
   );
-  assert.match(ui, /if \(detailDialog\?\.open\) return/);
-  assert.match(ui, /sameChinaOrderOptionMappings/);
   assert.match(activeUi, /waitForMainSave/);
   assert.match(activeUi, /if \(detailDialog\?\.open\)/);
   assert.match(html, /class="button button-primary detail-floating-save" value="save"/);
