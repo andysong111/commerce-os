@@ -6,6 +6,8 @@ on:
       - "src/lib/chinaOrderLedger.ts"
       - "src/lib/internalChinaPurchaseDraft.ts"
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
+      - "src/lib/monthlyPurchasePolicy.ts"
+      - "src/lib/shopling/calendarMonthRevenue.ts"
       - "src/app/api/china-order-ledger/**"
       - "src/app/api/china-order-manager/**"
       - "src/app/china-order-manager/**"
@@ -14,6 +16,7 @@ on:
       - "tests/chinaOrderLedger.test.mjs"
       - "tests/internalChinaPurchaseDraftMvp.test.mjs"
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
+      - "tests/monthlyPurchasePolicy.test.mjs"
       - ".github/workflows/china-order-ledger-ci.yml"
   workflow_dispatch:
 
@@ -35,12 +38,14 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint China order ledger and internal order MVP
+      - name: Lint China order ledger and monthly purchase budget
         run: >-
           npx eslint
           src/lib/chinaOrderLedger.ts
           src/lib/internalChinaPurchaseDraft.ts
           src/lib/internalChinaPurchaseBudgetAudit.ts
+          src/lib/monthlyPurchasePolicy.ts
+          src/lib/shopling/calendarMonthRevenue.ts
           src/app/api/china-order-ledger/events/route.ts
           "src/app/api/china-order-manager/drafts/[draftId]/route.ts"
           src/app/china-order-manager/page.tsx
@@ -51,14 +56,22 @@ jobs:
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
-      - name: Run China order ledger tests
+          tests/monthlyPurchasePolicy.test.mjs
+      - name: Run China order ledger and monthly budget tests
         run: >-
           node --experimental-strip-types --test
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
+          tests/monthlyPurchasePolicy.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://china-order-ledger-build-check.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_china_order_ledger_build_check
+          SUPABASE_SECRET_KEY: sb_secret_china_order_ledger_build_check
+          PRODUCT_MASTER_BASE_URL: https://commerce-os-product-master.vercel.app
+          PRODUCT_MASTER_INTEGRATION_SECRET: ci-product-master-secret
+          SHOPLING_LOGIN_ID: ci-shopling-id
+          SHOPLING_COMPANY_ID: ci-shopling-company
+          SHOPLING_API_AUTH_KEY: ci-shopling-key

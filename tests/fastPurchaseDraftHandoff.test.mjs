@@ -19,8 +19,14 @@ test("legacy handoff remains available for backward compatibility", () => {
 
 test("legacy queue still refuses non-reserved or already progressing drafts", () => {
   assert.match(handoff, /draft\.openQuantity <= 0/);
-  assert.match(handoff, /draft\.orderedQuantity > 0 \|\| draft\.receivedQuantity > 0/);
-  assert.match(handoff, /line\.status !== "RESERVED" \|\| line\.openQuantity <= 0/);
+  assert.match(
+    handoff,
+    /draft\.orderedQuantity > 0 \|\| draft\.receivedQuantity > 0/,
+  );
+  assert.match(
+    handoff,
+    /line\.status !== "RESERVED" \|\| line\.openQuantity <= 0/,
+  );
   assert.match(handoff, /FAST_PURCHASE_HANDOFF_ALREADY_PROGRESSING/);
 });
 
@@ -35,14 +41,18 @@ test("legacy relay metadata remains B-code safe", () => {
   assert.match(handoff, /\^LEGACY-/i);
   assert.match(handoff, /return barcode/);
   assert.match(handoff, /loadProductLaunchPurchaseMetadataByBarcode/);
-  assert.match(queue, /supplierLink: normalizeSupplierLink\(item\.supplierLink\)/);
+  assert.match(
+    queue,
+    /supplierLink: normalizeSupplierLink\(item\.supplierLink\)/,
+  );
 });
 
 test("operator fast-purchase UI now opens the Ops Center internal China draft directly", () => {
   assert.match(actions, /function internalChinaDraftUrl/);
   assert.match(actions, /\/china-order-manager\/drafts\//);
   assert.match(actions, /Ops Center 중국 주문초안 열기/);
-  assert.match(actions, /GPT Site를 거치지 않고 Ops Center 내부 중국 발주초안/);
+  assert.match(actions, /중국 발주 준비는 같은 월간 Draft를 계속 사용합니다/);
+  assert.match(actions, /OPS CENTER NATIVE/);
   assert.doesNotMatch(actions, /\/api\/fast-purchase\/drafts\/queue/);
   assert.doesNotMatch(actions, /orderManagerUrl|chatgpt\.site/);
 });

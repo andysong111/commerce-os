@@ -1,5 +1,12 @@
 import { openChinaOrderCommitmentsByBarcode } from "@/lib/chinaOrderLedger";
 import {
+  koreanMonthLabel,
+  monthlyPurchaseCycleFor,
+} from "@/lib/monthlyPurchasePolicy";
+import {
+  DEFAULT_PURCHASE_COST_MULTIPLIER,
+} from "@/lib/productDecisionEngine/portfolio";
+import {
   loadProductMasterCanonicalSalesAudit,
   type CanonicalRollingSalesRow,
 } from "@/lib/productMasterCanonicalSalesAudit";
@@ -8,6 +15,7 @@ import {
   loadProductDecisionLiveStatus,
   loadProductPlanningSnapshot,
 } from "@/lib/productDecisionLiveRefresh";
+import { loadCalendarMonthNormalRevenue } from "@/lib/shopling/calendarMonthRevenue";
 import {
   buildLiveProductDecisionSnapshot,
   type PlanningProduct,
@@ -44,6 +52,9 @@ export type CanonicalPurchaseShadow = {
   planningMismatchBarcodes: string[];
   commitmentBarcodeCount: number;
   recent30Revenue: number;
+  purchaseCycleMonth: string;
+  purchaseBudgetMonth: string;
+  purchaseBudgetMonthRevenue: number;
   snapshot: ReturnType<typeof buildLiveProductDecisionSnapshot> | null;
   legacyReference: {
     available: boolean;
@@ -105,9 +116,9 @@ function canonicalAggregate(
       planning: matches[0],
       units: canonical.monthlyUnits.map(integer),
       revenue: canonical.monthlyRevenue.map(integer),
-      // Phase 1 deliberately refuses to reuse Shopling order demand as a claim
-      // denominator. Claim/shipped-order auxiliary signals are connected only
-      // after the canonical demand path itself is proven independently.
+      // Purchase demand keeps using the rolling 12×30-day canonical history.
+      // Only the portfolio funding cap is frozen to the previous calendar
+      // month so marketplace settlement and purchase cashflow share one cycle.
       shippedOrders: emptyBuckets(),
       weightedClaims: emptyBuckets(),
       claimQuantity: emptyBuckets(),
@@ -143,13 +154,24 @@ function canonicalAggregate(
 export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseShadow> {
   const generatedAt = new Date().toISOString();
   const blockers: CanonicalPurchaseShadowBlocker[] = [];
+  const cycle = monthlyPurchaseCycleFor(generatedAt);
 
-  const [reconciliation, audit, planning, legacy] = await Promise.all([
-    loadPostApplyCanonicalReconciliation(),
-    loadProductMasterCanonicalSalesAudit(),
-    loadProductPlanningSnapshot(),
-    loadProductDecisionLiveStatus(),
-  ]);
+  const [reconciliation, audit, planning, legacy, budgetRevenueResult] =
+    await Promise.all([
+      loadPostApplyCanonicalReconciliation(),
+      loadProductMasterCanonicalSalesAudit(),
+      loadProductPlanningSnapshot(),
+      loadProductDecisionLiveStatus(),
+      loadCalendarMonthNormalRevenue(cycle.budgetMonth)
+        .then((value) => ({ value, error: null as string | null }))
+        .catch((error) => ({
+          value: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "CALENDAR_MONTH_REVENUE_UNAVAILABLE",
+        })),
+    ]);
 
   if (!reconciliation.ready || reconciliation.state !== "READY") {
     blockers.push({
@@ -160,7 +182,20 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
   if (!audit.ready || !audit.snapshot) {
     blockers.push({
       key: "canonical-audit",
-      message: audit.message || "Product Master canonical 판매원장을 읽지 못했습니다.",
+      message:
+        audit.message || "Product Master canonical 판매원장을 읽지 못했습니다.",
+    });
+  }
+
+  const purchaseBudgetMonthRevenue = integer(
+    budgetRevenueResult.value?.revenueKrw,
+  );
+  if (budgetRevenueResult.error || purchaseBudgetMonthRevenue <= 0) {
+    blockers.push({
+      key: "calendar-month-purchase-budget",
+      message: budgetRevenueResult.error
+        ? `${koreanMonthLabel(cycle.budgetMonth)} 달력월 정상매출 조회 실패: ${budgetRevenueResult.error}`
+        : `${koreanMonthLabel(cycle.budgetMonth)} 달력월 정상매출이 0원이라 월간 발주예산을 확정할 수 없습니다.`,
     });
   }
 
@@ -171,7 +206,9 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
     ? Math.max(0, Math.round(ageMs / 60_000))
     : null;
   const canonicalFresh =
-    canonicalAgeMinutes !== null && ageMs >= 0 && ageMs <= CANONICAL_FRESHNESS_MAX_MS;
+    canonicalAgeMinutes !== null &&
+    ageMs >= 0 &&
+    ageMs <= CANONICAL_FRESHNESS_MAX_MS;
   if (!canonicalFresh) {
     blockers.push({
       key: "canonical-freshness",
@@ -230,22 +267,36 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
         key: "china-order-commitments",
         message: `중국 미입고 원장 읽기 실패: ${commitments.error}`,
       });
-    } else {
+    } else if (!budgetRevenueResult.error && purchaseBudgetMonthRevenue > 0) {
       commitmentBarcodeCount = commitments.commitments.size;
+      const monthlyBudgetAggregate: ShoplingLiveAggregate = {
+        ...built.aggregate,
+        // buildLiveProductDecisionSnapshot uses this single portfolio funding
+        // field. Demand units/revenue buckets remain untouched.
+        recent30Revenue: purchaseBudgetMonthRevenue,
+      };
       snapshot = buildLiveProductDecisionSnapshot(
-        `canonical-purchase-shadow:${reconciliation.candidateSalesRequestId ?? analysisAsOf}`,
-        built.aggregate,
+        `canonical-purchase-shadow:${
+          reconciliation.candidateSalesRequestId ?? analysisAsOf
+        }`,
+        monthlyBudgetAggregate,
         commitments.commitments,
       );
       snapshot = {
         ...snapshot,
         notice:
-          "판매수요는 Product Master persisted canonical 12×30일 원장만 사용한 그림자 발주안입니다. 클레임 보조신호는 아직 연결하지 않아 중립값이며 실제 발주 실행은 차단됩니다.",
+          "판매수요는 Product Master canonical 12×30일 원장을 사용하고, 상품대금 발주예산은 직전 달력월 정상매출로 고정한 월간 발주안입니다. 클레임 보조신호는 아직 중립값이며 실제 발주 실행은 차단됩니다.",
+        budgetBasis:
+          `${koreanMonthLabel(cycle.budgetMonth)} 1일~말일 정상매출 ` +
+          `${purchaseBudgetMonthRevenue.toLocaleString("ko-KR")}원 ÷ 2 · ` +
+          `배송대행 포함 배수 ${DEFAULT_PURCHASE_COST_MULTIPLIER.toFixed(2)}`,
       };
       if ((snapshot.products ?? []).length !== exactPlanningMatchCount) {
         blockers.push({
           key: "engine-output-coverage",
-          message: `Engine 입력 ${exactPlanningMatchCount}개 · 출력 ${(snapshot.products ?? []).length}개`,
+          message: `Engine 입력 ${exactPlanningMatchCount}개 · 출력 ${
+            (snapshot.products ?? []).length
+          }개`,
         });
       }
     }
@@ -261,9 +312,6 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
       ? compareLiveProductDecision(legacySnapshot, snapshot)
       : null;
 
-  // This is intentionally a hard promotion blocker in Phase 1. The point of
-  // this shadow is to prove the primary demand source can be switched without
-  // silently falling back to Shopling order demand. Claims are connected next.
   blockers.push({
     key: "claim-auxiliary",
     message:
@@ -296,6 +344,9 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
     planningMismatchBarcodes,
     commitmentBarcodeCount,
     recent30Revenue,
+    purchaseCycleMonth: cycle.cycleMonth,
+    purchaseBudgetMonth: cycle.budgetMonth,
+    purchaseBudgetMonthRevenue,
     snapshot,
     legacyReference: {
       available: Boolean(legacySnapshot),
@@ -305,7 +356,7 @@ export async function loadCanonicalPurchaseShadow(): Promise<CanonicalPurchaseSh
     },
     blockers,
     message: shadowReady
-      ? "Product Master canonical 판매수요만으로 발주 엔진 입력·출력 전체를 생성했습니다. 다음 단계에서 클레임 보조신호를 연결하기 전까지 실제 전환은 차단합니다."
-      : "Canonical 발주 shadow의 구조 검증에서 차단 조건이 남아 있습니다.",
+      ? `${koreanMonthLabel(cycle.cycleMonth)} 발주안은 ${koreanMonthLabel(cycle.budgetMonth)} 달력월 매출예산과 최신 canonical 수요·재고·미입고를 결합해 계산했습니다.`
+      : "Canonical 월간 발주 shadow의 구조 검증에서 차단 조건이 남아 있습니다.",
   };
 }

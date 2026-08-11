@@ -4,10 +4,16 @@ on:
   pull_request:
     paths:
       - "src/lib/productDecisionLiveRefresh.ts"
+      - "src/lib/monthlyPurchasePolicy.ts"
+      - "src/lib/monthlyPurchaseCycleGate.ts"
+      - "src/lib/shopling/calendarMonthRevenue.ts"
+      - "src/lib/stage8CanonicalPurchaseShadow.ts"
       - "src/app/api/product-decision-agent/live-refresh/**"
       - "src/app/api/cron/product-decision-live-refresh/**"
       - "src/app/product-decision-agent/live-refresh/**"
       - "tests/productDecisionLiveRefreshWorker.test.mjs"
+      - "tests/monthlyPurchasePolicy.test.mjs"
+      - "tests/stage8CanonicalPurchaseShadow.test.mjs"
       - "vercel.json"
       - ".github/workflows/product-decision-live-refresh-ci.yml"
   workflow_dispatch:
@@ -30,19 +36,27 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint live refresh workflow
+      - name: Lint monthly purchase workflow
         run: >-
           npx eslint
           src/lib/productDecisionLiveRefresh.ts
+          src/lib/monthlyPurchasePolicy.ts
+          src/lib/monthlyPurchaseCycleGate.ts
+          src/lib/shopling/calendarMonthRevenue.ts
+          src/lib/stage8CanonicalPurchaseShadow.ts
           src/app/api/product-decision-agent/live-refresh/route.ts
           src/app/api/cron/product-decision-live-refresh/route.ts
           src/app/product-decision-agent/live-refresh/page.tsx
           src/app/product-decision-agent/live-refresh/LiveRefreshControl.tsx
           tests/productDecisionLiveRefreshWorker.test.mjs
-      - name: Run live refresh workflow tests
+          tests/monthlyPurchasePolicy.test.mjs
+          tests/stage8CanonicalPurchaseShadow.test.mjs
+      - name: Run monthly purchase workflow tests
         run: >-
           node --experimental-strip-types --test
           tests/productDecisionLiveRefreshWorker.test.mjs
+          tests/monthlyPurchasePolicy.test.mjs
+          tests/stage8CanonicalPurchaseShadow.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:

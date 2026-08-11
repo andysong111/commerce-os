@@ -16,6 +16,14 @@ test("canonical purchase shadow uses persisted Product Master rolling sales as t
   assert.match(engine, /buildLiveProductDecisionSnapshot/);
 });
 
+test("purchase funding is frozen to previous calendar month while rolling history remains the demand source", () => {
+  assert.match(engine, /monthlyPurchaseCycleFor\(generatedAt\)/);
+  assert.match(engine, /loadCalendarMonthNormalRevenue\(cycle\.budgetMonth\)/);
+  assert.match(engine, /recent30Revenue: purchaseBudgetMonthRevenue/);
+  assert.match(engine, /1일~말일 정상매출/);
+  assert.match(engine, /Demand units\/revenue buckets remain untouched/);
+});
+
 test("phase one cannot silently fall back to direct Shopling order demand", () => {
   assert.doesNotMatch(engine, /ShoplingReadClient/);
   assert.doesNotMatch(engine, /aggregateShoplingOrderChunk/);
@@ -29,6 +37,7 @@ test("promotion remains fail closed until claim auxiliary signal is connected", 
   assert.match(engine, /promotionReady: false/);
   assert.match(engine, /businessWritesEnabled: false/);
   assert.match(engine, /key: "claim-auxiliary"/);
+  assert.match(engine, /key: "calendar-month-purchase-budget"/);
   assert.match(engine, /CANONICAL_FRESHNESS_MAX_MS = 12 \* 60 \* 60 \* 1000/);
   assert.match(page, /실제 발주 항상 차단/);
   assert.match(page, /claim auxiliary 연결 전까지 전환 금지/);
@@ -46,6 +55,9 @@ test("planning and canonical active SKU coverage must be exact before shadow is 
   assert.match(engine, /matches\.length !== 1/);
   assert.match(engine, /planningMismatchBarcodes/);
   assert.match(engine, /exactPlanningMatchCount !== canonical\.rows\.length/);
-  assert.match(engine, /\(snapshot\.products \?\? \[\]\)\.length !== exactPlanningMatchCount/);
+  assert.match(
+    engine,
+    /\(snapshot\.products \?\? \[\]\)\.length !== exactPlanningMatchCount/,
+  );
   assert.match(page, /Engine 입력 일치/);
 });

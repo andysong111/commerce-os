@@ -19,14 +19,21 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Test internal draft safety
-        run: node --experimental-strip-types --test tests/fastPurchaseInternalDraft.test.mjs
+        run: >-
+          node --experimental-strip-types --test
+          tests/fastPurchaseInternalDraft.test.mjs
+          tests/monthlyPurchasePolicy.test.mjs
       - name: Lint internal draft files
         run: >-
           npx eslint
           src/lib/fastPurchaseInternalDraft.ts
+          src/lib/monthlyPurchasePolicy.ts
+          src/lib/monthlyPurchaseCycleGate.ts
           src/app/api/fast-purchase/drafts/route.ts
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           src/app/fast-purchase-mvp/page.tsx
+          tests/fastPurchaseInternalDraft.test.mjs
+          tests/monthlyPurchasePolicy.test.mjs
       - name: Build
         run: npm run build
         env:

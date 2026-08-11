@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
-import { CHINA_ORDER_EVENT_OPERATION_TYPE, loadChinaOrderLedger, normalizeChinaOrderCommitmentEvent } from "@/lib/chinaOrderLedger";
+import {
+  CHINA_ORDER_EVENT_OPERATION_TYPE,
+  loadChinaOrderLedger,
+  normalizeChinaOrderCommitmentEvent,
+} from "@/lib/chinaOrderLedger";
 import { loadFastPurchaseMvpResilient } from "@/lib/fastPurchaseMvpResilient";
+import {
+  monthlyPurchaseCycleFor,
+  seoulCalendarMonth,
+} from "@/lib/monthlyPurchasePolicy";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
@@ -39,6 +47,7 @@ export type FastPurchaseInternalDraft = {
   sourceFingerprint: string;
   dataMode: "LIVE" | "LAST_KNOWN_MANUAL_FALLBACK";
   createdAt: string;
+  cycleMonth: string;
   lineCount: number;
   totalQuantity: number;
   duplicate: boolean;
@@ -65,7 +74,9 @@ function hash(value: unknown) {
 
 function supabaseConnection() {
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(/\/$/, "");
-  const secret = (process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY)?.trim();
+  const secret = (
+    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+  )?.trim();
   if (!baseUrl || !secret) throw new Error("SUPABASE_ADMIN_NOT_CONFIGURED");
   return { baseUrl, secret };
 }
@@ -83,26 +94,41 @@ export async function createFastPurchaseInternalDraft(
   if (report.dataMode !== input.dataMode) {
     throw new Error("FAST_PURCHASE_DRAFT_MODE_CHANGED");
   }
-  if (!Array.isArray(input.lines) || input.lines.length < 1 || input.lines.length > MAX_LINES) {
+  if (
+    !Array.isArray(input.lines) ||
+    input.lines.length < 1 ||
+    input.lines.length > MAX_LINES
+  ) {
     throw new Error("FAST_PURCHASE_DRAFT_LINES_INVALID");
   }
 
-  const reportByBarcode = new Map(report.rows.map((row) => [barcode(row.barcode), row] as const));
+  const reportByBarcode = new Map(
+    report.rows.map((row) => [barcode(row.barcode), row] as const),
+  );
   const seen = new Set<string>();
   const lines: FastPurchaseInternalDraftLine[] = input.lines.map((raw) => {
     const key = barcode(raw.barcode);
-    if (!BARCODE.test(key) || seen.has(key)) throw new Error(`FAST_PURCHASE_DRAFT_BARCODE_INVALID:${key}`);
+    if (!BARCODE.test(key) || seen.has(key)) {
+      throw new Error(`FAST_PURCHASE_DRAFT_BARCODE_INVALID:${key}`);
+    }
     seen.add(key);
     const current = reportByBarcode.get(key);
-    if (!current) throw new Error(`FAST_PURCHASE_DRAFT_BARCODE_NOT_CURRENT:${key}`);
-    if (current.action !== "MANUAL_REVIEW" && current.action !== "DEMAND_ONLY_REVIEW") {
+    if (!current) {
+      throw new Error(`FAST_PURCHASE_DRAFT_BARCODE_NOT_CURRENT:${key}`);
+    }
+    if (
+      current.action !== "MANUAL_REVIEW" &&
+      current.action !== "DEMAND_ONLY_REVIEW"
+    ) {
       throw new Error(`FAST_PURCHASE_DRAFT_NOT_MANUAL:${key}`);
     }
     if (raw.stockSense !== "LOW" && raw.stockSense !== "OUT") {
       throw new Error(`FAST_PURCHASE_DRAFT_STOCK_JUDGMENT_REQUIRED:${key}`);
     }
     const plannedQuantity = quantity(raw.plannedQuantity);
-    if (plannedQuantity <= 0) throw new Error(`FAST_PURCHASE_DRAFT_QUANTITY_REQUIRED:${key}`);
+    if (plannedQuantity <= 0) {
+      throw new Error(`FAST_PURCHASE_DRAFT_QUANTITY_REQUIRED:${key}`);
+    }
     if (plannedQuantity > MANUAL_QUANTITY_MAX) {
       throw new Error(`FAST_PURCHASE_DRAFT_QUANTITY_EXCEEDED:${key}`);
     }
@@ -121,7 +147,10 @@ export async function createFastPurchaseInternalDraft(
     };
   });
 
-  const totalQuantity = lines.reduce((sum, line) => sum + line.plannedQuantity, 0);
+  const totalQuantity = lines.reduce(
+    (sum, line) => sum + line.plannedQuantity,
+    0,
+  );
   const stable = {
     sourceFingerprint: input.sourceFingerprint,
     dataMode: input.dataMode,
@@ -134,6 +163,26 @@ export async function createFastPurchaseInternalDraft(
   };
   const draftId = `fast-purchase-draft:${hash(stable).slice(0, 20)}`;
   const createdAt = new Date().toISOString();
+  const cycleMonth = monthlyPurchaseCycleFor(createdAt).cycleMonth;
+
+  // Purchase recommendation is a calendar-month decision. Once any internal
+  // Draft has been committed in that month, another different Draft must not
+  // be created by a later data refresh. Exact duplicate retries remain
+  // idempotent so a double-click cannot create a second business decision.
+  const existing = await loadFastPurchaseInternalDrafts();
+  if (existing.error) {
+    throw new Error(`FAST_PURCHASE_MONTHLY_CYCLE_LEDGER_UNAVAILABLE:${existing.error}`);
+  }
+  const sameCycle = existing.drafts.filter(
+    (draft) => draft.createdAt && draft.cycleMonth === cycleMonth,
+  );
+  const differentDraft = sameCycle.find((draft) => draft.draftId !== draftId);
+  if (differentDraft) {
+    throw new Error(
+      `FAST_PURCHASE_MONTHLY_CYCLE_ALREADY_USED:${cycleMonth}:${differentDraft.draftId}`,
+    );
+  }
+
   const { baseUrl, secret } = supabaseConnection();
   const operations = lines.map((line) => {
     const event = normalizeChinaOrderCommitmentEvent({
@@ -145,10 +194,13 @@ export async function createFastPurchaseInternalDraft(
       status: "RESERVED",
       requestedQuantity: line.plannedQuantity,
       occurredAt: createdAt,
-      note: `빠른 발주안 내부 Draft · ${line.stockSense === "OUT" ? "품절" : "부족"}`,
+      note: `빠른 발주안 내부 Draft · ${
+        line.stockSense === "OUT" ? "품절" : "부족"
+      }`,
       payload: {
         sourceFingerprint: input.sourceFingerprint,
         dataMode: input.dataMode,
+        cycleMonth,
         modelNo: line.modelNo,
         productName: line.productName,
         referenceDemandQuantity: line.referenceDemandQuantity,
@@ -161,14 +213,19 @@ export async function createFastPurchaseInternalDraft(
       operation_type: CHINA_ORDER_EVENT_OPERATION_TYPE,
       status: "SUCCEEDED",
       source: SOURCE_SYSTEM,
-      source_event_id: `china-order:${encodeURIComponent(event.sourceSystem)}:${encodeURIComponent(event.sourceEventId)}`,
-      correlation_id: `china-order-line:${encodeURIComponent(event.sourceSystem)}:${encodeURIComponent(event.sourceLineId)}`,
+      source_event_id: `china-order:${encodeURIComponent(
+        event.sourceSystem,
+      )}:${encodeURIComponent(event.sourceEventId)}`,
+      correlation_id: `china-order-line:${encodeURIComponent(
+        event.sourceSystem,
+      )}:${encodeURIComponent(event.sourceLineId)}`,
       actor_type: "OPS_OPERATOR",
       input_snapshot: event,
       result_snapshot: {
         accepted: true,
         internalDraft: true,
         externalOrderExecuted: false,
+        cycleMonth,
         draftId,
         barcode: line.barcode,
         requestedQuantity: line.plannedQuantity,
@@ -193,7 +250,11 @@ export async function createFastPurchaseInternalDraft(
     },
   );
   const body = await response.text();
-  if (!response.ok) throw new Error(`FAST_PURCHASE_DRAFT_STORE_FAILED:${response.status}:${body.slice(0, 300)}`);
+  if (!response.ok) {
+    throw new Error(
+      `FAST_PURCHASE_DRAFT_STORE_FAILED:${response.status}:${body.slice(0, 300)}`,
+    );
+  }
   const inserted = body ? (JSON.parse(body) as unknown) : [];
   const insertedCount = Array.isArray(inserted) ? inserted.length : 0;
 
@@ -202,6 +263,7 @@ export async function createFastPurchaseInternalDraft(
     sourceFingerprint: input.sourceFingerprint,
     dataMode: input.dataMode,
     createdAt,
+    cycleMonth,
     lineCount: lines.length,
     totalQuantity,
     duplicate: insertedCount === 0,
@@ -212,30 +274,61 @@ export async function createFastPurchaseInternalDraft(
 
 export async function loadFastPurchaseInternalDrafts() {
   const ledger = await loadChinaOrderLedger();
-  const rows = ledger.commitments.filter((row) => row.sourceSystem === SOURCE_SYSTEM);
+  const rows = ledger.commitments.filter(
+    (row) => row.sourceSystem === SOURCE_SYSTEM,
+  );
   const groups = new Map<string, typeof rows>();
   for (const row of rows) {
     const draftId = row.sourceRunId || "UNKNOWN_DRAFT";
     groups.set(draftId, [...(groups.get(draftId) ?? []), row]);
   }
   const drafts = [...groups.entries()]
-    .map(([draftId, lines]) => ({
-      draftId,
-      lineCount: lines.length,
-      requestedQuantity: lines.reduce((sum, line) => sum + line.requestedQuantity, 0),
-      orderedQuantity: lines.reduce((sum, line) => sum + line.orderedQuantity, 0),
-      receivedQuantity: lines.reduce((sum, line) => sum + line.receivedQuantity, 0),
-      openQuantity: lines.reduce((sum, line) => sum + line.openQuantity, 0),
-      updatedAt: lines.reduce((latest, line) => Date.parse(line.updatedAt) > Date.parse(latest) ? line.updatedAt : latest, lines[0]?.updatedAt ?? new Date(0).toISOString()),
-      lines: lines.map((line) => ({
-        barcode: line.barcode,
-        requestedQuantity: line.requestedQuantity,
-        orderedQuantity: line.orderedQuantity,
-        receivedQuantity: line.receivedQuantity,
-        openQuantity: line.openQuantity,
-        status: line.status,
-      })),
-    }))
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+    .map(([draftId, lines]) => {
+      const createdAt = lines.reduce((earliest, line) => {
+        const candidate = line.reservedAt || line.updatedAt;
+        if (!earliest) return candidate;
+        return Date.parse(candidate) < Date.parse(earliest) ? candidate : earliest;
+      }, "");
+      return {
+        draftId,
+        cycleMonth: createdAt ? seoulCalendarMonth(createdAt) : "",
+        createdAt,
+        lineCount: lines.length,
+        requestedQuantity: lines.reduce(
+          (sum, line) => sum + line.requestedQuantity,
+          0,
+        ),
+        orderedQuantity: lines.reduce(
+          (sum, line) => sum + line.orderedQuantity,
+          0,
+        ),
+        receivedQuantity: lines.reduce(
+          (sum, line) => sum + line.receivedQuantity,
+          0,
+        ),
+        openQuantity: lines.reduce(
+          (sum, line) => sum + line.openQuantity,
+          0,
+        ),
+        updatedAt: lines.reduce(
+          (latest, line) =>
+            Date.parse(line.updatedAt) > Date.parse(latest)
+              ? line.updatedAt
+              : latest,
+          lines[0]?.updatedAt ?? new Date(0).toISOString(),
+        ),
+        lines: lines.map((line) => ({
+          barcode: line.barcode,
+          requestedQuantity: line.requestedQuantity,
+          orderedQuantity: line.orderedQuantity,
+          receivedQuantity: line.receivedQuantity,
+          openQuantity: line.openQuantity,
+          status: line.status,
+        })),
+      };
+    })
+    .sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+    );
   return { drafts, error: ledger.error };
 }
