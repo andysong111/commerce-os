@@ -24,11 +24,19 @@ test("only shortage or stockout manual rows with positive quantities can enter a
   assert.match(draft, /FAST_PURCHASE_DRAFT_QUANTITY_REQUIRED/);
 });
 
-test("demand-only quantities cannot exceed the current zero-stock reference ceiling", () => {
+test("manual quantities may exceed the demand reference but never 9999", () => {
+  assert.match(draft, /const MANUAL_QUANTITY_MAX = 9_999/);
+  assert.match(draft, /plannedQuantity > MANUAL_QUANTITY_MAX/);
+  assert.match(draft, /FAST_PURCHASE_DRAFT_QUANTITY_EXCEEDED/);
   assert.match(draft, /FAST_PURCHASE_DRAFT_REFERENCE_CHANGED/);
-  assert.match(draft, /current\.action === "DEMAND_ONLY_REVIEW" && plannedQuantity > currentReference/);
-  assert.match(draft, /FAST_PURCHASE_DRAFT_REFERENCE_EXCEEDED/);
-  assert.match(actions, /Math\.min\(plannedQuantity, integer\(row\.referenceDemandQuantity\)\)/);
+  assert.doesNotMatch(draft, /FAST_PURCHASE_DRAFT_REFERENCE_EXCEEDED/);
+  assert.doesNotMatch(
+    draft,
+    /current\.action === "DEMAND_ONLY_REVIEW" && plannedQuantity > currentReference/,
+  );
+  assert.match(actions, /const MANUAL_QUANTITY_MAX = 9_999/);
+  assert.match(actions, /Math\.min\(\s*integer\(entry\.plannedQuantity\),\s*MANUAL_QUANTITY_MAX/);
+  assert.doesNotMatch(actions, /Math\.min\(plannedQuantity, integer\(row\.referenceDemandQuantity\)\)/);
 });
 
 test("internal draft stores RESERVED commitment events but never ORDERED or external execution", () => {
