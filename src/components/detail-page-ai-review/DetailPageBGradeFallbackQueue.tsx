@@ -242,8 +242,12 @@ function isCompletedBGrade(job: DetailPageReviewJob) {
   const request = record(result.bGradeEngineRequest);
   return (
     engine.id === "b-grade-hybrid-v2" ||
+    engine.id === "source-only-b-grade-v1" ||
     request.id === "b-grade-hybrid-v2" ||
-    (result.qualityTier === "B" && result.bGradeSourceFirst === true)
+    request.id === "source-only-b-grade-v1" ||
+    (result.qualityTier === "B" && result.bGradeSourceFirst === true) ||
+    (result.qualityTier === "B" && result.bGradeSourceOnly === true) ||
+    result.representativeQualityProof === "seller-source-only-no-ai-generation"
   );
 }
 
