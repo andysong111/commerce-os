@@ -3,7 +3,6 @@ import {
   normalizeChinaOrderOptionMappings,
   readChinaOrderOptionMappings,
 } from "./lib/china-order-options.mjs";
-import { normalizeChinaProductLinks } from "./lib/china-product-links.mjs";
 
 const OPTIMIZED_API = "/api/product-launch-tracker/optimized";
 const detailDialog = document.querySelector("#detail-dialog");
@@ -34,7 +33,6 @@ detailDialog?.addEventListener("close", () => {
 detailForm?.addEventListener("submit", captureBeforeSave, true);
 detailForm?.addEventListener("submit", schedulePersistAfterMainSave);
 detailForm?.addEventListener("input", handleMappingInput, true);
-detailForm?.addEventListener("change", handleMappingChange, true);
 
 function installStyles() {
   if (document.querySelector("#optimized-china-order-mapping-style")) return;
@@ -45,11 +43,11 @@ function installStyles() {
     .optimized-china-order-map-title { margin: 0; font-size: 14px; font-weight: 900; color: #0f172a; }
     .optimized-china-order-map-help { margin: 5px 0 0; font-size: 12px; line-height: 1.6; color: #64748b; }
     .optimized-china-order-map-list { display: grid; gap: 8px; margin-top: 12px; }
-    .optimized-china-order-map-row { display: grid; grid-template-columns: minmax(118px, 145px) minmax(150px, .8fr) minmax(230px, 1.1fr) minmax(230px, 1.1fr); gap: 8px; align-items: center; }
+    .optimized-china-order-map-row { display: grid; grid-template-columns: minmax(118px, 145px) minmax(150px, .8fr) minmax(260px, 1.4fr); gap: 8px; align-items: center; }
     .optimized-china-order-barcode { font: 800 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a; }
     .optimized-china-order-sale-option { font-size: 12px; font-weight: 800; color: #334155; }
-    .optimized-china-order-link-select, .optimized-china-order-option-input { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 13px; background: #fff; }
-    .optimized-china-order-link-select:focus, .optimized-china-order-option-input:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
+    .optimized-china-order-option-input { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px 12px; font-size: 13px; background: #fff; }
+    .optimized-china-order-option-input:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
     .optimized-china-order-empty { border: 1px dashed #cbd5e1; border-radius: 10px; padding: 12px; font-size: 12px; color: #64748b; background: #f8fafc; }
     .optimized-china-order-status { margin-top: 10px; font-size: 12px; font-weight: 800; color: #64748b; }
     .optimized-china-order-status[data-tone='dirty'] { color: #b45309; }
@@ -93,11 +91,11 @@ async function renderCurrentItemMapping(serial) {
     renderMappings(readChinaOrderOptionMappings(item));
     updateSectionHeading();
     setStatus(
-      "판매옵션은 B-code 기준값입니다. 주문할 1688 링크와 실제 중국옵션명만 지정한 뒤 상품 저장을 누르세요.",
+      "1688 주문링크는 이 모델의 고정 1번 중국 상품링크를 자동 사용합니다. B-code별로는 실제 중국옵션명만 저장하세요.",
     );
   } catch (error) {
     setStatus(
-      error instanceof Error ? error.message : "B-code별 중국 주문 매핑을 불러오지 못했습니다.",
+      error instanceof Error ? error.message : "B-code별 중국옵션을 불러오지 못했습니다.",
       "error",
     );
   }
@@ -113,8 +111,8 @@ function ensureMappingPanel() {
   panel.className = "optimized-china-order-map-wrap";
   panel.dataset.dirty = "false";
   panel.innerHTML = `
-    <h4 class="optimized-china-order-map-title">B-code별 중국 주문 매핑</h4>
-    <p class="optimized-china-order-map-help">각 B-code의 판매옵션은 이미 고정되어 있습니다. 해당 B-code가 실제로 주문할 1688 링크를 선택하고 중국 판매자의 옵션명을 입력하세요.</p>
+    <h4 class="optimized-china-order-map-title">B-code별 중국옵션</h4>
+    <p class="optimized-china-order-map-help">판매옵션과 B-code는 기준값입니다. 주문링크는 모델번호 기준 1번 중국 상품링크를 공통 사용하므로 여기서는 중국 판매자의 실제 옵션명만 입력합니다.</p>
     <div id="optimized-china-order-map-list" class="optimized-china-order-map-list"></div>
     <div id="optimized-china-order-map-status" class="optimized-china-order-status"></div>
   `;
@@ -127,10 +125,10 @@ function updateSectionHeading() {
   const section = detailForm?.querySelector("#optimized-china-product-links-section");
   const heading = section?.querySelector(".section-title-row h3");
   const help = section?.querySelector(".section-title-row p");
-  if (heading) heading.textContent = "중국 상품링크 · 주문옵션";
+  if (heading) heading.textContent = "중국 상품링크 · 중국옵션";
   if (help) {
     help.textContent =
-      "중국 링크는 최대 5개까지 저장합니다. 아래에서 각 B-code가 실제로 주문할 링크와 중국옵션을 연결합니다.";
+      "중국 링크는 최대 5개까지 저장하며 1번 링크가 해당 모델의 발주 기준링크입니다. B-code별로는 중국옵션명만 저장합니다.";
   }
 }
 
@@ -148,42 +146,10 @@ function renderMappings(mappings) {
         <div class="optimized-china-order-map-row" data-optimized-china-order-map-row data-option-id="${escapeAttribute(mapping.id)}" data-barcode="${escapeAttribute(mapping.barcode)}" data-sale-option="${escapeAttribute(mapping.saleOption)}">
           <span class="optimized-china-order-barcode">${escapeHtml(mapping.barcode || "B-code 미입력")}</span>
           <span class="optimized-china-order-sale-option">${escapeHtml(mapping.saleOption || "판매옵션 미입력")}</span>
-          <select class="optimized-china-order-link-select" data-optimized-china-order-link-select data-current-link="${escapeAttribute(mapping.supplierLink)}"></select>
           <input class="optimized-china-order-option-input" data-optimized-china-order-option-input type="text" autocomplete="off" placeholder="1688 실제 중국옵션명" value="${escapeAttribute(mapping.chinaOption)}" />
         </div>`,
     )
     .join("");
-  refreshMappingLinkChoices();
-}
-
-function currentRawLinks() {
-  return [...(detailForm?.querySelectorAll("[data-china-link-input]") ?? [])]
-    .map((input) => String(input.value ?? "").trim())
-    .filter(Boolean);
-}
-
-function currentNormalizedLinks() {
-  return normalizeChinaProductLinks(currentRawLinks());
-}
-
-function refreshMappingLinkChoices() {
-  const rawLinks = currentRawLinks();
-  for (const select of detailForm?.querySelectorAll(
-    "[data-optimized-china-order-link-select]",
-  ) ?? []) {
-    const current = String(select.value || select.dataset.currentLink || "").trim();
-    const choices = [...new Set(rawLinks)];
-    if (current && !choices.includes(current)) choices.unshift(current);
-    select.innerHTML = [
-      '<option value="">1688 링크 선택</option>',
-      ...choices.map(
-        (link, index) =>
-          `<option value="${escapeAttribute(link)}">${index + 1}번 · ${escapeHtml(link)}</option>`,
-      ),
-    ].join("");
-    select.value = current && choices.includes(current) ? current : "";
-    select.dataset.currentLink = select.value;
-  }
 }
 
 function readMappingValues() {
@@ -192,9 +158,6 @@ function readMappingValues() {
       id: String(row.dataset.optionId ?? "").trim(),
       barcode: String(row.dataset.barcode ?? "").trim(),
       saleOption: String(row.dataset.saleOption ?? "").trim(),
-      supplierLink: String(
-        row.querySelector("[data-optimized-china-order-link-select]")?.value ?? "",
-      ).trim(),
       chinaOption: String(
         row.querySelector("[data-optimized-china-order-option-input]")?.value ?? "",
       ).trim(),
@@ -204,20 +167,8 @@ function readMappingValues() {
 
 function handleMappingInput(event) {
   const target = event.target instanceof Element ? event.target : null;
-  if (!target) return;
-  if (target.matches("[data-china-link-input]")) {
-    refreshMappingLinkChoices();
-    return;
-  }
-  if (!target.matches("[data-optimized-china-order-option-input]")) return;
+  if (!target?.matches("[data-optimized-china-order-option-input]")) return;
   markDirty("B-code별 중국옵션 변경사항이 있습니다. 상품 저장 버튼을 눌러 반영하세요.");
-}
-
-function handleMappingChange(event) {
-  const target = event.target instanceof Element ? event.target : null;
-  if (!target?.matches("[data-optimized-china-order-link-select]")) return;
-  target.dataset.currentLink = String(target.value ?? "");
-  markDirty("B-code별 주문링크 변경사항이 있습니다. 상품 저장 버튼을 눌러 반영하세요.");
 }
 
 function markDirty(message) {
@@ -233,15 +184,14 @@ function captureBeforeSave(event) {
   const panel = detailForm?.querySelector("#optimized-china-order-map-wrap");
   if (!panel) return;
   try {
-    const links = currentNormalizedLinks();
-    const mappings = normalizeChinaOrderOptionMappings(readMappingValues(), links);
-    pendingSave = { itemId, links, mappings };
+    const mappings = normalizeChinaOrderOptionMappings(readMappingValues());
+    pendingSave = { itemId, mappings };
   } catch (error) {
     pendingSave = null;
     event.preventDefault();
     event.stopImmediatePropagation();
     const message =
-      error instanceof Error ? error.message : "B-code별 중국 주문 매핑을 확인하세요.";
+      error instanceof Error ? error.message : "B-code별 중국옵션을 확인하세요.";
     setStatus(message, "error");
     window.alert(message);
   }
@@ -256,7 +206,7 @@ function schedulePersistAfterMainSave(event) {
 
 function waitForMainSave(draft, attempt) {
   if (attempt > 80) {
-    console.error("China order mapping save timed out waiting for product detail save.");
+    console.error("China option mapping save timed out waiting for product detail save.");
     return;
   }
   window.setTimeout(() => {
@@ -271,13 +221,10 @@ function waitForMainSave(draft, attempt) {
 async function persistMapping(draft) {
   try {
     const item = await fetchItem(draft.itemId);
-    const availableLinks = Array.isArray(item.chinaProductLinks)
-      ? item.chinaProductLinks
-      : draft.links;
     const next = applyChinaOrderOptionMappings(
       item,
       draft.mappings,
-      availableLinks,
+      item.chinaProductLinks,
       { now: new Date(), updatedBy: "승준" },
     );
     const response = await fetch(OPTIMIZED_API, {
@@ -296,8 +243,10 @@ async function persistMapping(draft) {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok || body?.ok !== true) {
-      throw new Error(body?.message || "B-code별 중국 주문 매핑을 서버에 저장하지 못했습니다.");
+      throw new Error(body?.message || "B-code별 중국옵션을 서버에 저장하지 못했습니다.");
     }
+    const panel = detailForm?.querySelector("#optimized-china-order-map-wrap");
+    if (panel) panel.dataset.dirty = "false";
     window.dispatchEvent(
       new CustomEvent("product-launch-tracker:external-state", {
         detail: { source: "optimized-china-order-mapping", itemId: draft.itemId },
@@ -307,8 +256,8 @@ async function persistMapping(draft) {
     console.error(error);
     window.alert(
       error instanceof Error
-        ? `${error.message}\n상품 기본정보는 저장됐지만 중국 주문 매핑은 다시 확인해야 합니다.`
-        : "B-code별 중국 주문 매핑을 저장하지 못했습니다.",
+        ? `${error.message}\n상품 기본정보는 저장됐지만 중국옵션은 다시 확인해야 합니다.`
+        : "B-code별 중국옵션을 저장하지 못했습니다.",
     );
   }
 }

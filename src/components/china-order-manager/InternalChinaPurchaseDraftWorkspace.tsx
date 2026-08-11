@@ -137,7 +137,7 @@ export function InternalChinaPurchaseDraftWorkspace({
     const issues: string[] = [];
     for (const line of draft.lines) {
       if (line.unitPriceCny <= 0) issues.push(`${line.barcode} 위안단가`);
-      if (!line.supplierLink) issues.push(`${line.barcode} 1688 링크`);
+      if (!line.supplierLink) issues.push(`${line.barcode} 모델 1번 1688 링크`);
       if (!line.chinaOption.trim()) issues.push(`${line.barcode} 중국옵션`);
     }
     return issues;
@@ -167,7 +167,6 @@ export function InternalChinaPurchaseDraftWorkspace({
         barcode: line.barcode,
         quantity: line.quantity,
         chinaOption: line.chinaOption,
-        supplierLink: line.supplierLink,
         unitPriceCny: line.unitPriceCny,
         freightGroupId: line.freightGroupId,
         domesticChinaFreightCny: line.domesticChinaFreightCny,
@@ -301,11 +300,11 @@ export function InternalChinaPurchaseDraftWorkspace({
               실제 1688 주문 준비
             </h2>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              판매옵션은 B-code에 이미 고정된 기준값을 표시만 합니다. 1688 기준링크와
-              중국옵션은 상품출시진행관리 상품상세의 B-code별 중국 주문 매핑에서
-              자동으로 가져옵니다. 실제 주문 시에는 위안단가와 중국내 운임을 확인해
-              입력하고, 링크·중국옵션이 실제 1688 화면과 다를 때만 보정하세요. 수량은
-              빠른 발주안에서 RESERVED로 확정되어 이 화면에서는 변경하지 않습니다.
+              판매옵션은 B-code 기준값을 표시합니다. 1688 주문링크는 B-code별로
+              따로 입력하지 않고 해당 모델번호의 상품출시진행관리 고정 1번 중국
+              상품링크를 모든 옵션이 공통 사용합니다. B-code별로는 중국옵션만 확인하고,
+              실제 주문 시 위안단가와 중국내 운임을 입력하세요. 수량은 빠른 발주안에서
+              RESERVED로 확정되어 이 화면에서는 변경하지 않습니다.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
@@ -394,12 +393,12 @@ export function InternalChinaPurchaseDraftWorkspace({
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[2100px] text-left text-xs">
+          <table className="min-w-[1900px] text-left text-xs">
             <thead className="border-b border-slate-200 bg-slate-50 font-bold text-slate-500">
               <tr>
                 <th className="px-3 py-3">B-code / 모델 / 옵션</th>
                 <th className="px-3 py-3">중국옵션</th>
-                <th className="px-3 py-3">1688 기준 링크</th>
+                <th className="px-3 py-3">모델 고정 1번 1688 링크</th>
                 <th className="px-3 py-3 text-right">수량</th>
                 <th className="px-3 py-3 text-right">위안단가</th>
                 <th className="px-3 py-3">운임그룹</th>
@@ -446,28 +445,26 @@ export function InternalChinaPurchaseDraftWorkspace({
                         }
                       />
                     </td>
-                    <td className="min-w-[380px] px-2 py-2">
-                      <div className="flex gap-2">
-                        <Input
-                          value={line.supplierLink}
-                          disabled={!editable}
-                          required={!line.supplierLink}
-                          placeholder="B-code별 1688 링크 자동입력"
-                          onChange={(value) =>
-                            updateLine(line.barcode, { supplierLink: value })
-                          }
-                        />
-                        {validHttpUrl(line.supplierLink) ? (
+                    <td className="min-w-[330px] px-2 py-2">
+                      {validHttpUrl(line.supplierLink) ? (
+                        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-emerald-900">
+                            {line.supplierLink}
+                          </span>
                           <a
                             href={line.supplierLink}
                             target="_blank"
                             rel="noreferrer"
-                            className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-2 font-black text-emerald-800 hover:bg-emerald-100"
+                            className="shrink-0 rounded-lg border border-emerald-300 bg-white px-2.5 py-1.5 font-black text-emerald-800 hover:bg-emerald-100"
                           >
                             1688 열기
                           </a>
-                        ) : null}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 font-bold text-amber-900">
+                          상품출시진행관리에서 이 모델의 1번 중국 상품링크를 입력하세요.
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-right text-sm font-black text-slate-950">
                       {number.format(line.quantity)}
@@ -547,10 +544,11 @@ export function InternalChinaPurchaseDraftWorkspace({
 
       <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-950">
         <strong>운영 규칙</strong> · 판매옵션은 B-code 기준정보이며 이 화면에서
-        수정하지 않습니다. 상품출시진행관리에서 B-code별 1688 링크와 중국옵션을
-        저장하면 아직 주문 전인 기존 Draft에도 새로고침 시 자동 보충됩니다.
-        `1688 주문완료 후 기록`은 외부 주문 버튼이 아니며 실제 1688에서 주문·결제를
-        마친 뒤에만 눌러 Commerce OS의 RESERVED 약정을 ORDERED로 전환합니다.
+        수정하지 않습니다. 1688 주문링크는 해당 모델번호의 상품출시진행관리
+        고정 1번 중국 상품링크를 자동 사용하고 B-code별 링크 입력은 하지 않습니다.
+        중국옵션은 B-code별로 저장해 재사용합니다. `1688 주문완료 후 기록`은 외부
+        주문 버튼이 아니며 실제 1688에서 주문·결제를 마친 뒤에만 눌러 Commerce OS의
+        RESERVED 약정을 ORDERED로 전환합니다.
       </section>
     </div>
   );

@@ -1,7 +1,7 @@
 import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
-const PRODUCT_LAUNCH_ASSET_VERSION = "20260811-china-order-map-v3";
+const PRODUCT_LAUNCH_ASSET_VERSION = "20260812-model-fixed-first-china-link-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,

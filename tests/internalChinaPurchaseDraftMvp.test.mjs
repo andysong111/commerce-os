@@ -40,12 +40,14 @@ test("B-code metadata is reused from Product Master tracker and live Shopling mo
   assert.match(engine, /live\?\.modelName/);
 });
 
-test("product launch metadata uses each option B-code supplier link before the product-level fallback", () => {
-  assert.match(trackerMetadata, /normalizeSupplierLink\(option\.supplierLink\)/);
-  assert.match(trackerMetadata, /fallbackSupplierLink/);
+test("product launch metadata uses the model product-level fixed first China link for every B-code", () => {
+  assert.match(trackerMetadata, /fixedFirstSupplierLink = summaryLinks\[0\]/);
+  assert.match(trackerMetadata, /supplierLink: fixedFirstSupplierLink/);
   assert.match(trackerMetadata, /saleOption: text\(option\.saleOption\)/);
   assert.match(trackerMetadata, /chinaOption: text\(option\.chinaOption\)/);
   assert.match(trackerMetadata, /barcode = normalizeBarcode\(option\.barcode\)/);
+  assert.doesNotMatch(trackerMetadata, /normalizeSupplierLink\(option\.supplierLink\)/);
+  assert.doesNotMatch(trackerMetadata, /supplierLinkByIndex/);
 });
 
 test("tracker B-code metadata is authoritative while old saved blanks remain a fallback", () => {
@@ -54,10 +56,6 @@ test("tracker B-code metadata is authoritative while old saved blanks remain a f
   assert.match(
     engine,
     /chinaOption: baseLine\.chinaOption \|\| text\(saved\.chinaOption\)/,
-  );
-  assert.match(
-    engine,
-    /supplierLink: baseLine\.supplierLink \|\| text\(saved\.supplierLink\)/,
   );
   assert.match(engine, /return saved \? mergeSavedLine\(line, saved\) : line/);
 });
@@ -90,6 +88,21 @@ test("reserved quantity and sale option remain source-owned while order-time cos
   assert.match(
     workspace,
     /수량은[\s\S]*RESERVED로 확정되어 이 화면에서는 변경하지 않습니다/,
+  );
+});
+
+test("1688 link is read-only and comes from the model fixed first product link", () => {
+  assert.match(workspace, /모델 고정 1번 1688 링크/);
+  assert.match(workspace, /해당 모델번호의 상품출시진행관리/);
+  assert.match(workspace, /고정 1번 중국/);
+  assert.match(workspace, /1688 열기/);
+  assert.doesNotMatch(
+    workspace,
+    /updateLine\(line\.barcode,\s*\{\s*supplierLink:/,
+  );
+  assert.doesNotMatch(
+    workspace.match(/function payload\(\)[\s\S]*?\n  }\n\n  async function saveDraft/)?.[0] ?? "",
+    /supplierLink:/,
   );
 });
 
