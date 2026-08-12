@@ -3,16 +3,25 @@ import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
+  readProductLaunchListSnapshot,
   readProductLaunchState,
   readResponseJson,
   resolveProductLaunchIdentity,
   writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
 import {
+  PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD,
+  buildProductLaunchListIndex,
+  buildProductLaunchListSnapshot,
+  parseProductLaunchListSnapshot,
+  queryProductLaunchListPage,
+  withProductLaunchListSnapshot,
+  type ProductLaunchTrackerListIndex,
+} from "@/lib/productLaunchTrackerListSnapshot";
+import {
   applyProductLaunchTrackerMutation,
   buildProductLaunchTrackerIndex,
   getProductLaunchTrackerItem,
-  queryProductLaunchTrackerPage,
   type ProductLaunchTrackerIndex,
   type ProductLaunchTrackerState,
 } from "@/lib/productLaunchTrackerOptimized";
@@ -30,6 +39,17 @@ const cache = new Map<
     index: ProductLaunchTrackerIndex;
   }
 >();
+const listCache = new Map<
+  string,
+  {
+    updatedAt: string | null;
+    schemaVersion: number | null;
+    checkedAt: number;
+    accessedAt: number;
+    source: "snapshot" | "full_fallback";
+    index: ProductLaunchTrackerListIndex;
+  }
+>();
 const mutationQueues = new Map<string, Promise<unknown>>();
 
 type StoredRow = {
@@ -37,6 +57,12 @@ type StoredRow = {
   updated_at?: unknown;
   schema_version?: unknown;
   owner_email?: unknown;
+};
+
+type ListStoredRow = {
+  list_snapshot?: unknown;
+  updated_at?: unknown;
+  schema_version?: unknown;
 };
 
 export async function GET(request: NextRequest) {
@@ -47,6 +73,45 @@ export async function GET(request: NextRequest) {
   if (!config.ok) return Response.json(config.body, { status: config.status });
 
   try {
+    const mode = request.nextUrl.searchParams.get("mode") || "page";
+    if (mode === "page") {
+      const loaded = await loadCachedListIndex(
+        config.value,
+        identity.value.userId,
+      );
+      if (!loaded) {
+        return Response.json({
+          ok: true,
+          stateExists: false,
+          updatedAt: null,
+          schemaVersion: null,
+        });
+      }
+
+      const page = queryProductLaunchListPage(loaded.index, {
+        page: request.nextUrl.searchParams.get("page"),
+        pageSize: request.nextUrl.searchParams.get("pageSize"),
+        search: request.nextUrl.searchParams.get("search"),
+        batch: request.nextUrl.searchParams.get("batch"),
+        assignee: request.nextUrl.searchParams.get("assignee"),
+        overall: request.nextUrl.searchParams.get("overall"),
+        unfinishedOnly: request.nextUrl.searchParams.get("unfinishedOnly"),
+        sort: request.nextUrl.searchParams.get("sort"),
+        direction: request.nextUrl.searchParams.get("direction"),
+      });
+
+      return Response.json({
+        ok: true,
+        stateExists: true,
+        ...page,
+        policy: loaded.index.snapshot.policy ?? null,
+        sourceImportedAt: loaded.index.snapshot.sourceImportedAt ?? null,
+        updatedAt: loaded.updatedAt,
+        schemaVersion: loaded.schemaVersion,
+        listSource: loaded.source,
+      });
+    }
+
     const loaded = await loadCachedIndex(
       config.value,
       identity.value.userId,
@@ -60,7 +125,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const mode = request.nextUrl.searchParams.get("mode") || "page";
     if (mode === "items") {
       const requestedIds = [
         ...new Set(
@@ -153,27 +217,14 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const page = queryProductLaunchTrackerPage(loaded.index, {
-      page: request.nextUrl.searchParams.get("page"),
-      pageSize: request.nextUrl.searchParams.get("pageSize"),
-      search: request.nextUrl.searchParams.get("search"),
-      batch: request.nextUrl.searchParams.get("batch"),
-      assignee: request.nextUrl.searchParams.get("assignee"),
-      overall: request.nextUrl.searchParams.get("overall"),
-      unfinishedOnly: request.nextUrl.searchParams.get("unfinishedOnly"),
-      sort: request.nextUrl.searchParams.get("sort"),
-      direction: request.nextUrl.searchParams.get("direction"),
-    });
-
-    return Response.json({
-      ok: true,
-      stateExists: true,
-      ...page,
-      policy: loaded.index.state.policy ?? null,
-      sourceImportedAt: loaded.index.state.sourceImportedAt ?? null,
-      updatedAt: loaded.updatedAt,
-      schemaVersion: loaded.schemaVersion,
-    });
+    return Response.json(
+      {
+        ok: false,
+        code: "PRODUCT_LAUNCH_TRACKER_MODE_NOT_SUPPORTED",
+        message: "지원하지 않는 진행관리 조회 방식입니다.",
+      },
+      { status: 400 },
+    );
   } catch (error) {
     return Response.json(
       {
@@ -241,6 +292,92 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
+async function loadCachedListIndex(
+  config: { supabaseUrl: string; secretKey: string },
+  ownerId: string,
+) {
+  const existing = listCache.get(ownerId);
+  const now = Date.now();
+  if (existing && now - existing.checkedAt < CACHE_STAMP_TTL_MS) {
+    existing.accessedAt = now;
+    return {
+      updatedAt: existing.updatedAt,
+      schemaVersion: existing.schemaVersion,
+      source: existing.source,
+      index: existing.index,
+    };
+  }
+
+  if (!existing) return loadAndCacheListSnapshot(config, ownerId);
+
+  const stamp = await readStateStamp(config, ownerId);
+  if (!stamp) {
+    listCache.delete(ownerId);
+    cache.delete(ownerId);
+    return null;
+  }
+  if (existing.updatedAt === stamp.updatedAt) {
+    existing.checkedAt = now;
+    existing.accessedAt = now;
+    existing.schemaVersion = stamp.schemaVersion;
+    return {
+      updatedAt: stamp.updatedAt,
+      schemaVersion: stamp.schemaVersion,
+      source: existing.source,
+      index: existing.index,
+    };
+  }
+
+  return loadAndCacheListSnapshot(config, ownerId);
+}
+
+async function loadAndCacheListSnapshot(
+  config: { supabaseUrl: string; secretKey: string },
+  ownerId: string,
+) {
+  const row = (await readProductLaunchListSnapshot(
+    config,
+    ownerId,
+  )) as ListStoredRow | null;
+  if (!row) return null;
+
+  const updatedAt = nullableText(row.updated_at);
+  const schemaVersion = numberOrNull(row.schema_version);
+  const snapshot = parseProductLaunchListSnapshot(row.list_snapshot);
+  if (snapshot) {
+    const index = buildProductLaunchListIndex(snapshot);
+    setListCache(ownerId, {
+      updatedAt,
+      schemaVersion,
+      source: "snapshot",
+      index,
+    });
+    return {
+      updatedAt,
+      schemaVersion,
+      source: "snapshot" as const,
+      index,
+    };
+  }
+
+  const full = await loadAndCacheFullState(config, ownerId);
+  if (!full) return null;
+  const fallbackSnapshot = buildProductLaunchListSnapshot(full.index.state);
+  const index = buildProductLaunchListIndex(fallbackSnapshot);
+  setListCache(ownerId, {
+    updatedAt: full.updatedAt,
+    schemaVersion: full.schemaVersion,
+    source: "full_fallback",
+    index,
+  });
+  return {
+    updatedAt: full.updatedAt,
+    schemaVersion: full.schemaVersion,
+    source: "full_fallback" as const,
+    index,
+  };
+}
+
 async function loadCachedIndex(
   config: { supabaseUrl: string; secretKey: string },
   ownerId: string,
@@ -256,18 +393,12 @@ async function loadCachedIndex(
     };
   }
 
-  // Cold start: read the full saved state once. Previously this path first read
-  // a lightweight timestamp row and then fetched the same owner's full state,
-  // creating two sequential Supabase round trips before the first table render.
-  if (!existing) {
-    return loadAndCacheFullState(config, ownerId);
-  }
+  if (!existing) return loadAndCacheFullState(config, ownerId);
 
-  // Warm cache: keep the cheap timestamp check so page/filter changes can reuse
-  // the in-memory index without re-downloading the full payload when unchanged.
   const stamp = await readStateStamp(config, ownerId);
   if (!stamp) {
     cache.delete(ownerId);
+    listCache.delete(ownerId);
     return null;
   }
   if (existing.updatedAt === stamp.updatedAt) {
@@ -290,12 +421,26 @@ async function loadAndCacheFullState(
 ) {
   const row = (await readProductLaunchState(config, ownerId)) as StoredRow | null;
   if (!row || !isRecord(row.state_payload)) return null;
-  const index = buildProductLaunchTrackerIndex(
-    row.state_payload as ProductLaunchTrackerState,
-  );
+  const state = row.state_payload as ProductLaunchTrackerState;
+  const index = buildProductLaunchTrackerIndex(state);
   const updatedAt = nullableText(row.updated_at);
   const schemaVersion = numberOrNull(row.schema_version);
   setCache(ownerId, { updatedAt, schemaVersion, index });
+
+  const snapshot =
+    parseProductLaunchListSnapshot(
+      state[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD],
+    ) ?? buildProductLaunchListSnapshot(state);
+  setListCache(ownerId, {
+    updatedAt,
+    schemaVersion,
+    source: parseProductLaunchListSnapshot(
+      state[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD],
+    )
+      ? "snapshot"
+      : "full_fallback",
+    index: buildProductLaunchListIndex(snapshot),
+  });
   return { updatedAt, schemaVersion, index };
 }
 
@@ -317,20 +462,32 @@ async function mutateStateWithRetry(
       row.state_payload as ProductLaunchTrackerState,
       input,
     );
+    const persistedState = withProductLaunchListSnapshot(mutation.state);
     const saved = await conditionalWriteState(
       config,
       identity,
-      mutation.state,
+      persistedState,
       nullableText(row.updated_at),
     );
     if (!saved) continue;
 
-    const index = buildProductLaunchTrackerIndex(mutation.state);
+    const index = buildProductLaunchTrackerIndex(persistedState);
+    const listSnapshot =
+      parseProductLaunchListSnapshot(
+        persistedState[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD],
+      ) ?? buildProductLaunchListSnapshot(persistedState);
     const updatedAt = nullableText(saved.updated_at) || new Date().toISOString();
+    const schemaVersion = numberOrNull(saved.schema_version) ?? 3;
     setCache(identity.userId, {
       updatedAt,
-      schemaVersion: numberOrNull(saved.schema_version) ?? 3,
+      schemaVersion,
       index,
+    });
+    setListCache(identity.userId, {
+      updatedAt,
+      schemaVersion,
+      source: "snapshot",
+      index: buildProductLaunchListIndex(listSnapshot),
     });
     const changedItems = mutation.changedIds
       .map((id) => index.summariesById.get(id))
@@ -342,7 +499,7 @@ async function mutateStateWithRetry(
 
     return {
       updatedAt,
-      schemaVersion: numberOrNull(saved.schema_version) ?? 3,
+      schemaVersion,
       changedIds: mutation.changedIds,
       createdIds: mutation.createdIds,
       items: changedItems,
@@ -434,11 +591,32 @@ function setCache(
 ) {
   const now = Date.now();
   cache.set(ownerId, { ...value, checkedAt: now, accessedAt: now });
-  if (cache.size <= MAX_CACHE_OWNERS) return;
-  const oldest = [...cache.entries()]
+  trimCache(cache, ownerId);
+}
+
+function setListCache(
+  ownerId: string,
+  value: {
+    updatedAt: string | null;
+    schemaVersion: number | null;
+    source: "snapshot" | "full_fallback";
+    index: ProductLaunchTrackerListIndex;
+  },
+) {
+  const now = Date.now();
+  listCache.set(ownerId, { ...value, checkedAt: now, accessedAt: now });
+  trimCache(listCache, ownerId);
+}
+
+function trimCache<T extends { accessedAt: number }>(
+  target: Map<string, T>,
+  ownerId: string,
+) {
+  if (target.size <= MAX_CACHE_OWNERS) return;
+  const oldest = [...target.entries()]
     .filter(([key]) => key !== ownerId)
     .sort((left, right) => left[1].accessedAt - right[1].accessedAt)[0];
-  if (oldest) cache.delete(oldest[0]);
+  if (oldest) target.delete(oldest[0]);
 }
 
 function enqueueMutation<T>(ownerId: string, operation: () => Promise<T>) {
