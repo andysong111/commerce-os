@@ -1,6 +1,10 @@
-import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD,
+  withProductLaunchListSnapshot,
+} from "@/lib/productLaunchTrackerListSnapshot";
+import type { ProductLaunchTrackerState } from "@/lib/productLaunchTrackerOptimized";
 import {
   isOpsLoginTemporarilyDisabled,
   isSameOriginOpsRequest,
@@ -18,7 +22,7 @@ export type ProductLaunchAdminConfig = {
 };
 
 export async function resolveProductLaunchIdentity(
-  request: NextRequest,
+  request: Request,
   options: { requireSameOrigin?: boolean } = {},
 ): Promise<
   | { ok: true; value: ProductLaunchIdentity }
@@ -126,17 +130,46 @@ export async function readProductLaunchState(
   return Array.isArray(body) ? body[0] ?? null : null;
 }
 
+export async function readProductLaunchListSnapshot(
+  config: ProductLaunchAdminConfig,
+  ownerId: string,
+) {
+  const params = new URLSearchParams({
+    select: `list_snapshot:state_payload->${PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD},updated_at,schema_version`,
+    owner_id: `eq.${ownerId}`,
+    limit: "1",
+  });
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/product_launch_tracker_states?${params.toString()}`,
+    {
+      headers: createSupabaseAdminHeaders(config.secretKey),
+      cache: "no-store",
+    },
+  );
+  const body = await readResponseJson(response);
+  if (!response.ok) {
+    throw new Error(readProductLaunchError(body, response.status));
+  }
+  return Array.isArray(body) ? body[0] ?? null : null;
+}
+
 export async function writeProductLaunchState(
   config: ProductLaunchAdminConfig,
   identity: ProductLaunchIdentity,
   state: Record<string, unknown>,
 ) {
-  const schemaVersion = Math.max(1, Math.floor(Number(state.schemaVersion) || 3));
+  const persistedState = withProductLaunchListSnapshot(
+    state as ProductLaunchTrackerState,
+  );
+  const schemaVersion = Math.max(
+    1,
+    Math.floor(Number(persistedState.schemaVersion) || 3),
+  );
   const row = {
     owner_id: identity.userId,
     owner_email: identity.email,
     schema_version: schemaVersion,
-    state_payload: state,
+    state_payload: persistedState,
     updated_at: new Date().toISOString(),
   };
   const response = await fetch(
