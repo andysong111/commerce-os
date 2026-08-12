@@ -1,0 +1,131 @@
+name: Product Launch List Snapshot 20260813
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/product-launch-list-snapshot-20260813.yml"
+      - "src/lib/productLaunchTrackerListSnapshot.ts"
+      - "src/lib/productLaunchTrackerServer.ts"
+      - "src/app/api/product-launch-tracker/optimized/route.ts"
+      - "src/app/api/product-launch-tracker/state/route.ts"
+      - "src/app/api/product-launch-tracker/migrations/list-snapshot-20260813/route.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-launch-list-snapshot-20260813
+  cancel-in-progress: false
+
+jobs:
+  backfill-and-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for production migration endpoint
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813'
+          for attempt in $(seq 1 40); do
+            code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            if [ "$code" = '200' ]; then
+              cat /tmp/dry-run.json
+              node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'dry-run returned ok=false');
+          const report = body.report || {};
+          if (!(report.stateItemCount > 0)) throw new Error(`invalid stateItemCount=${report.stateItemCount}`);
+          if (report.snapshotItemCount !== report.stateItemCount) {
+            throw new Error(`snapshot count mismatch ${report.snapshotItemCount}/${report.stateItemCount}`);
+          }
+          if (!(report.snapshotBytes > 0) || !(report.fullStateBytes > report.snapshotBytes)) {
+            throw new Error(`snapshot is not lighter: full=${report.fullStateBytes} snapshot=${report.snapshotBytes}`);
+          }
+          NODE
+              exit 0
+            fi
+            echo "attempt=$attempt status=$code"
+            cat /tmp/dry-run.json 2>/dev/null || true
+            sleep 10
+          done
+          echo 'List snapshot endpoint did not become ready in time.' >&2
+          exit 1
+
+      - name: Apply snapshot exactly once
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813?apply=1'
+          curl --fail-with-body -sS "$URL" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'apply returned ok=false');
+          if (body.applied !== true && body.alreadyApplied !== true) {
+            throw new Error('snapshot was neither applied nor already applied');
+          }
+          if (body.snapshotReadable !== true) throw new Error('stored snapshot was not readable');
+          NODE
+
+      - name: Verify idempotency and JSON-path read
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813'
+          curl --fail-with-body -sS "$URL" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          if (body.ok !== true || body.alreadyApplied !== true) {
+            throw new Error('snapshot migration marker verification failed');
+          }
+          if (body.snapshotReadable !== true) throw new Error('JSON-path snapshot verification failed');
+          if (body.snapshotItemCount !== body.report?.stateItemCount) {
+            throw new Error(`stored count mismatch ${body.snapshotItemCount}/${body.report?.stateItemCount}`);
+          }
+          NODE
+
+      - name: Probe production page through lightweight list path
+        run: |
+          set -euo pipefail
+          BASE='https://commerce-os-ops-center.vercel.app'
+          URL="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE" \
+            -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -w '%{time_total}' \
+            "$URL" \
+            -o /tmp/page.json \
+            > /tmp/page-time.txt
+          cat /tmp/page.json
+          echo "page_time_seconds=$(cat /tmp/page-time.txt)"
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/page.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'page probe returned ok=false');
+          if (body.listSource !== 'snapshot') throw new Error(`unexpected listSource=${body.listSource}`);
+          if (!(body.total > 0)) throw new Error(`invalid total=${body.total}`);
+          if (!Array.isArray(body.items) || body.items.length > 25) {
+            throw new Error(`invalid page item count=${body.items?.length}`);
+          }
+          const seconds = Number(fs.readFileSync('/tmp/page-time.txt', 'utf8'));
+          if (!Number.isFinite(seconds) || seconds > 30) {
+            throw new Error(`page probe remained too slow: ${seconds}s`);
+          }
+          const report = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8')).report || {};
+          const summary = [
+            '## Product Launch lightweight list snapshot',
+            '',
+            `- state items: ${report.stateItemCount ?? 0}`,
+            `- full state bytes: ${report.fullStateBytes ?? 0}`,
+            `- list snapshot bytes: ${report.snapshotBytes ?? 0}`,
+            `- reduction: ${report.reductionPercent ?? 0}%`,
+            `- production page source: ${body.listSource}`,
+            `- production page time: ${seconds.toFixed(3)}s`,
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          NODE
