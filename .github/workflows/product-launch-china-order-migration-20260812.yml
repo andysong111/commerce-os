@@ -1,0 +1,79 @@
+name: Product Launch China Order Migration 20260812
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/product-launch-china-order-migration-20260812.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for production migration endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/china-order-20260812'
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            if [ "$code" = '200' ]; then
+              cat /tmp/dry-run.json
+              exit 0
+            fi
+            echo "attempt=$attempt status=$code"
+            sleep 10
+          done
+          echo 'Migration endpoint did not become ready in time.' >&2
+          cat /tmp/dry-run.json 2>/dev/null || true
+          exit 1
+
+      - name: Apply migration exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/china-order-20260812?apply=1'
+          curl --fail-with-body -sS "$URL" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'migration returned ok=false');
+          if (body.applied !== true && body.alreadyApplied !== true) {
+            throw new Error('migration neither applied nor alreadyApplied');
+          }
+          const report = body.report || {};
+          console.log(`matched=${report.matchedItems ?? 0} changed=${report.changedItems ?? 0} linkChanged=${report.linkChangedItems ?? 0} optionChanged=${report.optionChangedItems ?? 0}`);
+          NODE
+
+      - name: Verify idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/china-order-20260812'
+          curl --fail-with-body -sS "$URL" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          if (body.ok !== true || body.alreadyApplied !== true) {
+            throw new Error('migration marker verification failed');
+          }
+          const report = body.report || {};
+          const summary = [
+            '## China order migration 2026-08-12',
+            '',
+            `- matched items: ${report.matchedItems ?? 0}`,
+            `- changed items: ${report.changedItems ?? 0}`,
+            `- link changed items: ${report.linkChangedItems ?? 0}`,
+            `- option changed items: ${report.optionChangedItems ?? 0}`,
+            `- ambiguous models: ${(report.ambiguousModels || []).length}`,
+            `- option issues: ${(report.optionIssues || []).length}`,
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          NODE
