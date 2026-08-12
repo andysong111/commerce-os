@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import {
+  PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD,
+  withProductLaunchListSnapshot,
+} from "@/lib/productLaunchTrackerListSnapshot";
+import type { ProductLaunchTrackerState } from "@/lib/productLaunchTrackerOptimized";
+import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
   readProductLaunchState,
@@ -126,8 +131,10 @@ export async function PUT(request: NextRequest) {
     const existing = isRecord(existingRow?.state_payload)
       ? (existingRow.state_payload as TrackerStatePayload)
       : null;
-    const state = normalizeStatePayload(
-      preserveServerDeletedItems(incoming, existing),
+    const state = prepareStateForStorage(
+      normalizeStatePayload(
+        preserveServerDeletedItems(incoming, existing),
+      ),
     );
     const saved = (await writeProductLaunchState(
       config.value,
@@ -175,8 +182,10 @@ async function mergePartialStateWithRetry(
       );
     }
 
-    const state = normalizeStatePayload(
-      preserveServerDeletedItems(mergePartialPage(existing, incoming), existing),
+    const state = prepareStateForStorage(
+      normalizeStatePayload(
+        preserveServerDeletedItems(mergePartialPage(existing, incoming), existing),
+      ),
     );
     const previousUpdatedAt = nullableText(existingRow?.updated_at);
     if (!previousUpdatedAt) {
@@ -290,6 +299,7 @@ function mergePartialPage(
   };
   delete merged.partialPage;
   delete merged.partialItemIds;
+  delete merged[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD];
   return merged;
 }
 
@@ -297,22 +307,29 @@ function normalizeStatePayload(value: unknown): TrackerStatePayload {
   if (!isRecord(value)) {
     throw new Error("진행관리 state 객체가 필요합니다.");
   }
-  const state = value as TrackerStatePayload;
-  if (!Array.isArray(state.items)) {
+  const cloned = JSON.parse(JSON.stringify(value)) as TrackerStatePayload;
+  delete cloned[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD];
+  if (!Array.isArray(cloned.items)) {
     throw new Error("진행관리 상품 목록(items)이 필요합니다.");
   }
-  if (state.items.length > MAX_ITEM_COUNT) {
+  if (cloned.items.length > MAX_ITEM_COUNT) {
     throw new Error(
       `진행관리 상품은 최대 ${MAX_ITEM_COUNT.toLocaleString("ko-KR")}건까지 저장할 수 있습니다.`,
     );
   }
-  const serialized = JSON.stringify(state);
+  const serialized = JSON.stringify(cloned);
   if (new TextEncoder().encode(serialized).byteLength > MAX_STATE_BYTES) {
     throw new Error(
       "진행관리 데이터 크기가 8MB를 초과했습니다. 상세페이지 원본 이미지는 URL로 연결하세요.",
     );
   }
-  return JSON.parse(serialized) as TrackerStatePayload;
+  return cloned;
+}
+
+function prepareStateForStorage(state: TrackerStatePayload) {
+  return withProductLaunchListSnapshot(
+    state as ProductLaunchTrackerState,
+  ) as TrackerStatePayload;
 }
 
 function preserveServerDeletedItems(
