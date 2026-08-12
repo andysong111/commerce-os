@@ -1,0 +1,80 @@
+name: Product Launch Stock Sheet Backfill 20260812
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/product-launch-stock-sheet-backfill-1165-20260812.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production backfill endpoint
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/stock-sheet-backfill-20260812'
+          for attempt in $(seq 1 30); do
+            code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            if [ "$code" = '200' ]; then
+              cat /tmp/dry-run.json
+              node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'dry-run returned ok=false');
+          NODE
+              exit 0
+            fi
+            echo "attempt=$attempt status=$code"
+            cat /tmp/dry-run.json 2>/dev/null || true
+            sleep 10
+          done
+          echo 'Backfill endpoint did not become ready in time.' >&2
+          exit 1
+
+      - name: Apply backfill exactly once
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/stock-sheet-backfill-20260812?apply=1'
+          curl --fail-with-body -sS "$URL" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'backfill returned ok=false');
+          if (body.applied !== true && body.alreadyApplied !== true) {
+            throw new Error('backfill neither applied nor alreadyApplied');
+          }
+          const report = body.report || {};
+          console.log(`planned=${report.plannedCreateItems ?? 0} sourceTargets=${report.sourceTargetCount ?? 0} skippedExisting=${report.skippedExistingModelItems ?? 0}`);
+          NODE
+
+      - name: Verify idempotency
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/stock-sheet-backfill-20260812'
+          curl --fail-with-body -sS "$URL" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          if (body.ok !== true || body.alreadyApplied !== true) {
+            throw new Error('backfill marker verification failed');
+          }
+          const report = body.report || {};
+          const summary = [
+            '## Stock sheet backfill until row 1165',
+            '',
+            `- source target count: ${report.sourceTargetCount ?? 0}`,
+            `- state item count before: ${report.stateItemCount ?? 0}`,
+            `- planned created items: ${report.plannedCreateItems ?? 0}`,
+            `- skipped existing models: ${report.skippedExistingModelItems ?? 0}`,
+            `- skipped duplicate source models: ${report.skippedDuplicateSourceItems ?? 0}`,
+            `- no-link targets: ${report.noLinkTargets ?? 0}`,
+            `- optionless targets: ${report.optionlessTargets ?? 0}`,
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          NODE
