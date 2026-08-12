@@ -54,6 +54,20 @@ test("sourcing center surfaces the live next action without blocking manual navi
   assert.match(page, /TEST_READY 후보만 보는 구조/);
 });
 
+test("sourcing center explains the closed-loop replenishment policy and operator action", () => {
+  assert.match(page, /운영 루프/);
+  assert.match(page, /후보 풀이 소진됐을 때만 보충/);
+  assert.match(page, /신규 후보 보충/);
+  assert.match(page, /현재 사람 개입/);
+  assert.match(page, /이번 최소행동/);
+  assert.match(page, /operatorActionLabel/);
+  assert.match(page, /afterAction/);
+  assert.match(page, /automaticContinuation/);
+  assert.match(page, /1688 브라우저 화면에서 후보를 한 번 수집·저장/);
+  assert.match(page, /AI 의미분석·NAVER·Shopping Insight/);
+  assert.match(page, /운영 중에도 후보 풀이 소진됐을 때만 다시 호출/);
+});
+
 test("sourcing center separates upstream funnel counts from final decision counts", () => {
   assert.match(page, /confirmedOpportunityCandidates/);
   assert.match(page, /supplyAnchorResolvedCandidates/);
