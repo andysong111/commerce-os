@@ -18,6 +18,13 @@ type PipelineStatus = {
   nextActionLabel: string;
   nextHref: string;
   reason: string;
+  operatorMode?: string;
+  operatorActionRequired?: boolean;
+  operatorActionLabel?: string;
+  afterAction?: string;
+  automaticContinuation?: boolean;
+  cyclePolicy?: string;
+  cycleNote?: string;
   funnel?: {
     confirmedOpportunityCandidates: number;
     supplyAnchorResolvedCandidates: number;
@@ -194,6 +201,15 @@ function easyNextAction(action: string, fallback: string) {
   return fallback || "전체 상태를 확인할 차례";
 }
 
+function operatorModeKo(status: PipelineStatus) {
+  if (status.operatorActionRequired === false) return "사람 개입 없음";
+  if (status.operatorMode === "BROWSER_CAPTURE") return "브라우저 확인 1회";
+  if (status.operatorMode === "HUMAN_REVIEW") return "사람 판단 필요";
+  if (status.operatorMode === "TEST_DECISION") return "테스트 결정 필요";
+  if (status.operatorMode === "SYSTEM_STEP") return "실행 1회";
+  return "현재 단계 확인";
+}
+
 async function readPipelineStatus(): Promise<PipelineStatus | null> {
   try {
     const response = await fetch(`${SOURCING_ENGINE_BASE}/api/pipeline-status`, {
@@ -264,6 +280,44 @@ export default async function SourcingCenterPage() {
             </a>
           ) : null}
         </div>
+
+        {status ? (
+          <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700">운영 루프</p>
+                <h3 className="mt-1 text-base font-black text-slate-950">새 후보는 매번 찾는 게 아니라, 현재 후보 풀이 소진됐을 때만 보충합니다.</h3>
+              </div>
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">{operatorModeKo(status)}</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-slate-500">신규 후보 보충</p>
+                <p className="mt-1 text-sm font-black text-slate-950">후보 풀 소진 때만</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-slate-500">현재 사람 개입</p>
+                <p className="mt-1 text-sm font-black text-slate-950">{operatorModeKo(status)}</p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-slate-500">이번 최소행동</p>
+                <p className="mt-1 text-sm font-black leading-5 text-slate-950">{status.operatorActionLabel ?? status.nextActionLabel}</p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-600">
+              {status.cycleNote ?? "신규 후보는 현재 검증 풀이 소진됐을 때만 다시 수집합니다."}
+            </p>
+            <div className="mt-3 rounded-xl bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-900">
+              <strong>그 다음:</strong> {status.afterAction ?? "현재 행동이 끝나면 소싱엔진이 다음 최소행동을 다시 계산합니다."}
+              {status.automaticContinuation ? <span className="ml-1 font-bold">자동 후속처리 연결됨</span> : null}
+            </div>
+            {status.nextAction === "COLLECT_NEW_CANDIDATES" ? (
+              <div className="mt-3 rounded-xl bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-900">
+                <strong>현재 MVP의 사람 역할:</strong> 1688 브라우저 화면에서 후보를 한 번 수집·저장하는 것만 남아 있습니다. 저장 뒤 AI 의미분석·NAVER·Shopping Insight는 기존 자동처리가 이어집니다. 이 수집은 건설할 때만 하는 일은 아니지만, 운영 중에도 후보 풀이 소진됐을 때만 다시 호출됩니다.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {status?.funnel ? (
           <div className="mt-4">
