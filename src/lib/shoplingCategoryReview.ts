@@ -1,3 +1,9 @@
+import {
+  hasShoplingInventoryPseudoCategorySegment,
+  sanitizeShoplingCategoryPath,
+  sanitizeShoplingCategoryPathArray,
+} from "@/lib/shoplingCategoryPathSafety";
+
 export type ShoplingCategoryReviewStatus =
   | "review_required"
   | "review_held"
@@ -72,11 +78,15 @@ function stringArray(value: unknown) {
     : [];
 }
 
+function categoryArray(value: unknown) {
+  return sanitizeShoplingCategoryPathArray(stringArray(value), 5);
+}
+
 function normalizeStatus(item: TrackerItem): ShoplingCategoryReviewStatus | null {
   const raw = text(item.categoryAiStatus) as ShoplingCategoryReviewStatus;
   if (REVIEW_STATUSES.has(raw)) return raw;
-  const suggestion = text(item.categoryAiSuggestion);
-  const currentCategory = text(item.shoplingCategory);
+  const suggestion = sanitizeShoplingCategoryPath(item.categoryAiSuggestion);
+  const currentCategory = sanitizeShoplingCategoryPath(item.shoplingCategory);
   if (suggestion && !currentCategory) return "review_required";
   return null;
 }
@@ -114,7 +124,7 @@ export function buildShoplingCategoryReviewRows(
     const item = raw as TrackerItem;
     if (item.archivedAt) continue;
     const itemId = text(item.id);
-    const suggestion = text(item.categoryAiSuggestion);
+    const suggestion = sanitizeShoplingCategoryPath(item.categoryAiSuggestion);
     const status = normalizeStatus(item);
     if (!itemId || !suggestion || !status || seen.has(itemId)) continue;
     seen.add(itemId);
@@ -123,18 +133,18 @@ export function buildShoplingCategoryReviewRows(
       itemId,
       modelNumber: text(item.modelNumber),
       productName: text(item.productName),
-      currentCategory: text(item.shoplingCategory),
+      currentCategory: sanitizeShoplingCategoryPath(item.shoplingCategory),
       suggestion,
       confidence: confidence(item.categoryAiConfidence),
       reason: text(item.categoryAiReason),
-      alternatives: stringArray(item.categoryAiAlternatives),
+      alternatives: categoryArray(item.categoryAiAlternatives),
       status,
       batchId,
       batchLabel: batchLabel(batchId),
       snapshotHash: text(item.categoryAiSnapshotHash),
       updatedAt: text(item.categoryAiUpdatedAt),
       reviewedAt: text(item.categoryAiReviewedAt),
-      approvedValue: text(item.categoryAiApprovedValue),
+      approvedValue: sanitizeShoplingCategoryPath(item.categoryAiApprovedValue),
     });
   }
 
@@ -204,14 +214,30 @@ export function applyShoplingCategoryReviewDecisions(
     const itemId = text(item.id);
     const decision = decisionById.get(itemId);
     if (!decision) return item;
-    const suggestion = text(item.categoryAiSuggestion);
+    const rawSuggestion = text(item.categoryAiSuggestion);
+    const suggestion = sanitizeShoplingCategoryPath(rawSuggestion);
     if (!suggestion) return item;
 
-    const next: TrackerItem = { ...item };
+    const next: TrackerItem = {
+      ...item,
+      categoryAiSuggestion: suggestion,
+      categoryAiAlternatives: categoryArray(item.categoryAiAlternatives),
+      categoryAiCandidateChoices: categoryArray(item.categoryAiCandidateChoices),
+      categoryAiCandidatePaths: categoryArray(item.categoryAiCandidatePaths),
+    };
+    const cleanCurrentCategory = sanitizeShoplingCategoryPath(item.shoplingCategory);
+    if (cleanCurrentCategory) next.shoplingCategory = cleanCurrentCategory;
+
     if (decision.action === "approve") {
-      const approvedCategory = text(decision.category) || suggestion;
+      const requestedCategory = text(decision.category) || rawSuggestion;
+      const approvedCategory = sanitizeShoplingCategoryPath(requestedCategory);
       if (!approvedCategory) {
         throw new Error(`${text(item.modelNumber) || itemId}의 승인 카테고리가 비어 있습니다.`);
+      }
+      if (hasShoplingInventoryPseudoCategorySegment(approvedCategory)) {
+        throw new Error(
+          `${text(item.modelNumber) || itemId}의 승인 카테고리에 재고 방식이 포함되어 있습니다. 후보를 다시 생성하세요.`,
+        );
       }
       next.shoplingCategory = approvedCategory;
       next.categoryAiApprovedValue = approvedCategory;
