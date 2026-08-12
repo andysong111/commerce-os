@@ -67,6 +67,18 @@ test("every canonical state write regenerates the lightweight snapshot", () => {
   assert.match(optimized, /const persistedState = withProductLaunchListSnapshot\(mutation\.state\)/);
 });
 
+test("transient Supabase schema-cache failures are retried with bounded reads", () => {
+  assert.match(server, /const PRODUCT_LAUNCH_READ_ATTEMPTS = 6/);
+  assert.match(server, /const PRODUCT_LAUNCH_READ_TIMEOUT_MS = 12_000/);
+  assert.match(server, /PRODUCT_LAUNCH_READ_RETRY_DELAYS_MS = \[750, 1_500, 3_000, 5_000, 8_000\]/);
+  assert.match(server, /"pgrst002"/);
+  assert.match(server, /"schema cache"/);
+  assert.match(server, /"could not query the database"/);
+  assert.match(server, /readProductLaunchStorageJson/);
+  assert.match(server, /AbortController/);
+  assert.match(server, /TRANSIENT_STORAGE_STATUSES/);
+});
+
 test("one-time migration verifies the JSON-path snapshot and production page source", () => {
   assert.match(migration, /productLaunchListSnapshot20260813/);
   assert.match(migration, /verifyStoredSnapshot/);
@@ -75,4 +87,6 @@ test("one-time migration verifies the JSON-path snapshot and production page sou
   assert.match(workflow, /Verify idempotency and JSON-path read/);
   assert.match(workflow, /Probe production page through lightweight list path/);
   assert.match(workflow, /body\.listSource !== 'snapshot'/);
+  assert.match(workflow, /--connect-timeout 10 --max-time 50/);
+  assert.match(workflow, /for attempt in \$\(seq 1 20\)/);
 });
