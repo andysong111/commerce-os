@@ -4,6 +4,7 @@ import {
   isRetryableCategoryOutputError,
 } from "@/lib/shoplingCategoryRecommendationRunner";
 import { generateNaverFirstShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverFirst";
+import { generateNaverTopFiveShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverTopFive";
 import { parseProductCategoryInputs } from "@/lib/shoplingCategoryScoring";
 import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
 
@@ -34,23 +35,29 @@ export async function POST(request: NextRequest) {
         (body as Record<string, unknown>).retryFailedIndividually,
     );
     const categoryMode = String(
-      process.env.SHOPLING_CATEGORY_MODE || "naver_first",
+      process.env.SHOPLING_CATEGORY_MODE || "naver_top5",
     )
       .trim()
       .toLocaleLowerCase("en-US");
+    const model = process.env.OPENAI_NAVER_CATEGORY_MODEL || "gpt-4.1-mini";
     const generated =
       categoryMode === "legacy"
         ? await generateReliableShoplingCategoryRecommendations(inputs, {
             timeoutMs: 60_000,
             retryFailedIndividually,
           })
-        : await generateNaverFirstShoplingCategoryRecommendations(inputs, {
-            timeoutMs: 22_000,
-            // 새 기본 방식은 '모델명 -> 네이버 쇼핑 카테고리 확인 -> 샵플링 경로 유사도 매칭'만 수행합니다.
-            // 기존 gpt-5-mini 설정을 상속하면 간단한 검색에도 reasoning 토큰이 출력 한도를 소모할 수 있어
-            // 네이버 확인 단계는 빠른 비추론 모델로 고정합니다. 기존 legacy 엔진은 그대로 보존됩니다.
-            model: process.env.OPENAI_NAVER_CATEGORY_MODEL || "gpt-4.1-mini",
-          });
+        : categoryMode === "naver_first"
+          ? await generateNaverFirstShoplingCategoryRecommendations(inputs, {
+              timeoutMs: 22_000,
+              model,
+            })
+          : await generateNaverTopFiveShoplingCategoryRecommendations(inputs, {
+              timeoutMs: 22_000,
+              // 기본 방식은 '모델명 -> 네이버 쇼핑 상위 5개 상품 카테고리 수집 -> 샵플링 경로 유사도 종합 매칭'입니다.
+              // 동일 상품 판정은 하지 않고, 상위 결과에서 확인되는 실제 네이버 카테고리들을 근거로 사용합니다.
+              // 기존 naver_first/legacy 엔진은 롤백용으로 그대로 보존합니다.
+              model,
+            });
 
     const generatedById = new Map(
       generated.results.map((row) => [row.itemId, row]),
