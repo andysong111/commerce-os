@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sanitizeShoplingCategorySnapshot } from "@/lib/shoplingCategorySnapshotSafety";
 import { writeShoplingCategoryCatalogToSupabase } from "@/lib/shoplingCategorySupabaseStore";
 
 export type LocalShoplingCategoryEntry = {
@@ -37,10 +38,11 @@ function normalizeStringArray(value: unknown, maxItems: number) {
 export function validateLocalShoplingCategorySnapshot(
   value: unknown,
 ): LocalShoplingCategorySnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const sanitized = sanitizeShoplingCategorySnapshot(value);
+  if (!sanitized) {
     throw new Error("로컬 카테고리 결과 형식이 올바르지 않습니다.");
   }
-  const source = value as Record<string, unknown>;
+  const source = sanitized as Record<string, unknown>;
   const requestId = text(source.requestId);
   const collectedAt = text(source.collectedAt);
   const categoryPageUrl = text(source.categoryPageUrl);
