@@ -22,16 +22,18 @@ concurrency:
 jobs:
   backfill-and-probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Wait for production migration endpoint
         run: |
           set -euo pipefail
           URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813'
-          for attempt in $(seq 1 40); do
-            code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+          for attempt in $(seq 1 20); do
+            code=$(curl -sS --connect-timeout 10 --max-time 50 \
+              -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            echo "attempt=$attempt status=$code"
+            cat /tmp/dry-run.json 2>/dev/null || true
             if [ "$code" = '200' ]; then
-              cat /tmp/dry-run.json
               node - <<'NODE'
           const fs = require('fs');
           const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
@@ -47,8 +49,6 @@ jobs:
           NODE
               exit 0
             fi
-            echo "attempt=$attempt status=$code"
-            cat /tmp/dry-run.json 2>/dev/null || true
             sleep 10
           done
           echo 'List snapshot endpoint did not become ready in time.' >&2
@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813?apply=1'
-          curl --fail-with-body -sS "$URL" -o /tmp/apply.json
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 "$URL" -o /tmp/apply.json
           cat /tmp/apply.json
           node - <<'NODE'
           const fs = require('fs');
@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/list-snapshot-20260813'
-          curl --fail-with-body -sS "$URL" -o /tmp/verify.json
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 "$URL" -o /tmp/verify.json
           cat /tmp/verify.json
           node - <<'NODE'
           const fs = require('fs');
@@ -94,6 +94,7 @@ jobs:
           BASE='https://commerce-os-ops-center.vercel.app'
           URL="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
           curl --fail-with-body -sS \
+            --connect-timeout 10 --max-time 60 \
             -H "Origin: $BASE" \
             -H "Referer: $BASE/product-launch-tracker" \
             -H 'Sec-Fetch-Site: same-origin' \
