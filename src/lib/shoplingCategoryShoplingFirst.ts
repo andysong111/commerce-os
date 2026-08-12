@@ -1,4 +1,13 @@
-import type { ProductCategoryRecommendation } from "./shoplingCategoryCatalog.ts";
+import {
+  fetchShoplingCategorySnapshot,
+  type ProductCategoryRecommendation,
+} from "./shoplingCategoryCatalog.ts";
+import {
+  buildShoplingBranchOptions,
+  classifyShoplingBranches,
+  repairShoplingRecommendationWithinBranches,
+  shouldRepairShoplingRecommendation,
+} from "./shoplingCategoryBranchRepair.ts";
 import { parseOpenAiStructuredOutput } from "./openAiStructuredOutput.ts";
 import {
   generateReliableShoplingCategoryRecommendations,
@@ -6,6 +15,7 @@ import {
 } from "./shoplingCategoryRecommendationRunner.ts";
 import type { ProductCategoryInput } from "./shoplingCategoryScoring.ts";
 
+const ACCURACY_REPAIR_CONCURRENCY = 3;
 const NAVER_VALIDATION_CONCURRENCY = 3;
 const NAVER_VALIDATION_TIMEOUT_MS = 14_000;
 
@@ -62,6 +72,7 @@ type ShoplingFirstOptions = {
   validationTimeoutMs?: number;
   retryFailedIndividually?: boolean;
   validateWithNaver?: boolean;
+  accuracyRepair?: boolean;
   dependencies?: {
     generateBase?: BaseGenerator;
     validateNaver?: ValidationGenerator;
@@ -77,7 +88,8 @@ function text(value: unknown) {
  * 1) 모델명/옵션을 웹 없이 의미분석
  * 2) 실제 샵플링 카테고리 스냅샷에서 후보 축소
  * 3) AI가 실제 후보 안에서 1순위 + 대안 후보를 선택
- * 4) 네이버는 선택 결과를 보조 검증만 하며, 실패하거나 근거가 없어도 결과를 폐기하지 않음
+ * 4) 낮은 신뢰도/업종 불일치 후보는 실제 샵플링 상위 분기 안에서 정밀 재선택
+ * 5) 네이버는 최종 선택 결과를 보조 검증만 하며 실패해도 결과를 폐기하지 않음
  */
 export async function generateShoplingFirstCategoryRecommendations(
   inputs: ProductCategoryInput[],
@@ -96,22 +108,25 @@ export async function generateShoplingFirstCategoryRecommendations(
     retryFailedIndividually: options.retryFailedIndividually,
   });
 
-  if (options.validateWithNaver === false || !base.results.length) {
-    return {
-      ...base,
-      results: base.results.map((result) => ({ ...result, autoApply: false })),
-    };
+  const inputById = new Map(inputs.map((input) => [input.itemId, input]));
+  const accuracyRepairEnabled =
+    options.accuracyRepair ?? options.dependencies === undefined;
+  const repairedBase = accuracyRepairEnabled
+    ? await applyAccuracyBranchRepair(base, inputs, inputById, options)
+    : {
+        ...base,
+        results: base.results.map((result) => ({ ...result, autoApply: false })),
+      };
+
+  if (options.validateWithNaver === false || !repairedBase.results.length) {
+    return repairedBase;
   }
 
-  const inputById = new Map(inputs.map((input) => [input.itemId, input]));
-  const validationTargets = base.results.filter(
+  const validationTargets = repairedBase.results.filter(
     (result) => Boolean(text(result.selectedPath)) && inputById.has(result.itemId),
   );
   if (!validationTargets.length) {
-    return {
-      ...base,
-      results: base.results.map((result) => ({ ...result, autoApply: false })),
-    };
+    return repairedBase;
   }
 
   const validateNaver =
@@ -137,11 +152,100 @@ export async function generateShoplingFirstCategoryRecommendations(
   });
 
   return {
-    ...base,
-    results: base.results.map((result) =>
+    ...repairedBase,
+    results: repairedBase.results.map((result) =>
       applyPositiveNaverValidation(result, validationById.get(result.itemId) ?? null),
     ),
   };
+}
+
+async function applyAccuracyBranchRepair(
+  base: ReliableCategoryRecommendationResult,
+  inputs: ProductCategoryInput[],
+  inputById: ReadonlyMap<string, ProductCategoryInput>,
+  options: ShoplingFirstOptions,
+): Promise<ReliableCategoryRecommendationResult> {
+  try {
+    const snapshot = await fetchShoplingCategorySnapshot();
+    if (!snapshot?.categories?.length) {
+      return {
+        ...base,
+        results: base.results.map((result) => ({ ...result, autoApply: false })),
+      };
+    }
+
+    const branchOptions = buildShoplingBranchOptions(snapshot.categories);
+    if (!branchOptions.length) {
+      return {
+        ...base,
+        results: base.results.map((result) => ({ ...result, autoApply: false })),
+      };
+    }
+
+    const branchPlans = await classifyShoplingBranches(inputs, branchOptions, {
+      apiKey: options.apiKey,
+      model: options.model,
+      fetcher: options.fetcher,
+      timeoutMs: 14_000,
+    });
+    const branchesById = new Map(
+      branchPlans.map((plan) => [plan.itemId, plan.branches]),
+    );
+    const repairTargets = base.results.filter((recommendation) => {
+      const branches = branchesById.get(recommendation.itemId) ?? [];
+      return (
+        inputById.has(recommendation.itemId) &&
+        shouldRepairShoplingRecommendation(recommendation, branches)
+      );
+    });
+    if (!repairTargets.length) {
+      return {
+        ...base,
+        results: base.results.map((result) => ({ ...result, autoApply: false })),
+      };
+    }
+
+    const settled = await mapWithConcurrencySettled(
+      repairTargets,
+      ACCURACY_REPAIR_CONCURRENCY,
+      async (recommendation) => {
+        const input = inputById.get(recommendation.itemId)!;
+        const branches = branchesById.get(recommendation.itemId) ?? [];
+        return repairShoplingRecommendationWithinBranches(
+          input,
+          recommendation,
+          snapshot.categories,
+          branches,
+          {
+            apiKey: options.apiKey,
+            model: options.model,
+            fetcher: options.fetcher,
+            timeoutMs: 14_000,
+          },
+        );
+      },
+    );
+
+    const repairedById = new Map<string, ProductCategoryRecommendation>();
+    settled.forEach((result, index) => {
+      if (result.status !== "fulfilled" || !result.value) return;
+      repairedById.set(repairTargets[index].itemId, result.value);
+    });
+
+    return {
+      ...base,
+      results: base.results.map((result) => ({
+        ...(repairedById.get(result.itemId) ?? result),
+        autoApply: false,
+      })),
+    };
+  } catch {
+    // 정밀 분기 보정은 정확도 보강 단계다. 실패해도 기존 샵플링 후보를 보존한다.
+    return {
+      ...base,
+      results: base.results.map((result) => ({ ...result, autoApply: false })),
+    };
+  }
 }
 
 export function applyPositiveNaverValidation(
