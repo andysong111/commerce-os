@@ -4,7 +4,7 @@ import {
   isRetryableCategoryOutputError,
 } from "@/lib/shoplingCategoryRecommendationRunner";
 import { generateNaverFirstShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverFirst";
-import { generateNaverTopFiveShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverTopFive";
+import { generateShoplingFirstCategoryRecommendations } from "@/lib/shoplingCategoryShoplingFirst";
 import { parseProductCategoryInputs } from "@/lib/shoplingCategoryScoring";
 import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
 
@@ -34,12 +34,23 @@ export async function POST(request: NextRequest) {
         !Array.isArray(body) &&
         (body as Record<string, unknown>).retryFailedIndividually,
     );
-    const categoryMode = String(
-      process.env.SHOPLING_CATEGORY_MODE || "naver_top5",
+    const requestedCategoryMode = String(
+      process.env.SHOPLING_CATEGORY_MODE || "shopling_first",
     )
       .trim()
       .toLocaleLowerCase("en-US");
-    const model = process.env.OPENAI_NAVER_CATEGORY_MODEL || "gpt-4.1-mini";
+    // 방금 실험했던 naver_top5 값이 런타임 환경에 남아 있더라도 새 기본 엔진으로 강제 전환합니다.
+    const categoryMode =
+      requestedCategoryMode === "legacy" || requestedCategoryMode === "naver_first"
+        ? requestedCategoryMode
+        : "shopling_first";
+    const naverModel =
+      process.env.OPENAI_NAVER_CATEGORY_MODEL || "gpt-4.1-mini";
+    const shoplingFirstModel =
+      process.env.OPENAI_SHOPLING_FIRST_CATEGORY_MODEL ||
+      process.env.OPENAI_CATEGORY_MODEL ||
+      "gpt-4.1-mini";
+
     const generated =
       categoryMode === "legacy"
         ? await generateReliableShoplingCategoryRecommendations(inputs, {
@@ -49,14 +60,14 @@ export async function POST(request: NextRequest) {
         : categoryMode === "naver_first"
           ? await generateNaverFirstShoplingCategoryRecommendations(inputs, {
               timeoutMs: 22_000,
-              model,
+              model: naverModel,
             })
-          : await generateNaverTopFiveShoplingCategoryRecommendations(inputs, {
-              timeoutMs: 22_000,
-              // 기본 방식은 '모델명 -> 네이버 쇼핑 상위 5개 상품 카테고리 수집 -> 샵플링 경로 유사도 종합 매칭'입니다.
-              // 동일 상품 판정은 하지 않고, 상위 결과에서 확인되는 실제 네이버 카테고리들을 근거로 사용합니다.
-              // 기존 naver_first/legacy 엔진은 롤백용으로 그대로 보존합니다.
-              model,
+          : await generateShoplingFirstCategoryRecommendations(inputs, {
+              timeoutMs: 45_000,
+              validationTimeoutMs: 14_000,
+              retryFailedIndividually,
+              model: shoplingFirstModel,
+              naverModel,
             });
 
     const generatedById = new Map(
@@ -88,6 +99,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({
         event: "shopling_category_batch_complete",
         categoryMode,
+        requestedCategoryMode,
         inputCount: inputs.length,
         resultCount: results.length,
         failureCount: failures.length,
