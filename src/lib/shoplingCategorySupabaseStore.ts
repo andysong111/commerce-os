@@ -8,6 +8,7 @@ import type {
   ShoplingCategoryRefreshStatus,
   ShoplingCategorySnapshot,
 } from "@/lib/shoplingCategoryCatalog";
+import { sanitizeShoplingCategorySnapshot } from "@/lib/shoplingCategorySnapshotSafety";
 
 const SYSTEM_OWNER_ID = "7fcb0ac2-cc25-4f0a-a2d9-6f94fbdb7b91";
 const SYSTEM_OWNER_EMAIL = "system+shopling-categories@commerce-os.local";
@@ -24,6 +25,28 @@ function adminConfig() {
   const result = getProductLaunchAdminConfig();
   if (!result.ok) throw new Error(result.body.message);
   return result.value;
+}
+
+function normalizeStoredCatalog(payload: StoredPayload) {
+  const snapshot = sanitizeShoplingCategorySnapshot(
+    payload.snapshot,
+  ) as ShoplingCategorySnapshot | null;
+  const rawStatus =
+    payload.status && typeof payload.status === "object"
+      ? (payload.status as ShoplingCategoryRefreshStatus)
+      : null;
+  const status = rawStatus
+    ? {
+        ...rawStatus,
+        ...(snapshot
+          ? {
+              categoryCount: snapshot.categoryCount,
+              hash: snapshot.hash,
+            }
+          : {}),
+      }
+    : null;
+  return { snapshot, status };
 }
 
 export async function readShoplingCategoryCatalogFromSupabase(): Promise<{
@@ -55,16 +78,7 @@ export async function readShoplingCategoryCatalogFromSupabase(): Promise<{
   if (!payload || typeof payload !== "object" || payload.kind !== SYSTEM_KIND) {
     return { snapshot: null, status: null };
   }
-  return {
-    snapshot:
-      payload.snapshot && typeof payload.snapshot === "object"
-        ? (payload.snapshot as ShoplingCategorySnapshot)
-        : null,
-    status:
-      payload.status && typeof payload.status === "object"
-        ? (payload.status as ShoplingCategoryRefreshStatus)
-        : null,
-  };
+  return normalizeStoredCatalog(payload);
 }
 
 export async function writeShoplingCategoryCatalogToSupabase(input: {
@@ -73,14 +87,25 @@ export async function writeShoplingCategoryCatalogToSupabase(input: {
 }) {
   const config = adminConfig();
   const now = new Date().toISOString();
+  const snapshot = sanitizeShoplingCategorySnapshot(
+    input.snapshot,
+  ) as ShoplingCategorySnapshot | null;
+  if (!snapshot) {
+    throw new Error("저장할 샵플링 카테고리 스냅샷이 비어 있습니다.");
+  }
+  const status: ShoplingCategoryRefreshStatus = {
+    ...input.status,
+    categoryCount: snapshot.categoryCount,
+    hash: snapshot.hash,
+  };
   const row = {
     owner_id: SYSTEM_OWNER_ID,
     owner_email: SYSTEM_OWNER_EMAIL,
     schema_version: SYSTEM_SCHEMA_VERSION,
     state_payload: {
       kind: SYSTEM_KIND,
-      snapshot: input.snapshot,
-      status: input.status,
+      snapshot,
+      status,
       updatedAt: now,
     },
     updated_at: now,
