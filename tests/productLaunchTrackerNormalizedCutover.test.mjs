@@ -47,6 +47,16 @@ test("normalized reads require an enabled and fresh workspace", () => {
   assert.match(source.normalized, /listSource: "normalized"/);
 });
 
+test("page and detail reads use normalized product and option rows", () => {
+  assert.match(source.normalized, /queryProductLaunchNormalizedPage/);
+  assert.match(source.normalized, /readProductLaunchNormalizedItem/);
+  assert.match(source.normalized, /readProductLaunchNormalizedItems/);
+  assert.match(source.normalized, /itemSource: "normalized"/);
+  assert.match(source.store, /product_launch_items/);
+  assert.match(source.store, /product_launch_options/);
+  assert.match(source.normalized, /return legacyGet\(request\)/);
+});
+
 test("legacy writes remain authoritative and refresh normalized rows", () => {
   assert.match(source.normalized, /syncProductLaunchNormalizedAfterMutation/);
   assert.match(source.state, /syncProductLaunchNormalizedFull/);
