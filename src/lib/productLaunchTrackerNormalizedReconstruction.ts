@@ -16,15 +16,13 @@ const OPTION_CHUNK_SIZE = 200;
 
 type UnknownRecord = Record<string, unknown>;
 
-type CanonicalMetadata = {
+export type ProductLaunchCanonicalMetadata = {
   updated_at?: unknown;
   schema_version?: unknown;
   owner_email?: unknown;
 };
 
 type WorkspaceRow = {
-  owner_id?: unknown;
-  owner_email?: unknown;
   schema_version?: unknown;
   policy?: unknown;
   source_imported_at?: unknown;
@@ -36,7 +34,7 @@ type WorkspaceRow = {
 export async function readProductLaunchCanonicalMetadata(
   config: ProductLaunchAdminConfig,
   ownerId: string,
-): Promise<CanonicalMetadata | null> {
+): Promise<ProductLaunchCanonicalMetadata | null> {
   const params = new URLSearchParams({
     select: "updated_at,schema_version,owner_email",
     owner_id: `eq.${ownerId}`,
@@ -50,7 +48,7 @@ export async function readProductLaunchCanonicalMetadata(
     },
     { attempts: 3, timeoutMs: 30_000, retryDelaysMs: [1_000, 2_000] },
   );
-  return (Array.isArray(body) ? body[0] ?? null : null) as CanonicalMetadata | null;
+  return (Array.isArray(body) ? body[0] ?? null : null) as ProductLaunchCanonicalMetadata | null;
 }
 
 export async function reconstructProductLaunchStateFromNormalized(
@@ -113,10 +111,11 @@ export async function reconstructProductLaunchStateFromNormalized(
     option.optionName = text(row.option_name) || text(option.optionName) || "옵션";
     option.saleOption = text(row.sale_option) || text(option.saleOption ?? option.value);
     option.chinaOption = text(row.china_option);
-    option.barcode = normalizeLocationCode(row.barcode);
+    option.barcode = text(row.barcode);
     option.baseSalePriceKrw = nonNegativeInteger(row.base_sale_price_krw);
     option.unitCostKrw = nonNegativeInteger(row.unit_cost_krw);
-    option.sourceOrderItemId = nullableText(row.source_order_item_id);
+    const sourceOrderItemId = nullableText(row.source_order_item_id);
+    if (sourceOrderItemId) option.sourceOrderItemId = sourceOrderItemId;
     const list = optionsByItem.get(itemId) ?? [];
     list.push(option);
     optionsByItem.set(itemId, list);
@@ -135,8 +134,8 @@ export async function reconstructProductLaunchStateFromNormalized(
     if (!Number.isFinite(Number(item.trackerRowNumber))) {
       item.trackerRowNumber = integerOrNull(row.tracker_row_number);
     }
-    item.warehouseLocation = normalizeLocationCode(row.warehouse_location);
-    item.barcode = normalizeLocationCode(row.barcode);
+    item.warehouseLocation = text(row.warehouse_location);
+    item.barcode = text(row.barcode);
     item.modelNumber = text(row.model_number) || text(item.modelNumber);
     item.productName = text(row.product_name) || text(item.productName);
     item.orderOptions = orderOptions;
@@ -178,7 +177,7 @@ async function readWorkspace(
 ): Promise<WorkspaceRow | null> {
   const params = new URLSearchParams({
     select:
-      "owner_id,owner_email,schema_version,policy,source_imported_at,meta_payload,source_state_updated_at,normalized_read_enabled",
+      "schema_version,policy,source_imported_at,meta_payload,source_state_updated_at,normalized_read_enabled",
     owner_id: `eq.${ownerId}`,
     limit: "1",
   });
@@ -234,10 +233,6 @@ function sameTimestamp(left: unknown, right: unknown) {
     Number.isFinite(rightMs) &&
     Math.abs(leftMs - rightMs) < 1_000
   );
-}
-
-function normalizeLocationCode(value: unknown) {
-  return text(value).normalize("NFKC").toUpperCase().replace(/\s+/g, "");
 }
 
 function integerOrNull(value: unknown) {
