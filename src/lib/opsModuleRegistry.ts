@@ -29,19 +29,19 @@ const isolatedBaseModules: readonly CommerceModule[] = extendedModuleRegistry.ma
     if (module.id !== "detail-page-studio") return module;
     return {
       ...module,
-      title: "Commerce OS Detail Page Studio · SaaS 전용 · v260807",
+      title: "Commerce OS Detail Page Studio · SaaS 전용 · Production",
       navigationLabel: "상세페이지 스튜디오 · SaaS 전용",
       description:
-        "현재 상품출시진행관리에서 검증한 Production v3 상세페이지 엔진 기준을 SaaS 운영 카드에도 동일 적용합니다. SaaS UI·과금·다국어는 독립 확장하되 대표 1장·부가 4장과 1000×14000 상세페이지 생성 기준은 공통 baseline을 사용합니다.",
-      route:
-        "https://commerce-os-detail-page-studio-git-isolated-sa-3f377e-a2bsangsa.vercel.app/?studio_variant=saas-test",
+        "외부 고객용 standalone SaaS Production입니다. 입력부만 1688 링크·브라우저 가져오기 또는 이미지 업로드로 분리하고, 상세페이지와 대표·부가 이미지 생성 과정은 상품출시진행관리 OPS source-first-v3 기준을 사용합니다.",
+      route: "https://commerce-os-detail-page-saas.vercel.app/",
       inputType:
-        "상품 이미지 최대 3장 또는 1688 링크, 상품명, 공급처 정보, 판매 옵션, 선택형 문구 언어",
+        "1688 링크·브라우저 가져오기 또는 제품 이미지 3~60장, 실제 판매 옵션, 문구 언어",
       outputType:
-        "Production v3 상세페이지 1000×14000 JPG, 대표 1장·부가 4장, 실행·사용량 원장",
-      note: `${DETAIL_PAGE_V3_BASELINE_NOTE} 이 카드는 isolated/saas-production 배포 별칭을 유지합니다.`,
-      helperNote: "v260807 · 공통 Production v3 · SaaS 전용",
-      actionLabel: "SaaS 상세페이지 스튜디오 열기",
+        "OPS source-first-v3 상세페이지 1000×14000 JPG, 대표 1장·부가 4장, 사용자 작업 원장과 결과 6개 저장",
+      note: `${DETAIL_PAGE_V3_BASELINE_NOTE} 이 카드는 standalone SaaS Production을 엽니다. 내부 상품출시진행관리 연결본과 테스트 Studio 주소는 변경하지 않습니다.`,
+      helperNote: "Standalone SaaS Production · OPS V3",
+      actionLabel: "SaaS Production 열기",
+      safetyBadge: "내부 OPS와 분리",
     };
   },
 );
