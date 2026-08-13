@@ -25,16 +25,7 @@ jobs:
             code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
             if [ "$code" = '200' ]; then
               cat /tmp/dry-run.json
-              node - <<'NODE'
-              const fs = require('fs');
-              const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
-              if (body.ok !== true) throw new Error(body.message || 'dry-run returned ok=false');
-              if (body.dryRun !== true && body.alreadyApplied !== true) {
-                throw new Error('endpoint is neither dry-run nor already-applied');
-              }
-              const report = body.report || {};
-              console.log(`dry-run changedItems=${report.changedItems ?? 0} changedOptions=${report.changedOptions ?? 0} ambiguous=${report.ambiguousOptionCount ?? 0} unmatched=${report.unmatchedOptionCount ?? 0}`);
-              NODE
+              node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/dry-run.json","utf8")); if(body.ok!==true) throw new Error(body.message||"dry-run returned ok=false"); if(body.dryRun!==true&&body.alreadyApplied!==true) throw new Error("endpoint is neither dry-run nor already-applied"); const report=body.report||{}; console.log(`dry-run changedItems=${report.changedItems??0} changedOptions=${report.changedOptions??0} ambiguous=${report.ambiguousOptionCount??0} unmatched=${report.unmatchedOptionCount??0}`);'
               exit 0
             fi
             echo "attempt=$attempt status=$code"
@@ -53,16 +44,7 @@ jobs:
             code=$(curl -sS -o /tmp/apply.json -w '%{http_code}' "$URL" || true)
             cat /tmp/apply.json 2>/dev/null || true
             if [ "$code" = '200' ]; then
-              node - <<'NODE'
-              const fs = require('fs');
-              const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
-              if (body.ok !== true) throw new Error(body.message || 'apply returned ok=false');
-              if (body.applied !== true && body.alreadyApplied !== true) {
-                throw new Error('migration neither applied nor already applied');
-              }
-              const report = body.report || {};
-              console.log(`applied changedItems=${report.changedItems ?? 0} changedOptions=${report.changedOptions ?? 0} preserved=${report.preservedExistingOptions ?? 0}`);
-              NODE
+              node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/apply.json","utf8")); if(body.ok!==true) throw new Error(body.message||"apply returned ok=false"); if(body.applied!==true&&body.alreadyApplied!==true) throw new Error("migration neither applied nor already applied"); const report=body.report||{}; console.log(`applied changedItems=${report.changedItems??0} changedOptions=${report.changedOptions??0} preserved=${report.preservedExistingOptions??0}`);'
               exit 0
             fi
             if [ "$code" != '409' ]; then
@@ -82,24 +64,4 @@ jobs:
           URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/stock-sheet-china-option-refresh-20260813'
           curl --fail-with-body -sS "$URL" -o /tmp/verify.json
           cat /tmp/verify.json
-          node - <<'NODE'
-          const fs = require('fs');
-          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
-          if (body.ok !== true || body.alreadyApplied !== true) {
-            throw new Error('migration marker verification failed');
-          }
-          const report = body.report || {};
-          const summary = [
-            '## Stock sheet China option refresh 2026-08-13',
-            '',
-            `- state items: ${report.stateItemCount ?? 0}`,
-            `- matched model items: ${report.matchedModelItems ?? 0}`,
-            `- changed items: ${report.changedItems ?? 0}`,
-            `- changed China options: ${report.changedOptions ?? 0}`,
-            `- preserved existing China options: ${report.preservedExistingOptions ?? 0}`,
-            `- ambiguous options left unchanged: ${report.ambiguousOptionCount ?? 0}`,
-            `- unmatched options left unchanged: ${report.unmatchedOptionCount ?? 0}`,
-            `- source rows used: ${(report.sourceRowsUsed || []).length}`,
-          ].join('\n');
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-          NODE
+          node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/verify.json","utf8")); if(body.ok!==true||body.alreadyApplied!==true) throw new Error("migration marker verification failed"); const report=body.report||{}; const summary=["## Stock sheet China option refresh 2026-08-13","",`- state items: ${report.stateItemCount??0}`,`- matched model items: ${report.matchedModelItems??0}`,`- changed items: ${report.changedItems??0}`,`- changed China options: ${report.changedOptions??0}`,`- preserved existing China options: ${report.preservedExistingOptions??0}`,`- ambiguous options left unchanged: ${report.ambiguousOptionCount??0}`,`- unmatched options left unchanged: ${report.unmatchedOptionCount??0}`,`- source rows used: ${(report.sourceRowsUsed||[]).length}`].join("\n"); fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,summary+"\n");'
