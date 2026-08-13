@@ -20,11 +20,12 @@ on:
       - 'src/lib/productLaunchTracker*.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
-      - 'supabase/migrations/20260731000*_product_launch*.sql'
+      - 'supabase/migrations/*product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
+      - 'next.config.ts'
       - '.github/workflows/product-launch-tracker-ci.yml'
 
 jobs:
@@ -49,6 +50,7 @@ jobs:
           tests/productLaunchTrackerTableOps.test.mjs
           tests/productLaunchTrackerChinaProductLinks.test.mjs
           tests/productLaunchTrackerChinaOrderMappingActiveUi.test.mjs
+          tests/productLaunchTrackerNormalizedCutover.test.mjs
           tests/detailPageAssetStorageRetry.test.mjs
           tests/detailPageManualDecision.test.mjs
           tests/shoplingCategoryCatalog.test.mjs

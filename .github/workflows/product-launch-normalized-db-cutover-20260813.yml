@@ -1,0 +1,43 @@
+name: Product Launch Normalized DB Cutover 20260813
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'next.config.ts'
+      - 'src/app/api/product-launch-tracker/normalized-*/**'
+      - 'src/app/api/product-launch-tracker/migrations/normalized-db-cutover-20260813/**'
+      - 'src/lib/productLaunchTrackerNormalized*.ts'
+      - '.github/workflows/product-launch-normalized-db-cutover-20260813.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Cut over and verify production
+        run: |
+          set -euo pipefail
+          BASE='https://commerce-os-ops-center.vercel.app'
+          CUT="$BASE/api/product-launch-tracker/migrations/normalized-db-cutover-20260813"
+          for n in $(seq 1 40); do
+            code=$(curl -sS --connect-timeout 10 --max-time 60 -o /tmp/audit.json -w '%{http_code}' "$CUT" || true)
+            echo "attempt=$n status=$code"
+            [ "$code" = 200 ] && break
+            sleep 10
+          done
+          node -e 'const b=require("/tmp/audit.json");if(b.ok!==true)throw Error(JSON.stringify(b))'
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 120 "$CUT?apply=1" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node -e 'const b=require("/tmp/apply.json");if(!b.ok||!b.applied||!b.ready||!b.readEnabled)throw Error(JSON.stringify(b));if(b.expected.itemCount!==b.actual.itemCount||b.expected.optionCount!==b.actual.optionCount)throw Error("count mismatch")'
+          URL="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 -H "Origin: $BASE" -H "Referer: $BASE/product-launch-tracker" -H 'Sec-Fetch-Site: same-origin' -w '%{time_total}' "$URL" -o /tmp/page.json > /tmp/time.txt
+          node - <<'NODE'
+          const fs=require('fs'),b=require('/tmp/page.json'),s=+fs.readFileSync('/tmp/time.txt','utf8');
+          if(!b.ok||b.listSource!=='normalized'||!(b.total>0)||!Array.isArray(b.items)||b.items.length>25||!Number.isFinite(s)||s>10)throw Error(JSON.stringify({b,s}));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Normalized product launch DB\n\n- items: ${b.total}\n- page: ${s.toFixed(3)}s\n`);
+          NODE
