@@ -45,6 +45,17 @@ test("카테고리 업데이트 버튼은 GitHub Actions보다 로컬 실행기�
     ),
     "utf8",
   );
+  const compactUpload = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-local-upload-payload.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.ok(
+    app.indexOf("category-local-upload-payload.js") <
+      app.indexOf("category-local-update.js"),
+  );
   assert.ok(
     app.indexOf("category-local-update.js") <
       app.indexOf("category-update-progress.js"),
@@ -60,6 +71,10 @@ test("카테고리 업데이트 버튼은 GitHub Actions보다 로컬 실행기�
   assert.match(local, /보안문자 입력 대기 중/);
   assert.match(local, /백그라운드로 보기/);
   assert.match(local, /업데이트 취소/);
+  assert.match(compactUpload, /shopling-categories\/local-result/);
+  assert.match(compactUpload, /categories\.push\(\{ path, codes \}\)/);
+  assert.doesNotMatch(compactUpload, /names\s*:/);
+  assert.doesNotMatch(compactUpload, /diagnostics\s*:/);
 });
 
 test("전역 작업 도우미는 로컬 작업 중 클라우드 상태로 덮어쓰지 않는다", async () => {
@@ -125,7 +140,8 @@ test("로컬 결과는 운영자 인증 후 Supabase 서버 저장 경로로 전
   assert.match(publisher, /writeShoplingCategoryCatalogToSupabase/);
   assert.doesNotMatch(publisher, /git\/blobs/);
   assert.match(store, /product_launch_tracker_states/);
-  assert.match(store, /resolution=merge-duplicates/);
+  assert.match(store, /resolution=merge-duplicates,return=minimal/);
+  assert.doesNotMatch(store, /return=representation/);
 });
 
 test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 저장을 재시도한다", async () => {

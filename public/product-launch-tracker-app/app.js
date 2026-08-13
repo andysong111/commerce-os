@@ -97,6 +97,7 @@ async function loadIdleIntegrations() {
     "./category-ai-reliable.js",
     "./category-review-queue-link.js",
     "./category-toolbar-layout.js",
+    "./category-local-upload-payload.js",
     "./category-local-update.js",
     "./category-local-result-recovery.js",
     "./category-update-progress.js",
