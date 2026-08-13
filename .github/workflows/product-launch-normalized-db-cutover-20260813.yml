@@ -34,10 +34,36 @@ jobs:
           curl --fail-with-body -sS --connect-timeout 10 --max-time 120 "$CUT?apply=1" -o /tmp/apply.json
           cat /tmp/apply.json
           node -e 'const b=require("/tmp/apply.json");if(!b.ok||!b.applied||!b.ready||!b.readEnabled)throw Error(JSON.stringify(b));if(b.expected.itemCount!==b.actual.itemCount||b.expected.optionCount!==b.actual.optionCount)throw Error("count mismatch")'
-          URL="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
-          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 -H "Origin: $BASE" -H "Referer: $BASE/product-launch-tracker" -H 'Sec-Fetch-Site: same-origin' -w '%{time_total}' "$URL" -o /tmp/page.json > /tmp/time.txt
+
+          PAGE="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 \
+            -H "Origin: $BASE" -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' -w '%{time_total}' \
+            "$PAGE" -o /tmp/page.json > /tmp/page-time.txt
+          ITEM_ID=$(node -p 'require("/tmp/page.json").items[0].id')
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 \
+            -H "Origin: $BASE" -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' -w '%{time_total}' \
+            "$BASE/api/product-launch-tracker/optimized?mode=item&id=$ITEM_ID" \
+            -o /tmp/item.json > /tmp/item-time.txt
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 \
+            -H "Origin: $BASE" -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' -w '%{time_total}' \
+            "$BASE/api/product-launch-tracker/optimized?mode=items&id=$ITEM_ID" \
+            -o /tmp/items.json > /tmp/items-time.txt
+
           node - <<'NODE'
-          const fs=require('fs'),b=require('/tmp/page.json'),s=+fs.readFileSync('/tmp/time.txt','utf8');
-          if(!b.ok||b.listSource!=='normalized'||!(b.total>0)||!Array.isArray(b.items)||b.items.length>25||!Number.isFinite(s)||s>10)throw Error(JSON.stringify({b,s}));
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Normalized product launch DB\n\n- items: ${b.total}\n- page: ${s.toFixed(3)}s\n`);
+          const fs=require('fs');
+          const page=require('/tmp/page.json');
+          const item=require('/tmp/item.json');
+          const items=require('/tmp/items.json');
+          const pt=+fs.readFileSync('/tmp/page-time.txt','utf8');
+          const it=+fs.readFileSync('/tmp/item-time.txt','utf8');
+          const its=+fs.readFileSync('/tmp/items-time.txt','utf8');
+          const id=page.items?.[0]?.id;
+          if(!page.ok||page.listSource!=='normalized'||!(page.total>0)||!Array.isArray(page.items)||page.items.length>25)throw Error(JSON.stringify(page));
+          if(!item.ok||item.itemSource!=='normalized'||item.item?.id!==id||!Array.isArray(item.item?.orderOptions))throw Error(JSON.stringify(item));
+          if(!items.ok||items.itemSource!=='normalized'||items.items?.length!==1||items.items[0]?.id!==id)throw Error(JSON.stringify(items));
+          if(![pt,it,its].every(Number.isFinite)||Math.max(pt,it,its)>10)throw Error(JSON.stringify({pt,it,its}));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,`## Normalized product launch DB\n\n- items: ${page.total}\n- page: ${pt.toFixed(3)}s\n- item: ${it.toFixed(3)}s\n- items: ${its.toFixed(3)}s\n`);
           NODE
