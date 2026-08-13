@@ -1,0 +1,65 @@
+name: Product Launch Random Color Option Finalize 20260813
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/product-launch-random-color-option-finalize-20260813.yml'
+      - 'src/app/api/product-launch-tracker/migrations/random-color-option-finalize-20260813/route.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for production endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/random-color-option-finalize-20260813'
+          for attempt in $(seq 1 45); do
+            code=$(curl -sS -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            if [ "$code" = '200' ]; then
+              cat /tmp/dry-run.json
+              node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/dry-run.json","utf8")); if(body.ok!==true) throw new Error(body.message||"dry-run returned ok=false"); if(body.dryRun!==true&&body.alreadyApplied!==true) throw new Error("endpoint not ready"); const report=body.report||{}; console.log(`dry-run matchedItems=${report.matchedItems??0} changedOptions=${report.changedOptions??0}`);'
+              exit 0
+            fi
+            echo "attempt=$attempt status=$code"
+            cat /tmp/dry-run.json 2>/dev/null || true
+            sleep 10
+          done
+          echo 'Endpoint did not become ready.' >&2
+          exit 1
+
+      - name: Apply random color option
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/random-color-option-finalize-20260813?apply=1'
+          for attempt in $(seq 1 6); do
+            code=$(curl -sS -o /tmp/apply.json -w '%{http_code}' "$URL" || true)
+            cat /tmp/apply.json 2>/dev/null || true
+            if [ "$code" = '200' ]; then
+              node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/apply.json","utf8")); if(body.ok!==true) throw new Error(body.message||"apply returned ok=false"); if(body.applied!==true&&body.alreadyApplied!==true) throw new Error("not applied"); const report=body.report||{}; if((report.changedOptions??0)!==1&&(report.preservedExistingOptions??0)!==1) throw new Error("target option was neither changed nor already present"); console.log(`applied changedItems=${report.changedItems??0} changedOptions=${report.changedOptions??0} selected=${report.selectedChinaOption??""}`);'
+              exit 0
+            fi
+            if [ "$code" != '409' ]; then
+              echo "Unexpected status=$code" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Verify marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/random-color-option-finalize-20260813'
+          curl --fail-with-body -sS "$URL" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node -e 'const fs=require("fs"); const body=JSON.parse(fs.readFileSync("/tmp/verify.json","utf8")); if(body.ok!==true||body.alreadyApplied!==true) throw new Error("marker verification failed"); const report=body.report||{}; if(report.selectedChinaOption!=="抱枕-蓝色") throw new Error("unexpected selected China option");'
