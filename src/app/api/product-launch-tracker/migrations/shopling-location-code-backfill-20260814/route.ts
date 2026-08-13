@@ -4,7 +4,7 @@ import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
-  readProductLaunchState,
+  readProductLaunchStorageJson,
   readResponseJson,
   resolveProductLaunchIdentity,
   writeProductLaunchState,
@@ -23,7 +23,7 @@ import {
 import type { ProductLaunchTrackerState } from "@/lib/productLaunchTrackerOptimized";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 const TABLE_NAME = "product_launch_tracker_states";
 const MIGRATION_KEY = "shoplingLocationCodeBackfill20260814V2";
@@ -205,10 +205,24 @@ async function loadContext(request: NextRequest) {
     return { response: Response.json(config.body, { status: config.status }) } as const;
   }
   try {
-    const row = (await readProductLaunchState(
-      config.value,
-      identity.value.userId,
-    )) as StoredRow | null;
+    const params = new URLSearchParams({
+      select: "state_payload,updated_at,schema_version,owner_email",
+      owner_id: `eq.${identity.value.userId}`,
+      limit: "1",
+    });
+    const { body } = await readProductLaunchStorageJson(
+      `${config.value.supabaseUrl}/rest/v1/${TABLE_NAME}?${params.toString()}`,
+      {
+        headers: createSupabaseAdminHeaders(config.value.secretKey),
+        cache: "no-store",
+      },
+      {
+        attempts: 2,
+        timeoutMs: 60_000,
+        retryDelaysMs: [2_000],
+      },
+    );
+    const row = (Array.isArray(body) ? body[0] ?? null : null) as StoredRow | null;
     if (!row || !isRecord(row.state_payload)) {
       return {
         response: Response.json(
