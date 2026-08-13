@@ -116,17 +116,17 @@ export async function writeShoplingCategoryCatalogToSupabase(input: {
       method: "POST",
       headers: {
         ...createSupabaseAdminHeaders(config.secretKey),
-        Prefer: "resolution=merge-duplicates,return=representation",
+        Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify(row),
       cache: "no-store",
     },
   );
-  const body = await readResponseJson(response);
   if (!response.ok) {
+    const body = await readResponseJson(response);
     throw new Error(readProductLaunchError(body, response.status));
   }
-  return Array.isArray(body) ? body[0] ?? row : row;
+  return row;
 }
 
 export const SHOPLING_CATEGORY_SYSTEM_OWNER_ID = SYSTEM_OWNER_ID;
