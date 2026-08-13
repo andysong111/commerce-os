@@ -11,6 +11,22 @@ const localNetworkPolicy = `(self ${detailPageStudioOrigins
   .join(" ")})`;
 
 const nextConfig: NextConfig = {
+  async rewrites() {
+    return {
+      beforeFiles: [
+        {
+          source: "/api/product-launch-tracker/optimized",
+          destination: "/api/product-launch-tracker/normalized-optimized",
+        },
+        {
+          source: "/api/product-launch-tracker/state",
+          destination: "/api/product-launch-tracker/normalized-state",
+        },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
+  },
   async headers() {
     return [
       {
