@@ -1,0 +1,127 @@
+name: Product Launch Normalized DB 20260813
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/product-launch-normalized-db-20260813.yml"
+      - "next.config.ts"
+      - "src/lib/productLaunchTrackerNormalizedStore.ts"
+      - "src/app/api/product-launch-tracker/normalized-read/route.ts"
+      - "src/app/api/product-launch-tracker/optimized-legacy/route.ts"
+      - "src/app/api/product-launch-tracker/migrations/normalized-db-20260813/route.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-launch-normalized-db-20260813
+  cancel-in-progress: false
+
+jobs:
+  backfill-enable-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for production endpoint and validate dry run
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/normalized-db-20260813'
+          for attempt in $(seq 1 45); do
+            code=$(curl -sS --connect-timeout 10 --max-time 90 -o /tmp/dry-run.json -w '%{http_code}' "$URL" || true)
+            echo "attempt=$attempt status=$code"
+            cat /tmp/dry-run.json 2>/dev/null || true
+            if [ "$code" = '200' ]; then
+              node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'dry-run returned ok=false');
+          if (!(body.expected?.itemCount > 0)) throw new Error(`invalid expected itemCount=${body.expected?.itemCount}`);
+          NODE
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Normalized cutover endpoint did not become ready.' >&2
+          exit 1
+
+      - name: Backfill, validate every payload, and enable normalized reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/normalized-db-20260813?apply=1'
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 300 "$URL" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'apply returned ok=false');
+          if (body.applied !== true && body.alreadyApplied !== true) throw new Error('normalized DB not applied');
+          if (body.parity?.ok !== true) throw new Error(`parity failed: ${JSON.stringify(body.parity?.mismatches || [])}`);
+          NODE
+
+      - name: Verify idempotency and enabled freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://commerce-os-ops-center.vercel.app/api/product-launch-tracker/migrations/normalized-db-20260813'
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 120 "$URL" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          if (body.ok !== true || body.alreadyApplied !== true) throw new Error('normalized DB freshness verification failed');
+          if (body.parity?.ok !== true) throw new Error('normalized DB parity was lost');
+          NODE
+
+      - name: Probe normalized list and item reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://commerce-os-ops-center.vercel.app'
+          PAGE="$BASE/api/product-launch-tracker/optimized?mode=page&page=1&pageSize=25&unfinishedOnly=false&direction=desc"
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 \
+            -H "Origin: $BASE" \
+            -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -w '%{time_total}' "$PAGE" -o /tmp/page.json > /tmp/page-time.txt
+          cat /tmp/page.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/page.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'page probe failed');
+          if (body.listSource !== 'normalized') throw new Error(`unexpected listSource=${body.listSource}`);
+          if (!(body.total > 0) || !Array.isArray(body.items) || !body.items.length) throw new Error('normalized page is empty');
+          fs.writeFileSync('/tmp/item-id.txt', String(body.items[0].id));
+          const seconds = Number(fs.readFileSync('/tmp/page-time.txt', 'utf8'));
+          if (!Number.isFinite(seconds) || seconds > 10) throw new Error(`normalized page too slow: ${seconds}s`);
+          console.log(`normalized_page_seconds=${seconds.toFixed(3)} total=${body.total}`);
+          NODE
+          ITEM_ID=$(cat /tmp/item-id.txt)
+          ITEM="$BASE/api/product-launch-tracker/optimized?mode=item&id=$ITEM_ID"
+          curl --fail-with-body -sS --connect-timeout 10 --max-time 60 \
+            -H "Origin: $BASE" \
+            -H "Referer: $BASE/product-launch-tracker" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            "$ITEM" -o /tmp/item.json
+          cat /tmp/item.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/item.json', 'utf8'));
+          if (body.ok !== true || !body.item) throw new Error(body.message || 'item probe failed');
+          if (body.itemSource !== 'normalized') throw new Error(`unexpected itemSource=${body.itemSource}`);
+          const verify = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          const summary = [
+            '## Product Launch normalized DB cutover',
+            '',
+            `- items: ${verify.actual?.itemCount ?? 0}`,
+            `- options: ${verify.actual?.optionCount ?? 0}`,
+            `- parity: ${verify.parity?.ok === true}`,
+            '- list source: normalized',
+            '- item source: normalized',
+            `- list time: ${Number(fs.readFileSync('/tmp/page-time.txt', 'utf8')).toFixed(3)}s`,
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          NODE
