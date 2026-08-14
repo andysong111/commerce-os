@@ -38,6 +38,76 @@ export type ShoplingCategoryApprovalPrior = {
 
 type RecordLike = Record<string, unknown>;
 
+const APPROVAL_IDENTITY_STOPWORDS = new Set(
+  [
+    "단품",
+    "세트",
+    "랜덤",
+    "색상랜덤",
+    "옵션",
+    "상품",
+    "제품",
+    "신형",
+    "일반",
+    "기본",
+    "대형",
+    "중형",
+    "소형",
+    "사이즈",
+    "색상",
+    "컬러",
+    "포함",
+    "블랙",
+    "화이트",
+    "그레이",
+    "회색",
+    "실버",
+    "골드",
+    "레드",
+    "블루",
+    "핑크",
+    "그린",
+    "옐로우",
+    "퍼플",
+    "보라",
+    "브라운",
+    "베이지",
+    "오렌지",
+    "주황",
+    "네이비",
+    "아이보리",
+    "투명",
+    "반투명",
+    "실리콘",
+    "스텐",
+    "스테인리스",
+    "철제",
+    "메탈",
+    "아연",
+    "가죽",
+    "우드",
+    "극세사",
+    "니트",
+    "벨벳",
+    "스펀지",
+    "플라스틱",
+    "용품",
+    "부품",
+    "부속품",
+    "소품",
+    "액세서리",
+    "기타",
+    "브러쉬",
+    "브러시",
+    "커버",
+    "케이스",
+    "패드",
+    "보호대",
+    "거치대",
+    "홀더",
+  ].map((value) => value.toLocaleLowerCase("ko-KR")),
+);
+
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -207,6 +277,42 @@ function identityText(productName: string, options: readonly string[]) {
     .join(" ");
 }
 
+function meaningfulIdentityTokens(value: unknown) {
+  const raw =
+    text(value)
+      .toLocaleLowerCase("ko-KR")
+      .match(/[0-9a-z가-힣]{2,}/g) ?? [];
+  return raw.filter((token) => {
+    if (APPROVAL_IDENTITY_STOPWORDS.has(token)) return false;
+    if (/^\d+(?:개|p|pcs?|cm|mm|ml|g|kg)?$/i.test(token)) return false;
+    return true;
+  });
+}
+
+function sharedSpecificIdentityTokenScore(left: unknown, right: unknown) {
+  const leftTokens = meaningfulIdentityTokens(left);
+  const rightTokens = meaningfulIdentityTokens(right);
+  if (!leftTokens.length || !rightTokens.length) return 0;
+  const rightSet = new Set(rightTokens);
+  const shared = leftTokens.filter((token) => rightSet.has(token));
+  if (!shared.length) return 0;
+
+  let score = 0;
+  const leftHead = leftTokens.at(-1) ?? "";
+  const rightHead = rightTokens.at(-1) ?? "";
+  for (const token of shared) {
+    const base = token.length >= 4 ? 0.76 : token.length >= 3 ? 0.71 : 0.66;
+    const headBonus =
+      token === leftHead && token === rightHead
+        ? 0.12
+        : token === leftHead || token === rightHead
+          ? 0.05
+          : 0;
+    score = Math.max(score, Math.min(0.9, base + headBonus));
+  }
+  return score;
+}
+
 export function shoplingApprovalIdentitySimilarity(
   left: { productName: string; optionLabels: readonly string[] },
   right: { productName: string; optionLabels: readonly string[] },
@@ -225,7 +331,15 @@ export function shoplingApprovalIdentitySimilarity(
   const fullRight = identityText(right.productName, right.optionLabels);
   const nameScore = jaccard(bigrams(left.productName), bigrams(right.productName));
   const fullScore = jaccard(bigrams(fullLeft), bigrams(fullRight));
-  return Math.max(nameScore, nameScore * 0.75 + fullScore * 0.25);
+  const specificTokenScore = sharedSpecificIdentityTokenScore(
+    left.productName,
+    right.productName,
+  );
+  return Math.max(
+    nameScore,
+    nameScore * 0.75 + fullScore * 0.25,
+    specificTokenScore,
+  );
 }
 
 export function findShoplingCategoryApprovalPrior(
