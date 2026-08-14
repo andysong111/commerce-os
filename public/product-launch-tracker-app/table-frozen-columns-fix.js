@@ -7,6 +7,7 @@ const tableBody = document.querySelector("#launch-table-body");
 
 if (tableWrap && table && tableHead && tableBody) {
   installStyles();
+  keepHeaderAboveFrozenBody();
 
   let firstFrame = 0;
   let secondFrame = 0;
@@ -40,7 +41,20 @@ if (tableWrap && table && tableHead && tableBody) {
   document.fonts?.ready.then(scheduleRepair).catch(() => {});
   scheduleRepair();
 
+  function keepHeaderAboveFrozenBody() {
+    // `thead` used to have z-index 5 while frozen body cells used z-index 20.
+    // That made tall option rows paint over the frozen header labels. Keep the
+    // whole header stacking context above every body cell, not only each <th>.
+    tableWrap.style.position = "relative";
+    tableWrap.style.isolation = "isolate";
+    tableHead.style.position = "sticky";
+    tableHead.style.top = "0px";
+    tableHead.style.zIndex = "100";
+    tableHead.style.isolation = "isolate";
+  }
+
   function repairFrozenColumns() {
+    keepHeaderAboveFrozenBody();
     const headRow = tableHead.querySelector("tr");
     if (!headRow) return;
 
@@ -93,7 +107,7 @@ if (tableWrap && table && tableHead && tableBody) {
         cell.style.width = width;
         cell.style.minWidth = width;
         cell.style.maxWidth = width;
-        cell.style.zIndex = row === headRow ? "40" : "20";
+        cell.style.zIndex = row === headRow ? "120" : "20";
         cell.style.backgroundClip = "border-box";
         cell.style.isolation = "isolate";
       }
@@ -141,21 +155,43 @@ function installStyles() {
   const style = document.createElement("style");
   style.id = "frozen-column-scroll-fix-styles";
   style.textContent = `
+    .table-wrap {
+      position: relative;
+      isolation: isolate;
+    }
     .table-wrap.has-frozen-column-pane table {
       position: relative;
       isolation: isolate;
+    }
+    #launch-table-head {
+      position: sticky !important;
+      top: 0 !important;
+      z-index: 100 !important;
+      isolation: isolate;
+    }
+    #launch-table-head > tr {
+      position: relative;
+      z-index: 100;
     }
     #launch-table-head > tr > th:not(.is-frozen-table-column),
     #launch-table-body > tr > td:not(.is-frozen-table-column) {
       position: relative;
       z-index: 0;
     }
-    #launch-table-head > tr > th:not(.is-frozen-table-column) { z-index: 1; }
+    #launch-table-head > tr > th:not(.is-frozen-table-column) {
+      z-index: 101 !important;
+      background: #f1f5f9 !important;
+    }
     #launch-table-head > tr > th.is-frozen-table-column {
-      z-index: 40 !important;
+      z-index: 120 !important;
       background: #eef4ff !important;
       background-clip: border-box !important;
       box-shadow: inset -1px 0 0 #dbe3ef;
+    }
+    #launch-table-head .sort-button,
+    #launch-table-head .column-drag-handle {
+      position: relative;
+      z-index: 1;
     }
     #launch-table-body > tr > td.is-frozen-table-column {
       z-index: 20 !important;
