@@ -2,30 +2,29 @@ import {
   alignChinaOptionMappingsToRegisteredOptions,
   normalizeRegisteredBcode,
 } from "./lib/china-option-table-authority.mjs";
+import { readChinaOrderOptionMappings } from "./lib/china-order-options.mjs";
 
+const OPTIMIZED_API = "/api/product-launch-tracker/optimized";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
-let syncTimer = null;
+const syncTimers = new Set();
 let syncing = false;
+let syncSerial = 0;
 
-scheduleSync(0);
-scheduleSync(120);
-scheduleSync(500);
+for (const delay of [0, 120, 500, 1_200, 2_500]) scheduleSync(delay);
 
 document.addEventListener(
   "click",
   (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest("button[data-action='detail']")) {
-      scheduleSync(0);
-      scheduleSync(180);
-      scheduleSync(700);
+      for (const delay of [0, 180, 700, 1_600, 3_000]) scheduleSync(delay);
     }
     if (
       target?.closest("#detail-form button[value='save'], #detail-form .detail-floating-save")
     ) {
-      syncChinaOptionPanelToOptionTable();
+      scheduleSync(0);
     }
   },
   true,
@@ -47,8 +46,13 @@ detailForm?.addEventListener(
 );
 
 detailDialog?.addEventListener("close", () => {
-  if (syncTimer) window.clearTimeout(syncTimer);
-  syncTimer = null;
+  clearSyncTimers();
+  syncSerial += 1;
+  const panel = detailForm?.querySelector("#optimized-china-order-map-wrap");
+  if (panel) {
+    panel.dataset.itemId = "";
+    panel.dataset.dirty = "false";
+  }
 });
 
 window.addEventListener("product-launch-tracker:model-bcodes-reconciled", () => {
@@ -64,41 +68,99 @@ if (detailForm) {
 }
 
 function scheduleSync(delay = 20) {
-  if (syncTimer) window.clearTimeout(syncTimer);
-  syncTimer = window.setTimeout(() => {
-    syncTimer = null;
-    syncChinaOptionPanelToOptionTable();
+  const timer = window.setTimeout(() => {
+    syncTimers.delete(timer);
+    void syncChinaOptionPanelToOptionTable();
   }, delay);
+  syncTimers.add(timer);
 }
 
-function syncChinaOptionPanelToOptionTable() {
+function clearSyncTimers() {
+  for (const timer of syncTimers) window.clearTimeout(timer);
+  syncTimers.clear();
+}
+
+async function syncChinaOptionPanelToOptionTable() {
   if (syncing || !detailDialog?.open || !detailForm || !optionTableBody) return;
-  const panel = detailForm.querySelector("#optimized-china-order-map-wrap");
+  const itemId = String(detailForm.elements?.id?.value ?? "").trim();
+  const section = detailForm.querySelector("#optimized-china-product-links-section");
+  if (!itemId || !section) return;
+
+  const panel = ensureChinaOptionPanel(section);
   const list = panel?.querySelector("#optimized-china-order-map-list");
   if (!panel || !list) return;
 
   const registered = readRegisteredOptionTableRows();
-  const current = readChinaOptionPanelRows();
-  const aligned = alignChinaOptionMappingsToRegisteredOptions(registered, current);
-  if (samePanelRows(current, aligned)) {
-    updateAuthorityStatus(panel, aligned.length);
-    return;
-  }
-
+  const serial = ++syncSerial;
   syncing = true;
   try {
-    renderAlignedRows(list, aligned);
+    let sourceRows = readChinaOptionPanelRows();
+    const panelBelongsToItem = panel.dataset.itemId === itemId;
+    if (!panelBelongsToItem && panel.dataset.dirty !== "true") sourceRows = [];
+
+    if (!sourceRows.length && panel.dataset.dirty !== "true") {
+      setPanelStatus(panel, "B-code별 중국옵션 불러오는 중", "");
+      const item = await fetchItem(itemId);
+      if (serial !== syncSerial || !detailDialog.open) return;
+      sourceRows = readChinaOrderOptionMappings(item);
+    }
+
+    const aligned = alignChinaOptionMappingsToRegisteredOptions(
+      registered,
+      sourceRows,
+    );
+    const current = readChinaOptionPanelRows();
+    if (!samePanelRows(current, aligned)) renderAlignedRows(list, aligned);
+
+    panel.dataset.itemId = itemId;
+    updateSectionHeading(section);
     updateAuthorityStatus(panel, aligned.length);
     window.dispatchEvent(
       new CustomEvent("product-launch-tracker:china-options-aligned", {
         detail: {
-          itemId: String(detailForm.elements?.id?.value ?? "").trim(),
+          itemId,
           barcodes: aligned.map((row) => row.barcode),
         },
       }),
     );
+  } catch (error) {
+    setPanelStatus(
+      panel,
+      error instanceof Error
+        ? error.message
+        : "B-code별 중국옵션을 불러오지 못했습니다.",
+      "error",
+    );
   } finally {
     syncing = false;
+  }
+}
+
+function ensureChinaOptionPanel(section) {
+  let panel = section.querySelector("#optimized-china-order-map-wrap");
+  if (panel) return panel;
+  panel = document.createElement("div");
+  panel.id = "optimized-china-order-map-wrap";
+  panel.className = "optimized-china-order-map-wrap";
+  panel.dataset.dirty = "false";
+  panel.dataset.itemId = "";
+  panel.innerHTML = `
+    <h4 class="optimized-china-order-map-title">B-code별 중국옵션</h4>
+    <p class="optimized-china-order-map-help">발주·입고 옵션가격에 바코드·위치코드가 등록된 항목만 표시합니다. 주문링크는 모델의 1번 중국 상품링크를 공통 사용하고 실제 중국옵션명만 저장합니다.</p>
+    <div id="optimized-china-order-map-list" class="optimized-china-order-map-list"></div>
+    <div id="optimized-china-order-map-status" class="optimized-china-order-status"></div>`;
+  section.append(panel);
+  updateSectionHeading(section);
+  return panel;
+}
+
+function updateSectionHeading(section) {
+  const heading = section.querySelector(".section-title-row h3");
+  const help = section.querySelector(".section-title-row p");
+  if (heading) heading.textContent = "중국 상품링크 · 중국옵션";
+  if (help) {
+    help.textContent =
+      "중국 링크는 최대 5개까지 저장하며 1번 링크가 해당 모델의 발주 기준링크입니다. B-code별로는 발주·입고 옵션가격에 등록된 항목의 중국옵션명만 저장합니다.";
   }
 }
 
@@ -163,12 +225,35 @@ function renderAlignedRows(list, rows) {
 
 function updateAuthorityStatus(panel, count) {
   if (panel.dataset.dirty === "true") return;
-  const status = panel.querySelector("#optimized-china-order-map-status");
-  if (!status) return;
-  status.textContent = count
+  const message = count
     ? `발주·입고 옵션가격에 바코드·위치코드가 등록된 ${count}개 B-code만 표시합니다.`
     : "발주·입고 옵션가격에 등록된 유효 B-code가 없어 중국옵션을 표시하지 않습니다.";
-  status.dataset.tone = count ? "saved" : "";
+  setPanelStatus(panel, message, count ? "saved" : "");
+}
+
+function setPanelStatus(panel, message, tone = "") {
+  const status = panel.querySelector("#optimized-china-order-map-status");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.tone = tone;
+}
+
+async function fetchItem(itemId) {
+  const response = await fetch(
+    `${OPTIMIZED_API}?${new URLSearchParams({ mode: "item", id: itemId }).toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+    },
+  );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body?.ok !== true || !body?.item) {
+    throw new Error(
+      body?.message || "상품 상세의 B-code 옵션정보를 불러오지 못했습니다.",
+    );
+  }
+  return body.item;
 }
 
 function escapeAttribute(value) {

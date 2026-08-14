@@ -30,7 +30,7 @@ test("optimized product-launch path loads the B-code China option extensions", (
     loader,
     /await import\("\.\/china-option-table-authority\.js"\)/,
   );
-  assert.match(page, /20260815-frozen-header-visible-v1/);
+  assert.match(page, /20260815-china-options-detail-ready-v1/);
 });
 
 test("active product detail stores only B-code China option while model fixed first link stays product-owned", () => {
@@ -76,11 +76,15 @@ test("B-code별 중국옵션은 발주·입고 옵션가격에 등록된 B-code�
   ]);
 });
 
-test("option-price table mutation immediately re-aligns the China option panel", () => {
+test("option-price table mutation and late detail loading mount and align the China option panel", () => {
   assert.match(authorityUi, /#detail-options/);
   assert.match(authorityUi, /\[data-field='barcode'\]/);
   assert.match(authorityUi, /\[data-field='saleOption'\]/);
   assert.match(authorityUi, /MutationObserver/);
+  assert.match(authorityUi, /syncTimers = new Set/);
+  assert.match(authorityUi, /ensureChinaOptionPanel/);
+  assert.match(authorityUi, /readChinaOrderOptionMappings/);
+  assert.match(authorityUi, /fetchItem/);
   assert.match(authorityUi, /alignChinaOptionMappingsToRegisteredOptions/);
   assert.match(authorityUi, /발주·입고 옵션가격에 바코드·위치코드가 등록된/);
   assert.doesNotMatch(authorityUi, /operation:\s*"patch_item"/);
