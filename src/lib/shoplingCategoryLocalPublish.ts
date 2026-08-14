@@ -25,6 +25,8 @@ export type LocalShoplingCategorySnapshot = {
 };
 
 const MAX_CATEGORY_COUNT = 50_000;
+const MAX_LOCAL_SNAPSHOT_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+const MAX_LOCAL_SNAPSHOT_FUTURE_SKEW_MS = 10 * 60 * 1_000;
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -50,11 +52,15 @@ export function validateLocalShoplingCategorySnapshot(
     throw new Error("로컬 카테고리 결과의 requestId가 올바르지 않습니다.");
   }
   const collectedTimestamp = Date.parse(collectedAt);
+  const snapshotAgeMs = Date.now() - collectedTimestamp;
   if (
     !Number.isFinite(collectedTimestamp) ||
-    Math.abs(Date.now() - collectedTimestamp) > 24 * 60 * 60 * 1_000
+    snapshotAgeMs < -MAX_LOCAL_SNAPSHOT_FUTURE_SKEW_MS ||
+    snapshotAgeMs > MAX_LOCAL_SNAPSHOT_AGE_MS
   ) {
-    throw new Error("로컬 카테고리 결과의 수집 시각이 올바르지 않습니다.");
+    throw new Error(
+      "로컬 카테고리 결과의 수집 시각이 올바르지 않습니다. 7일 이내에 수집된 결과만 복구할 수 있습니다.",
+    );
   }
   if (!/^https:\/\/a\.shopling\.co\.kr\//i.test(categoryPageUrl)) {
     throw new Error("샵플링 카테고리 페이지 주소가 올바르지 않습니다.");
