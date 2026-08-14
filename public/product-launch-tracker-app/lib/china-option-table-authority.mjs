@@ -13,10 +13,6 @@ export function normalizeRegisteredBcode(value) {
   return /^[A-Z]{3}\d+-\d+$/.test(candidate) ? candidate : "";
 }
 
-function saleKey(value) {
-  return text(value).toLowerCase().replace(/\s+/g, "");
-}
-
 export function registeredOrderOptionRows(values) {
   const seen = new Set();
   const rows = [];
@@ -35,22 +31,6 @@ export function registeredOrderOptionRows(values) {
   return rows;
 }
 
-function uniqueSaleOptionIndex(values) {
-  const index = new Map();
-  const ambiguous = new Set();
-  for (const row of values) {
-    const key = saleKey(row.saleOption);
-    if (!key || ambiguous.has(key)) continue;
-    if (index.has(key)) {
-      index.delete(key);
-      ambiguous.add(key);
-      continue;
-    }
-    index.set(key, row);
-  }
-  return index;
-}
-
 export function alignChinaOptionMappingsToRegisteredOptions(
   registeredValues,
   savedValues,
@@ -61,18 +41,15 @@ export function alignChinaOptionMappingsToRegisteredOptions(
     return {
       id: text(row.id) || `saved-${index + 1}`,
       barcode: normalizeRegisteredBcode(row.barcode),
-      saleOption: text(row.saleOption ?? row.value),
       chinaOption: text(row.chinaOption).slice(0, 240),
     };
   });
   const byBarcode = new Map(
     saved.filter((row) => row.barcode).map((row) => [row.barcode, row]),
   );
-  const bySaleOption = uniqueSaleOptionIndex(saved);
 
   return registered.map((row) => {
-    const matched =
-      byBarcode.get(row.barcode) || bySaleOption.get(saleKey(row.saleOption));
+    const matched = byBarcode.get(row.barcode);
     return {
       id: matched?.id || row.id,
       barcode: row.barcode,
