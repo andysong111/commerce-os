@@ -49,6 +49,9 @@ if (detailPageMode === "worker") {
   // Product Master is the authority for which B-codes actually belong to a model.
   // Remove stale or cross-model option rows before the operator edits or saves them.
   await import("./model-bcode-option-guard.js");
+  // The China-option panel must always mirror the B-codes that are actually visible
+  // in the order/receipt option-price table. Blank and stale rows are never shown.
+  await import("./china-option-table-authority.js");
 
   // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
