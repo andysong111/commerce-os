@@ -192,6 +192,29 @@ test("수동 카테고리는 상품별 접이식 입력으로 최소화하고 �
   assert.match(catalogRoute, /categories: snapshot\.categories\.map/);
 });
 
+test("상품별 수동 경로는 먼저 임시 보존하고 선택한 경로를 한 번에 일괄 승인한다", async () => {
+  const picker = await readFile(
+    new URL(
+      "../src/components/shopling-category-review/ShoplingCategoryManualPicker.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(picker, /MANUAL_DRAFTS_STORAGE_KEY/);
+  assert.match(picker, /window\.sessionStorage\.setItem/);
+  assert.match(picker, /readStoredDrafts/);
+  assert.match(picker, /manualSelections/);
+  assert.match(picker, /bulkApproveManualPaths/);
+  assert.match(picker, /수동 선택 \{manualSelections\.length\}건/);
+  assert.match(picker, /수동 선택 일괄 승인/);
+  assert.match(picker, /AI 카테고리 검토함 · 수동 선택 일괄 승인/);
+  assert.match(picker, /applyShoplingCategoryReviewDecisions\(latest, decisions/);
+  assert.match(picker, /최신 진행관리 상태와 실제 카탈로그 경로를 다시 확인/);
+  assert.match(picker, /다른 상품의 수동 선택값은 유지됩니다/);
+  assert.doesNotMatch(picker, /window\.location\.reload/);
+});
+
 test("AI API는 관련 후보가 없을 때 엉뚱한 경로 대신 빈 검토 결과를 반환한다", async () => {
   const route = await readFile(
     new URL(
