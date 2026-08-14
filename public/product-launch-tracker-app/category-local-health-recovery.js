@@ -121,6 +121,10 @@ async function recoverPreservedResultFromHealth() {
     const failedAt = new Date().toISOString();
     const storedSession = readJson(SESSION_KEY) ?? {};
     const requestId = text(storedSession.requestId);
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "보존된 샵플링 카테고리 결과를 저장하지 못했습니다.";
     const failedSession = {
       ...storedSession,
       mode: "local",
@@ -137,16 +141,14 @@ async function recoverPreservedResultFromHealth() {
       requestId,
       updatedAt: failedAt,
       title: "보존된 카테고리 결과 저장 실패",
-      message:
-        error instanceof Error
-          ? error.message
-          : "보존된 샵플링 카테고리 결과를 저장하지 못했습니다.",
+      message: errorMessage,
       detail: "수집 결과는 로컬 실행기에 계속 보존됨",
       progress: 97,
     };
     writeJson(SESSION_KEY, failedSession);
     writeJson(TASK_KEY, failedTask);
     notifyParent(failedTask);
+    showRecoveryErrorNotice(errorMessage);
     console.warn("Shopling preserved-result save failed.", error);
   } finally {
     recoveryBusy = false;
@@ -196,6 +198,29 @@ function showRecoveryNotice(count) {
   ].join(";");
   document.body.append(notice);
   window.setTimeout(() => notice.remove(), 8_000);
+}
+
+function showRecoveryErrorNotice(message) {
+  document.querySelector("#category-health-recovery-error")?.remove();
+  const notice = document.createElement("div");
+  notice.id = "category-health-recovery-error";
+  notice.textContent = `보존된 카테고리 저장 실패: ${message}`;
+  notice.style.cssText = [
+    "position:fixed",
+    "right:24px",
+    "bottom:24px",
+    "z-index:2147483600",
+    "max-width:520px",
+    "padding:14px 18px",
+    "border-radius:12px",
+    "background:#991b1b",
+    "color:white",
+    "font-size:13px",
+    "font-weight:800",
+    "box-shadow:0 16px 40px rgba(15,23,42,.28)",
+  ].join(";");
+  document.body.append(notice);
+  window.setTimeout(() => notice.remove(), 12_000);
 }
 
 function notifyParent(task) {
