@@ -5,6 +5,8 @@ import {
   type InternalChinaPurchaseDraftInput,
 } from "@/lib/internalChinaPurchaseDraft";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
+import { updateModelFixedSupplierLink } from "@/lib/productLaunchPurchaseMetadataWrite";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,12 +42,31 @@ function errorResponse(error: unknown) {
     message = "빠른 발주안에서 RESERVED로 고정한 주문수량은 이 화면에서 변경하지 않습니다.";
   } else if (code === "INTERNAL_CHINA_ORDER_REQUIRED") {
     message = `실제 주문완료 기록 전에 필수값을 확인하세요. ${raw.split(":").slice(1).join(":")}`;
+  } else if (code === "PRODUCT_LAUNCH_SUPPLIER_LINK_REQUIRED") {
+    message = "모델 고정 1번 1688 링크를 입력하세요.";
+  } else if (code === "PRODUCT_LAUNCH_SUPPLIER_LINK_INVALID") {
+    message = "올바른 http/https 1688 링크를 입력하세요.";
+  } else if (code === "PRODUCT_LAUNCH_SUPPLIER_LINK_TOO_LONG") {
+    message = "중국 주문링크는 4,000자 이하로 입력하세요.";
+  } else if (code === "PRODUCT_LAUNCH_MODEL_NOT_FOUND") {
+    message = `상품출시진행관리에서 해당 모델번호를 찾지 못했습니다: ${raw.split(":").slice(1).join(":")}`;
+  } else if (code === "PRODUCT_LAUNCH_MODEL_CONFLICT") {
+    message = `상품출시진행관리에 같은 모델번호가 여러 건 있어 자동 역저장을 중단했습니다: ${raw.split(":").slice(1).join(":")}`;
+  } else if (code === "PRODUCT_LAUNCH_CONCURRENT_UPDATE") {
+    message = "상품출시진행관리 데이터가 동시에 변경됐습니다. 화면을 새로고침한 뒤 다시 저장하세요.";
   }
-  const notFound = code === "INTERNAL_CHINA_DRAFT_NOT_FOUND";
+  const notFound = [
+    "INTERNAL_CHINA_DRAFT_NOT_FOUND",
+    "PRODUCT_LAUNCH_MODEL_NOT_FOUND",
+  ].includes(code);
+  const conflict = [
+    "PRODUCT_LAUNCH_MODEL_CONFLICT",
+    "PRODUCT_LAUNCH_CONCURRENT_UPDATE",
+  ].includes(code);
   return Response.json(
     { ok: false, code, message, externalOrderExecuted: false },
     {
-      status: notFound ? 404 : 400,
+      status: notFound ? 404 : conflict ? 409 : 400,
       headers: { "cache-control": "no-store" },
     },
   );
@@ -79,6 +100,64 @@ export async function PUT(request: Request, context: RouteContext) {
         ok: true,
         draft,
         message: "Ops Center 중국 발주초안을 저장했습니다. 실제 1688 주문·결제는 실행하지 않았습니다.",
+        externalOrderExecuted: false,
+      },
+      { headers: { "cache-control": "no-store" } },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function PATCH(request: Request, context: RouteContext) {
+  if (!isSameOriginOpsRequest(request)) return unauthorized();
+  const identity = await resolveProductLaunchIdentity(request);
+  if (!identity.ok) {
+    return Response.json(identity.body, {
+      status: identity.status,
+      headers: { "cache-control": "no-store" },
+    });
+  }
+  const { draftId } = await context.params;
+  const decodedDraftId = decodeURIComponent(draftId);
+  try {
+    const body = (await request.json().catch(() => ({}))) as {
+      action?: unknown;
+      modelNo?: unknown;
+      supplierLink?: unknown;
+    };
+    if (String(body.action ?? "") !== "UPDATE_MODEL_SUPPLIER_LINK") {
+      return Response.json(
+        {
+          ok: false,
+          code: "INTERNAL_CHINA_ACTION_INVALID",
+          message: "지원하지 않는 중국 발주초안 변경 작업입니다.",
+          externalOrderExecuted: false,
+        },
+        { status: 400, headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    const write = await updateModelFixedSupplierLink({
+      identity: identity.value,
+      modelNumber: body.modelNo,
+      supplierLink: body.supplierLink,
+      source: "CHINA_ORDER_DRAFT",
+      draftId: decodedDraftId,
+    });
+    const draft = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    return Response.json(
+      {
+        ok: true,
+        draft,
+        modelNo: write.modelNumber,
+        supplierLink: write.supplierLink,
+        savedAt: write.savedAt,
+        productMasterSynced: write.productMaster.ok,
+        productMasterError: write.productMaster.error ?? null,
+        message: write.productMaster.ok
+          ? "Draft에서 입력한 링크를 상품출시진행관리의 모델 고정 1번 링크로 역저장하고 상품마스터 최신 원장에도 반영했습니다."
+          : `상품출시진행관리에는 역저장했지만 상품마스터 최신 원장 동기화를 다시 확인해야 합니다: ${write.productMaster.error}`,
         externalOrderExecuted: false,
       },
       { headers: { "cache-control": "no-store" } },

@@ -116,5 +116,5 @@ test("상세화면의 발주옵션과 중국옵션은 같은 정리된 B-code �
 test("운영 상품출시 페이지가 B-code guard와 option-table authority를 로드한다", () => {
   assert.match(loader, /await import\("\.\/model-bcode-option-guard\.js"\)/);
   assert.match(loader, /await import\("\.\/china-option-table-authority\.js"\)/);
-  assert.match(page, /20260815-china-options-detail-ready-v1/);
+  assert.match(page, /20260815-bidirectional-purchase-metadata-v1/);
 });
