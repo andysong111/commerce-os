@@ -64,6 +64,8 @@ type AiResponseBatch = {
   snapshotHash: string;
 };
 
+type CandidateSelections = Record<string, string>;
+
 export function ShoplingCategoryCoreNounReview() {
   const [state, setState] = useState<TrackerState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,6 +73,8 @@ export function ShoplingCategoryCoreNounReview() {
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [candidateSelections, setCandidateSelections] =
+    useState<CandidateSelections>({});
   const [bulkProgress, setBulkProgress] = useState("");
 
   useEffect(() => {
@@ -83,12 +87,26 @@ export function ShoplingCategoryCoreNounReview() {
     () => reviews.filter((item) => selectedIdSet.has(item.itemId)),
     [reviews, selectedIdSet],
   );
+  const selectedCandidateCount = Object.keys(candidateSelections).length;
   const allSelected =
     reviews.length > 0 && reviews.every((item) => selectedIdSet.has(item.itemId));
 
   useEffect(() => {
     const visible = new Set(reviews.map((item) => item.itemId));
     setSelectedIds((current) => current.filter((itemId) => visible.has(itemId)));
+    setCandidateSelections((current) => {
+      const next: CandidateSelections = {};
+      let changed = false;
+      for (const [itemId, category] of Object.entries(current)) {
+        const review = reviews.find((item) => item.itemId === itemId);
+        if (review?.candidates.includes(category)) {
+          next[itemId] = category;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
   }, [reviews]);
 
   async function loadStateWithRetry() {
@@ -121,6 +139,31 @@ export function ShoplingCategoryCoreNounReview() {
     setSelectedIds(allSelected ? [] : reviews.map((item) => item.itemId));
   }
 
+  function toggleCandidateSelection(itemId: string, category: string) {
+    if (busyKey) return;
+    setCandidateSelections((current) => {
+      if (current[itemId] === category) {
+        const { [itemId]: _removed, ...rest } = current;
+        return rest;
+      }
+      return {
+        ...current,
+        [itemId]: category,
+      };
+    });
+  }
+
+  function clearCandidateSelectionsFor(itemIds: string[]) {
+    if (!itemIds.length) return;
+    const targets = new Set(itemIds);
+    setCandidateSelections((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([itemId]) => !targets.has(itemId)),
+      );
+      return next;
+    });
+  }
+
   async function approve(item: ReviewItem, category: string) {
     if (busyKey) return;
     setBusyKey(`approve:${item.itemId}`);
@@ -133,6 +176,7 @@ export function ShoplingCategoryCoreNounReview() {
         { reviewer: "AI 카테고리 검토함" },
       );
       await persistState(result.state as TrackerState);
+      clearCandidateSelectionsFor([item.itemId]);
       setNotice(`${item.modelNumber || item.productName} · 선택한 후보를 승인했습니다.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "후보 승인에 실패했습니다.");
@@ -141,47 +185,65 @@ export function ShoplingCategoryCoreNounReview() {
     }
   }
 
-  async function bulkApproveFirstCandidates() {
-    if (busyKey || !selectedIds.length) return;
-    setBusyKey("bulk:approve");
+  async function bulkApproveSelectedCandidates() {
+    if (busyKey || !selectedCandidateCount) return;
+    setBusyKey("bulk:approve-selected");
     setNotice("");
     setBulkProgress("");
     try {
       const latest = await requireServerState();
-      const selected = new Set(selectedIds);
-      const latestReviews = buildReviews(latest).filter((item) =>
-        selected.has(item.itemId),
+      const latestReviews = new Map(
+        buildReviews(latest).map((item) => [item.itemId, item] as const),
       );
-      const approvable = latestReviews.filter((item) => Boolean(item.candidates[0]));
-      const skipped = latestReviews.length - approvable.length;
-      if (!approvable.length) {
-        throw new Error("선택한 상품에 승인할 AI 1순위 후보가 없습니다. 먼저 후보를 다시 생성하세요.");
+      const decisions: Array<{
+        itemId: string;
+        action: "approve";
+        category: string;
+      }> = [];
+      const staleIds: string[] = [];
+
+      for (const [itemId, category] of Object.entries(candidateSelections)) {
+        const review = latestReviews.get(itemId);
+        if (!review?.candidates.includes(category)) {
+          staleIds.push(itemId);
+          continue;
+        }
+        decisions.push({ itemId, action: "approve", category });
       }
+
+      if (!decisions.length) {
+        throw new Error(
+          "선택한 후보가 최신 검토 데이터와 일치하지 않습니다. 화면을 새로고침하거나 후보를 다시 선택하세요.",
+        );
+      }
+
       const confirmed = window.confirm(
-        `선택한 ${approvable.length}건의 AI 1순위 후보를 일괄 승인합니다.${
-          skipped ? ` 후보가 없는 ${skipped}건은 제외됩니다.` : ""
+        `직접 선택한 후보 ${decisions.length}건을 일괄 승인합니다.${
+          staleIds.length ? ` 변경된 후보 ${staleIds.length}건은 제외됩니다.` : ""
         } 계속하시겠습니까?`,
       );
       if (!confirmed) return;
 
-      const result = applyShoplingCategoryReviewDecisions(
-        latest,
-        approvable.map((item) => ({
-          itemId: item.itemId,
-          action: "approve" as const,
-          category: item.candidates[0],
-        })),
-        { reviewer: "AI 카테고리 검토함 · 일괄 승인" },
-      );
+      const result = applyShoplingCategoryReviewDecisions(latest, decisions, {
+        reviewer: "AI 카테고리 검토함 · 직접 선택 일괄 승인",
+      });
       await persistState(result.state as TrackerState);
-      setSelectedIds([]);
+      setCandidateSelections(
+        Object.fromEntries(
+          Object.entries(candidateSelections).filter(([itemId]) =>
+            staleIds.includes(itemId),
+          ),
+        ),
+      );
       setNotice(
-        `${approvable.length}건의 AI 1순위 후보를 일괄 승인했습니다.${
-          skipped ? ` 후보가 없던 ${skipped}건은 승인하지 않았습니다.` : ""
+        `직접 선택한 후보 ${decisions.length}건을 일괄 승인했습니다.${
+          staleIds.length
+            ? ` 후보가 바뀐 ${staleIds.length}건은 승인하지 않고 선택 상태로 남겼습니다.`
+            : ""
         }`,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "일괄 승인에 실패했습니다.");
+      setNotice(error instanceof Error ? error.message : "선택 후보 일괄 승인에 실패했습니다.");
     } finally {
       setBusyKey("");
     }
@@ -201,6 +263,7 @@ export function ShoplingCategoryCoreNounReview() {
       const aiBatch = await requestAiCandidates([source]);
       const next = applyAiResultsToState(latest, aiBatch.results, aiBatch.snapshotHash);
       await persistState(next);
+      clearCandidateSelectionsFor([item.itemId]);
       const ai = aiBatch.results[0];
       const selectedPath = text(ai?.selectedPath);
       const autoApply = ai?.autoApply === true && Boolean(selectedPath);
@@ -233,6 +296,7 @@ export function ShoplingCategoryCoreNounReview() {
         throw new Error("재생성할 선택 상품을 최신 진행관리에서 찾지 못했습니다.");
       }
 
+      clearCandidateSelectionsFor(sources.map((source) => text(source.id)).filter(Boolean));
       let completed = 0;
       for (let offset = 0; offset < sources.length; offset += AI_BATCH_SIZE) {
         const batch = sources.slice(offset, offset + AI_BATCH_SIZE);
@@ -364,7 +428,7 @@ export function ShoplingCategoryCoreNounReview() {
             모델명에서 실제 제품명사를 먼저 찾습니다
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            모델명 웹 검색의 시장 카테고리와 핵심 제품명사를 함께 확인합니다. 관련 후보가 없으면 엉뚱한 카테고리를 제시하지 않습니다.
+            상품 체크박스는 재생성 대상을, 후보 체크박스는 실제 승인할 카테고리를 선택합니다. 한 상품에서는 후보 하나만 선택됩니다.
           </p>
         </div>
         <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-black text-amber-800">
@@ -379,7 +443,7 @@ export function ShoplingCategoryCoreNounReview() {
       ) : null}
 
       <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-black text-slate-900">
               <input
@@ -389,10 +453,10 @@ export function ShoplingCategoryCoreNounReview() {
                 disabled={Boolean(busyKey)}
                 className="h-4 w-4 rounded border-slate-300"
               />
-              전체 선택 · {reviews.length}건
+              재생성 대상 전체 선택 · {reviews.length}건
             </label>
             <p className="mt-1 text-xs text-slate-500">
-              {selectedReviews.length}건 선택됨 · 일괄 승인은 각 상품의 현재 AI 1순위 후보만 승인합니다.
+              재생성 상품 {selectedReviews.length}건 선택 · 승인 후보 {selectedCandidateCount}건 선택
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -402,7 +466,7 @@ export function ShoplingCategoryCoreNounReview() {
               disabled={Boolean(busyKey) || !selectedIds.length}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
             >
-              선택 해제
+              재생성 선택 해제
             </button>
             <button
               type="button"
@@ -412,17 +476,25 @@ export function ShoplingCategoryCoreNounReview() {
             >
               {busyKey === "bulk:reanalyze"
                 ? "일괄 재생성 중…"
-                : `선택 후보 일괄 재생성${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+                : `선택 상품 후보 일괄 재생성${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
             </button>
             <button
               type="button"
-              onClick={() => void bulkApproveFirstCandidates()}
-              disabled={Boolean(busyKey) || !selectedIds.length}
+              onClick={() => setCandidateSelections({})}
+              disabled={Boolean(busyKey) || !selectedCandidateCount}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-black text-amber-800 disabled:opacity-40"
+            >
+              후보 선택 해제
+            </button>
+            <button
+              type="button"
+              onClick={() => void bulkApproveSelectedCandidates()}
+              disabled={Boolean(busyKey) || !selectedCandidateCount}
               className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
             >
-              {busyKey === "bulk:approve"
-                ? "일괄 승인 중…"
-                : `선택 1순위 일괄 승인${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+              {busyKey === "bulk:approve-selected"
+                ? "선택 후보 승인 중…"
+                : `선택 후보 일괄 승인${selectedCandidateCount ? ` (${selectedCandidateCount})` : ""}`}
             </button>
           </div>
         </div>
@@ -437,6 +509,7 @@ export function ShoplingCategoryCoreNounReview() {
         {reviews.map((item) => {
           const reanalyzing = busyKey === `reanalyze:${item.itemId}`;
           const selected = selectedIdSet.has(item.itemId);
+          const selectedCandidate = candidateSelections[item.itemId] || "";
           return (
             <article
               key={item.itemId}
@@ -453,7 +526,7 @@ export function ShoplingCategoryCoreNounReview() {
                     checked={selected}
                     onChange={() => toggleSelected(item.itemId)}
                     disabled={Boolean(busyKey)}
-                    aria-label={`${item.modelNumber || item.productName} 선택`}
+                    aria-label={`${item.modelNumber || item.productName} 재생성 대상 선택`}
                     className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
                   />
                   <div className="min-w-0">
@@ -493,31 +566,51 @@ export function ShoplingCategoryCoreNounReview() {
 
               {item.candidates.length ? (
                 <div className="mt-3 space-y-2">
-                  {item.candidates.map((candidate, index) => (
-                    <div
-                      key={candidate}
-                      className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black text-slate-400">
-                          후보 {index + 1}{index === 0 ? " · AI 1순위" : ""}
-                        </p>
-                        <p className="mt-0.5 break-words text-xs font-bold leading-5 text-slate-800">
-                          {candidate}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void approve(item, candidate)}
-                        disabled={Boolean(busyKey)}
-                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                  {item.candidates.map((candidate, index) => {
+                    const candidateSelected = selectedCandidate === candidate;
+                    return (
+                      <div
+                        key={candidate}
+                        className={`flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between ${
+                          candidateSelected
+                            ? "border-blue-400 bg-blue-50"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
                       >
-                        {busyKey === `approve:${item.itemId}`
-                          ? "저장 중…"
-                          : "이 후보 승인"}
-                      </button>
-                    </div>
-                  ))}
+                        <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={candidateSelected}
+                            onChange={() =>
+                              toggleCandidateSelection(item.itemId, candidate)
+                            }
+                            disabled={Boolean(busyKey)}
+                            aria-label={`${item.modelNumber || item.productName} 후보 ${index + 1} 선택`}
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-[10px] font-black text-slate-400">
+                              후보 {index + 1}{index === 0 ? " · AI 1순위" : ""}
+                              {candidateSelected ? " · 승인 선택됨" : ""}
+                            </span>
+                            <span className="mt-0.5 block break-words text-xs font-bold leading-5 text-slate-800">
+                              {candidate}
+                            </span>
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void approve(item, candidate)}
+                          disabled={Boolean(busyKey)}
+                          className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                        >
+                          {busyKey === `approve:${item.itemId}`
+                            ? "저장 중…"
+                            : "이 후보 승인"}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">

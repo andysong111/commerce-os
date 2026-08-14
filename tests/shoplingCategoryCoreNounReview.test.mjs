@@ -27,7 +27,7 @@ test("검토 패널은 후보가 없어도 상품과 재분석 버튼을 유지�
   assert.doesNotMatch(page, /ShoplingCategoryCandidateQuickApprove/);
 });
 
-test("검토함은 체크박스 전체선택과 선택 일괄 재생성·1순위 승인을 제공한다", async () => {
+test("검토함은 재생성 상품 선택과 승인 후보 선택을 분리해 일괄 처리한다", async () => {
   const component = await readFile(
     new URL(
       "../src/components/shopling-category-review/ShoplingCategoryCoreNounReview.tsx",
@@ -37,17 +37,23 @@ test("검토함은 체크박스 전체선택과 선택 일괄 재생성·1순위
   );
 
   assert.match(component, /type="checkbox"/);
-  assert.match(component, /전체 선택 · \{reviews\.length\}건/);
-  assert.match(component, /선택 후보 일괄 재생성/);
-  assert.match(component, /선택 1순위 일괄 승인/);
-  assert.match(component, /bulkReanalyze/);
-  assert.match(component, /bulkApproveFirstCandidates/);
+  assert.match(component, /재생성 대상 전체 선택 · \{reviews\.length\}건/);
+  assert.match(component, /선택 상품 후보 일괄 재생성/);
+  assert.match(component, /선택 후보 일괄 승인/);
+  assert.match(component, /candidateSelections/);
+  assert.match(component, /toggleCandidateSelection/);
+  assert.match(component, /selectedCandidate === candidate/);
+  assert.match(component, /한 상품에서는 후보 하나만 선택됩니다/);
+  assert.match(component, /bulkApproveSelectedCandidates/);
+  assert.doesNotMatch(component, /bulkApproveFirstCandidates/);
+  assert.match(component, /직접 선택한 후보 \$\{decisions\.length\}건을 일괄 승인합니다/);
+  assert.match(component, /AI 카테고리 검토함 · 직접 선택 일괄 승인/);
+  assert.match(component, /review\?\.candidates\.includes\(category\)/);
   assert.match(component, /const AI_BATCH_SIZE = 5/);
   assert.match(component, /offset \+= AI_BATCH_SIZE/);
   assert.match(component, /requestAiCandidates\(batch\)/);
   assert.match(component, /requestAiCandidates\(\[source\]\)/);
   assert.match(component, /window\.confirm/);
-  assert.match(component, /AI 카테고리 검토함 · 일괄 승인/);
   assert.match(component, /실패한 \$\{failedSet\.size\}건만 선택 상태로 남겼습니다/);
 });
 
