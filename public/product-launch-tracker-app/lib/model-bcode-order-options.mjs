@@ -12,6 +12,11 @@ function normalizeBarcode(value) {
   return text(value).toUpperCase().replace(/\s+/g, "");
 }
 
+function managedBarcode(value) {
+  const barcode = normalizeBarcode(value);
+  return /^[A-Z]{3}\d+-\d+$/.test(barcode) ? barcode : "";
+}
+
 function nonNegativeInteger(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.ceil(parsed)) : 0;
@@ -32,8 +37,8 @@ function normalizedAuthority(values) {
   const output = [];
   for (const raw of Array.isArray(values) ? values : []) {
     const row = record(raw);
-    const barcode = normalizeBarcode(row.barcode);
-    if (!/^[A-Z]{3}\d+-\d+$/.test(barcode) || seen.has(barcode)) continue;
+    const barcode = managedBarcode(row.barcode);
+    if (!barcode || seen.has(barcode)) continue;
     seen.add(barcode);
     output.push({
       id: text(row.id) || `model-${barcode}`,
@@ -48,10 +53,13 @@ function normalizedAuthority(values) {
   return output.sort((left, right) => left.barcode.localeCompare(right.barcode));
 }
 
-function uniqueSaleOptionIndex(source) {
+function uniqueBlankBarcodeSaleOptionIndex(source) {
   const index = new Map();
   const ambiguous = new Set();
   for (const row of source) {
+    // A row that already carries another managed B-code belongs to another SKU and
+    // must never donate option/cost data merely because its sale-option text matches.
+    if (managedBarcode(row.barcode)) continue;
     const key = normalizedSaleOption(row.saleOption ?? row.value);
     if (!key || ambiguous.has(key)) continue;
     if (index.has(key)) {
@@ -71,20 +79,23 @@ export function reconcileModelOrderOptions(currentValues, authoritativeValues) {
 
   const byBarcode = new Map();
   for (const row of current) {
-    const code = normalizeBarcode(row.barcode);
-    if (/^[A-Z]{3}\d+-\d+$/.test(code) && !byBarcode.has(code)) {
-      byBarcode.set(code, row);
-    }
+    const code = managedBarcode(row.barcode);
+    if (code && !byBarcode.has(code)) byBarcode.set(code, row);
   }
-  const bySaleOption = uniqueSaleOptionIndex(current);
-  const singleFallback = authority.length === 1 && current.length === 1 ? current[0] : null;
+  const blankBySaleOption = uniqueBlankBarcodeSaleOptionIndex(current);
+  const singleBlankFallback =
+    authority.length === 1 &&
+    current.length === 1 &&
+    !managedBarcode(current[0].barcode)
+      ? current[0]
+      : null;
 
   return authority.map((authoritative) => {
     const exact = byBarcode.get(authoritative.barcode);
-    const saleMatch = bySaleOption.get(
+    const blankSaleMatch = blankBySaleOption.get(
       normalizedSaleOption(authoritative.saleOption),
     );
-    const saved = exact || saleMatch || singleFallback || {};
+    const saved = exact || blankSaleMatch || singleBlankFallback || {};
     return {
       ...saved,
       id: text(saved.id) || authoritative.id,
