@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  buildShoplingCategoryApprovalExamples,
+  computeShoplingCategoryAccuracyMetrics,
+  findShoplingCategoryApprovalPrior,
+} from "../src/lib/shoplingCategoryLearning.ts";
 
 test("검토 패널은 후보가 없어도 상품과 재분석 버튼을 유지한다", async () => {
   const component = await readFile(
@@ -55,6 +60,127 @@ test("검토함은 재생성 상품 선택과 승인 후보 선택을 분리해 
   assert.match(component, /requestAiCandidates\(\[source\]\)/);
   assert.match(component, /window\.confirm/);
   assert.match(component, /실패한 \$\{failedSet\.size\}건만 선택 상태로 남겼습니다/);
+});
+
+test("승인 정답 이력은 유사 상품의 샵플링 경로 prior와 Top-1·Top-3 지표로 누적된다", () => {
+  const state = {
+    items: [
+      {
+        id: "approved-1",
+        modelNumber: "AAA001",
+        productName: "실리콘 골무 손가락 보호대",
+        orderOptions: [{ saleOption: "단품" }],
+        shoplingCategory: "문구/취미>수예>재봉용품>골무",
+        categoryAiStatus: "review_approved",
+        categoryAiSuggestion: "문구/취미>수예>재봉용품>골무",
+        categoryAiCandidateChoices: [
+          "문구/취미>수예>재봉용품>골무",
+          "생활/건강>보호용품>손가락보호대>기타",
+        ],
+        categoryAiApprovedValue: "문구/취미>수예>재봉용품>골무",
+        categoryAiReviewedAt: "2026-08-15T00:00:00.000Z",
+      },
+      {
+        id: "approved-2",
+        modelNumber: "AAA002",
+        productName: "재봉 골무",
+        orderOptions: [],
+        shoplingCategory: "문구/취미>수예>재봉용품>골무",
+        categoryAiStatus: "review_approved",
+        categoryAiSuggestion: "생활/건강>보호용품>손가락보호대>기타",
+        categoryAiCandidateChoices: [
+          "생활/건강>보호용품>손가락보호대>기타",
+          "문구/취미>수예>재봉용품>골무",
+        ],
+        categoryAiApprovedValue: "문구/취미>수예>재봉용품>골무",
+        categoryAiReviewedAt: "2026-08-15T00:01:00.000Z",
+      },
+    ],
+  };
+  const examples = buildShoplingCategoryApprovalExamples(state);
+  const metrics = computeShoplingCategoryAccuracyMetrics(state);
+  assert.equal(examples.length, 2);
+  assert.equal(metrics.approvedCount, 2);
+  assert.equal(metrics.top1Correct, 1);
+  assert.equal(metrics.top3Covered, 2);
+  assert.equal(metrics.top1Rate, 50);
+  assert.equal(metrics.top3Rate, 100);
+
+  const prior = findShoplingCategoryApprovalPrior(
+    {
+      itemId: "new-item",
+      modelNumber: "AAA999",
+      productName: "재봉용 실리콘 골무",
+      optionLabels: ["단품"],
+      currentCategory: "",
+      chinaProductLinks: [],
+    },
+    examples,
+    new Set(["문구/취미>수예>재봉용품>골무"]),
+  );
+  assert.equal(prior?.path, "문구/취미>수예>재봉용품>골무");
+});
+
+test("Shopling-first 정확도 파이프라인은 승인 prior, leaf 검증, 네이버 후보 재랭킹, 저신뢰 이미지 fallback을 순차 적용한다", async () => {
+  const route = await readFile(
+    new URL(
+      "../src/app/api/product-launch-tracker/ai-category/route.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const accuracy = await readFile(
+    new URL("../src/lib/shoplingCategoryAccuracyV2.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(route, /buildShoplingCategoryApprovalExamples/);
+  assert.match(route, /computeShoplingCategoryAccuracyMetrics/);
+  assert.match(route, /enhanceShoplingCategoryRecommendations/);
+  assert.match(route, /validateWithNaver: false/);
+  assert.match(route, /resolveTrackerImageUrl/);
+  assert.match(route, /engineVersion: SHOPLING_CATEGORY_ENGINE_VERSION/);
+  assert.match(accuracy, /findShoplingCategoryApprovalPrior/);
+  assert.match(accuracy, /validateLeafCandidates/);
+  assert.match(accuracy, /leaf 단계 최종 검증자/);
+  assert.match(accuracy, /rerankCandidatesWithNaver/);
+  assert.match(accuracy, /후보 3개의 네이버 기반 재랭킹 담당자/);
+  assert.match(accuracy, /rerankLowConfidenceWithImages/);
+  assert.match(accuracy, /type: "input_image"/);
+  assert.match(accuracy, /recommendation\.confidence < 55/);
+});
+
+test("검토 화면은 실제 샵플링 카탈로그의 대·중·소·세 선택과 전체 경로 복붙 수동 승인을 제공한다", async () => {
+  const page = await readFile(
+    new URL("../src/app/shopling-category-review-queue/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const picker = await readFile(
+    new URL(
+      "../src/components/shopling-category-review/ShoplingCategoryManualPicker.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const catalogRoute = await readFile(
+    new URL("../src/app/api/shopling-categories/catalog/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(page, /ShoplingCategoryManualPicker/);
+  assert.match(picker, /1\. 대카테고리/);
+  assert.match(picker, /2\. 중카테고리/);
+  assert.match(picker, /3\. 소카테고리/);
+  assert.match(picker, /4\. 세카테고리/);
+  assert.match(picker, /붙여넣은 경로 확인/);
+  assert.match(picker, /이 수동 경로 승인/);
+  assert.match(picker, /catalogPathByKey/);
+  assert.match(picker, /현재 샵플링 카탈로그에 없는 경로는 승인할 수 없습니다/);
+  assert.match(picker, /Top-1/);
+  assert.match(picker, /Top-3/);
+  assert.match(catalogRoute, /fetchShoplingCategorySnapshot/);
+  assert.match(catalogRoute, /resolveProductLaunchIdentity/);
+  assert.match(catalogRoute, /categories: snapshot\.categories\.map/);
 });
 
 test("AI API는 관련 후보가 없을 때 엉뚱한 경로 대신 빈 검토 결과를 반환한다", async () => {

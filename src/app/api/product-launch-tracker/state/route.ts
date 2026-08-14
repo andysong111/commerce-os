@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { SHOPLING_CATEGORY_ENGINE_VERSION } from "@/lib/shoplingCategoryLearning";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import {
   PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD,
@@ -131,10 +132,11 @@ export async function PUT(request: NextRequest) {
     const existing = isRecord(existingRow?.state_payload)
       ? (existingRow.state_payload as TrackerStatePayload)
       : null;
+    const normalized = normalizeStatePayload(
+      preserveServerDeletedItems(incoming, existing),
+    );
     const state = prepareStateForStorage(
-      normalizeStatePayload(
-        preserveServerDeletedItems(incoming, existing),
-      ),
+      tagFreshCategoryEngineVersions(normalized, existing),
     );
     const saved = (await writeProductLaunchState(
       config.value,
@@ -182,10 +184,11 @@ async function mergePartialStateWithRetry(
       );
     }
 
+    const merged = normalizeStatePayload(
+      preserveServerDeletedItems(mergePartialPage(existing, incoming), existing),
+    );
     const state = prepareStateForStorage(
-      normalizeStatePayload(
-        preserveServerDeletedItems(mergePartialPage(existing, incoming), existing),
-      ),
+      tagFreshCategoryEngineVersions(merged, existing),
     );
     const previousUpdatedAt = nullableText(existingRow?.updated_at);
     if (!previousUpdatedAt) {
@@ -301,6 +304,38 @@ function mergePartialPage(
   delete merged.partialItemIds;
   delete merged[PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD];
   return merged;
+}
+
+function tagFreshCategoryEngineVersions(
+  incoming: TrackerStatePayload,
+  existing: TrackerStatePayload | null,
+) {
+  const incomingItems = Array.isArray(incoming.items) ? incoming.items : [];
+  if (!incomingItems.length) return incoming;
+  const existingItems = Array.isArray(existing?.items)
+    ? existing!.items.filter(isRecord)
+    : [];
+  const existingById = new Map(
+    existingItems
+      .map((item) => [String(item.id ?? "").trim(), item] as const)
+      .filter(([id]) => id),
+  );
+
+  const items = incomingItems.map((raw) => {
+    if (!isRecord(raw)) return raw;
+    const id = String(raw.id ?? "").trim();
+    const aiUpdatedAt = String(raw.categoryAiUpdatedAt ?? "").trim();
+    const explicitVersion = String(raw.categoryAiEngineVersion ?? "").trim();
+    if (!id || !aiUpdatedAt || explicitVersion) return raw;
+    const previous = existingById.get(id);
+    const previousAiUpdatedAt = String(previous?.categoryAiUpdatedAt ?? "").trim();
+    if (aiUpdatedAt === previousAiUpdatedAt) return raw;
+    return {
+      ...raw,
+      categoryAiEngineVersion: SHOPLING_CATEGORY_ENGINE_VERSION,
+    };
+  });
+  return { ...incoming, items };
 }
 
 function normalizeStatePayload(value: unknown): TrackerStatePayload {

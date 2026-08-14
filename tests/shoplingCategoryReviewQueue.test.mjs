@@ -118,6 +118,42 @@ test("수정 승인과 보류·제외·재검토를 한 번의 state 저장으�
   );
 });
 
+test("AI 후보가 비어 있어도 실제 카탈로그 경로를 명시하면 수동 승인한다", () => {
+  const state = {
+    items: [
+      {
+        id: "manual-no-suggestion",
+        modelNumber: "AAA999",
+        productName: "수동 분류 상품",
+        shoplingCategory: "",
+        categoryAiSuggestion: "",
+        categoryAiStatus: "review_required",
+      },
+    ],
+  };
+  const result = applyShoplingCategoryReviewDecisions(
+    state,
+    [
+      {
+        itemId: "manual-no-suggestion",
+        action: "approve",
+        category: "문구/취미>수예>재봉용품>골무",
+      },
+    ],
+    {
+      now: "2026-08-15T00:00:00.000Z",
+      reviewer: "AI 카테고리 검토함 · 수동 카탈로그 지정",
+    },
+  );
+  assert.equal(result.appliedCount, 1);
+  const approved = result.state.items[0];
+  assert.equal(approved.shoplingCategory, "문구/취미>수예>재봉용품>골무");
+  assert.equal(approved.categoryAiSuggestion, "문구/취미>수예>재봉용품>골무");
+  assert.equal(approved.categoryAiApprovedValue, "문구/취미>수예>재봉용품>골무");
+  assert.equal(approved.categoryAiStatus, "review_approved");
+  assert.equal(approved.categoryAiDecision, "edited");
+});
+
 test("검토함 화면은 다건 승인·수정·보류·제외와 진행관리 반영을 제공한다", async () => {
   const page = await readFile(
     new URL("../src/app/shopling-category-review-queue/page.tsx", import.meta.url),
@@ -164,6 +200,7 @@ test("검토함 화면은 다건 승인·수정·보류·제외와 진행관리 
   assert.match(workspace, /STATE_ENDPOINT/);
   assert.match(domain, /categoryAiSuggestion/);
   assert.match(domain, /review_approved/);
+  assert.match(domain, /explicitApprovedCategory/);
   assert.match(modules, /shopling-category-review-queue/);
   assert.match(groups, /shopling-category-review-queue/);
   assert.match(trackerApp, /category-review-queue-link\.js/);

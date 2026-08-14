@@ -216,11 +216,16 @@ export function applyShoplingCategoryReviewDecisions(
     if (!decision) return item;
     const rawSuggestion = text(item.categoryAiSuggestion);
     const suggestion = sanitizeShoplingCategoryPath(rawSuggestion);
-    if (!suggestion) return item;
+    const explicitApprovedCategory =
+      decision.action === "approve"
+        ? sanitizeShoplingCategoryPath(decision.category)
+        : "";
+    if (!suggestion && !explicitApprovedCategory) return item;
 
+    const effectiveSuggestion = suggestion || explicitApprovedCategory;
     const next: TrackerItem = {
       ...item,
-      categoryAiSuggestion: suggestion,
+      categoryAiSuggestion: effectiveSuggestion,
       categoryAiAlternatives: categoryArray(item.categoryAiAlternatives),
       categoryAiCandidateChoices: categoryArray(item.categoryAiCandidateChoices),
       categoryAiCandidatePaths: categoryArray(item.categoryAiCandidatePaths),
@@ -229,8 +234,9 @@ export function applyShoplingCategoryReviewDecisions(
     if (cleanCurrentCategory) next.shoplingCategory = cleanCurrentCategory;
 
     if (decision.action === "approve") {
-      const requestedCategory = text(decision.category) || rawSuggestion;
-      const approvedCategory = sanitizeShoplingCategoryPath(requestedCategory);
+      const approvedCategory =
+        explicitApprovedCategory ||
+        sanitizeShoplingCategoryPath(text(decision.category) || rawSuggestion);
       if (!approvedCategory) {
         throw new Error(`${text(item.modelNumber) || itemId}의 승인 카테고리가 비어 있습니다.`);
       }
@@ -242,7 +248,8 @@ export function applyShoplingCategoryReviewDecisions(
       next.shoplingCategory = approvedCategory;
       next.categoryAiApprovedValue = approvedCategory;
       next.categoryAiStatus = "review_approved";
-      next.categoryAiDecision = approvedCategory === suggestion ? "suggestion" : "edited";
+      next.categoryAiDecision =
+        suggestion && approvedCategory === suggestion ? "suggestion" : "edited";
       next.categoryAiReviewedAt = now;
       next.categoryAiReviewedBy = reviewer;
       next.updatedAt = now;
