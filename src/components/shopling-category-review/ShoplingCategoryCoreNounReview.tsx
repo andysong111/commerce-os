@@ -6,6 +6,7 @@ import { applyShoplingCategoryReviewDecisions } from "@/lib/shoplingCategoryRevi
 const STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const AI_ENDPOINT = "/api/product-launch-tracker/ai-category";
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const AI_BATCH_SIZE = 5;
 
 type TrackerItem = Record<string, unknown> & {
   id?: unknown;
@@ -46,6 +47,7 @@ type MarketEvidence = {
 };
 
 type AiResult = {
+  itemId?: unknown;
   selectedPath?: unknown;
   confidence?: unknown;
   reason?: unknown;
@@ -57,18 +59,37 @@ type AiResult = {
   marketEvidence?: unknown;
 };
 
+type AiResponseBatch = {
+  results: AiResult[];
+  snapshotHash: string;
+};
+
 export function ShoplingCategoryCoreNounReview() {
   const [state, setState] = useState<TrackerState | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [busyKey, setBusyKey] = useState("");
   const [notice, setNotice] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkProgress, setBulkProgress] = useState("");
 
   useEffect(() => {
     void loadStateWithRetry();
   }, []);
 
   const reviews = useMemo(() => buildReviews(state), [state]);
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedReviews = useMemo(
+    () => reviews.filter((item) => selectedIdSet.has(item.itemId)),
+    [reviews, selectedIdSet],
+  );
+  const allSelected =
+    reviews.length > 0 && reviews.every((item) => selectedIdSet.has(item.itemId));
+
+  useEffect(() => {
+    const visible = new Set(reviews.map((item) => item.itemId));
+    setSelectedIds((current) => current.filter((itemId) => visible.has(itemId)));
+  }, [reviews]);
 
   async function loadStateWithRetry() {
     setLoading(true);
@@ -84,6 +105,20 @@ export function ShoplingCategoryCoreNounReview() {
     }
     setLoadError("검토 데이터를 불러오지 못했습니다. 다시 불러오기를 눌러주세요.");
     setLoading(false);
+  }
+
+  function toggleSelected(itemId: string) {
+    if (busyKey) return;
+    setSelectedIds((current) =>
+      current.includes(itemId)
+        ? current.filter((value) => value !== itemId)
+        : [...current, itemId],
+    );
+  }
+
+  function toggleAll() {
+    if (busyKey) return;
+    setSelectedIds(allSelected ? [] : reviews.map((item) => item.itemId));
   }
 
   async function approve(item: ReviewItem, category: string) {
@@ -106,6 +141,52 @@ export function ShoplingCategoryCoreNounReview() {
     }
   }
 
+  async function bulkApproveFirstCandidates() {
+    if (busyKey || !selectedIds.length) return;
+    setBusyKey("bulk:approve");
+    setNotice("");
+    setBulkProgress("");
+    try {
+      const latest = await requireServerState();
+      const selected = new Set(selectedIds);
+      const latestReviews = buildReviews(latest).filter((item) =>
+        selected.has(item.itemId),
+      );
+      const approvable = latestReviews.filter((item) => Boolean(item.candidates[0]));
+      const skipped = latestReviews.length - approvable.length;
+      if (!approvable.length) {
+        throw new Error("선택한 상품에 승인할 AI 1순위 후보가 없습니다. 먼저 후보를 다시 생성하세요.");
+      }
+      const confirmed = window.confirm(
+        `선택한 ${approvable.length}건의 AI 1순위 후보를 일괄 승인합니다.${
+          skipped ? ` 후보가 없는 ${skipped}건은 제외됩니다.` : ""
+        } 계속하시겠습니까?`,
+      );
+      if (!confirmed) return;
+
+      const result = applyShoplingCategoryReviewDecisions(
+        latest,
+        approvable.map((item) => ({
+          itemId: item.itemId,
+          action: "approve" as const,
+          category: item.candidates[0],
+        })),
+        { reviewer: "AI 카테고리 검토함 · 일괄 승인" },
+      );
+      await persistState(result.state as TrackerState);
+      setSelectedIds([]);
+      setNotice(
+        `${approvable.length}건의 AI 1순위 후보를 일괄 승인했습니다.${
+          skipped ? ` 후보가 없던 ${skipped}건은 승인하지 않았습니다.` : ""
+        }`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "일괄 승인에 실패했습니다.");
+    } finally {
+      setBusyKey("");
+    }
+  }
+
   async function reanalyze(item: ReviewItem) {
     if (busyKey) return;
     setBusyKey(`reanalyze:${item.itemId}`);
@@ -117,87 +198,13 @@ export function ShoplingCategoryCoreNounReview() {
       );
       if (!source) throw new Error("재분석할 상품을 찾지 못했습니다.");
 
-      const response = await fetch(AI_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          items: [
-            {
-              itemId: source.id,
-              modelNumber: source.modelNumber,
-              productName: source.productName,
-              optionLabels: Array.isArray(source.orderOptions)
-                ? source.orderOptions
-                    .map((option) =>
-                      option && typeof option === "object"
-                        ? text((option as { saleOption?: unknown }).saleOption)
-                        : "",
-                    )
-                    .filter(Boolean)
-                : [],
-              currentCategory: text(source.shoplingCategory),
-              chinaProductLinks: Array.isArray(source.chinaProductLinks)
-                ? source.chinaProductLinks
-                : [],
-            },
-          ],
-        }),
-      });
-      const body = await response.json().catch(() => ({}));
-      const ai = Array.isArray(body?.results) ? (body.results[0] as AiResult) : null;
-      if (!response.ok || body?.ok !== true || !ai) {
-        throw new Error(body?.message || "새 카테고리 후보를 생성하지 못했습니다.");
-      }
-
-      const now = new Date().toISOString();
-      const selectedPath = text(ai.selectedPath);
-      const autoApply = ai.autoApply === true && Boolean(selectedPath);
-      const skippedExisting = ai.skippedExisting === true;
-      const next: TrackerState = {
-        ...latest,
-        savedAt: now,
-        items: latest.items.map((candidate) =>
-          text(candidate?.id) === item.itemId
-            ? {
-                ...candidate,
-                shoplingCategory: autoApply
-                  ? selectedPath
-                  : candidate.shoplingCategory,
-                categoryAiSuggestion: selectedPath,
-                categoryAiConfidence: Math.max(
-                  0,
-                  Math.min(100, Number(ai.confidence) || 0),
-                ),
-                categoryAiReason: normalizeReason(text(ai.reason)),
-                categoryAiAlternatives: stringArray(ai.alternatives).slice(0, 3),
-                categoryAiCandidateChoices: stringArray(
-                  ai.candidateChoices,
-                ).slice(0, 3),
-                categoryAiCandidatePaths: stringArray(ai.candidatePaths),
-                categoryAiMarketEvidence: normalizeMarketEvidence(
-                  ai.marketEvidence,
-                ),
-                categoryAiStatus: autoApply
-                  ? "auto_applied"
-                  : skippedExisting
-                    ? "existing_preserved"
-                    : "review_required",
-                categoryAiSnapshotHash: text(body?.snapshot?.hash),
-                categoryAiUpdatedAt: now,
-                updatedAt: now,
-                updatedBy: autoApply
-                  ? "AI 카테고리 자동설정"
-                  : candidate.updatedBy,
-              }
-            : candidate,
-        ),
-      };
+      const aiBatch = await requestAiCandidates([source]);
+      const next = applyAiResultsToState(latest, aiBatch.results, aiBatch.snapshotHash);
       await persistState(next);
-      const newCandidates = stringArray(ai.candidateChoices).filter(Boolean);
+      const ai = aiBatch.results[0];
+      const selectedPath = text(ai?.selectedPath);
+      const autoApply = ai?.autoApply === true && Boolean(selectedPath);
+      const newCandidates = stringArray(ai?.candidateChoices).filter(Boolean);
       setNotice(
         autoApply
           ? `${item.modelNumber} · 고신뢰도 카테고리가 자동입력됐습니다.`
@@ -210,6 +217,97 @@ export function ShoplingCategoryCoreNounReview() {
     } finally {
       setBusyKey("");
     }
+  }
+
+  async function bulkReanalyze() {
+    if (busyKey || !selectedIds.length) return;
+    setBusyKey("bulk:reanalyze");
+    setNotice("");
+    setBulkProgress("");
+    const failedIds: string[] = [];
+    try {
+      let working = await requireServerState();
+      const selected = new Set(selectedIds);
+      const sources = working.items.filter((item) => selected.has(text(item?.id)));
+      if (!sources.length) {
+        throw new Error("재생성할 선택 상품을 최신 진행관리에서 찾지 못했습니다.");
+      }
+
+      let completed = 0;
+      for (let offset = 0; offset < sources.length; offset += AI_BATCH_SIZE) {
+        const batch = sources.slice(offset, offset + AI_BATCH_SIZE);
+        setBulkProgress(`선택 후보 재생성 중 · ${completed}/${sources.length}`);
+        let successfulResults: AiResult[] = [];
+        let snapshotHash = "";
+        try {
+          const result = await requestAiCandidates(batch);
+          successfulResults = result.results;
+          snapshotHash = result.snapshotHash;
+        } catch {
+          for (const source of batch) {
+            try {
+              const result = await requestAiCandidates([source]);
+              successfulResults.push(...result.results);
+              snapshotHash = result.snapshotHash || snapshotHash;
+            } catch {
+              failedIds.push(text(source.id));
+            }
+          }
+        }
+
+        if (successfulResults.length) {
+          working = applyAiResultsToState(
+            working,
+            successfulResults,
+            snapshotHash,
+          );
+          await persistState(working);
+        }
+        completed += batch.length;
+        setBulkProgress(`선택 후보 재생성 중 · ${completed}/${sources.length}`);
+      }
+
+      const failedSet = new Set(failedIds.filter(Boolean));
+      setSelectedIds([...failedSet]);
+      const successCount = sources.length - failedSet.size;
+      setNotice(
+        `${successCount}건의 후보를 새 샵플링 카탈로그 기준으로 다시 생성했습니다.${
+          failedSet.size
+            ? ` 실패한 ${failedSet.size}건만 선택 상태로 남겼습니다.`
+            : ""
+        }`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "일괄 후보 재생성에 실패했습니다.");
+    } finally {
+      setBulkProgress("");
+      setBusyKey("");
+    }
+  }
+
+  async function requestAiCandidates(sources: TrackerItem[]): Promise<AiResponseBatch> {
+    const response = await fetch(AI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({ items: sources.map(aiInputFromSource) }),
+    });
+    const body = await response.json().catch(() => ({}));
+    const rawResults = Array.isArray(body?.results) ? (body.results as AiResult[]) : [];
+    if (!response.ok || body?.ok !== true || !rawResults.length) {
+      throw new Error(body?.message || "새 카테고리 후보를 생성하지 못했습니다.");
+    }
+    const results = rawResults.map((ai, index) => ({
+      ...ai,
+      itemId: text(ai.itemId) || text(sources[index]?.id),
+    }));
+    return {
+      results,
+      snapshotHash: text(body?.snapshot?.hash),
+    };
   }
 
   async function persistState(next: TrackerState) {
@@ -280,35 +378,108 @@ export function ShoplingCategoryCoreNounReview() {
         </div>
       ) : null}
 
+      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-black text-slate-900">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                disabled={Boolean(busyKey)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              전체 선택 · {reviews.length}건
+            </label>
+            <p className="mt-1 text-xs text-slate-500">
+              {selectedReviews.length}건 선택됨 · 일괄 승인은 각 상품의 현재 AI 1순위 후보만 승인합니다.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              disabled={Boolean(busyKey) || !selectedIds.length}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 disabled:opacity-40"
+            >
+              선택 해제
+            </button>
+            <button
+              type="button"
+              onClick={() => void bulkReanalyze()}
+              disabled={Boolean(busyKey) || !selectedIds.length}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 disabled:opacity-40"
+            >
+              {busyKey === "bulk:reanalyze"
+                ? "일괄 재생성 중…"
+                : `선택 후보 일괄 재생성${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => void bulkApproveFirstCandidates()}
+              disabled={Boolean(busyKey) || !selectedIds.length}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+            >
+              {busyKey === "bulk:approve"
+                ? "일괄 승인 중…"
+                : `선택 1순위 일괄 승인${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+            </button>
+          </div>
+        </div>
+        {bulkProgress ? (
+          <div className="mt-3 rounded-lg bg-blue-100 px-3 py-2 text-xs font-black text-blue-900">
+            {bulkProgress}
+          </div>
+        ) : null}
+      </div>
+
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         {reviews.map((item) => {
           const reanalyzing = busyKey === `reanalyze:${item.itemId}`;
+          const selected = selectedIdSet.has(item.itemId);
           return (
-            <article key={item.itemId} className="rounded-xl border border-slate-200 p-4">
+            <article
+              key={item.itemId}
+              className={`rounded-xl border p-4 ${
+                selected
+                  ? "border-blue-300 bg-blue-50/40"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="font-black text-slate-950">
-                    {item.modelNumber || "모델번호 없음"} · {item.productName || "모델명 없음"}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">{item.reason}</p>
-                  {item.marketEvidence ? (
-                    <div className="mt-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] leading-5 text-cyan-950">
-                      <p className="font-black">
-                        {item.marketEvidence.status === "web"
-                          ? "웹 검색 근거"
-                          : "웹 검색 대체 분석"} · 근거 신뢰도 {item.marketEvidence.confidence}%
-                      </p>
-                      {item.marketEvidence.summary ? (
-                        <p>{item.marketEvidence.summary}</p>
-                      ) : null}
-                      {item.marketEvidence.categoryPaths.length ? (
-                        <p>시장 분류: {item.marketEvidence.categoryPaths.join(" / ")}</p>
-                      ) : null}
-                      {item.marketEvidence.sourceDomains.length ? (
-                        <p>출처: {item.marketEvidence.sourceDomains.join(", ")}</p>
-                      ) : null}
-                    </div>
-                  ) : null}
+                <div className="flex min-w-0 items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleSelected(item.itemId)}
+                    disabled={Boolean(busyKey)}
+                    aria-label={`${item.modelNumber || item.productName} 선택`}
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-black text-slate-950">
+                      {item.modelNumber || "모델번호 없음"} · {item.productName || "모델명 없음"}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">{item.reason}</p>
+                    {item.marketEvidence ? (
+                      <div className="mt-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-[11px] leading-5 text-cyan-950">
+                        <p className="font-black">
+                          {item.marketEvidence.status === "web"
+                            ? "웹 검색 근거"
+                            : "웹 검색 대체 분석"} · 근거 신뢰도 {item.marketEvidence.confidence}%
+                        </p>
+                        {item.marketEvidence.summary ? (
+                          <p>{item.marketEvidence.summary}</p>
+                        ) : null}
+                        {item.marketEvidence.categoryPaths.length ? (
+                          <p>시장 분류: {item.marketEvidence.categoryPaths.join(" / ")}</p>
+                        ) : null}
+                        {item.marketEvidence.sourceDomains.length ? (
+                          <p>출처: {item.marketEvidence.sourceDomains.join(", ")}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -359,6 +530,74 @@ export function ShoplingCategoryCoreNounReview() {
       </div>
     </section>
   );
+}
+
+function aiInputFromSource(source: TrackerItem) {
+  return {
+    itemId: source.id,
+    modelNumber: source.modelNumber,
+    productName: source.productName,
+    optionLabels: Array.isArray(source.orderOptions)
+      ? source.orderOptions
+          .map((option) =>
+            option && typeof option === "object"
+              ? text((option as { saleOption?: unknown }).saleOption)
+              : "",
+          )
+          .filter(Boolean)
+      : [],
+    currentCategory: text(source.shoplingCategory),
+    chinaProductLinks: Array.isArray(source.chinaProductLinks)
+      ? source.chinaProductLinks
+      : [],
+  };
+}
+
+function applyAiResultsToState(
+  state: TrackerState,
+  results: AiResult[],
+  snapshotHash: string,
+): TrackerState {
+  const byItemId = new Map(
+    results
+      .map((ai) => [text(ai.itemId), ai] as const)
+      .filter(([itemId]) => Boolean(itemId)),
+  );
+  const now = new Date().toISOString();
+  return {
+    ...state,
+    savedAt: now,
+    items: state.items.map((candidate) => {
+      const ai = byItemId.get(text(candidate?.id));
+      if (!ai) return candidate;
+      const selectedPath = text(ai.selectedPath);
+      const autoApply = ai.autoApply === true && Boolean(selectedPath);
+      const skippedExisting = ai.skippedExisting === true;
+      return {
+        ...candidate,
+        shoplingCategory: autoApply ? selectedPath : candidate.shoplingCategory,
+        categoryAiSuggestion: selectedPath,
+        categoryAiConfidence: Math.max(
+          0,
+          Math.min(100, Number(ai.confidence) || 0),
+        ),
+        categoryAiReason: normalizeReason(text(ai.reason)),
+        categoryAiAlternatives: stringArray(ai.alternatives).slice(0, 3),
+        categoryAiCandidateChoices: stringArray(ai.candidateChoices).slice(0, 3),
+        categoryAiCandidatePaths: stringArray(ai.candidatePaths),
+        categoryAiMarketEvidence: normalizeMarketEvidence(ai.marketEvidence),
+        categoryAiStatus: autoApply
+          ? "auto_applied"
+          : skippedExisting
+            ? "existing_preserved"
+            : "review_required",
+        categoryAiSnapshotHash: snapshotHash,
+        categoryAiUpdatedAt: now,
+        updatedAt: now,
+        updatedBy: autoApply ? "AI 카테고리 자동설정" : candidate.updatedBy,
+      };
+    }),
+  };
 }
 
 function buildReviews(state: TrackerState | null): ReviewItem[] {
