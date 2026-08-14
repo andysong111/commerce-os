@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
 import { ShoplingCategoryCoreNounReview } from "@/components/shopling-category-review/ShoplingCategoryCoreNounReview";
+import { ShoplingCategoryManualPicker } from "@/components/shopling-category-review/ShoplingCategoryManualPicker";
 import { ShoplingCategoryReviewQueue } from "@/components/shopling-category-review/ShoplingCategoryReviewQueue";
 
 export default function ShoplingCategoryReviewQueuePage() {
@@ -12,9 +13,10 @@ export default function ShoplingCategoryReviewQueuePage() {
       <section className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-950 shadow-sm">
         <p className="font-bold">운영 원칙</p>
         <p className="mt-1 leading-6 text-blue-900">
-          AI는 모델번호, 진행관리의 모델명, 옵션정보를 기준으로 분류합니다. 모델명에서 실제 제품명사를 먼저 찾고, 관련 카테고리가 없으면 엉뚱한 후보를 억지로 제시하지 않습니다. 승인된 값은 신규 상품 출시 진행관리의 샵플링 표준카테고리에 즉시 반영됩니다.
+          AI는 모델번호, 진행관리의 모델명, 옵션정보를 기준으로 분류합니다. 모델명에서 실제 제품명사를 먼저 찾고, 관련 카테고리가 없으면 엉뚱한 후보를 억지로 제시하지 않습니다. 승인된 값은 신규 상품 출시 진행관리의 샵플링 표준카테고리에 즉시 반영되며 이후 유사 상품의 승인 정답 학습 근거로 사용됩니다.
         </p>
       </section>
+      <ShoplingCategoryManualPicker />
       <ShoplingCategoryCoreNounReview />
       <ShoplingCategoryReviewQueue />
     </>
