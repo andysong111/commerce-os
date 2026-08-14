@@ -3,9 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { validateLocalShoplingCategorySnapshot } from "../src/lib/shoplingCategoryLocalPublish.ts";
 
-test("로컬 샵플링 카테고리 스냅샷을 검증하고 정규화한다", () => {
-  const collectedAt = new Date().toISOString();
-  const snapshot = validateLocalShoplingCategorySnapshot({
+function buildLocalSnapshot(collectedAt) {
+  return {
     schemaVersion: 1,
     source: "shopling_local_playwright",
     status: "success",
@@ -26,11 +25,32 @@ test("로컬 샵플링 카테고리 스냅샷을 검증하고 정규화한다", 
         codes: ["1", "11", "111", "1111"],
       },
     ],
-  });
+  };
+}
+
+test("로컬 샵플링 카테고리 스냅샷을 검증하고 정규화한다", () => {
+  const snapshot = validateLocalShoplingCategorySnapshot(
+    buildLocalSnapshot(new Date().toISOString()),
+  );
   assert.equal(snapshot.categoryCount, 1);
   assert.equal(snapshot.source, "shopling_local_playwright");
   assert.match(snapshot.hash, /^[a-f0-9]{64}$/);
   assert.equal(snapshot.categories[0].path, "스포츠/레저>헬스기구>스트레칭용품>짐볼");
+});
+
+test("로컬 실행기에 보존된 25시간 전 결과는 재수집 없이 복구할 수 있다", () => {
+  const collectedAt = new Date(Date.now() - 25 * 60 * 60 * 1_000).toISOString();
+  const snapshot = validateLocalShoplingCategorySnapshot(buildLocalSnapshot(collectedAt));
+  assert.equal(snapshot.categoryCount, 1);
+  assert.equal(snapshot.collectedAt, collectedAt);
+});
+
+test("7일을 넘긴 로컬 카테고리 결과는 오래된 결과로 거부한다", () => {
+  const collectedAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000).toISOString();
+  assert.throws(
+    () => validateLocalShoplingCategorySnapshot(buildLocalSnapshot(collectedAt)),
+    /7일 이내/,
+  );
 });
 
 test("카테고리 업데이트 버튼은 GitHub Actions보다 로컬 실행기가 먼저 처리한다", async () => {
@@ -138,6 +158,7 @@ test("로컬 결과는 운영자 인증 후 Supabase 서버 저장 경로로 전
   assert.match(route, /resolveProductLaunchIdentity/);
   assert.match(route, /publishLocalShoplingCategorySnapshot/);
   assert.match(publisher, /writeShoplingCategoryCatalogToSupabase/);
+  assert.match(publisher, /MAX_LOCAL_SNAPSHOT_AGE_MS = 7 \* 24/);
   assert.doesNotMatch(publisher, /git\/blobs/);
   assert.match(store, /product_launch_tracker_states/);
   assert.match(store, /resolution=merge-duplicates,return=minimal/);
@@ -156,6 +177,13 @@ test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 �
     ),
     "utf8",
   );
+  const healthRecovery = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/category-local-health-recovery.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   assert.ok(
     app.indexOf("category-local-result-recovery.js") >
       app.indexOf("category-local-update.js"),
@@ -166,4 +194,6 @@ test("저장 실패 후 로컬에 보존된 결과는 재수집 없이 자동 �
   assert.match(recovery, /재수집 없이 결과 저장 중/);
   assert.match(recovery, /targetAddressSpace: "loopback"/);
   assert.match(recovery, /category-update-task-changed/);
+  assert.match(healthRecovery, /showRecoveryErrorNotice/);
+  assert.match(healthRecovery, /보존된 카테고리 저장 실패/);
 });
