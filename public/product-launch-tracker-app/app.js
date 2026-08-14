@@ -46,6 +46,9 @@ if (detailPageMode === "worker") {
   // Optimized tracker owns the active detail dialog, so B-code China purchasing
   // metadata must mount on that path rather than the retired legacy extension.
   await import("./optimized-china-order-mapping.js");
+  // Product Master is the authority for which B-codes actually belong to a model.
+  // Remove stale or cross-model option rows before the operator edits or saves them.
+  await import("./model-bcode-option-guard.js");
 
   // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
