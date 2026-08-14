@@ -8,11 +8,15 @@ const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
-const RECONCILE_DELAYS = [40, 160, 420, 900, 1_600];
+const RECONCILE_DELAYS = [0, 80, 220, 500, 900, 1_600];
+const DOM_ENFORCE_DELAYS = [30, 120, 320, 700, 1_400];
 
 let renderSerial = 0;
 let renderTimers = [];
+let domTimers = [];
 let completedKey = "";
+let authoritativeKey = "";
+let authoritativeOptions = [];
 
 scheduleReconcile();
 
@@ -20,20 +24,43 @@ document.addEventListener(
   "click",
   (event) => {
     const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("button[data-action='detail']")) return;
-    completedKey = "";
-    scheduleReconcile();
+    if (!target) return;
+    if (target.closest("button[data-action='detail']")) {
+      resetAuthority();
+      scheduleReconcile();
+      return;
+    }
+    if (target.closest("#china-sync-button, #add-option-button")) {
+      scheduleDomEnforcement();
+    }
   },
   true,
 );
 
+// This ancestor capture listener runs before the form-level China-option save
+// listener and before the optimized app's bubble submit listener. Therefore both
+// saving paths see the exact same authoritative B-code set.
+document.addEventListener("submit", enforceAuthorityBeforeSave, true);
+
+detailForm?.elements?.modelNumber?.addEventListener("change", () => {
+  resetAuthority();
+  scheduleReconcile();
+});
+
 detailDialog?.addEventListener("close", () => {
-  completedKey = "";
+  resetAuthority();
   clearTimers();
 });
 
+function resetAuthority() {
+  completedKey = "";
+  authoritativeKey = "";
+  authoritativeOptions = [];
+  unlockStructureControls();
+}
+
 function scheduleReconcile() {
-  clearTimers();
+  clearRenderTimers();
   const serial = ++renderSerial;
   for (const delay of RECONCILE_DELAYS) {
     renderTimers.push(
@@ -45,22 +72,37 @@ function scheduleReconcile() {
   }
 }
 
-function clearTimers() {
+function scheduleDomEnforcement() {
+  clearDomTimers();
+  for (const delay of DOM_ENFORCE_DELAYS) {
+    domTimers.push(
+      window.setTimeout(() => {
+        enforceCurrentDom();
+      }, delay),
+    );
+  }
+}
+
+function clearRenderTimers() {
   for (const timer of renderTimers) window.clearTimeout(timer);
   renderTimers = [];
+}
+
+function clearDomTimers() {
+  for (const timer of domTimers) window.clearTimeout(timer);
+  domTimers = [];
+}
+
+function clearTimers() {
+  clearRenderTimers();
+  clearDomTimers();
 }
 
 async function reconcileCurrentItem(serial) {
   if (!detailDialog?.open || !detailForm) return;
   const itemId = String(detailForm.elements?.id?.value ?? "").trim();
-  const modelNumber = String(
-    detailForm.elements?.modelNumber?.value ?? "",
-  )
-    .normalize("NFKC")
-    .trim()
-    .toUpperCase()
-    .replace(/\s+/g, "");
-  if (!itemId || !/^AAA\d{3,}$/.test(modelNumber)) return;
+  const modelNumber = currentModelNumber();
+  if (!itemId || !modelNumber) return;
   const key = `${itemId}:${modelNumber}`;
   if (completedKey === key) return;
 
@@ -87,6 +129,8 @@ async function reconcileCurrentItem(serial) {
       return;
     }
 
+    authoritativeKey = key;
+    authoritativeOptions = authority;
     const nextOptions = reconcileModelOrderOptions(item.orderOptions, authority);
     if (!sameModelOrderOptions(item.orderOptions, nextOptions)) {
       await requestJson(OPTIMIZED_API, {
@@ -102,8 +146,7 @@ async function reconcileCurrentItem(serial) {
     }
     if (serial !== renderSerial || !detailDialog?.open) return;
 
-    renderOptionTable(nextOptions);
-    renderChinaOptionPanel(nextOptions);
+    renderAuthoritativeOptions(nextOptions);
     const syncStatus = document.querySelector("#china-sync-status");
     if (syncStatus) {
       syncStatus.textContent = `${nextOptions.length}개 연결 · 모델 B-code 검증`;
@@ -124,21 +167,129 @@ async function reconcileCurrentItem(serial) {
   }
 }
 
+function currentModelNumber() {
+  const modelNumber = String(
+    detailForm?.elements?.modelNumber?.value ?? "",
+  )
+    .normalize("NFKC")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+  return /^AAA\d{3,}$/.test(modelNumber) ? modelNumber : "";
+}
+
+function enforceAuthorityBeforeSave(event) {
+  if (event.target !== detailForm || event.submitter?.value !== "save") return;
+  enforceCurrentDom();
+}
+
+function enforceCurrentDom() {
+  if (!detailDialog?.open || !authoritativeOptions.length) return;
+  const itemId = String(detailForm?.elements?.id?.value ?? "").trim();
+  const key = `${itemId}:${currentModelNumber()}`;
+  if (!itemId || key !== authoritativeKey) return;
+
+  const currentOptions = mergeChinaOptionsIntoTableRows(
+    readOptionTableRows(),
+    readChinaOptionRows(),
+  );
+  const nextOptions = reconcileModelOrderOptions(
+    currentOptions,
+    authoritativeOptions,
+  );
+  renderAuthoritativeOptions(nextOptions);
+  setGuardStatus(
+    `${currentModelNumber()}의 실제 B-code만 저장합니다. 임의 추가·삭제·B-code 변경은 Product Master 기준으로 자동 복원됩니다.`,
+    "saved",
+  );
+}
+
+function renderAuthoritativeOptions(options) {
+  renderOptionTable(options);
+  renderChinaOptionPanel(options);
+  lockStructureControls();
+}
+
 function renderOptionTable(options) {
   if (!optionTableBody) return;
   optionTableBody.innerHTML = options
     .map(
       (option, index) => `
-        <tr data-option-index="${index}">
+        <tr data-option-index="${index}" data-option-id="${escapeAttribute(option.id)}">
           <td><input data-field="optionName" value="${escapeAttribute(option.optionName || "옵션")}" placeholder="옵션" /></td>
-          <td><input data-field="saleOption" value="${escapeAttribute(option.saleOption || "단품")}" placeholder="블랙" /></td>
-          <td><input data-field="barcode" value="${escapeAttribute(option.barcode)}" placeholder="BAA1-1" /></td>
+          <td><input data-field="saleOption" value="${escapeAttribute(option.saleOption || "단품")}" placeholder="블랙" readonly aria-readonly="true" title="Product Master 모델별 판매옵션 기준값" /></td>
+          <td><input data-field="barcode" value="${escapeAttribute(option.barcode)}" placeholder="BAA1-1" readonly aria-readonly="true" title="Product Master 모델별 B-code 기준값" /></td>
           <td><input data-field="baseSalePriceKrw" type="number" min="0" step="1" value="${Number(option.baseSalePriceKrw) || ""}" /></td>
           <td><input data-field="unitCostKrw" type="number" min="0" step="1" value="${Number(option.unitCostKrw) || ""}" /></td>
-          <td><button class="option-remove" type="button" data-action="remove-option">×</button></td>
+          <td><button class="option-remove" type="button" data-action="remove-option" disabled title="모델별 실제 B-code는 Product Master에서 관리합니다.">×</button></td>
         </tr>`,
     )
     .join("");
+}
+
+function readOptionTableRows() {
+  return [...(optionTableBody?.querySelectorAll("tr[data-option-index]") ?? [])].map(
+    (row, index) => {
+      const get = (field) =>
+        String(row.querySelector(`[data-field='${field}']`)?.value ?? "").trim();
+      return {
+        id: String(row.dataset.optionId ?? `option-${index + 1}`).trim(),
+        optionName: get("optionName") || "옵션",
+        saleOption: get("saleOption") || "단품",
+        barcode: get("barcode"),
+        baseSalePriceKrw: Math.max(
+          0,
+          Math.ceil(Number(get("baseSalePriceKrw")) || 0),
+        ),
+        unitCostKrw: Math.max(
+          0,
+          Math.ceil(Number(get("unitCostKrw")) || 0),
+        ),
+        sourceOrderItemId: null,
+      };
+    },
+  );
+}
+
+function readChinaOptionRows() {
+  return [...(
+    detailForm?.querySelectorAll("[data-optimized-china-order-map-row]") ?? []
+  )].map((row) => ({
+    barcode: String(row.dataset.barcode ?? "").trim().toUpperCase(),
+    saleOption: String(row.dataset.saleOption ?? "").trim(),
+    chinaOption: String(
+      row.querySelector("[data-optimized-china-order-option-input]")?.value ?? "",
+    ).trim(),
+  }));
+}
+
+function mergeChinaOptionsIntoTableRows(tableRows, chinaRows) {
+  const byBarcode = new Map(
+    chinaRows
+      .filter((row) => row.barcode)
+      .map((row) => [row.barcode, row.chinaOption]),
+  );
+  return tableRows.map((row) => ({
+    ...row,
+    chinaOption: byBarcode.get(String(row.barcode).toUpperCase()) || "",
+  }));
+}
+
+function lockStructureControls() {
+  const addButton = document.querySelector("#add-option-button");
+  if (addButton) {
+    addButton.disabled = true;
+    addButton.title =
+      "이 모델의 옵션 B-code는 Product Master 기준으로 자동관리됩니다.";
+  }
+}
+
+function unlockStructureControls() {
+  const addButton = document.querySelector("#add-option-button");
+  if (addButton) {
+    addButton.disabled = false;
+    addButton.title = "";
+  }
 }
 
 function ensureChinaOptionPanel() {
