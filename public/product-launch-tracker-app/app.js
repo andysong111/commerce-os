@@ -52,6 +52,10 @@ if (detailPageMode === "worker") {
   // The China-option panel must always mirror the B-codes that are actually visible
   // in the order/receipt option-price table. Blank and stale rows are never shown.
   await import("./china-option-table-authority.js");
+  // Every successful purchase-metadata save is copied to Product Master so that its
+  // latest-value ledger reflects whichever side — launch tracker or order Draft —
+  // the operator edited last.
+  await import("./purchase-metadata-auto-sync.js");
 
   // Lightweight table and dialog behavior is available immediately after first render.
   await import("./table-horizontal-scroll.js");
