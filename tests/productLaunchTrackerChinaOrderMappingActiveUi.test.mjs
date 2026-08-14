@@ -17,7 +17,11 @@ test("optimized product-launch path loads the B-code China option extension", ()
     loader,
     /await import\("\.\/optimized-china-order-mapping\.js"\)/,
   );
-  assert.match(page, /20260812-model-fixed-first-china-link-v1/);
+  assert.match(
+    loader,
+    /await import\("\.\/model-bcode-option-guard\.js"\)/,
+  );
+  assert.match(page, /20260812-authoritative-model-bcodes-v1/);
 });
 
 test("active product detail stores only B-code China option while model fixed first link stays product-owned", () => {
