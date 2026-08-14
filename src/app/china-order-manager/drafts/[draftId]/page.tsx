@@ -73,7 +73,7 @@ export default async function InternalChinaPurchaseDraftPage({
       />
 
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
-        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다.
+        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 이 화면은 기존 GPT Site의 주문 준비 단계를 대체합니다. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다.
       </section>
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
