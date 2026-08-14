@@ -7,7 +7,10 @@ import { applyShoplingCategoryReviewDecisions } from "@/lib/shoplingCategoryRevi
 const STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const CATALOG_ENDPOINT = "/api/shopling-categories/catalog";
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const MANUAL_DRAFTS_STORAGE_KEY =
+  "commerce-os:shopling-category-manual-drafts:v1";
 const SEARCH_RESULT_LIMIT = 8;
+const BULK_BUSY_KEY = "__manual-category-bulk__";
 
 type RecordLike = Record<string, unknown>;
 type TrackerState = RecordLike & { items: RecordLike[] };
@@ -33,6 +36,12 @@ type ManualDraft = {
 };
 
 type ManualDrafts = Record<string, ManualDraft>;
+
+type ManualApprovalSelection = {
+  itemId: string;
+  item: RecordLike;
+  path: string;
+};
 
 const EMPTY_SELECTION: PickerSelection = {
   large: "",
@@ -242,6 +251,54 @@ function cascadeOptions(
   };
 }
 
+function normalizeStoredDraft(value: unknown): ManualDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as RecordLike;
+  const rawSelection =
+    row.selection && typeof row.selection === "object" && !Array.isArray(row.selection)
+      ? (row.selection as RecordLike)
+      : {};
+  return {
+    selection: {
+      large: text(rawSelection.large),
+      middle: text(rawSelection.middle),
+      small: text(rawSelection.small),
+      detail: text(rawSelection.detail),
+    },
+    query: text(row.query),
+    manualPath: text(row.manualPath),
+    notice: text(row.notice),
+  };
+}
+
+function readStoredDrafts(): ManualDrafts {
+  try {
+    const raw = window.sessionStorage.getItem(MANUAL_DRAFTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next: ManualDrafts = {};
+    for (const [itemId, value] of Object.entries(parsed)) {
+      const normalized = normalizeStoredDraft(value);
+      if (itemId && normalized) next[itemId] = normalized;
+    }
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredDrafts(drafts: ManualDrafts) {
+  try {
+    window.sessionStorage.setItem(
+      MANUAL_DRAFTS_STORAGE_KEY,
+      JSON.stringify(drafts),
+    );
+  } catch {
+    // 브라우저 저장이 막혀도 현재 탭의 React state는 계속 사용합니다.
+  }
+}
+
 export function ShoplingCategoryManualPicker() {
   const [state, setState] = useState<TrackerState | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -251,6 +308,10 @@ export function ShoplingCategoryManualPicker() {
   const [busyItemId, setBusyItemId] = useState("");
   const [notice, setNotice] = useState("");
   const [drafts, setDrafts] = useState<ManualDrafts>({});
+
+  useEffect(() => {
+    setDrafts(readStoredDrafts());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,16 +360,25 @@ export function ShoplingCategoryManualPicker() {
     () => new Map(catalog.map((entry) => [entry.path, entry])),
     [catalog],
   );
+  const manualSelections = useMemo<ManualApprovalSelection[]>(() => {
+    return reviewItems.flatMap((item) => {
+      const itemId = text(item.id);
+      const rawPath = drafts[itemId]?.manualPath;
+      if (!itemId || !rawPath) return [];
+      const canonical = catalogPathByKey.get(pathKey(rawPath));
+      return canonical ? [{ itemId, item, path: canonical }] : [];
+    });
+  }, [reviewItems, drafts, catalogPathByKey]);
 
   useEffect(() => {
     const visible = new Set(reviewItems.map((item) => text(item.id)));
     setDrafts((current) => {
       const next = Object.fromEntries(
         Object.entries(current).filter(([itemId]) => visible.has(itemId)),
-      );
-      return Object.keys(next).length === Object.keys(current).length
-        ? current
-        : next;
+      ) as ManualDrafts;
+      if (Object.keys(next).length === Object.keys(current).length) return current;
+      writeStoredDrafts(next);
+      return next;
     });
   }, [reviewItems]);
 
@@ -316,14 +386,45 @@ export function ShoplingCategoryManualPicker() {
     return drafts[itemId] ?? emptyDraft();
   }
 
+  function replaceDrafts(next: ManualDrafts) {
+    writeStoredDrafts(next);
+    setDrafts(next);
+  }
+
   function updateDraft(
     itemId: string,
     updater: (current: ManualDraft) => ManualDraft,
   ) {
-    setDrafts((current) => ({
-      ...current,
-      [itemId]: updater(current[itemId] ?? emptyDraft()),
-    }));
+    setDrafts((current) => {
+      const next = {
+        ...current,
+        [itemId]: updater(current[itemId] ?? emptyDraft()),
+      };
+      writeStoredDrafts(next);
+      return next;
+    });
+  }
+
+  function clearDraft(itemId: string) {
+    setDrafts((current) => {
+      const { [itemId]: _removed, ...rest } = current;
+      const next = rest as ManualDrafts;
+      writeStoredDrafts(next);
+      return next;
+    });
+  }
+
+  function clearAllManualSelections() {
+    if (busyItemId || !manualSelections.length) return;
+    setDrafts((current) => {
+      const selectedIds = new Set(manualSelections.map((entry) => entry.itemId));
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([itemId]) => !selectedIds.has(itemId)),
+      ) as ManualDrafts;
+      writeStoredDrafts(next);
+      return next;
+    });
+    setNotice("수동 승인용으로 선택해 둔 경로를 모두 해제했습니다.");
   }
 
   function chooseEntry(itemId: string, entry: CatalogEntry, message = "") {
@@ -332,7 +433,9 @@ export function ShoplingCategoryManualPicker() {
       selection: selectionFromEntry(entry),
       query: entry.path,
       manualPath: entry.path,
-      notice: message || "실제 샵플링 카탈로그 경로를 선택했습니다.",
+      notice:
+        message ||
+        "실제 샵플링 카탈로그 경로를 선택했습니다. 상단에서 일괄 승인할 수 있습니다.",
     }));
   }
 
@@ -364,7 +467,9 @@ export function ShoplingCategoryManualPicker() {
         selection: nextSelection,
         query: nextPath || current.query,
         manualPath: nextPath,
-        notice: nextPath ? "드롭다운에서 실제 경로를 선택했습니다." : "",
+        notice: nextPath
+          ? "드롭다운에서 실제 경로를 선택했습니다. 상단에서 일괄 승인할 수 있습니다."
+          : "",
       };
     });
   }
@@ -396,7 +501,7 @@ export function ShoplingCategoryManualPicker() {
       chooseEntry(
         itemId,
         entry,
-        "붙여넣은 전체 경로가 현재 샵플링 카탈로그와 정확히 일치합니다.",
+        "붙여넣은 전체 경로가 현재 샵플링 카탈로그와 정확히 일치합니다. 상단에서 일괄 승인할 수 있습니다.",
       );
     }
   }
@@ -413,7 +518,7 @@ export function ShoplingCategoryManualPicker() {
       return;
     }
     const confirmed = window.confirm(
-      `${reviewLabel(item)}\n\n${canonical}\n\n이 샵플링 카테고리로 직접 승인하시겠습니까?`,
+      `${reviewLabel(item)}\n\n${canonical}\n\n이 샵플링 카테고리만 지금 개별 승인하시겠습니까?\n다른 수동 선택값은 그대로 보존됩니다.`,
     );
     if (!confirmed) return;
 
@@ -432,16 +537,88 @@ export function ShoplingCategoryManualPicker() {
         { reviewer: "AI 카테고리 검토함 · 상품별 수동 지정" },
       );
       await persistState(result.state as TrackerState);
-      setNotice(`${reviewLabel(item)} · 수동 지정 카테고리를 승인했습니다.`);
-      window.setTimeout(() => window.location.reload(), 450);
+      clearDraft(itemId);
+      setNotice(
+        `${reviewLabel(item)} · 개별 승인했습니다. 다른 상품의 수동 선택값은 유지됩니다.`,
+      );
     } catch (error) {
-      updateDraft(itemId, (current) => ({
-        ...current,
+      updateDraft(itemId, (currentDraft) => ({
+        ...currentDraft,
         notice:
           error instanceof Error
             ? error.message
             : "수동 카테고리 승인에 실패했습니다.",
       }));
+    } finally {
+      setBusyItemId("");
+    }
+  }
+
+  async function bulkApproveManualPaths() {
+    if (busyItemId || !manualSelections.length) return;
+    const confirmed = window.confirm(
+      `상품별로 선택해 둔 수동 샵플링 카테고리 ${manualSelections.length}건을 한 번에 승인합니다.\n\n승인 직전에 최신 진행관리 상태와 실제 카탈로그 경로를 다시 확인합니다. 계속하시겠습니까?`,
+    );
+    if (!confirmed) return;
+
+    setBusyItemId(BULK_BUSY_KEY);
+    setNotice("");
+    try {
+      const latest = await readServerState();
+      if (!latest) throw new Error("최신 진행관리 데이터를 불러오지 못했습니다.");
+      const latestById = new Map(
+        latest.items.map((item) => [text(item.id), item] as const),
+      );
+      const decisions: Array<{
+        itemId: string;
+        action: "approve";
+        category: string;
+      }> = [];
+      const skippedIds: string[] = [];
+
+      for (const selection of manualSelections) {
+        const current = latestById.get(selection.itemId);
+        const canonical = catalogPathByKey.get(pathKey(selection.path));
+        if (!current || !isReviewItem(current) || !canonical) {
+          skippedIds.push(selection.itemId);
+          continue;
+        }
+        decisions.push({
+          itemId: selection.itemId,
+          action: "approve",
+          category: canonical,
+        });
+      }
+
+      if (!decisions.length) {
+        throw new Error(
+          "일괄 승인 가능한 최신 수동 선택값이 없습니다. 이미 처리된 상품인지 확인하세요.",
+        );
+      }
+
+      const result = applyShoplingCategoryReviewDecisions(latest, decisions, {
+        reviewer: "AI 카테고리 검토함 · 수동 선택 일괄 승인",
+      });
+      await persistState(result.state as TrackerState);
+
+      const approvedIds = new Set(decisions.map((decision) => decision.itemId));
+      const nextDrafts = Object.fromEntries(
+        Object.entries(drafts).filter(([itemId]) => !approvedIds.has(itemId)),
+      ) as ManualDrafts;
+      replaceDrafts(nextDrafts);
+      setNotice(
+        `수동 선택 ${decisions.length}건을 한 번에 승인했습니다.${
+          skippedIds.length
+            ? ` 최신 상태가 달라진 ${skippedIds.length}건은 승인하지 않고 선택값을 남겼습니다.`
+            : ""
+        }`,
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "수동 선택 일괄 승인에 실패했습니다.",
+      );
     } finally {
       setBusyItemId("");
     }
@@ -475,13 +652,15 @@ export function ShoplingCategoryManualPicker() {
 
   if (!reviewItems.length) return null;
 
+  const bulkSaving = busyItemId === BULK_BUSY_KEY;
+
   return (
     <section className="mb-4 rounded-2xl border border-emerald-200 bg-white p-3 shadow-sm">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-black text-emerald-700">상품별 수동 카테고리 지정</p>
           <p className="mt-0.5 text-xs text-slate-500">
-            평소에는 한 줄로 접어두고, 필요한 상품만 펼쳐 대→중→소→세 선택 또는 카테고리 검색을 사용합니다.
+            상품별로 경로를 먼저 골라두고, 선택이 끝나면 한 번에 일괄 승인합니다. 선택값은 같은 탭에서 새로고침해도 보존됩니다.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px] font-black">
@@ -494,6 +673,27 @@ export function ShoplingCategoryManualPicker() {
           <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-800">
             Top-3 {metrics.top3Rate}%
           </span>
+          <span className="rounded-lg bg-emerald-100 px-2 py-1 text-emerald-900">
+            수동 선택 {manualSelections.length}건
+          </span>
+          <button
+            type="button"
+            onClick={clearAllManualSelections}
+            disabled={Boolean(busyItemId) || !manualSelections.length}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-slate-700 disabled:opacity-40"
+          >
+            수동 선택 해제
+          </button>
+          <button
+            type="button"
+            onClick={() => void bulkApproveManualPaths()}
+            disabled={Boolean(busyItemId) || !manualSelections.length}
+            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-white disabled:bg-slate-300"
+          >
+            {bulkSaving
+              ? "수동 선택 일괄 승인 중…"
+              : `수동 선택 일괄 승인${manualSelections.length ? ` (${manualSelections.length})` : ""}`}
+          </button>
           <span className="rounded-lg bg-slate-50 px-2 py-1 text-slate-500">
             카탈로그 {catalog.length.toLocaleString("ko-KR")} · {catalogHash.slice(0, 8) || "확인 중"}
           </span>
@@ -518,17 +718,26 @@ export function ShoplingCategoryManualPicker() {
           const options = cascadeOptions(catalog, draft.selection);
           const searchResults = searchCatalog(catalog, draft.query);
           const saving = busyItemId === itemId;
+          const selectedForBulk = Boolean(
+            draft.manualPath && catalogPathByKey.get(pathKey(draft.manualPath)),
+          );
           return (
             <details
               key={itemId}
-              className="group rounded-lg border border-slate-200 bg-slate-50 open:bg-white"
+              className={`group rounded-lg border bg-slate-50 open:bg-white ${
+                selectedForBulk ? "border-emerald-300" : "border-slate-200"
+              }`}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs marker:hidden">
                 <span className="min-w-0 truncate font-black text-slate-900">
                   {reviewLabel(item)}
                 </span>
-                <span className="shrink-0 font-black text-emerald-700">
-                  수동 지정 · 검색 ▾
+                <span
+                  className={`shrink-0 font-black ${
+                    selectedForBulk ? "text-emerald-800" : "text-emerald-700"
+                  }`}
+                >
+                  {selectedForBulk ? "수동 선택됨 ✓ · 수정 ▾" : "수동 지정 · 검색 ▾"}
                 </span>
               </summary>
 
@@ -584,17 +793,26 @@ export function ShoplingCategoryManualPicker() {
                     <button
                       type="button"
                       onClick={() => confirmTypedPath(itemId)}
-                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700"
+                      disabled={Boolean(busyItemId)}
+                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 disabled:opacity-40"
                     >
                       경로 확인
                     </button>
                     <button
                       type="button"
+                      onClick={() => clearDraft(itemId)}
+                      disabled={!draft.manualPath || Boolean(busyItemId)}
+                      className="rounded-md border border-emerald-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-emerald-800 disabled:opacity-40"
+                    >
+                      선택 취소
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void approveManualPath(item, draft.manualPath)}
                       disabled={!draft.manualPath || saving || Boolean(busyItemId && !saving)}
-                      className="rounded-md bg-emerald-700 px-2.5 py-1.5 text-[11px] font-black text-white disabled:bg-slate-300"
+                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700 disabled:opacity-40"
                     >
-                      {saving ? "저장 중…" : "수동 승인"}
+                      {saving ? "저장 중…" : "개별 수동 승인"}
                     </button>
                   </div>
 
@@ -608,10 +826,11 @@ export function ShoplingCategoryManualPicker() {
                             chooseEntry(
                               itemId,
                               entry,
-                              `검색 결과 ${index + 1}번 실제 경로를 선택했습니다.`,
+                              `검색 결과 ${index + 1}번 실제 경로를 선택했습니다. 상단에서 일괄 승인할 수 있습니다.`,
                             )
                           }
-                          className="block w-full rounded px-2 py-1.5 text-left hover:bg-emerald-50"
+                          disabled={Boolean(busyItemId)}
+                          className="block w-full rounded px-2 py-1.5 text-left hover:bg-emerald-50 disabled:opacity-40"
                         >
                           <span className="block text-[10px] font-black text-emerald-700">
                             검색 결과 {index + 1} · {entry.names.at(-1) || "카테고리"}
@@ -625,8 +844,16 @@ export function ShoplingCategoryManualPicker() {
                   ) : null}
                 </div>
 
-                <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-950">
-                  <span className="font-black">선택 경로 · </span>
+                <div
+                  className={`mt-2 rounded-md px-2 py-1.5 text-[11px] ${
+                    selectedForBulk
+                      ? "bg-emerald-100 text-emerald-950"
+                      : "bg-emerald-50 text-emerald-950"
+                  }`}
+                >
+                  <span className="font-black">
+                    {selectedForBulk ? "일괄 승인 대기 · " : "선택 경로 · "}
+                  </span>
                   <span className="font-bold">
                     {draft.manualPath || "아직 선택하지 않음"}
                   </span>
@@ -713,14 +940,19 @@ async function readCatalog(): Promise<{
     }
     const categories = body.categories
       .map((raw: unknown) => {
-        const row = raw && typeof raw === "object" && !Array.isArray(raw)
-          ? (raw as RecordLike)
-          : null;
+        const row =
+          raw && typeof raw === "object" && !Array.isArray(raw)
+            ? (raw as RecordLike)
+            : null;
         if (!row) return null;
         const path = text(row.path);
         const names = Array.isArray(row.names)
           ? row.names.map(text).filter(Boolean).slice(0, 4)
-          : path.split(/\s*>\s*/g).map(text).filter(Boolean).slice(0, 4);
+          : path
+              .split(/\s*>\s*/g)
+              .map(text)
+              .filter(Boolean)
+              .slice(0, 4);
         const codes = Array.isArray(row.codes)
           ? row.codes.map(text).filter(Boolean).slice(0, 4)
           : [];
@@ -728,7 +960,9 @@ async function readCatalog(): Promise<{
           ? { path, names, codes, depth: Number(row.depth) || names.length }
           : null;
       })
-      .filter((entry: CatalogEntry | null): entry is CatalogEntry => Boolean(entry));
+      .filter(
+        (entry: CatalogEntry | null): entry is CatalogEntry => Boolean(entry),
+      );
     return { categories, hash: text(body.hash) };
   } catch {
     return null;
