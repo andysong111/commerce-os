@@ -8,6 +8,7 @@ import {
 import {
   generateReliableShoplingCategoryRecommendations,
   isRetryableCategoryOutputError,
+  type ReliableCategoryRecommendationResult,
 } from "@/lib/shoplingCategoryRecommendationRunner";
 import { generateNaverFirstShoplingCategoryRecommendations } from "@/lib/shoplingCategoryNaverFirst";
 import { generateShoplingFirstCategoryRecommendations } from "@/lib/shoplingCategoryShoplingFirst";
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest) {
       categoryMode === "shopling_first"
         ? await enhanceShoplingCategoryRecommendations(
             enrichedInputs,
-            generatedBase,
+            generatedBase as ReliableCategoryRecommendationResult,
             {
               approvalExamples,
               model: shoplingFirstModel,
