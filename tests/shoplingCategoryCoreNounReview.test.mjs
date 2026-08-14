@@ -150,7 +150,7 @@ test("Shopling-first 정확도 파이프라인은 승인 prior, leaf 검증, 네
   assert.match(accuracy, /recommendation\.confidence < 55/);
 });
 
-test("검토 화면은 실제 샵플링 카탈로그의 대·중·소·세 선택과 전체 경로 복붙 수동 승인을 제공한다", async () => {
+test("수동 카테고리는 상품별 접이식 입력으로 최소화하고 드롭다운·검색·전체경로 복붙을 함께 지원한다", async () => {
   const page = await readFile(
     new URL("../src/app/shopling-category-review-queue/page.tsx", import.meta.url),
     "utf8",
@@ -168,16 +168,25 @@ test("검토 화면은 실제 샵플링 카탈로그의 대·중·소·세 선�
   );
 
   assert.match(page, /ShoplingCategoryManualPicker/);
-  assert.match(picker, /1\. 대카테고리/);
-  assert.match(picker, /2\. 중카테고리/);
-  assert.match(picker, /3\. 소카테고리/);
-  assert.match(picker, /4\. 세카테고리/);
-  assert.match(picker, /붙여넣은 경로 확인/);
-  assert.match(picker, /이 수동 경로 승인/);
+  assert.match(picker, /reviewItems\.map/);
+  assert.match(picker, /<details/);
+  assert.match(picker, /수동 지정 · 검색/);
+  assert.match(picker, /CompactCategorySelect/);
+  assert.match(picker, /label="대"/);
+  assert.match(picker, /label="중"/);
+  assert.match(picker, /label="소"/);
+  assert.match(picker, /label="세"/);
+  assert.match(picker, /카테고리 검색 \/ 전체 경로 복붙/);
+  assert.match(picker, /searchCatalog/);
+  assert.match(picker, /검색 결과 \{index \+ 1\}/);
+  assert.match(picker, /confirmTypedPath/);
+  assert.match(picker, /경로 확인/);
+  assert.match(picker, /수동 승인/);
   assert.match(picker, /catalogPathByKey/);
   assert.match(picker, /현재 샵플링 카탈로그에 없는 경로는 승인할 수 없습니다/);
   assert.match(picker, /Top-1/);
   assert.match(picker, /Top-3/);
+  assert.doesNotMatch(picker, /검토 상품 선택/);
   assert.match(catalogRoute, /fetchShoplingCategorySnapshot/);
   assert.match(catalogRoute, /resolveProductLaunchIdentity/);
   assert.match(catalogRoute, /categories: snapshot\.categories\.map/);
