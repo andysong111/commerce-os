@@ -126,7 +126,16 @@ test("진행관리 표 UI는 직접입력·열 드래그·열 고정·선택 일
   assert.match(frozenFix, /cell\.style\.minWidth = width/);
   assert.match(frozenFix, /cell\.style\.maxWidth = width/);
   assert.match(frozenFix, /background-clip: border-box !important/);
-  assert.match(frozenFix, /z-index: 40 !important/);
+  assert.match(frozenFix, /tableHead\.style\.zIndex = "100"/);
+  assert.match(frozenFix, /row === headRow \? "120" : "20"/);
+  assert.match(
+    frozenFix,
+    /#launch-table-head\s*\{[^}]*z-index: 100 !important/s,
+  );
+  assert.match(
+    frozenFix,
+    /#launch-table-head > tr > th\.is-frozen-table-column\s*\{[^}]*z-index: 120 !important/s,
+  );
   assert.match(app, /table-inline-ops-loader\.js/);
   assert.match(app, /table-frozen-columns-fix\.js/);
 });
