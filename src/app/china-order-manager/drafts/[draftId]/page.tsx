@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { InternalChinaPurchaseBudgetAudit } from "@/components/china-order-manager/InternalChinaPurchaseBudgetAudit";
 import { InternalChinaPurchaseDraftWorkspace } from "@/components/china-order-manager/InternalChinaPurchaseDraftWorkspace";
+import { InternalChinaSupplierLinkEditor } from "@/components/china-order-manager/InternalChinaSupplierLinkEditor";
 import { PageHeader } from "@/components/PageHeader";
 import { loadInternalChinaPurchaseBudgetAudit } from "@/lib/internalChinaPurchaseBudgetAudit";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
@@ -77,6 +78,8 @@ export default async function InternalChinaPurchaseDraftPage({
       </section>
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
+
+      <InternalChinaSupplierLinkEditor initialDraft={draft} />
 
       <InternalChinaPurchaseDraftWorkspace
         initialDraft={draft}
