@@ -7,6 +7,7 @@ import { applyShoplingCategoryReviewDecisions } from "@/lib/shoplingCategoryRevi
 const STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const CATALOG_ENDPOINT = "/api/shopling-categories/catalog";
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
+const SEARCH_RESULT_LIMIT = 8;
 
 type RecordLike = Record<string, unknown>;
 type TrackerState = RecordLike & { items: RecordLike[] };
@@ -24,12 +25,30 @@ type PickerSelection = {
   detail: string;
 };
 
+type ManualDraft = {
+  selection: PickerSelection;
+  query: string;
+  manualPath: string;
+  notice: string;
+};
+
+type ManualDrafts = Record<string, ManualDraft>;
+
 const EMPTY_SELECTION: PickerSelection = {
   large: "",
   middle: "",
   small: "",
   detail: "",
 };
+
+function emptyDraft(): ManualDraft {
+  return {
+    selection: { ...EMPTY_SELECTION },
+    query: "",
+    manualPath: "",
+    notice: "",
+  };
+}
 
 function text(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
@@ -38,6 +57,7 @@ function text(value: unknown) {
 function pathKey(value: unknown) {
   return text(value)
     .replace(/[＞→]/g, ">")
+    .replace(/\t+/g, ">")
     .replace(/\s*>\s*/g, ">")
     .replace(/\s+/g, "")
     .toLocaleLowerCase("ko-KR");
@@ -48,6 +68,20 @@ function normalizePastedPath(value: unknown) {
     .replace(/[＞→]/g, ">")
     .replace(/\t+/g, ">")
     .replace(/\s*>\s*/g, ">");
+}
+
+function compactSearch(value: unknown) {
+  return text(value)
+    .toLocaleLowerCase("ko-KR")
+    .replace(/[^0-9a-z가-힣]/g, "");
+}
+
+function searchTokens(value: unknown) {
+  return (
+    text(value)
+      .toLocaleLowerCase("ko-KR")
+      .match(/[0-9a-z가-힣]{2,}/g) ?? []
+  ).filter((token, index, array) => array.indexOf(token) === index);
 }
 
 function unique(values: string[]) {
@@ -68,17 +102,155 @@ function reviewLabel(item: RecordLike) {
   }`;
 }
 
+function selectionFromEntry(entry: CatalogEntry): PickerSelection {
+  return {
+    large: entry.names[0] ?? "",
+    middle: entry.names[1] ?? "",
+    small: entry.names[2] ?? "",
+    detail: entry.names[3] ?? "",
+  };
+}
+
+function resolveCascadePath(
+  catalog: CatalogEntry[],
+  selection: PickerSelection,
+) {
+  const names = [
+    selection.large,
+    selection.middle,
+    selection.small,
+    selection.detail,
+  ].filter(Boolean);
+  if (!names.length) return "";
+  const exact = catalog.find(
+    (entry) =>
+      entry.names.length === names.length &&
+      entry.names.every((name, index) => name === names[index]),
+  );
+  return exact?.path ?? "";
+}
+
+function searchCatalog(
+  catalog: CatalogEntry[],
+  rawQuery: string,
+  limit = SEARCH_RESULT_LIMIT,
+) {
+  const query = text(rawQuery);
+  if (query.length < 2) return [];
+  const exactKey = pathKey(normalizePastedPath(query));
+  const exact = catalog.find((entry) => pathKey(entry.path) === exactKey);
+  if (exact) return [exact];
+
+  const tokens = searchTokens(query);
+  const compactQuery = compactSearch(query);
+  if (!tokens.length && !compactQuery) return [];
+
+  return catalog
+    .map((entry) => {
+      const nameCompacts = entry.names.map(compactSearch);
+      const leaf = nameCompacts.at(-1) ?? "";
+      const compactPath = compactSearch(entry.path);
+      let score = 0;
+      let matched = 0;
+
+      for (const token of tokens) {
+        const compactToken = compactSearch(token);
+        if (!compactToken) continue;
+        if (leaf === compactToken) {
+          score += 120;
+          matched += 1;
+          continue;
+        }
+        if (leaf.includes(compactToken)) {
+          score += 80;
+          matched += 1;
+          continue;
+        }
+        if (nameCompacts.some((name) => name === compactToken)) {
+          score += 60;
+          matched += 1;
+          continue;
+        }
+        if (nameCompacts.some((name) => name.includes(compactToken))) {
+          score += 42;
+          matched += 1;
+          continue;
+        }
+        if (compactPath.includes(compactToken)) {
+          score += 24;
+          matched += 1;
+        }
+      }
+
+      if (compactQuery && leaf === compactQuery) score += 140;
+      else if (compactQuery && leaf.includes(compactQuery)) score += 90;
+      else if (compactQuery && compactPath.includes(compactQuery)) score += 35;
+      if (tokens.length && matched === tokens.length) score += 50;
+
+      return { entry, score, matched };
+    })
+    .filter((row) => row.score > 0 && (!tokens.length || row.matched > 0))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.entry.depth - right.entry.depth ||
+        left.entry.path.localeCompare(right.entry.path, "ko-KR"),
+    )
+    .slice(0, Math.max(1, limit))
+    .map((row) => row.entry);
+}
+
+function cascadeOptions(
+  catalog: CatalogEntry[],
+  selection: PickerSelection,
+) {
+  return {
+    large: unique(catalog.map((entry) => entry.names[0]).filter(Boolean)),
+    middle: selection.large
+      ? unique(
+          catalog
+            .filter((entry) => entry.names[0] === selection.large)
+            .map((entry) => entry.names[1])
+            .filter(Boolean),
+        )
+      : [],
+    small: selection.large && selection.middle
+      ? unique(
+          catalog
+            .filter(
+              (entry) =>
+                entry.names[0] === selection.large &&
+                entry.names[1] === selection.middle,
+            )
+            .map((entry) => entry.names[2])
+            .filter(Boolean),
+        )
+      : [],
+    detail: selection.large && selection.middle && selection.small
+      ? unique(
+          catalog
+            .filter(
+              (entry) =>
+                entry.names[0] === selection.large &&
+                entry.names[1] === selection.middle &&
+                entry.names[2] === selection.small,
+            )
+            .map((entry) => entry.names[3])
+            .filter(Boolean),
+        )
+      : [],
+  };
+}
+
 export function ShoplingCategoryManualPicker() {
   const [state, setState] = useState<TrackerState | null>(null);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [catalogHash, setCatalogHash] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [selection, setSelection] = useState<PickerSelection>(EMPTY_SELECTION);
-  const [pastedPath, setPastedPath] = useState("");
-  const [manualPath, setManualPath] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [busyItemId, setBusyItemId] = useState("");
   const [notice, setNotice] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [drafts, setDrafts] = useState<ManualDrafts>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +261,13 @@ export function ShoplingCategoryManualPicker() {
         if (nextCatalog) {
           setCatalog(nextCatalog.categories);
           setCatalogHash(nextCatalog.hash);
+        }
+        if (!nextState || !nextCatalog) {
+          setLoadError(
+            !nextState
+              ? "검토 상품 데이터를 불러오지 못했습니다."
+              : "샵플링 카탈로그를 불러오지 못했습니다.",
+          );
         }
       })
       .finally(() => {
@@ -116,186 +295,155 @@ export function ShoplingCategoryManualPicker() {
     () => new Map(catalog.map((entry) => [pathKey(entry.path), entry.path])),
     [catalog],
   );
-  const selectedItem = useMemo(
-    () => reviewItems.find((item) => text(item.id) === selectedItemId) ?? null,
-    [reviewItems, selectedItemId],
-  );
-
-  useEffect(() => {
-    if (!selectedItemId && reviewItems.length) {
-      setSelectedItemId(text(reviewItems[0].id));
-    }
-    if (
-      selectedItemId &&
-      !reviewItems.some((item) => text(item.id) === selectedItemId)
-    ) {
-      setSelectedItemId(text(reviewItems[0]?.id));
-    }
-  }, [reviewItems, selectedItemId]);
-
-  useEffect(() => {
-    setSelection(EMPTY_SELECTION);
-    setPastedPath("");
-    setManualPath("");
-    setNotice("");
-  }, [selectedItemId]);
-
-  const largeOptions = useMemo(
-    () => unique(catalog.map((entry) => entry.names[0]).filter(Boolean)),
+  const catalogEntryByPath = useMemo(
+    () => new Map(catalog.map((entry) => [entry.path, entry])),
     [catalog],
   );
-  const middleOptions = useMemo(
-    () =>
-      unique(
-        catalog
-          .filter((entry) => entry.names[0] === selection.large)
-          .map((entry) => entry.names[1])
-          .filter(Boolean),
-      ),
-    [catalog, selection.large],
-  );
-  const smallOptions = useMemo(
-    () =>
-      unique(
-        catalog
-          .filter(
-            (entry) =>
-              entry.names[0] === selection.large &&
-              entry.names[1] === selection.middle,
-          )
-          .map((entry) => entry.names[2])
-          .filter(Boolean),
-      ),
-    [catalog, selection.large, selection.middle],
-  );
-  const detailOptions = useMemo(
-    () =>
-      unique(
-        catalog
-          .filter(
-            (entry) =>
-              entry.names[0] === selection.large &&
-              entry.names[1] === selection.middle &&
-              entry.names[2] === selection.small,
-          )
-          .map((entry) => entry.names[3])
-          .filter(Boolean),
-      ),
-    [catalog, selection.large, selection.middle, selection.small],
-  );
-
-  const cascadePath = useMemo(() => {
-    const names = [
-      selection.large,
-      selection.middle,
-      selection.small,
-      selection.detail,
-    ].filter(Boolean);
-    if (!names.length) return "";
-    const exact = catalog.find(
-      (entry) =>
-        entry.names.length === names.length &&
-        entry.names.every((name, index) => name === names[index]),
-    );
-    return exact?.path ?? "";
-  }, [catalog, selection]);
 
   useEffect(() => {
-    if (cascadePath) setManualPath(cascadePath);
-  }, [cascadePath]);
+    const visible = new Set(reviewItems.map((item) => text(item.id)));
+    setDrafts((current) => {
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([itemId]) => visible.has(itemId)),
+      );
+      return Object.keys(next).length === Object.keys(current).length
+        ? current
+        : next;
+    });
+  }, [reviewItems]);
 
-  function selectLarge(value: string) {
-    setSelection({ large: value, middle: "", small: "", detail: "" });
-    setManualPath("");
+  function draftFor(itemId: string) {
+    return drafts[itemId] ?? emptyDraft();
   }
 
-  function selectMiddle(value: string) {
-    setSelection((current) => ({
+  function updateDraft(
+    itemId: string,
+    updater: (current: ManualDraft) => ManualDraft,
+  ) {
+    setDrafts((current) => ({
       ...current,
-      middle: value,
-      small: "",
-      detail: "",
+      [itemId]: updater(current[itemId] ?? emptyDraft()),
     }));
-    setManualPath("");
   }
 
-  function selectSmall(value: string) {
-    setSelection((current) => ({ ...current, small: value, detail: "" }));
-    setManualPath("");
+  function chooseEntry(itemId: string, entry: CatalogEntry, message = "") {
+    updateDraft(itemId, (current) => ({
+      ...current,
+      selection: selectionFromEntry(entry),
+      query: entry.path,
+      manualPath: entry.path,
+      notice: message || "실제 샵플링 카탈로그 경로를 선택했습니다.",
+    }));
   }
 
-  function selectDetail(value: string) {
-    setSelection((current) => ({ ...current, detail: value }));
-    setManualPath("");
+  function changeCascade(
+    itemId: string,
+    level: keyof PickerSelection,
+    value: string,
+  ) {
+    updateDraft(itemId, (current) => {
+      const nextSelection = { ...current.selection };
+      if (level === "large") {
+        nextSelection.large = value;
+        nextSelection.middle = "";
+        nextSelection.small = "";
+        nextSelection.detail = "";
+      } else if (level === "middle") {
+        nextSelection.middle = value;
+        nextSelection.small = "";
+        nextSelection.detail = "";
+      } else if (level === "small") {
+        nextSelection.small = value;
+        nextSelection.detail = "";
+      } else {
+        nextSelection.detail = value;
+      }
+      const nextPath = resolveCascadePath(catalog, nextSelection);
+      return {
+        ...current,
+        selection: nextSelection,
+        query: nextPath || current.query,
+        manualPath: nextPath,
+        notice: nextPath ? "드롭다운에서 실제 경로를 선택했습니다." : "",
+      };
+    });
   }
 
-  function applyPastedPath() {
-    const normalized = normalizePastedPath(pastedPath);
+  function changeQuery(itemId: string, value: string) {
+    updateDraft(itemId, (current) => ({
+      ...current,
+      query: value,
+      manualPath: "",
+      notice: "",
+    }));
+  }
+
+  function confirmTypedPath(itemId: string) {
+    const draft = draftFor(itemId);
+    const normalized = normalizePastedPath(draft.query);
     const matched = catalogPathByKey.get(pathKey(normalized));
     if (!matched) {
-      setManualPath("");
-      setNotice(
-        "붙여넣은 경로가 현재 샵플링 7,259개 카탈로그와 정확히 일치하지 않습니다. 대→중→소→세 선택으로 확인하세요.",
-      );
+      updateDraft(itemId, (current) => ({
+        ...current,
+        manualPath: "",
+        notice:
+          "전체 경로가 정확히 일치하지 않습니다. 아래 검색 결과를 선택하거나 대→중→소→세로 고르세요.",
+      }));
       return;
     }
-    const entry = catalog.find((candidate) => candidate.path === matched);
-    setManualPath(matched);
+    const entry = catalogEntryByPath.get(matched);
     if (entry) {
-      setSelection({
-        large: entry.names[0] ?? "",
-        middle: entry.names[1] ?? "",
-        small: entry.names[2] ?? "",
-        detail: entry.names[3] ?? "",
-      });
+      chooseEntry(
+        itemId,
+        entry,
+        "붙여넣은 전체 경로가 현재 샵플링 카탈로그와 정확히 일치합니다.",
+      );
     }
-    setNotice("현재 샵플링 카탈로그와 일치하는 실제 경로를 찾았습니다.");
   }
 
-  async function approveManualPath() {
-    if (saving || !selectedItem || !manualPath) return;
+  async function approveManualPath(item: RecordLike, manualPath: string) {
+    const itemId = text(item.id);
+    if (busyItemId || !itemId || !manualPath) return;
     const canonical = catalogPathByKey.get(pathKey(manualPath));
     if (!canonical) {
-      setNotice("현재 샵플링 카탈로그에 없는 경로는 승인할 수 없습니다.");
+      updateDraft(itemId, (current) => ({
+        ...current,
+        notice: "현재 샵플링 카탈로그에 없는 경로는 승인할 수 없습니다.",
+      }));
       return;
     }
     const confirmed = window.confirm(
-      `${reviewLabel(selectedItem)}\n\n${canonical}\n\n이 샵플링 카테고리로 직접 승인하시겠습니까?`,
+      `${reviewLabel(item)}\n\n${canonical}\n\n이 샵플링 카테고리로 직접 승인하시겠습니까?`,
     );
     if (!confirmed) return;
 
-    setSaving(true);
+    setBusyItemId(itemId);
     setNotice("");
     try {
       const latest = await readServerState();
       if (!latest) throw new Error("최신 진행관리 데이터를 불러오지 못했습니다.");
-      const current = latest.items.find(
-        (item) => text(item.id) === text(selectedItem.id),
-      );
+      const current = latest.items.find((candidate) => text(candidate.id) === itemId);
       if (!current || !isReviewItem(current)) {
         throw new Error("이 상품은 이미 다른 곳에서 처리되었거나 검토 대상이 아닙니다.");
       }
       const result = applyShoplingCategoryReviewDecisions(
         latest,
-        [
-          {
-            itemId: text(selectedItem.id),
-            action: "approve",
-            category: canonical,
-          },
-        ],
-        { reviewer: "AI 카테고리 검토함 · 수동 카탈로그 지정" },
+        [{ itemId, action: "approve", category: canonical }],
+        { reviewer: "AI 카테고리 검토함 · 상품별 수동 지정" },
       );
       await persistState(result.state as TrackerState);
-      setNotice(`${reviewLabel(selectedItem)} · 수동 지정 카테고리를 승인했습니다.`);
+      setNotice(`${reviewLabel(item)} · 수동 지정 카테고리를 승인했습니다.`);
+      window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "수동 카테고리 승인에 실패했습니다.",
-      );
+      updateDraft(itemId, (current) => ({
+        ...current,
+        notice:
+          error instanceof Error
+            ? error.message
+            : "수동 카테고리 승인에 실패했습니다.",
+      }));
     } finally {
-      setSaving(false);
+      setBusyItemId("");
     }
   }
 
@@ -319,138 +467,185 @@ export function ShoplingCategoryManualPicker() {
 
   if (loading) {
     return (
-      <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 text-sm font-bold text-slate-700 shadow-sm">
-        수동 카테고리 선택기와 승인 정확도 데이터를 불러오고 있습니다.
+      <section className="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-600 shadow-sm">
+        상품별 수동 카테고리 도구를 불러오고 있습니다.
       </section>
     );
   }
 
+  if (!reviewItems.length) return null;
+
   return (
-    <section className="mb-5 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+    <section className="mb-4 rounded-2xl border border-emerald-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">
-            수동 샵플링 카테고리 지정
-          </p>
-          <h2 className="mt-1 text-lg font-black text-slate-950">
-            실제 카탈로그를 대 → 중 → 소 → 세 순서로 직접 고릅니다
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">
-            드롭다운 선택과 전체 경로 복붙을 모두 지원합니다. 현재 저장된 샵플링 카탈로그에 실제 존재하지 않는 경로는 승인되지 않습니다.
+          <p className="text-xs font-black text-emerald-700">상품별 수동 카테고리 지정</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            평소에는 한 줄로 접어두고, 필요한 상품만 펼쳐 대→중→소→세 선택 또는 카테고리 검색을 사용합니다.
           </p>
         </div>
-        <div className="grid min-w-[320px] grid-cols-3 gap-2 text-center text-xs">
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <p className="font-bold text-slate-500">정답 누적</p>
-            <p className="mt-1 text-lg font-black text-slate-950">{metrics.approvedCount}</p>
-          </div>
-          <div className="rounded-xl bg-blue-50 px-3 py-2">
-            <p className="font-bold text-blue-600">Top-1</p>
-            <p className="mt-1 text-lg font-black text-blue-900">{metrics.top1Rate}%</p>
-          </div>
-          <div className="rounded-xl bg-emerald-50 px-3 py-2">
-            <p className="font-bold text-emerald-600">Top-3</p>
-            <p className="mt-1 text-lg font-black text-emerald-900">{metrics.top3Rate}%</p>
-          </div>
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-black">
+          <span className="rounded-lg bg-slate-50 px-2 py-1 text-slate-700">
+            정답 {metrics.approvedCount}
+          </span>
+          <span className="rounded-lg bg-blue-50 px-2 py-1 text-blue-800">
+            Top-1 {metrics.top1Rate}%
+          </span>
+          <span className="rounded-lg bg-emerald-50 px-2 py-1 text-emerald-800">
+            Top-3 {metrics.top3Rate}%
+          </span>
+          <span className="rounded-lg bg-slate-50 px-2 py-1 text-slate-500">
+            카탈로그 {catalog.length.toLocaleString("ko-KR")} · {catalogHash.slice(0, 8) || "확인 중"}
+          </span>
         </div>
       </div>
 
-      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <label className="text-xs font-black text-slate-600">검토 상품 선택</label>
-        <select
-          value={selectedItemId}
-          onChange={(event) => setSelectedItemId(event.target.value)}
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-900"
-        >
-          {!reviewItems.length ? <option value="">검토할 상품이 없습니다</option> : null}
-          {reviewItems.map((item) => (
-            <option key={text(item.id)} value={text(item.id)}>
-              {reviewLabel(item)}
-            </option>
-          ))}
-        </select>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <CategorySelect
-            label="1. 대카테고리"
-            value={selection.large}
-            options={largeOptions}
-            onChange={selectLarge}
-          />
-          <CategorySelect
-            label="2. 중카테고리"
-            value={selection.middle}
-            options={middleOptions}
-            onChange={selectMiddle}
-            disabled={!selection.large}
-          />
-          <CategorySelect
-            label="3. 소카테고리"
-            value={selection.small}
-            options={smallOptions}
-            onChange={selectSmall}
-            disabled={!selection.middle}
-          />
-          <CategorySelect
-            label="4. 세카테고리"
-            value={selection.detail}
-            options={detailOptions}
-            onChange={selectDetail}
-            disabled={!selection.small || !detailOptions.length}
-            optional={!detailOptions.length}
-          />
-        </div>
-
-        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3">
-          <p className="text-xs font-black text-emerald-700">현재 선택된 실제 경로</p>
-          <p className="mt-1 break-words text-sm font-black text-emerald-950">
-            {manualPath || "대→중→소→세를 선택하거나 아래에 전체 경로를 붙여넣으세요."}
-          </p>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-2 lg:flex-row">
-          <input
-            value={pastedPath}
-            onChange={(event) => setPastedPath(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                applyPastedPath();
-              }
-            }}
-            placeholder="예: 생활/건강>청소용품>청소도구>... 전체 경로 복붙"
-            className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-          />
-          <button
-            type="button"
-            onClick={applyPastedPath}
-            className="rounded-lg border border-emerald-300 bg-white px-4 py-2 text-xs font-black text-emerald-800"
-          >
-            붙여넣은 경로 확인
-          </button>
-          <button
-            type="button"
-            onClick={() => void approveManualPath()}
-            disabled={!selectedItem || !manualPath || saving}
-            className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-black text-white disabled:bg-slate-300"
-          >
-            {saving ? "수동 승인 저장 중…" : "이 수동 경로 승인"}
-          </button>
-        </div>
-        {notice ? (
-          <p className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-900">
-            {notice}
-          </p>
-        ) : null}
-        <p className="mt-3 text-[11px] text-slate-500">
-          카탈로그 {catalog.length.toLocaleString("ko-KR")}개 · snapshot {catalogHash.slice(0, 12) || "확인 중"}
+      {notice ? (
+        <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-900">
+          {notice}
         </p>
+      ) : null}
+      {loadError ? (
+        <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
+          {loadError}
+        </p>
+      ) : null}
+
+      <div className="mt-2 grid gap-2 xl:grid-cols-2">
+        {reviewItems.map((item) => {
+          const itemId = text(item.id);
+          const draft = draftFor(itemId);
+          const options = cascadeOptions(catalog, draft.selection);
+          const searchResults = searchCatalog(catalog, draft.query);
+          const saving = busyItemId === itemId;
+          return (
+            <details
+              key={itemId}
+              className="group rounded-lg border border-slate-200 bg-slate-50 open:bg-white"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-xs marker:hidden">
+                <span className="min-w-0 truncate font-black text-slate-900">
+                  {reviewLabel(item)}
+                </span>
+                <span className="shrink-0 font-black text-emerald-700">
+                  수동 지정 · 검색 ▾
+                </span>
+              </summary>
+
+              <div className="border-t border-slate-200 p-3">
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <CompactCategorySelect
+                    label="대"
+                    value={draft.selection.large}
+                    options={options.large}
+                    onChange={(value) => changeCascade(itemId, "large", value)}
+                  />
+                  <CompactCategorySelect
+                    label="중"
+                    value={draft.selection.middle}
+                    options={options.middle}
+                    onChange={(value) => changeCascade(itemId, "middle", value)}
+                    disabled={!draft.selection.large}
+                  />
+                  <CompactCategorySelect
+                    label="소"
+                    value={draft.selection.small}
+                    options={options.small}
+                    onChange={(value) => changeCascade(itemId, "small", value)}
+                    disabled={!draft.selection.middle}
+                  />
+                  <CompactCategorySelect
+                    label="세"
+                    value={draft.selection.detail}
+                    options={options.detail}
+                    onChange={(value) => changeCascade(itemId, "detail", value)}
+                    disabled={!draft.selection.small || !options.detail.length}
+                    optional={!options.detail.length}
+                  />
+                </div>
+
+                <div className="mt-2">
+                  <label className="text-[10px] font-black text-slate-500">
+                    카테고리 검색 / 전체 경로 복붙
+                  </label>
+                  <div className="mt-1 flex flex-col gap-1.5 sm:flex-row">
+                    <input
+                      value={draft.query}
+                      onChange={(event) => changeQuery(itemId, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          confirmTypedPath(itemId);
+                        }
+                      }}
+                      placeholder="예: 세안 브러쉬 / 골무 / 생활>..."
+                      className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => confirmTypedPath(itemId)}
+                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-700"
+                    >
+                      경로 확인
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void approveManualPath(item, draft.manualPath)}
+                      disabled={!draft.manualPath || saving || Boolean(busyItemId && !saving)}
+                      className="rounded-md bg-emerald-700 px-2.5 py-1.5 text-[11px] font-black text-white disabled:bg-slate-300"
+                    >
+                      {saving ? "저장 중…" : "수동 승인"}
+                    </button>
+                  </div>
+
+                  {draft.query.trim().length >= 2 && !draft.manualPath && searchResults.length ? (
+                    <div className="mt-1.5 max-h-44 overflow-auto rounded-md border border-slate-200 bg-white p-1 shadow-sm">
+                      {searchResults.map((entry, index) => (
+                        <button
+                          key={entry.path}
+                          type="button"
+                          onClick={() =>
+                            chooseEntry(
+                              itemId,
+                              entry,
+                              `검색 결과 ${index + 1}번 실제 경로를 선택했습니다.`,
+                            )
+                          }
+                          className="block w-full rounded px-2 py-1.5 text-left hover:bg-emerald-50"
+                        >
+                          <span className="block text-[10px] font-black text-emerald-700">
+                            검색 결과 {index + 1} · {entry.names.at(-1) || "카테고리"}
+                          </span>
+                          <span className="block break-words text-[11px] font-bold leading-4 text-slate-700">
+                            {entry.path}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-950">
+                  <span className="font-black">선택 경로 · </span>
+                  <span className="font-bold">
+                    {draft.manualPath || "아직 선택하지 않음"}
+                  </span>
+                </div>
+                {draft.notice ? (
+                  <p className="mt-1.5 text-[11px] font-bold text-blue-800">
+                    {draft.notice}
+                  </p>
+                ) : null}
+              </div>
+            </details>
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function CategorySelect({
+function CompactCategorySelect({
   label,
   value,
   options,
@@ -466,15 +661,15 @@ function CategorySelect({
   optional?: boolean;
 }) {
   return (
-    <label className="text-xs font-black text-slate-600">
-      {label}
+    <label className="flex items-center gap-1 text-[10px] font-black text-slate-500">
+      <span className="w-3 shrink-0">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
-        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-900 disabled:bg-slate-100 disabled:text-slate-400"
+        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-bold text-slate-800 disabled:bg-slate-100 disabled:text-slate-400"
       >
-        <option value="">{optional ? "세분류 없음 / 선택" : "선택"}</option>
+        <option value="">{optional ? "없음/선택" : "선택"}</option>
         {options.map((option) => (
           <option key={option} value={option}>
             {option}
