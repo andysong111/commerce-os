@@ -113,7 +113,8 @@ test("상세화면의 발주옵션과 중국옵션은 같은 정리된 B-code �
   assert.doesNotMatch(guard, /placeOrder|payOrder|checkout|fetch\([^)]*1688/i);
 });
 
-test("운영 상품출시 페이지가 B-code guard를 로드하고 캐시 버전을 갱신한다", () => {
+test("운영 상품출시 페이지가 B-code guard와 option-table authority를 로드한다", () => {
   assert.match(loader, /await import\("\.\/model-bcode-option-guard\.js"\)/);
-  assert.match(page, /20260812-authoritative-model-bcodes-v1/);
+  assert.match(loader, /await import\("\.\/china-option-table-authority\.js"\)/);
+  assert.match(page, /20260815-china-option-table-authority-v1/);
 });
