@@ -1,17 +1,22 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { alignChinaOptionMappingsToRegisteredOptions } from "../public/product-launch-tracker-app/lib/china-option-table-authority.mjs";
 
-const [loader, extension, page] = await Promise.all([
+const [loader, extension, authorityUi, page] = await Promise.all([
   readFile("public/product-launch-tracker-app/app.js", "utf8"),
   readFile(
     "public/product-launch-tracker-app/optimized-china-order-mapping.js",
     "utf8",
   ),
+  readFile(
+    "public/product-launch-tracker-app/china-option-table-authority.js",
+    "utf8",
+  ),
   readFile("src/app/product-launch-tracker/page.tsx", "utf8"),
 ]);
 
-test("optimized product-launch path loads the B-code China option extension", () => {
+test("optimized product-launch path loads the B-code China option extensions", () => {
   assert.match(loader, /await import\("\.\/optimized-app\.js"\)/);
   assert.match(
     loader,
@@ -21,7 +26,11 @@ test("optimized product-launch path loads the B-code China option extension", ()
     loader,
     /await import\("\.\/model-bcode-option-guard\.js"\)/,
   );
-  assert.match(page, /20260812-authoritative-model-bcodes-v1/);
+  assert.match(
+    loader,
+    /await import\("\.\/china-option-table-authority\.js"\)/,
+  );
+  assert.match(page, /20260815-china-option-table-authority-v1/);
 });
 
 test("active product detail stores only B-code China option while model fixed first link stays product-owned", () => {
@@ -31,6 +40,51 @@ test("active product detail stores only B-code China option while model fixed fi
   assert.doesNotMatch(extension, /data-optimized-china-order-link-select/);
   assert.match(extension, /고정 1번 중국 상품링크/);
   assert.match(extension, /readChinaOrderOptionMappings/);
+});
+
+test("B-code별 중국옵션은 발주·입고 옵션가격에 등록된 B-code만 남긴다", () => {
+  const aligned = alignChinaOptionMappingsToRegisteredOptions(
+    [{ id: "real", barcode: "BAC2-2", saleOption: "색상랜덤" }],
+    [
+      {
+        id: "blank",
+        barcode: "",
+        saleOption: "블랙1P,그레이1P",
+        chinaOption: "잘못된 중국옵션",
+      },
+      {
+        id: "wrong-1",
+        barcode: "BCB6-2",
+        saleOption: "블랙1P",
+        chinaOption: "잘못된 중국옵션2",
+      },
+      {
+        id: "right",
+        barcode: "BAC2-2",
+        saleOption: "색상랜덤",
+        chinaOption: "灰色",
+      },
+    ],
+  );
+  assert.deepEqual(aligned, [
+    {
+      id: "right",
+      barcode: "BAC2-2",
+      saleOption: "색상랜덤",
+      chinaOption: "灰色",
+    },
+  ]);
+});
+
+test("option-price table mutation immediately re-aligns the China option panel", () => {
+  assert.match(authorityUi, /#detail-options/);
+  assert.match(authorityUi, /\[data-field='barcode'\]/);
+  assert.match(authorityUi, /\[data-field='saleOption'\]/);
+  assert.match(authorityUi, /MutationObserver/);
+  assert.match(authorityUi, /alignChinaOptionMappingsToRegisteredOptions/);
+  assert.match(authorityUi, /발주·입고 옵션가격에 바코드·위치코드가 등록된/);
+  assert.doesNotMatch(authorityUi, /operation:\s*"patch_item"/);
+  assert.doesNotMatch(authorityUi, /placeOrder|payOrder|checkout|fetch\([^)]*1688/i);
 });
 
 test("China option mapping persists only after the optimized main product save closes successfully", () => {
