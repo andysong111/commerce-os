@@ -3,6 +3,7 @@ import { DetailPageAiReviewWorkspace } from "@/components/detail-page-ai-review/
 import { DetailPageBGradeFallbackQueue } from "@/components/detail-page-ai-review/DetailPageBGradeFallbackQueue";
 import { DetailPageManualDecisionQueue } from "@/components/detail-page-ai-review/DetailPageManualDecisionQueue";
 import { DetailPageRepresentativeDownloadControl } from "@/components/detail-page-ai-review/DetailPageRepresentativeDownloadControl";
+import { DetailPageSourceLinkFailurePanel } from "@/components/detail-page-ai-review/DetailPageSourceLinkFailurePanel";
 import { DetailPageTerminalJobControls } from "@/components/detail-page-ai-review/DetailPageTerminalJobControls";
 import { PageHeader } from "@/components/PageHeader";
 
@@ -20,6 +21,7 @@ export default function DetailPageAiReviewPage() {
         <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">정상 체크포인트 보존</span>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700">애매한 예외만 사용자 판단</span>
       </div>
+      <DetailPageSourceLinkFailurePanel />
       <DetailPageManualDecisionQueue />
       <DetailPageBGradeFallbackQueue />
       <DetailPageActiveJobControlsV2 />
