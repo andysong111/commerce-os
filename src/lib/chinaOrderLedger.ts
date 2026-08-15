@@ -71,6 +71,8 @@ export type ChinaOrderCommitmentSnapshot = {
   cancelledQuantity: number;
   committedQuantity: number;
   openQuantity: number;
+  manualAddedQuantity: number;
+  recommendationOpenQuantity: number;
   status: ChinaOrderCommitmentStatus;
   reservedAt: string | null;
   orderedAt: string | null;
@@ -120,6 +122,19 @@ function optionalQuantity(value: unknown) {
     throw new Error("CHINA_ORDER_QUANTITY_INVALID");
   }
   return Math.round(parsed);
+}
+
+function payloadObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function manualAddedQuantityFromEvent(event: NormalizedChinaOrderCommitmentEvent) {
+  const payload = payloadObject(event.payload);
+  if (payload.manualAddition !== true) return 0;
+  const parsed = Number(payload.addedQuantity);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 }
 
 function validStatus(value: unknown): value is ChinaOrderCommitmentStatus {
@@ -219,6 +234,7 @@ export function reduceChinaOrderCommitmentEvents(
   let orderedQuantity = 0;
   let receivedQuantity = 0;
   let cancelledQuantity = 0;
+  let manualAddedQuantity = 0;
   let sourceRunId = first.sourceRunId;
   let reservedAt: string | null = null;
   let orderedAt: string | null = null;
@@ -243,6 +259,7 @@ export function reduceChinaOrderCommitmentEvents(
       continue;
     }
 
+    manualAddedQuantity += manualAddedQuantityFromEvent(event);
     sourceRunId = event.sourceRunId ?? sourceRunId;
     requestedQuantity = Math.max(
       requestedQuantity,
@@ -295,6 +312,16 @@ export function reduceChinaOrderCommitmentEvents(
   }
 
   const committedQuantity = Math.max(requestedQuantity, orderedQuantity);
+  const totalOpenQuantity = openQuantity(
+    status,
+    committedQuantity,
+    receivedQuantity,
+    cancelledQuantity,
+  );
+  const recommendationOpenQuantity = Math.max(
+    0,
+    totalOpenQuantity - manualAddedQuantity,
+  );
   return {
     id: commitmentId(first),
     sourceSystem: first.sourceSystem,
@@ -306,12 +333,9 @@ export function reduceChinaOrderCommitmentEvents(
     receivedQuantity,
     cancelledQuantity,
     committedQuantity,
-    openQuantity: openQuantity(
-      status,
-      committedQuantity,
-      receivedQuantity,
-      cancelledQuantity,
-    ),
+    openQuantity: totalOpenQuantity,
+    manualAddedQuantity,
+    recommendationOpenQuantity,
     status,
     reservedAt,
     orderedAt,
@@ -452,8 +476,11 @@ export async function openChinaOrderCommitmentsByBarcode() {
   const ledger = await loadChinaOrderLedger();
   const result = new Map<string, number>();
   for (const row of ledger.commitments) {
-    if (row.openQuantity <= 0) continue;
-    result.set(row.barcode, (result.get(row.barcode) ?? 0) + row.openQuantity);
+    if (row.recommendationOpenQuantity <= 0) continue;
+    result.set(
+      row.barcode,
+      (result.get(row.barcode) ?? 0) + row.recommendationOpenQuantity,
+    );
   }
   return { commitments: result, error: ledger.error };
 }
