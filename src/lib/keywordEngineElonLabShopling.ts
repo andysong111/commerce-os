@@ -1,6 +1,7 @@
 import {
   parseShoplingReadResponse,
   shoplingReadConfigFromEnv,
+  type ShoplingReadConfig,
 } from "@/lib/shopling/shoplingReadClient";
 import { buildShoplingCurrentModelLookupXml } from "@/lib/shopling/shoplingCurrentModelIdentityResolver";
 import { postShoplingXml } from "@/lib/shopling/shoplingTlsTransport";
@@ -15,6 +16,14 @@ const PRODUCT_FIELDS = [
   "sale_status",
   "dtl_desc",
 ].join(",");
+
+// STEP 1 used to request all six lab products in one Shopling call. If that
+// single request stalled, Vercel could terminate the function before the API
+// route had a chance to return JSON. Keep the user-facing "6개 모두 실행"
+// behavior, but fan the six keys into three small concurrent reads so one
+// oversized/slow response does not monopolize the whole function lifetime.
+export const KEYWORD_ELON_LAB_SHOPLING_BATCH_SIZE = 2;
+export const KEYWORD_ELON_LAB_SHOPLING_TIMEOUT_MS = 18_000;
 
 type RawRow = Record<string, unknown>;
 
@@ -50,6 +59,38 @@ function env() {
   };
 }
 
+function batches(values: string[]) {
+  const output: string[][] = [];
+  for (
+    let index = 0;
+    index < values.length;
+    index += KEYWORD_ELON_LAB_SHOPLING_BATCH_SIZE
+  ) {
+    output.push(values.slice(index, index + KEYWORD_ELON_LAB_SHOPLING_BATCH_SIZE));
+  }
+  return output;
+}
+
+async function loadShoplingBatch(
+  config: ShoplingReadConfig,
+  goodsKeys: string[],
+): Promise<RawRow[]> {
+  const xml = buildShoplingCurrentModelLookupXml(config, goodsKeys, PRODUCT_FIELDS);
+  const response = await postShoplingXml(config.productsUrl, xml, {
+    headers: {
+      accept: "application/xml, text/xml",
+      "content-type": "application/xml; charset=utf-8",
+      "user-agent": "commerce-os-keyword-elon-lab/1.1",
+    },
+    timeoutMs: KEYWORD_ELON_LAB_SHOPLING_TIMEOUT_MS,
+  });
+  if (!response.ok) {
+    throw new Error(`KEYWORD_ELON_LAB_SHOPLING_HTTP_${response.status}`);
+  }
+  const body = await response.text();
+  return parseShoplingReadResponse("products", body) as RawRow[];
+}
+
 export type KeywordEngineElonLabShoplingContext = {
   goodsKey: string;
   found: boolean;
@@ -72,20 +113,10 @@ export async function loadKeywordEngineElonLabShoplingContexts(goodsKeys: string
   if (!normalized.length) return [];
 
   const config = shoplingReadConfigFromEnv(env());
-  const xml = buildShoplingCurrentModelLookupXml(config, normalized, PRODUCT_FIELDS);
-  const response = await postShoplingXml(config.productsUrl, xml, {
-    headers: {
-      accept: "application/xml, text/xml",
-      "content-type": "application/xml; charset=utf-8",
-      "user-agent": "commerce-os-keyword-elon-lab/1.0",
-    },
-    timeoutMs: 45_000,
-  });
-  if (!response.ok) {
-    throw new Error(`KEYWORD_ELON_LAB_SHOPLING_HTTP_${response.status}`);
-  }
-  const body = await response.text();
-  const sourceRows = parseShoplingReadResponse("products", body) as RawRow[];
+  const batchResults = await Promise.all(
+    batches(normalized).map((batch) => loadShoplingBatch(config, batch)),
+  );
+  const sourceRows = batchResults.flat();
 
   return normalized.map((goodsKey): KeywordEngineElonLabShoplingContext => {
     const rows = sourceRows.filter((row) => text(row.goods_key) === goodsKey);
