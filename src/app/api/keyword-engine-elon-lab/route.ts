@@ -20,6 +20,8 @@ export const maxDuration = 60;
 const STAGE_ONE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 1)!;
 const STAGE_TWO = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 2)!;
 const STAGE_THREE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 3)!;
+const STAGE_FOUR = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 4)!;
+
 const CURRENT_SEED_NOISE_TERMS = [
   "색상 랜덤",
   "색상랜덤",
@@ -85,6 +87,45 @@ function cleanCurrentSeed(value: unknown) {
   };
 }
 
+function buildCurrentProbeBreakdown(value: unknown) {
+  const baseSeed = text(value).replace(/\s+/g, " ");
+  const rawParts = baseSeed ? baseSeed.split(/\s+/).filter(Boolean) : [];
+  const seen = new Set<string>();
+  const probeTerms: string[] = [];
+  const excludedTerms: Array<{ term: string; reason: string }> = [];
+  const duplicateTerms: string[] = [];
+
+  for (const part of rawParts) {
+    if (part.length < 2) {
+      excludedTerms.push({ term: part, reason: "length_lt_2" });
+      continue;
+    }
+    if (seen.has(part)) {
+      duplicateTerms.push(part);
+      continue;
+    }
+    seen.add(part);
+    probeTerms.push(part);
+  }
+
+  const probes = baseSeed
+    ? [baseSeed, ...probeTerms.filter((term) => term !== baseSeed)]
+    : [];
+
+  return {
+    baseSeed,
+    rawParts,
+    probeTerms,
+    excludedTerms,
+    duplicateTerms,
+    probes,
+    probeCount: probes.length,
+    currentRule:
+      "정제 seed 전체를 첫 probe로 사용 + 공백 분해 구성어 중 길이 2자 이상 고유 단어를 순서대로 추가",
+    warning: baseSeed ? "" : "PROBE_BASE_SEED_EMPTY",
+  };
+}
+
 export async function GET(request: Request) {
   if (!assertSameOrigin(request)) {
     return jsonError("OPS Center 화면에서만 조회할 수 있습니다.", 403);
@@ -134,9 +175,7 @@ async function runStageOne(goodsKeys: string[]) {
       review_status: "pending",
       input_payload: { goods_key: context.goodsKey, ...inputPayload },
       output_payload: context,
-      error_message: context.found
-        ? ""
-        : "Shopling에서 goods_key를 찾지 못했습니다.",
+      error_message: context.found ? "" : "Shopling에서 goods_key를 찾지 못했습니다.",
       review_note: "",
       engine_revision: "ops-stage1-shopling-context-v1",
     }));
@@ -147,23 +186,19 @@ async function runStageOne(goodsKeys: string[]) {
     );
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Shopling Context 조회에 실패했습니다.";
-    const errorRows: KeywordEngineElonLabStoredRow[] = goodsKeys.map(
-      (goodsKey) => ({
-        goods_key: goodsKey,
-        stage_key: STAGE_ONE.key,
-        stage_index: STAGE_ONE.index,
-        run_status: "error",
-        review_status: "pending",
-        input_payload: { goods_key: goodsKey, ...inputPayload },
-        output_payload: {},
-        error_message: message,
-        review_note: "",
-        engine_revision: "ops-stage1-shopling-context-v1",
-      }),
-    );
+      error instanceof Error ? error.message : "Shopling Context 조회에 실패했습니다.";
+    const errorRows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => ({
+      goods_key: goodsKey,
+      stage_key: STAGE_ONE.key,
+      stage_index: STAGE_ONE.index,
+      run_status: "error",
+      review_status: "pending",
+      input_payload: { goods_key: goodsKey, ...inputPayload },
+      output_payload: {},
+      error_message: message,
+      review_note: "",
+      engine_revision: "ops-stage1-shopling-context-v1",
+    }));
     try {
       await upsertKeywordEngineElonLabRows(errorRows);
     } catch {
@@ -312,6 +347,68 @@ async function runStageThree(goodsKeys: string[]) {
   );
 }
 
+async function runStageFour(goodsKeys: string[]) {
+  const storedRows = await listKeywordEngineElonLabRows();
+  const stageTwoByGoodsKey = new Map(
+    storedRows
+      .filter((row) => row.stage_key === STAGE_TWO.key)
+      .map((row) => [row.goods_key, row] as const),
+  );
+  const stageThreeByGoodsKey = new Map(
+    storedRows
+      .filter((row) => row.stage_key === STAGE_THREE.key)
+      .map((row) => [row.goods_key, row] as const),
+  );
+
+  const blockedGoodsKeys = goodsKeys.filter((goodsKey) => {
+    const stageTwo = stageTwoByGoodsKey.get(goodsKey);
+    const stageThree = stageThreeByGoodsKey.get(goodsKey);
+    return (
+      stageThree?.run_status !== "ready" ||
+      stageThree?.review_status !== "pass" ||
+      rowTime(stageThree) < rowTime(stageTwo)
+    );
+  });
+  if (blockedGoodsKeys.length) {
+    return jsonError(
+      `STEP 4는 최신 STEP 3 결과가 모두 통과된 뒤 실행할 수 있습니다. 미통과 또는 오래된 결과: ${blockedGoodsKeys.join(", ")}`,
+      409,
+    );
+  }
+
+  const rows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => {
+    const stageThree = stageThreeByGoodsKey.get(goodsKey)!;
+    const cleanedSeed = text(stageThree.output_payload?.cleanedSeed);
+    const breakdown = buildCurrentProbeBreakdown(cleanedSeed);
+    return {
+      goods_key: goodsKey,
+      stage_key: STAGE_FOUR.key,
+      stage_index: STAGE_FOUR.index,
+      run_status: breakdown.baseSeed ? "ready" : "error",
+      review_status: "pending",
+      input_payload: {
+        sourceStage: STAGE_THREE.key,
+        sourceStageUpdatedAt: stageThree.updated_at ?? "",
+        goodsKey,
+        cleanedSeed,
+      },
+      output_payload: {
+        goodsKey,
+        ...breakdown,
+      },
+      error_message: breakdown.baseSeed ? "" : "Probe 생성에 사용할 정제 seed가 비었습니다.",
+      review_note: "",
+      engine_revision: "ops-stage4-current-probe-split-v1",
+    };
+  });
+
+  await upsertKeywordEngineElonLabRows(rows);
+  return NextResponse.json(
+    { ok: true, stage: STAGE_FOUR, rows },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function POST(request: Request) {
   if (!assertSameOrigin(request)) {
     return jsonError("OPS Center 화면에서만 실행할 수 있습니다.", 403);
@@ -333,8 +430,9 @@ export async function POST(request: Request) {
     if (stageKey === STAGE_ONE.key) return runStageOne(goodsKeys);
     if (stageKey === STAGE_TWO.key) return runStageTwo(goodsKeys);
     if (stageKey === STAGE_THREE.key) return runStageThree(goodsKeys);
+    if (stageKey === STAGE_FOUR.key) return runStageFour(goodsKeys);
     return jsonError(
-      "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1~3입니다.",
+      "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1~4입니다.",
       409,
     );
   }
@@ -352,7 +450,7 @@ export async function POST(request: Request) {
     if (!KEYWORD_ENGINE_ELON_LAB_STAGES.some((stage) => stage.key === stageKey)) {
       return jsonError("알 수 없는 단계입니다.");
     }
-    if (!( ["pending", "pass", "improve"] as string[]).includes(reviewStatus)) {
+    if (!(["pending", "pass", "improve"] as string[]).includes(reviewStatus)) {
       return jsonError("검수 상태가 올바르지 않습니다.");
     }
     try {
