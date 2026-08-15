@@ -217,10 +217,13 @@ test("v260807 manual-review storage reads and writes retry transient 504 timeout
   assert.equal(attempts, 2);
 });
 
-test("detail-page list polling is de-duplicated briefly and retries statement timeouts", () => {
-  assert.match(jobsRouteSource, /JOB_LIST_CACHE_TTL_MS = 1_500/);
+test("detail-page list polling reuses stale results while background refresh retries statement timeouts", () => {
+  assert.match(jobsRouteSource, /JOB_LIST_CACHE_TTL_MS = 8_000/);
+  assert.match(jobsRouteSource, /JOB_LIST_STALE_TTL_MS = 60_000/);
   assert.match(jobsRouteSource, /cachedDetailPageJobs/);
   assert.match(jobsRouteSource, /cached\?\.inFlight/);
+  assert.match(jobsRouteSource, /cached\.staleUntil > now/);
+  assert.match(jobsRouteSource, /after\(async \(\) =>/);
   assert.match(jobsRouteSource, /withDetailPageStoreRetry/);
   assert.match(jobsRouteSource, /jobListCache\.set/);
 });
