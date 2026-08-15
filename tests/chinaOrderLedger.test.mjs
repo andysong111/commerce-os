@@ -74,6 +74,69 @@ test("order, partial receipt and damage release produce one open commitment", ()
   assert.equal(snapshot.cancelledQuantity, 5);
   assert.equal(snapshot.committedQuantity, 100);
   assert.equal(snapshot.openQuantity, 55);
+  assert.equal(snapshot.manualAddedQuantity, 0);
+  assert.equal(snapshot.recommendationOpenQuantity, 55);
+});
+
+test("manual Draft add-ons stay in receiving open quantity but are excluded from next recommendation deduction", () => {
+  const snapshot = reduceChinaOrderCommitmentEvents([
+    event(),
+    event({
+      sourceEventId: "event-manual-1",
+      requestedQuantity: 130,
+      occurredAt: "2026-08-05T02:00:00.000Z",
+      payload: {
+        manualAddition: true,
+        addedQuantity: 30,
+        previousRequestedQuantity: 100,
+        targetRequestedQuantity: 130,
+      },
+    }),
+  ]);
+
+  assert.equal(snapshot.requestedQuantity, 130);
+  assert.equal(snapshot.openQuantity, 130);
+  assert.equal(snapshot.manualAddedQuantity, 30);
+  assert.equal(snapshot.recommendationOpenQuantity, 100);
+});
+
+test("manual-only B-code remains fully receivable while contributing zero pending deduction", () => {
+  const snapshot = reduceChinaOrderCommitmentEvents([
+    event({
+      requestedQuantity: 40,
+      payload: {
+        manualAddition: true,
+        addedQuantity: 40,
+        previousRequestedQuantity: 0,
+        targetRequestedQuantity: 40,
+      },
+    }),
+  ]);
+
+  assert.equal(snapshot.openQuantity, 40);
+  assert.equal(snapshot.manualAddedQuantity, 40);
+  assert.equal(snapshot.recommendationOpenQuantity, 0);
+});
+
+test("partial receiving still closes physical open quantity normally while manual add-on stays excluded", () => {
+  const snapshot = reduceChinaOrderCommitmentEvents([
+    event(),
+    event({
+      sourceEventId: "event-manual-1",
+      requestedQuantity: 130,
+      occurredAt: "2026-08-05T02:00:00.000Z",
+      payload: { manualAddition: true, addedQuantity: 30 },
+    }),
+    event({
+      sourceEventId: "event-receipt-1",
+      status: "PARTIALLY_RECEIVED",
+      receivedQuantity: 50,
+      occurredAt: "2026-08-05T03:00:00.000Z",
+    }),
+  ]);
+
+  assert.equal(snapshot.openQuantity, 80);
+  assert.equal(snapshot.recommendationOpenQuantity, 50);
 });
 
 test("final receipt closes the open commitment without double-counting", () => {
@@ -104,6 +167,7 @@ test("final receipt closes the open commitment without double-counting", () => {
   assert.equal(snapshot.receivedQuantity, 95);
   assert.equal(snapshot.cancelledQuantity, 5);
   assert.equal(snapshot.openQuantity, 0);
+  assert.equal(snapshot.recommendationOpenQuantity, 0);
 });
 
 test("ledger summary ignores duplicate event identities", () => {
