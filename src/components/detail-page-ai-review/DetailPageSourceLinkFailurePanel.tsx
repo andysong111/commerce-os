@@ -21,6 +21,7 @@ type ReviewJob = {
   message: string;
   sourceUrl?: string;
   payload?: UnknownRecord;
+  result?: UnknownRecord;
   updatedAt: string;
 };
 
@@ -69,9 +70,9 @@ export function DetailPageSourceLinkFailurePanel() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-black tracking-[0.12em] text-rose-600">검수 필요</p>
-          <h2 className="mt-1 text-lg font-black text-rose-950">링크 접근 불가</h2>
+          <h2 className="mt-1 text-lg font-black text-rose-950">링크불량 · 정상 상품 원본 확인 불가</h2>
           <p className="mt-1 text-sm font-semibold leading-6 text-rose-800">
-            상세페이지 고정링크 1번에서 상품 본문·원본 이미지를 확보하지 못했습니다. 상품이 내려갔거나 빈 페이지를 반환한 경우 새 1688 링크로 교체해야 합니다.
+            상세페이지 고정링크 1번이 내려갔거나 오류·빈 페이지·플레이스홀더만 반환해 실제 판매 상품의 형상을 확인하지 못했습니다. 새 1688 링크로 교체한 뒤 다시 생성해야 합니다.
           </p>
         </div>
         <span className="rounded-full bg-rose-600 px-3 py-1.5 text-xs font-black text-white">
@@ -85,7 +86,7 @@ export function DetailPageSourceLinkFailurePanel() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-black text-rose-700">
-                  링크 접근 불가
+                  링크불량
                 </span>
                 <strong className="truncate text-sm text-slate-950">{jobName(job)}</strong>
               </div>

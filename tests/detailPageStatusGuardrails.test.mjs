@@ -59,12 +59,12 @@ test("detail-page complete state is invalid when HTML and main image materials a
   );
 });
 
-test("removed, blank, or stalled 1688 source failures are classified as link access failures", () => {
+test("removed, blank, or stalled 1688 source failures are classified as link-bad", () => {
   const removed = sourceJob({
     error: "商品已下架 查看该店铺其他上架商品",
   });
   assert.equal(isDetailPageSourceLinkUnavailable(removed), true);
-  assert.equal(detailPageSourceLinkFailureLabel(removed), "링크 접근 불가");
+  assert.equal(detailPageSourceLinkFailureLabel(removed), "링크불량");
   assert.match(detailPageSourceLinkFailureDetail(removed), /商品已下架/);
 
   const blankGeneric = sourceJob();
@@ -84,7 +84,7 @@ test("removed, blank, or stalled 1688 source failures are classified as link acc
   );
 });
 
-test("Studio infrastructure failures and jobs with collected evidence are not mislabeled as link access failures", () => {
+test("Studio infrastructure failures and jobs with collected evidence are not mislabeled as link failures", () => {
   assert.equal(
     isDetailPageSourceLinkUnavailable(
       sourceJob({
@@ -97,7 +97,6 @@ test("Studio infrastructure failures and jobs with collected evidence are not mi
   assert.equal(
     isDetailPageSourceLinkUnavailable(
       sourceJob({
-        stage: "source_collection",
         error: "로컬 수집기 업데이트가 필요합니다.",
       }),
     ),
@@ -139,6 +138,7 @@ test("product tracker and AI review pages mount the new guardrails", async () =>
   assert.match(guard, /mode: "items"/);
   assert.match(reviewPage, /DetailPageSourceLinkFailurePanel/);
   assert.match(sourcePanel, /검수 필요/);
-  assert.match(sourcePanel, /링크 접근 불가/);
+  assert.match(sourcePanel, /링크불량/);
+  assert.match(sourcePanel, /정상 상품 원본 확인 불가/);
   assert.match(sourcePanel, /1688 링크 확인/);
 });
