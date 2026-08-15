@@ -13,29 +13,17 @@ const MAX_RECENT_JOBS = 50;
 const CACHE_TAG_PREFIX = "detail-page-jobs";
 const JOB_LIST_REVALIDATE_SECONDS = 15;
 
+type CachedJobListResult =
+  | { ok: true; jobs: Awaited<ReturnType<typeof listDetailPageJobs>> }
+  | { ok: false; message: string };
+
 export async function GET(request: NextRequest) {
   const identity = await resolveDetailPageJobIdentity(request);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
 
   const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
-  try {
-    const jobs = await readCachedJobs(identity.value.userId, query);
-    return Response.json(
-      {
-        ok: true,
-        scope: query ? "search" : "recent",
-        jobs: jobs.map(publicDetailPageJob),
-        listSource: "next-data-cache",
-      },
-      {
-        headers: {
-          "Cache-Control": "private, no-store",
-          "X-Commerce-Job-Cache": "data-cache",
-        },
-      },
-    );
-  } catch (error) {
-    console.error("[detail-page-job-list-cache] read failed", error);
+  const result = await readCachedJobs(identity.value.userId, query);
+  if (!result.ok) {
     return Response.json(
       {
         ok: false,
@@ -46,12 +34,28 @@ export async function GET(request: NextRequest) {
       {
         status: 503,
         headers: {
-          "Retry-After": "10",
+          "Retry-After": String(JOB_LIST_REVALIDATE_SECONDS),
           "Cache-Control": "private, no-store",
+          "X-Commerce-Job-Cache": "cached-backpressure",
         },
       },
     );
   }
+
+  return Response.json(
+    {
+      ok: true,
+      scope: query ? "search" : "recent",
+      jobs: result.jobs.map(publicDetailPageJob),
+      listSource: "next-data-cache",
+    },
+    {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "X-Commerce-Job-Cache": "data-cache",
+      },
+    },
+  );
 }
 
 export async function POST(request: NextRequest) {
@@ -66,21 +70,36 @@ export async function POST(request: NextRequest) {
 function readCachedJobs(ownerId: string, query: string) {
   const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
   return unstable_cache(
-    async () => {
-      const config = getDetailPageJobConfig();
-      if (!config.ok) {
-        throw new Error("상세페이지 작업 저장소 설정을 읽지 못했습니다.");
+    async (): Promise<CachedJobListResult> => {
+      try {
+        const config = getDetailPageJobConfig();
+        if (!config.ok) {
+          return {
+            ok: false,
+            message: "상세페이지 작업 저장소 설정을 읽지 못했습니다.",
+          };
+        }
+        const jobs = normalizedQuery
+          ? await searchDetailPageJobs(
+              config.value,
+              ownerId,
+              normalizedQuery,
+              MAX_RECENT_JOBS,
+            )
+          : await listDetailPageJobs(config.value, ownerId, MAX_RECENT_JOBS);
+        return { ok: true, jobs };
+      } catch (error) {
+        console.error("[detail-page-job-list-cache] store read failed", error);
+        return {
+          ok: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "상세페이지 작업 저장소를 읽지 못했습니다.",
+        };
       }
-      return normalizedQuery
-        ? searchDetailPageJobs(
-            config.value,
-            ownerId,
-            normalizedQuery,
-            MAX_RECENT_JOBS,
-          )
-        : listDetailPageJobs(config.value, ownerId, MAX_RECENT_JOBS);
     },
-    ["detail-page-job-list-v2", ownerId, normalizedQuery],
+    ["detail-page-job-list-v3-backpressure", ownerId, normalizedQuery],
     {
       revalidate: JOB_LIST_REVALIDATE_SECONDS,
       tags: [cacheTagFor(ownerId)],

@@ -2,6 +2,8 @@ const pageParams = new URLSearchParams(window.location.search);
 const detailPageMode = pageParams.get("detail_page_mode") || "standalone";
 const dockEventSource = "commerce-os-detail-page-dock";
 const workAssistantSource = "commerce-os-work-assistant";
+const detailJobsApi = "/api/product-launch-tracker/detail-page-jobs";
+const workerIdleCheckMs = 30_000;
 
 function signalDetailPageWorkerReady() {
   window.parent?.postMessage(
@@ -14,21 +16,93 @@ function signalDetailPageWorkerReady() {
 }
 
 if (detailPageMode === "worker") {
-  await import("./detail-page-product-scope.js");
-  await import("./detail-page-dock.js");
-  await import("./detail-page-bgrade-main-only-dock.js");
-  await import("./detail-page-dock-repair.js");
+  let workerModulesPromise = null;
+  let workerCheckTimer = null;
+
+  const ensureWorkerModules = () => {
+    if (!workerModulesPromise) {
+      workerModulesPromise = (async () => {
+        await import("./detail-page-product-scope.js");
+        await import("./detail-page-dock.js");
+        await import("./detail-page-bgrade-main-only-dock.js");
+        await import("./detail-page-dock-repair.js");
+      })();
+    }
+    return workerModulesPromise;
+  };
+
+  const scheduleWorkerCheck = (delay = 800) => {
+    window.clearTimeout(workerCheckTimer);
+    workerCheckTimer = window.setTimeout(async () => {
+      if (workerModulesPromise) return;
+      try {
+        const response = await fetch(detailJobsApi, {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => ({}));
+        const hasActiveJob =
+          response.ok &&
+          payload?.ok === true &&
+          Array.isArray(payload.jobs) &&
+          payload.jobs.some(
+            (job) =>
+              !["success", "failed", "cancelled"].includes(
+                String(job?.status || ""),
+              ),
+          );
+        if (hasActiveJob) {
+          await ensureWorkerModules();
+          return;
+        }
+      } catch {
+        // The shared jobs cache may be unavailable while Supabase is overloaded.
+      }
+      scheduleWorkerCheck(workerIdleCheckMs);
+    }, delay);
+  };
+
   signalDetailPageWorkerReady();
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
-    if (
-      event.data?.source === workAssistantSource &&
-      event.data?.type === "detail-page-worker-ping"
-    ) {
+    const payload = event.data;
+    if (payload?.source !== workAssistantSource) return;
+    if (payload?.type === "detail-page-worker-ping") {
       signalDetailPageWorkerReady();
+      return;
     }
+    if (payload?.__commerceWorkerBootstrapForwarded === true) return;
+    if (
+      payload?.type !== "activate-detail-page-job" &&
+      payload?.type !== "retry-detail-page-job"
+    ) {
+      return;
+    }
+
+    void ensureWorkerModules().then(() => {
+      const forwarded = {
+        ...payload,
+        __commerceWorkerBootstrapForwarded: true,
+      };
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: forwarded,
+          origin: window.location.origin,
+          source: window.parent,
+        }),
+      );
+    });
   });
+  scheduleWorkerCheck();
 } else {
+  try {
+    const startupPreview = await import("./startup-page-cache-preview.js");
+    startupPreview.installStartupPageCachePreview?.();
+  } catch (error) {
+    console.error("Product launch startup cache preview failed", error);
+  }
+
   // Do not abort or replace the list request. If a cold start is slow, only show a
   // passive status message while the existing optimized app keeps waiting normally.
   const slowListTimer = window.setTimeout(() => {

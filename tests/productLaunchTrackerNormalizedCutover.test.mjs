@@ -82,6 +82,18 @@ test("hot list reads use shared Next Data Cache across function instances", () =
   assert.doesNotMatch(source.cachedDetailJobs, /"use cache: remote"/);
 });
 
+test("transient Supabase failures are cached briefly instead of creating a retry storm", () => {
+  assert.match(source.cachedNormalized, /type CachedPageResult/);
+  assert.match(source.cachedNormalized, /kind: "unavailable"/);
+  assert.match(source.cachedNormalized, /cached-backpressure/);
+  assert.match(source.cachedNormalized, /product-launch-page-v3-backpressure/);
+
+  assert.match(source.cachedDetailJobs, /type CachedJobListResult/);
+  assert.match(source.cachedDetailJobs, /ok: false/);
+  assert.match(source.cachedDetailJobs, /cached-backpressure/);
+  assert.match(source.cachedDetailJobs, /detail-page-job-list-v3-backpressure/);
+});
+
 test("legacy writes remain authoritative and refresh normalized rows", () => {
   assert.match(source.normalized, /syncProductLaunchNormalizedAfterMutation/);
   assert.match(source.state, /syncProductLaunchNormalizedFull/);
