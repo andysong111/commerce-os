@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { cacheLife, cacheTag, revalidateTag } from "next/cache";
+import { revalidateTag, unstable_cache } from "next/cache";
 import {
   getProductLaunchAdminConfig,
   resolveProductLaunchIdentity,
@@ -11,6 +11,7 @@ import {
 import { GET as legacyGet, PATCH as legacyPatch } from "../normalized-optimized/route";
 
 const CACHE_TAG_PREFIX = "product-launch-page";
+const PAGE_REVALIDATE_SECONDS = 10;
 
 type PageQuery = {
   page: string | null;
@@ -38,11 +39,11 @@ export async function GET(request: NextRequest) {
     );
     if (!body) return legacyGet(request);
     return Response.json(
-      { ...body, listCache: "vercel-runtime-cache" },
+      { ...body, listCache: "next-data-cache" },
       {
         headers: {
           "Cache-Control": "private, no-store",
-          "X-Commerce-List-Cache": "remote",
+          "X-Commerce-List-Cache": "data-cache",
         },
       },
     );
@@ -70,42 +71,52 @@ export async function PATCH(request: NextRequest) {
   const identity = await resolveProductLaunchIdentity(request);
   const response = await legacyPatch(request);
   if (response.ok && identity.ok) {
-    revalidateTag(cacheTagFor(identity.value.userId));
+    revalidateTag(cacheTagFor(identity.value.userId), "max");
   }
   return response;
 }
 
-async function readCachedPage(ownerId: string, queryJson: string) {
-  "use cache: remote";
-  cacheLife({ stale: 30, revalidate: 10, expire: 300 });
-  cacheTag(cacheTagFor(ownerId));
+function readCachedPage(ownerId: string, queryJson: string) {
+  return unstable_cache(
+    async () => {
+      const config = getProductLaunchAdminConfig();
+      if (!config.ok) {
+        throw new Error("상품출시진행관리 저장소 설정을 읽지 못했습니다.");
+      }
 
-  const config = getProductLaunchAdminConfig();
-  if (!config.ok) throw new Error("상품출시진행관리 저장소 설정을 읽지 못했습니다.");
+      const workspace = await readProductLaunchNormalizedWorkspace(
+        config.value,
+        ownerId,
+      );
+      if (!workspace || workspace.normalized_read_enabled !== true) return null;
 
-  const workspace = await readProductLaunchNormalizedWorkspace(config.value, ownerId);
-  if (!workspace || workspace.normalized_read_enabled !== true) return null;
+      const query = JSON.parse(queryJson) as PageQuery;
+      const page = await queryProductLaunchNormalizedPage(
+        config.value,
+        ownerId,
+        workspace,
+        query,
+      );
 
-  const query = JSON.parse(queryJson) as PageQuery;
-  const page = await queryProductLaunchNormalizedPage(
-    config.value,
-    ownerId,
-    workspace,
-    query,
-  );
-
-  return {
-    ok: true,
-    stateExists: true,
-    ...page,
-    policy: isRecord(workspace.policy) ? workspace.policy : null,
-    sourceImportedAt: nullableText(workspace.source_imported_at),
-    updatedAt:
-      nullableText(workspace.source_state_updated_at) ??
-      nullableText(workspace.updated_at),
-    schemaVersion: numberOrNull(workspace.schema_version),
-    listSource: "normalized",
-  };
+      return {
+        ok: true,
+        stateExists: true,
+        ...page,
+        policy: isRecord(workspace.policy) ? workspace.policy : null,
+        sourceImportedAt: nullableText(workspace.source_imported_at),
+        updatedAt:
+          nullableText(workspace.source_state_updated_at) ??
+          nullableText(workspace.updated_at),
+        schemaVersion: numberOrNull(workspace.schema_version),
+        listSource: "normalized",
+      };
+    },
+    ["product-launch-page-v2", ownerId, queryJson],
+    {
+      revalidate: PAGE_REVALIDATE_SECONDS,
+      tags: [cacheTagFor(ownerId)],
+    },
+  )();
 }
 
 function readPageQuery(request: NextRequest): PageQuery {
