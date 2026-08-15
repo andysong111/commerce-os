@@ -66,20 +66,20 @@ test("page and detail reads use normalized product and option rows", () => {
   assert.match(source.normalized, /return legacyGet\(request\)/);
 });
 
-test("hot list reads use Vercel remote runtime cache across function instances", () => {
-  assert.match(source.cachedNormalized, /"use cache: remote"/);
-  assert.match(source.cachedNormalized, /cacheLife\(/);
-  assert.match(source.cachedNormalized, /cacheTag\(/);
-  assert.match(source.cachedNormalized, /revalidateTag\(/);
+test("hot list reads use shared Next Data Cache across function instances", () => {
+  assert.match(source.cachedNormalized, /unstable_cache/);
+  assert.match(source.cachedNormalized, /PAGE_REVALIDATE_SECONDS = 10/);
+  assert.match(source.cachedNormalized, /revalidateTag\([^\n]+, "max"\)/);
   assert.match(source.cachedNormalized, /queryProductLaunchNormalizedPage/);
-  assert.match(source.cachedNormalized, /listCache: "vercel-runtime-cache"/);
+  assert.match(source.cachedNormalized, /listCache: "next-data-cache"/);
 
-  assert.match(source.cachedDetailJobs, /"use cache: remote"/);
-  assert.match(source.cachedDetailJobs, /cacheLife\(/);
-  assert.match(source.cachedDetailJobs, /cacheTag\(/);
-  assert.match(source.cachedDetailJobs, /revalidateTag\(/);
+  assert.match(source.cachedDetailJobs, /unstable_cache/);
+  assert.match(source.cachedDetailJobs, /JOB_LIST_REVALIDATE_SECONDS = 15/);
+  assert.match(source.cachedDetailJobs, /revalidateTag\([^\n]+, "max"\)/);
   assert.match(source.cachedDetailJobs, /listDetailPageJobs/);
+  assert.match(source.cachedDetailJobs, /listSource: "next-data-cache"/);
   assert.doesNotMatch(source.cachedDetailJobs, /withDetailPageStoreRetry/);
+  assert.doesNotMatch(source.cachedDetailJobs, /"use cache: remote"/);
 });
 
 test("legacy writes remain authoritative and refresh normalized rows", () => {
