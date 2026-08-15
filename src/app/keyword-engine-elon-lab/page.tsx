@@ -46,6 +46,19 @@ function outputOf(row: KeywordEngineElonLabStoredRow | undefined) {
   return (row?.output_payload ?? {}) as StageOneOutput;
 }
 
+function mergeStoredRows(
+  current: KeywordEngineElonLabStoredRow[],
+  incoming: KeywordEngineElonLabStoredRow[],
+) {
+  const map = new Map(
+    current.map((row) => [`${row.stage_key}:${row.goods_key}`, row] as const),
+  );
+  for (const row of incoming) {
+    map.set(`${row.stage_key}:${row.goods_key}`, row);
+  }
+  return [...map.values()];
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
@@ -58,6 +71,7 @@ export default function KeywordEngineElonLabPage() {
   const [rows, setRows] = useState<KeywordEngineElonLabStoredRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set([0, 1, 2]));
@@ -118,6 +132,7 @@ export default function KeywordEngineElonLabPage() {
 
   const saveReview = async (goodsKey: string, reviewStatus: KeywordEngineElonLabReviewStatus) => {
     const key = `${STAGE_ONE_KEY}:${goodsKey}`;
+    setReviewSaving(key);
     setMessage("");
     try {
       const response = await fetch("/api/keyword-engine-elon-lab", {
@@ -133,9 +148,15 @@ export default function KeywordEngineElonLabPage() {
       });
       const data = (await response.json()) as ApiState;
       if (!response.ok || !data.ok) throw new Error(data.message || "검수 판정을 저장하지 못했습니다.");
-      await refresh();
+      const updatedRows = data.rows ?? [];
+      if (!updatedRows.length) throw new Error("검수 판정은 요청됐지만 서버 저장 결과를 확인하지 못했습니다.");
+      setRows((current) => mergeStoredRows(current, updatedRows));
+      const label = reviewStatus === "pass" ? "통과" : reviewStatus === "improve" ? "개선필요" : "검수대기";
+      setMessage(`${goodsKey} · ${label} 저장 완료`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "검수 판정을 저장하지 못했습니다.");
+    } finally {
+      setReviewSaving(null);
     }
   };
 
@@ -250,6 +271,7 @@ export default function KeywordEngineElonLabPage() {
                         const badge = statusBadge(row);
                         const output = outputOf(row);
                         const noteKey = `${STAGE_ONE_KEY}:${goodsKey}`;
+                        const savingThisReview = reviewSaving === noteKey;
                         return (
                           <div key={goodsKey} className="rounded-xl border border-slate-200 p-4">
                             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -280,9 +302,9 @@ export default function KeywordEngineElonLabPage() {
                                   <label className="text-xs font-bold text-slate-600">내 검수 메모</label>
                                   <textarea value={notes[noteKey] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [noteKey]: event.target.value }))} placeholder="예: prod_nm보다 model_nm을 seed로 쓰는 것이 더 적합함" className="mt-2 min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
                                   <div className="mt-3 flex flex-wrap gap-2">
-                                    <button disabled={row.run_status !== "ready"} onClick={() => void saveReview(goodsKey, "pass")} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300">이 상품 통과</button>
-                                    <button disabled={row.run_status !== "ready"} onClick={() => void saveReview(goodsKey, "improve")} className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300">개선 필요</button>
-                                    <button onClick={() => void saveReview(goodsKey, "pending")} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700">판정 초기화</button>
+                                    <button disabled={row.run_status !== "ready" || Boolean(reviewSaving)} onClick={() => void saveReview(goodsKey, "pass")} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300">{savingThisReview ? "저장 중…" : "이 상품 통과"}</button>
+                                    <button disabled={row.run_status !== "ready" || Boolean(reviewSaving)} onClick={() => void saveReview(goodsKey, "improve")} className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300">{savingThisReview ? "저장 중…" : "개선 필요"}</button>
+                                    <button disabled={Boolean(reviewSaving)} onClick={() => void saveReview(goodsKey, "pending")} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 disabled:bg-slate-100">판정 초기화</button>
                                   </div>
                                 </div>
                               </>
