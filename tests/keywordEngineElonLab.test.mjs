@@ -17,12 +17,23 @@ test("keyword engine Elon lab keeps the six fixed Shopling goods keys", () => {
   }
 });
 
-test("keyword engine Elon lab exposes the full decomposition map and only stage one is executable", () => {
+test("keyword engine Elon lab exposes 42 stages and connects stages one and two", () => {
   const stageCount = [...labFile.matchAll(/index:\s*\d+,\s*key:/g)].length;
   assert.equal(stageCount, 42);
-  assert.match(labFile, /CURRENT_IMPLEMENTED_STAGE = 1/);
-  assert.match(routeFile, /stageKey !== STAGE_ONE\.key/);
-  assert.match(routeFile, /현재 실험실에서 실제 실행이 연결된 단계는 1단계/);
+  assert.match(labFile, /index: 2, key: "seed_selection"[\s\S]*implemented: true/);
+  assert.match(labFile, /CURRENT_IMPLEMENTED_STAGE = 2/);
+  assert.match(routeFile, /const STAGE_TWO =/);
+  assert.match(routeFile, /if \(stageKey === STAGE_TWO\.key\) return runStageTwo/);
+  assert.match(routeFile, /STEP 2는 STEP 1 최신 결과가 모두 통과된 뒤 실행할 수 있습니다/);
+});
+
+test("stage two reproduces the current seed selection rule without redesigning it", () => {
+  assert.match(routeFile, /const selectedSeed = productName \|\| modelName \|\| goodsKey/);
+  assert.match(routeFile, /currentRule: "prod_nm \|\| model_nm \|\| goods_key"/);
+  assert.match(routeFile, /selectedSeedSource/);
+  assert.match(routeFile, /selectionReason/);
+  assert.match(pageFile, /현행 규칙 그대로 실행: prod_nm → model_nm → goods_key/);
+  assert.match(pageFile, /2단계 · 6개 모두 실행/);
 });
 
 test("keyword engine Elon lab is registered as an isolated OPS card", () => {
@@ -45,13 +56,18 @@ test("stage one reads Shopling context without modify endpoints", () => {
   assert.match(routeFile, /writesEnabled:\s*false/);
 });
 
-test("review buttons render the server write response immediately instead of waiting for a reread", () => {
+test("review buttons show local save feedback and apply the server row immediately", () => {
   assert.match(pageFile, /mergeStoredRows/);
   assert.match(pageFile, /const updatedRows = data\.rows \?\? \[\]/);
   assert.match(pageFile, /setRows\(\(current\) => mergeStoredRows\(current, updatedRows\)\)/);
-  assert.match(pageFile, /저장 완료/);
-  assert.doesNotMatch(
-    pageFile.match(/const saveReview = async[\s\S]*?\n  };\n\n  const toggleStage/)?.[0] ?? "",
-    /await refresh\(\)/,
-  );
+  assert.match(pageFile, /저장 중…/);
+  assert.match(pageFile, /✓ \$\{label\} 저장 완료/);
+  assert.match(pageFile, /✓ 통과 완료/);
+});
+
+test("stage two results become stale when stage one is newer", () => {
+  assert.match(pageFile, /function isFreshAfter/);
+  assert.match(pageFile, /rowTime\(row\) >= rowTime\(previous\)/);
+  assert.match(pageFile, /freshStageTwoRow/);
+  assert.match(pageFile, /기존 2단계 결과는 stale로 간주됩니다/);
 });
