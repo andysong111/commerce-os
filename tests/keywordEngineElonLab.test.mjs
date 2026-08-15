@@ -44,3 +44,14 @@ test("stage one reads Shopling context without modify endpoints", () => {
   assert.doesNotMatch(shoplingFile, /prod_each_mall_modify_api/);
   assert.match(routeFile, /writesEnabled:\s*false/);
 });
+
+test("review buttons render the server write response immediately instead of waiting for a reread", () => {
+  assert.match(pageFile, /mergeStoredRows/);
+  assert.match(pageFile, /const updatedRows = data\.rows \?\? \[\]/);
+  assert.match(pageFile, /setRows\(\(current\) => mergeStoredRows\(current, updatedRows\)\)/);
+  assert.match(pageFile, /저장 완료/);
+  assert.doesNotMatch(
+    pageFile.match(/const saveReview = async[\s\S]*?\n  };\n\n  const toggleStage/)?.[0] ?? "",
+    /await refresh\(\)/,
+  );
+});
