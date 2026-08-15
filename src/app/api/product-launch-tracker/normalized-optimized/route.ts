@@ -17,7 +17,7 @@ import {
 import { GET as legacyGet, PATCH as legacyPatch } from "../optimized/route";
 
 const PAGE_CACHE_TTL_MS = 10_000;
-const PAGE_CACHE_STALE_MS = 120_000;
+const PAGE_CACHE_STALE_MS = 60_000;
 const PAGE_CACHE_MAX_KEYS = 80;
 
 type CachedPage = {
@@ -184,7 +184,7 @@ async function getNormalizedPage(request: NextRequest) {
         ok: false,
         code: "PRODUCT_LAUNCH_LIST_TEMPORARILY_UNAVAILABLE",
         message:
-          "상품 목록 저장소 응답이 일시적으로 지연되고 있습니다. 잠시 후 자동으로 다시 불러옵니다.",
+          "상품 목록 저장소 응답이 일시적으로 지연되고 있습니다. 잠시 후 다시 시도해 주세요.",
       },
       {
         status: 503,
@@ -198,12 +198,7 @@ async function getNormalizedPage(request: NextRequest) {
 }
 
 async function loadNormalizedPageBody(
-  config: ReturnType<typeof getProductLaunchAdminConfig> extends {
-    ok: true;
-    value: infer T;
-  }
-    ? T
-    : never,
+  config: Parameters<typeof queryProductLaunchNormalizedPage>[0],
   ownerId: string,
   query: ReturnType<typeof pageQuery>,
 ) {
