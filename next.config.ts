@@ -16,7 +16,11 @@ const nextConfig: NextConfig = {
       beforeFiles: [
         {
           source: "/api/product-launch-tracker/optimized",
-          destination: "/api/product-launch-tracker/normalized-optimized",
+          destination: "/api/product-launch-tracker/normalized-optimized-cached",
+        },
+        {
+          source: "/api/product-launch-tracker/detail-page-jobs",
+          destination: "/api/product-launch-tracker/detail-page-jobs-cached",
         },
         {
           source: "/api/product-launch-tracker/state",
