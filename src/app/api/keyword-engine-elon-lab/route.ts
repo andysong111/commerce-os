@@ -5,6 +5,7 @@ import {
   isKeywordEngineElonLabGoodsKey,
   type KeywordEngineElonLabReviewStatus,
 } from "@/lib/keywordEngineElonLab";
+import { analyzeKeywordEngineIdentityBatch } from "@/lib/keywordEngineElonLabIdentity";
 import { loadKeywordEngineElonLabShoplingContexts } from "@/lib/keywordEngineElonLabShopling";
 import {
   listKeywordEngineElonLabRows,
@@ -84,45 +85,6 @@ function cleanCurrentSeed(value: unknown) {
     currentNoiseTerms: [...CURRENT_SEED_NOISE_TERMS],
     whitespaceNormalized: true,
     warning: cleanedSeed ? "" : "CLEANED_SEED_EMPTY",
-  };
-}
-
-function buildCurrentProbeBreakdown(value: unknown) {
-  const baseSeed = text(value).replace(/\s+/g, " ");
-  const rawParts = baseSeed ? baseSeed.split(/\s+/).filter(Boolean) : [];
-  const seen = new Set<string>();
-  const probeTerms: string[] = [];
-  const excludedTerms: Array<{ term: string; reason: string }> = [];
-  const duplicateTerms: string[] = [];
-
-  for (const part of rawParts) {
-    if (part.length < 2) {
-      excludedTerms.push({ term: part, reason: "length_lt_2" });
-      continue;
-    }
-    if (seen.has(part)) {
-      duplicateTerms.push(part);
-      continue;
-    }
-    seen.add(part);
-    probeTerms.push(part);
-  }
-
-  const probes = baseSeed
-    ? [baseSeed, ...probeTerms.filter((term) => term !== baseSeed)]
-    : [];
-
-  return {
-    baseSeed,
-    rawParts,
-    probeTerms,
-    excludedTerms,
-    duplicateTerms,
-    probes,
-    probeCount: probes.length,
-    currentRule:
-      "정제 seed 전체를 첫 probe로 사용 + 공백 분해 구성어 중 길이 2자 이상 고유 단어를 순서대로 추가",
-    warning: baseSeed ? "" : "PROBE_BASE_SEED_EMPTY",
   };
 }
 
@@ -376,37 +338,95 @@ async function runStageFour(goodsKeys: string[]) {
     );
   }
 
-  const rows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => {
+  const inputs = goodsKeys.map((goodsKey) => {
     const stageThree = stageThreeByGoodsKey.get(goodsKey)!;
-    const cleanedSeed = text(stageThree.output_payload?.cleanedSeed);
-    const breakdown = buildCurrentProbeBreakdown(cleanedSeed);
     return {
-      goods_key: goodsKey,
-      stage_key: STAGE_FOUR.key,
-      stage_index: STAGE_FOUR.index,
-      run_status: breakdown.baseSeed ? "ready" : "error",
-      review_status: "pending",
-      input_payload: {
-        sourceStage: STAGE_THREE.key,
-        sourceStageUpdatedAt: stageThree.updated_at ?? "",
-        goodsKey,
-        cleanedSeed,
-      },
-      output_payload: {
-        goodsKey,
-        ...breakdown,
-      },
-      error_message: breakdown.baseSeed ? "" : "Probe 생성에 사용할 정제 seed가 비었습니다.",
-      review_note: "",
-      engine_revision: "ops-stage4-current-probe-split-v1",
+      goodsKey,
+      cleanedSeed: text(stageThree.output_payload?.cleanedSeed),
+      stageThree,
     };
   });
+  const emptyGoodsKeys = inputs
+    .filter((item) => !item.cleanedSeed)
+    .map((item) => item.goodsKey);
+  if (emptyGoodsKeys.length) {
+    return jsonError(
+      `STEP 4 상품 정체성 분석에 사용할 정제 Seed가 비었습니다: ${emptyGoodsKeys.join(", ")}`,
+      409,
+    );
+  }
 
-  await upsertKeywordEngineElonLabRows(rows);
-  return NextResponse.json(
-    { ok: true, stage: STAGE_FOUR, rows },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  try {
+    const analysis = await analyzeKeywordEngineIdentityBatch(
+      inputs.map(({ goodsKey, cleanedSeed }) => ({ goodsKey, cleanedSeed })),
+    );
+    const resultByGoodsKey = new Map(
+      analysis.results.map((result) => [result.goodsKey, result] as const),
+    );
+    const rows: KeywordEngineElonLabStoredRow[] = inputs.map(
+      ({ goodsKey, cleanedSeed, stageThree }) => {
+        const result = resultByGoodsKey.get(goodsKey);
+        return {
+          goods_key: goodsKey,
+          stage_key: STAGE_FOUR.key,
+          stage_index: STAGE_FOUR.index,
+          run_status: result?.coreProduct ? "ready" : "error",
+          review_status: "pending",
+          input_payload: {
+            sourceStage: STAGE_THREE.key,
+            sourceStageUpdatedAt: stageThree.updated_at ?? "",
+            goodsKey,
+            cleanedSeed,
+            analysisMode: "semantic_product_identity_roles",
+            writesEnabled: false,
+          },
+          output_payload: result ?? {},
+          error_message: result?.coreProduct
+            ? ""
+            : "상품 핵심명사 또는 상품 정체성 분석 결과를 만들지 못했습니다.",
+          review_note: "",
+          engine_revision: "ops-stage4-semantic-identity-v2",
+        };
+      },
+    );
+    await upsertKeywordEngineElonLabRows(rows);
+    return NextResponse.json(
+      { ok: true, stage: STAGE_FOUR, model: analysis.model, rows },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "STEP 4 상품 정체성 구조화에 실패했습니다.";
+    const errorRows: KeywordEngineElonLabStoredRow[] = inputs.map(
+      ({ goodsKey, cleanedSeed, stageThree }) => ({
+        goods_key: goodsKey,
+        stage_key: STAGE_FOUR.key,
+        stage_index: STAGE_FOUR.index,
+        run_status: "error",
+        review_status: "pending",
+        input_payload: {
+          sourceStage: STAGE_THREE.key,
+          sourceStageUpdatedAt: stageThree.updated_at ?? "",
+          goodsKey,
+          cleanedSeed,
+          analysisMode: "semantic_product_identity_roles",
+          writesEnabled: false,
+        },
+        output_payload: {},
+        error_message: message,
+        review_note: "",
+        engine_revision: "ops-stage4-semantic-identity-v2",
+      }),
+    );
+    try {
+      await upsertKeywordEngineElonLabRows(errorRows);
+    } catch {
+      // Preserve the identity-analysis error even if persistence is unavailable.
+    }
+    return jsonError(message, 502);
+  }
 }
 
 export async function POST(request: Request) {
