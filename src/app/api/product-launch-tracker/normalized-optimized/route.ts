@@ -1,9 +1,14 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
+import {
+  getProductLaunchAdminConfig,
+  resolveProductLaunchIdentity,
+} from "@/lib/productLaunchTrackerServer";
 import { loadFreshProductLaunchNormalized } from "@/lib/productLaunchTrackerNormalizedAvailability";
 import {
   queryProductLaunchNormalizedPage,
   readProductLaunchNormalizedItem,
   readProductLaunchNormalizedItems,
+  readProductLaunchNormalizedWorkspace,
 } from "@/lib/productLaunchTrackerNormalizedStore";
 import {
   disableProductLaunchNormalizedRead,
@@ -11,9 +16,26 @@ import {
 } from "@/lib/productLaunchTrackerNormalizedWriteBridge";
 import { GET as legacyGet, PATCH as legacyPatch } from "../optimized/route";
 
+const PAGE_CACHE_TTL_MS = 10_000;
+const PAGE_CACHE_STALE_MS = 120_000;
+const PAGE_CACHE_MAX_KEYS = 80;
+
+type CachedPage = {
+  body: Record<string, unknown>;
+  expiresAt: number;
+  staleUntil: number;
+  refreshing?: boolean;
+};
+
+const pageCache = new Map<string, CachedPage>();
+
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("mode") || "page";
   if (!new Set(["page", "item", "items"]).has(mode)) return legacyGet(request);
+
+  if (mode === "page") {
+    return getNormalizedPage(request);
+  }
 
   const loaded = await loadFreshProductLaunchNormalized(request);
   if (loaded.response) return loaded.response;
@@ -22,36 +44,6 @@ export async function GET(request: NextRequest) {
   const { config, identity, workspace, updatedAt, schemaVersion } = loaded.value;
 
   try {
-    if (mode === "page") {
-      const page = await queryProductLaunchNormalizedPage(
-        config,
-        identity.userId,
-        workspace,
-        {
-          page: request.nextUrl.searchParams.get("page"),
-          pageSize: request.nextUrl.searchParams.get("pageSize"),
-          search: request.nextUrl.searchParams.get("search"),
-          batch: request.nextUrl.searchParams.get("batch"),
-          assignee: request.nextUrl.searchParams.get("assignee"),
-          overall: request.nextUrl.searchParams.get("overall"),
-          unfinishedOnly: request.nextUrl.searchParams.get("unfinishedOnly"),
-          sort: request.nextUrl.searchParams.get("sort"),
-          direction: request.nextUrl.searchParams.get("direction"),
-        },
-      );
-
-      return Response.json({
-        ok: true,
-        stateExists: true,
-        ...page,
-        policy: isRecord(workspace.policy) ? workspace.policy : null,
-        sourceImportedAt: nullableText(workspace.source_imported_at),
-        updatedAt,
-        schemaVersion,
-        listSource: "normalized",
-      });
-    }
-
     if (mode === "item") {
       const itemId = request.nextUrl.searchParams.get("id")?.trim() || "";
       if (!itemId) {
@@ -149,11 +141,168 @@ export async function GET(request: NextRequest) {
   }
 }
 
+async function getNormalizedPage(request: NextRequest) {
+  const identity = await resolveProductLaunchIdentity(request);
+  if (!identity.ok) return Response.json(identity.body, { status: identity.status });
+  const config = getProductLaunchAdminConfig();
+  if (!config.ok) return Response.json(config.body, { status: config.status });
+
+  const ownerId = identity.value.userId;
+  const query = pageQuery(request);
+  const cacheKey = `${ownerId}:${request.nextUrl.searchParams.toString()}`;
+  const now = Date.now();
+  const cached = pageCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now) {
+    return pageResponse(cached.body, "memory-fresh");
+  }
+
+  if (cached && cached.staleUntil > now) {
+    schedulePageRefresh(
+      cacheKey,
+      cached,
+      config.value,
+      ownerId,
+      query,
+    );
+    return pageResponse(cached.body, "stale-while-revalidate");
+  }
+
+  try {
+    const body = await loadNormalizedPageBody(
+      config.value,
+      ownerId,
+      query,
+    );
+    if (!body) return legacyGet(request);
+    setPageCache(cacheKey, body);
+    return pageResponse(body, "fresh");
+  } catch (error) {
+    console.error("[product-launch-normalized-page] read failed", error);
+    return Response.json(
+      {
+        ok: false,
+        code: "PRODUCT_LAUNCH_LIST_TEMPORARILY_UNAVAILABLE",
+        message:
+          "상품 목록 저장소 응답이 일시적으로 지연되고 있습니다. 잠시 후 자동으로 다시 불러옵니다.",
+      },
+      {
+        status: 503,
+        headers: {
+          "Retry-After": "2",
+          "Cache-Control": "private, no-store",
+        },
+      },
+    );
+  }
+}
+
+async function loadNormalizedPageBody(
+  config: ReturnType<typeof getProductLaunchAdminConfig> extends {
+    ok: true;
+    value: infer T;
+  }
+    ? T
+    : never,
+  ownerId: string,
+  query: ReturnType<typeof pageQuery>,
+) {
+  const workspace = await readProductLaunchNormalizedWorkspace(config, ownerId);
+  if (!workspace || workspace.normalized_read_enabled !== true) return null;
+
+  const page = await queryProductLaunchNormalizedPage(
+    config,
+    ownerId,
+    workspace,
+    query,
+  );
+
+  return {
+    ok: true,
+    stateExists: true,
+    ...page,
+    policy: isRecord(workspace.policy) ? workspace.policy : null,
+    sourceImportedAt: nullableText(workspace.source_imported_at),
+    updatedAt:
+      nullableText(workspace.source_state_updated_at) ??
+      nullableText(workspace.updated_at),
+    schemaVersion: numberOrNull(workspace.schema_version),
+    listSource: "normalized",
+  } satisfies Record<string, unknown>;
+}
+
+function schedulePageRefresh(
+  cacheKey: string,
+  cached: CachedPage,
+  config: Parameters<typeof queryProductLaunchNormalizedPage>[0],
+  ownerId: string,
+  query: ReturnType<typeof pageQuery>,
+) {
+  if (cached.refreshing) return;
+  pageCache.set(cacheKey, { ...cached, refreshing: true });
+
+  after(async () => {
+    try {
+      const body = await loadNormalizedPageBody(config, ownerId, query);
+      if (!body) {
+        pageCache.delete(cacheKey);
+        return;
+      }
+      setPageCache(cacheKey, body);
+    } catch (error) {
+      console.error("[product-launch-normalized-page] background refresh failed", error);
+      const latest = pageCache.get(cacheKey);
+      if (latest) pageCache.set(cacheKey, { ...latest, refreshing: false });
+    }
+  });
+}
+
+function setPageCache(cacheKey: string, body: Record<string, unknown>) {
+  if (pageCache.size >= PAGE_CACHE_MAX_KEYS && !pageCache.has(cacheKey)) {
+    const oldest = pageCache.keys().next().value;
+    if (oldest) pageCache.delete(oldest);
+  }
+  const now = Date.now();
+  pageCache.set(cacheKey, {
+    body,
+    expiresAt: now + PAGE_CACHE_TTL_MS,
+    staleUntil: now + PAGE_CACHE_STALE_MS,
+    refreshing: false,
+  });
+}
+
+function pageResponse(body: Record<string, unknown>, cacheStatus: string) {
+  return Response.json(
+    { ...body, listCache: cacheStatus },
+    {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "X-Commerce-List-Cache": cacheStatus,
+      },
+    },
+  );
+}
+
+function pageQuery(request: NextRequest) {
+  return {
+    page: request.nextUrl.searchParams.get("page"),
+    pageSize: request.nextUrl.searchParams.get("pageSize"),
+    search: request.nextUrl.searchParams.get("search"),
+    batch: request.nextUrl.searchParams.get("batch"),
+    assignee: request.nextUrl.searchParams.get("assignee"),
+    overall: request.nextUrl.searchParams.get("overall"),
+    unfinishedOnly: request.nextUrl.searchParams.get("unfinishedOnly"),
+    sort: request.nextUrl.searchParams.get("sort"),
+    direction: request.nextUrl.searchParams.get("direction"),
+  };
+}
+
 export async function PATCH(request: NextRequest) {
   const inputPromise = request.clone().json().catch(() => null as unknown);
   const response = await legacyPatch(request);
   if (!response.ok) return response;
 
+  pageCache.clear();
   const input = await inputPromise;
   const payload = await response.clone().json().catch(() => null as unknown);
   try {
@@ -180,6 +329,11 @@ function readRequestedIds(request: NextRequest) {
 function nullableText(value: unknown) {
   const result = typeof value === "string" ? value.trim() : "";
   return result || null;
+}
+
+function numberOrNull(value: unknown) {
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
 }
 
 function text(value: unknown) {
