@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildKeywordIdentityProbes } from "../src/lib/keywordEngineElonLabIdentity.ts";
 
-const [labFile, identityFile, moduleFile, registryFile, pageFile, routeFile, shoplingFile] = await Promise.all([
+const [labFile, identityFile, moduleFile, registryFile, pageFile, routeFile, shoplingFile, storeFile] = await Promise.all([
   readFile("src/lib/keywordEngineElonLab.ts", "utf8"),
   readFile("src/lib/keywordEngineElonLabIdentity.ts", "utf8"),
   readFile("src/lib/keywordEngineElonLabModule.ts", "utf8"),
@@ -11,6 +11,7 @@ const [labFile, identityFile, moduleFile, registryFile, pageFile, routeFile, sho
   readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8"),
   readFile("src/app/api/keyword-engine-elon-lab/route.ts", "utf8"),
   readFile("src/lib/keywordEngineElonLabShopling.ts", "utf8"),
+  readFile("src/lib/keywordEngineElonLabStore.ts", "utf8"),
 ]);
 
 test("keyword engine Elon lab keeps the six fixed Shopling goods keys", () => {
@@ -28,6 +29,8 @@ test("keyword engine Elon lab exposes 42 stages and connects stages one through 
   assert.match(routeFile, /const STAGE_FOUR =/);
   assert.match(routeFile, /if \(stageKey === STAGE_FOUR\.key\) return runStageFour/);
   assert.match(routeFile, /STEP 4는 최신 STEP 3 결과가 모두 통과된 뒤 실행할 수 있습니다/);
+  assert.match(pageFile, /stage\.index >= 1 && stage\.index <= 4/);
+  assert.match(pageFile, /executionControls\(stage\.index, stageKeyForIndex\(stage\.index\), stageReadyForIndex\(stage\.index\), stagePassForIndex\(stage\.index\)\)/);
 });
 
 test("stage two reproduces the current seed selection rule without redesigning it", () => {
@@ -46,14 +49,14 @@ test("stage three exposes the current seed noise removal rule", () => {
   assert.match(routeFile, /removedExpressions/);
   assert.match(routeFile, /cleanedSeed/);
   assert.match(routeFile, /ops-stage3-current-seed-cleaning-v1/);
-  assert.match(pageFile, /executionButton\(3, STAGE_THREE_KEY/);
+  assert.match(pageFile, /현행 제거어: 색상랜덤/);
 });
 
 test("stage four uses semantic product identity instead of whitespace probe splitting", () => {
   assert.match(routeFile, /analyzeKeywordEngineIdentityBatch/);
   assert.doesNotMatch(routeFile, /buildCurrentProbeBreakdown/);
   assert.match(routeFile, /analysisMode: "semantic_product_identity_roles"/);
-  assert.match(routeFile, /ops-stage4-semantic-identity-v2/);
+  assert.match(routeFile, /STAGE_FOUR_REVISION/);
   assert.match(identityFile, /coreProduct/);
   assert.match(identityFile, /identityAnchor/);
   assert.match(identityFile, /functionModifiers/);
@@ -66,11 +69,11 @@ test("stage four uses semantic product identity instead of whitespace probe spli
   assert.match(identityFile, /곰돌이 자수 반바지 B형/);
   assert.match(identityFile, /투구 골무 핑크/);
   assert.match(pageFile, /STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2"/);
+  assert.match(pageFile, /row\?\.engine_revision !== STAGE_FOUR_REVISION/);
   assert.match(pageFile, /CORE_PRODUCT/);
   assert.match(pageFile, /IDENTITY_ANCHOR/);
   assert.match(pageFile, /PRIMARY PROBE/);
   assert.match(pageFile, /CONDITIONAL PROBE/);
-  assert.match(pageFile, /기존 공백분해 STEP 4 결과는 V2에서 무효/);
 });
 
 test("stage four generates the agreed bear-shorts probes deterministically", () => {
@@ -138,13 +141,50 @@ test("stage one reads Shopling context without modify endpoints", () => {
   assert.match(routeFile, /writesEnabled:\s*false/);
 });
 
-test("review buttons show local save feedback and apply the server row immediately", () => {
+test("single review buttons show local save feedback and apply the server row immediately", () => {
   assert.match(pageFile, /mergeStoredRows/);
   assert.match(pageFile, /const updatedRows = data\.rows \?\? \[\]/);
   assert.match(pageFile, /setRows\(\(current\) => mergeStoredRows\(current, updatedRows\)\)/);
   assert.match(pageFile, /저장 중…/);
   assert.match(pageFile, /✓ \$\{label\} 저장 완료/);
   assert.match(pageFile, /✓ 통과 완료/);
+});
+
+test("each implemented stage supports a six-goods bulk pass through common controls", () => {
+  assert.match(routeFile, /action === "review_stage_batch"/);
+  assert.match(routeFile, /updateKeywordEngineElonLabReviews/);
+  assert.match(routeFile, /일괄 통과는 고정 테스트 goods_key 6개 전체에만 적용/);
+  assert.match(routeFile, /isCurrentReviewableRow/);
+  assert.match(pageFile, /saveBulkPass/);
+  assert.match(pageFile, /6개 일괄 통과/);
+  assert.match(pageFile, /const executionControls =/);
+  assert.match(pageFile, /saveBulkPass\(stageKey, stageNumber\)/);
+  assert.match(pageFile, /stageKeyForIndex/);
+  assert.match(pageFile, /stageReadyForIndex/);
+  assert.match(pageFile, /stagePassForIndex/);
+  assert.match(pageFile, /stage\.index >= 1 && stage\.index <= 4/);
+});
+
+test("review-only writes do not mutate execution updated_at", () => {
+  assert.match(storeFile, /updated_at intentionally represents the stage execution result timestamp/);
+  const patchSection = storeFile.slice(
+    storeFile.indexOf("async function patchKeywordEngineElonLabReview"),
+    storeFile.indexOf("export async function updateKeywordEngineElonLabReview"),
+  );
+  assert.doesNotMatch(patchSection, /updated_at:\s*new Date/);
+  assert.match(storeFile, /updateKeywordEngineElonLabReviews/);
+});
+
+test("refresh and deployments resume from persisted Supabase progress", () => {
+  assert.match(pageFile, /RESUME_STORAGE_KEY = "keywordEngineElonLab\.resumeStage\.v1"/);
+  assert.match(pageFile, /const resumeStage = !stageOnePassed/);
+  assert.match(pageFile, /window\.localStorage\.getItem\(RESUME_STORAGE_KEY\)/);
+  assert.match(pageFile, /window\.localStorage\.setItem\(RESUME_STORAGE_KEY/);
+  assert.match(pageFile, /stage\.index === resumeStage/);
+  assert.match(pageFile, /expandedStages\.has\(stage\.index\) \|\| stage\.index === resumeStage/);
+  assert.match(pageFile, /현재 이어서 작업: STEP \{resumeStage\}/);
+  assert.match(pageFile, /Supabase의 실행\/통과 결과를 기준으로 현재 STEP을 다시 계산/);
+  assert.match(pageFile, /STEP \{resumeStage\}로 이동/);
 });
 
 test("rerunning an executed stage warns that review state will reset", () => {
