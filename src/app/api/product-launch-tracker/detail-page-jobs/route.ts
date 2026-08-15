@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import {
   getDetailPageJobConfig,
   insertDetailPageJob,
@@ -12,12 +12,14 @@ import { withDetailPageStoreRetry } from "@/lib/detailPageStoreRetry";
 
 const MAX_RECENT_JOBS = 50;
 const COMPILER_WORKER_SLOT_COUNT = 3;
-const JOB_LIST_CACHE_TTL_MS = 1_500;
+const JOB_LIST_CACHE_TTL_MS = 8_000;
+const JOB_LIST_STALE_TTL_MS = 60_000;
 const JOB_LIST_CACHE_MAX_KEYS = 40;
 
 type DetailPageJobList = Awaited<ReturnType<typeof listDetailPageJobs>>;
 type JobListCacheEntry = {
   expiresAt: number;
+  staleUntil: number;
   jobs: DetailPageJobList;
   inFlight?: Promise<DetailPageJobList>;
 };
@@ -202,10 +204,56 @@ async function cachedDetailPageJobs(
   const key = `${ownerId}:${normalizedQuery.toLocaleLowerCase("ko-KR")}`;
   const now = Date.now();
   const cached = jobListCache.get(key);
-  if (cached?.inFlight) return cached.inFlight;
-  if (cached && cached.expiresAt > now) return cached.jobs;
 
-  const request = withDetailPageStoreRetry(() =>
+  if (cached && cached.expiresAt > now) return cached.jobs;
+  if (cached?.inFlight) {
+    if (cached.staleUntil > now) return cached.jobs;
+    return cached.inFlight;
+  }
+
+  const request = loadDetailPageJobs(config, ownerId, normalizedQuery);
+
+  if (cached && cached.staleUntil > now) {
+    jobListCache.set(key, { ...cached, inFlight: request });
+    after(async () => {
+      try {
+        const jobs = await request;
+        cacheDetailPageJobs(key, jobs);
+      } catch (error) {
+        console.error("[detail-page-job-list] background refresh failed", error);
+        const latest = jobListCache.get(key);
+        if (latest) jobListCache.set(key, { ...latest, inFlight: undefined });
+      }
+    });
+    return cached.jobs;
+  }
+
+  if (jobListCache.size >= JOB_LIST_CACHE_MAX_KEYS) {
+    jobListCache.clear();
+  }
+  jobListCache.set(key, {
+    expiresAt: 0,
+    staleUntil: 0,
+    jobs: cached?.jobs ?? [],
+    inFlight: request,
+  });
+
+  try {
+    const jobs = await request;
+    cacheDetailPageJobs(key, jobs);
+    return jobs;
+  } catch (error) {
+    jobListCache.delete(key);
+    throw error;
+  }
+}
+
+function loadDetailPageJobs(
+  config: Parameters<typeof listDetailPageJobs>[0],
+  ownerId: string,
+  normalizedQuery: string,
+) {
+  return withDetailPageStoreRetry(() =>
     normalizedQuery
       ? searchDetailPageJobs(
           config,
@@ -215,27 +263,15 @@ async function cachedDetailPageJobs(
         )
       : listDetailPageJobs(config, ownerId, MAX_RECENT_JOBS),
   );
+}
 
-  if (jobListCache.size >= JOB_LIST_CACHE_MAX_KEYS) {
-    jobListCache.clear();
-  }
+function cacheDetailPageJobs(key: string, jobs: DetailPageJobList) {
+  const now = Date.now();
   jobListCache.set(key, {
-    expiresAt: 0,
-    jobs: cached?.jobs ?? [],
-    inFlight: request,
+    expiresAt: now + JOB_LIST_CACHE_TTL_MS,
+    staleUntil: now + JOB_LIST_STALE_TTL_MS,
+    jobs,
   });
-
-  try {
-    const jobs = await request;
-    jobListCache.set(key, {
-      expiresAt: Date.now() + JOB_LIST_CACHE_TTL_MS,
-      jobs,
-    });
-    return jobs;
-  } catch (error) {
-    jobListCache.delete(key);
-    throw error;
-  }
 }
 
 function invalidateDetailPageJobListCache(ownerId: string) {
