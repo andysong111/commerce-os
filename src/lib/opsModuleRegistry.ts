@@ -3,6 +3,7 @@ import { detailPageSaasTestModule } from "@/lib/detailPageSaasTestModule";
 import { DETAIL_PAGE_V3_BASELINE_NOTE } from "@/lib/detailPageV3ProductionBaseline";
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 import { fastPurchaseMvpModule } from "@/lib/fastPurchaseMvpModule";
+import { keywordEngineElonLabModule } from "@/lib/keywordEngineElonLabModule";
 import type { CommerceModule } from "@/lib/moduleRegistry";
 
 const isolatedBaseModules: readonly CommerceModule[] = extendedModuleRegistry.map(
@@ -48,6 +49,7 @@ const isolatedBaseModules: readonly CommerceModule[] = extendedModuleRegistry.ma
 
 export const opsModuleRegistry: readonly CommerceModule[] = [
   ...isolatedBaseModules,
+  keywordEngineElonLabModule,
   fastPurchaseMvpModule,
   detailPageSaasTestModule,
   detailPageSaasTest260807Module,
