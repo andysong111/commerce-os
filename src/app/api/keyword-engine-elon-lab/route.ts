@@ -19,6 +19,15 @@ export const maxDuration = 60;
 
 const STAGE_ONE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 1)!;
 const STAGE_TWO = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 2)!;
+const STAGE_THREE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 3)!;
+const CURRENT_SEED_NOISE_TERMS = [
+  "색상 랜덤",
+  "색상랜덤",
+  "랜덤색상",
+  "무료배송",
+  "당일배송",
+  "랜덤",
+] as const;
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json(
@@ -35,11 +44,45 @@ function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
 }
 
+function rowTime(row: KeywordEngineElonLabStoredRow | undefined) {
+  const parsed = row?.updated_at ? Date.parse(row.updated_at) : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function requestedGoodsKeys(body: Record<string, unknown>) {
   const requested = Array.isArray(body.goodsKeys)
     ? body.goodsKeys.map((value) => String(value ?? "").trim())
     : [...KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS];
   return [...new Set(requested.filter(isKeywordEngineElonLabGoodsKey))];
+}
+
+function countOccurrences(source: string, target: string) {
+  if (!target || !source.includes(target)) return 0;
+  return source.split(target).length - 1;
+}
+
+function cleanCurrentSeed(value: unknown) {
+  const rawSeed = text(value);
+  let cleanedSeed = rawSeed;
+  const removedExpressions: { term: string; count: number }[] = [];
+
+  for (const term of CURRENT_SEED_NOISE_TERMS) {
+    const count = countOccurrences(cleanedSeed, term);
+    if (!count) continue;
+    removedExpressions.push({ term, count });
+    cleanedSeed = cleanedSeed.replaceAll(term, " ");
+  }
+
+  cleanedSeed = cleanedSeed.replace(/\s+/g, " ").trim();
+  return {
+    rawSeed,
+    cleanedSeed,
+    removedExpressions,
+    changed: cleanedSeed !== rawSeed,
+    currentNoiseTerms: [...CURRENT_SEED_NOISE_TERMS],
+    whitespaceNormalized: true,
+    warning: cleanedSeed ? "" : "CLEANED_SEED_EMPTY",
+  };
 }
 
 export async function GET(request: Request) {
@@ -205,6 +248,70 @@ async function runStageTwo(goodsKeys: string[]) {
   );
 }
 
+async function runStageThree(goodsKeys: string[]) {
+  const storedRows = await listKeywordEngineElonLabRows();
+  const stageOneByGoodsKey = new Map(
+    storedRows
+      .filter((row) => row.stage_key === STAGE_ONE.key)
+      .map((row) => [row.goods_key, row] as const),
+  );
+  const stageTwoByGoodsKey = new Map(
+    storedRows
+      .filter((row) => row.stage_key === STAGE_TWO.key)
+      .map((row) => [row.goods_key, row] as const),
+  );
+
+  const blockedGoodsKeys = goodsKeys.filter((goodsKey) => {
+    const stageOne = stageOneByGoodsKey.get(goodsKey);
+    const stageTwo = stageTwoByGoodsKey.get(goodsKey);
+    return (
+      stageTwo?.run_status !== "ready" ||
+      stageTwo?.review_status !== "pass" ||
+      rowTime(stageTwo) < rowTime(stageOne)
+    );
+  });
+  if (blockedGoodsKeys.length) {
+    return jsonError(
+      `STEP 3는 최신 STEP 2 결과가 모두 통과된 뒤 실행할 수 있습니다. 미통과 또는 오래된 결과: ${blockedGoodsKeys.join(", ")}`,
+      409,
+    );
+  }
+
+  const rows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => {
+    const stageTwo = stageTwoByGoodsKey.get(goodsKey)!;
+    const selectedSeed = text(stageTwo.output_payload?.selectedSeed);
+    const cleaned = cleanCurrentSeed(selectedSeed);
+    return {
+      goods_key: goodsKey,
+      stage_key: STAGE_THREE.key,
+      stage_index: STAGE_THREE.index,
+      run_status: "ready",
+      review_status: "pending",
+      input_payload: {
+        sourceStage: STAGE_TWO.key,
+        sourceStageUpdatedAt: stageTwo.updated_at ?? "",
+        goodsKey,
+        selectedSeed,
+      },
+      output_payload: {
+        goodsKey,
+        ...cleaned,
+        currentRule:
+          "색상 랜덤 / 색상랜덤 / 랜덤색상 / 무료배송 / 당일배송 / 랜덤 제거 후 공백 정규화",
+      },
+      error_message: cleaned.cleanedSeed ? "" : "잡음 제거 후 seed가 비었습니다.",
+      review_note: "",
+      engine_revision: "ops-stage3-current-seed-cleaning-v1",
+    };
+  });
+
+  await upsertKeywordEngineElonLabRows(rows);
+  return NextResponse.json(
+    { ok: true, stage: STAGE_THREE, rows },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function POST(request: Request) {
   if (!assertSameOrigin(request)) {
     return jsonError("OPS Center 화면에서만 실행할 수 있습니다.", 403);
@@ -225,8 +332,9 @@ export async function POST(request: Request) {
 
     if (stageKey === STAGE_ONE.key) return runStageOne(goodsKeys);
     if (stageKey === STAGE_TWO.key) return runStageTwo(goodsKeys);
+    if (stageKey === STAGE_THREE.key) return runStageThree(goodsKeys);
     return jsonError(
-      "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1 Shopling 상품 Context와 STEP 2 Seed 결정입니다.",
+      "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1~3입니다.",
       409,
     );
   }
