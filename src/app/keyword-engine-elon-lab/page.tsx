@@ -67,6 +67,7 @@ const STAGE_TWO_KEY = "seed_selection";
 const STAGE_THREE_KEY = "seed_cleaning";
 const STAGE_FOUR_KEY = "probe_generation";
 const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
+const RESUME_STORAGE_KEY = "keywordEngineElonLab.resumeStage.v1";
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -136,12 +137,11 @@ export default function KeywordEngineElonLabPage() {
   const [loading, setLoading] = useState(true);
   const [runningStage, setRunningStage] = useState<number | null>(null);
   const [reviewSaving, setReviewSaving] = useState<string | null>(null);
+  const [bulkSavingStage, setBulkSavingStage] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [reviewFeedback, setReviewFeedback] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [expandedStages, setExpandedStages] = useState<Set<number>>(
-    new Set([0, 1, 2, 3, 4, 5]),
-  );
+  const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set([0]));
 
   const refresh = async () => {
     const response = await fetch("/api/keyword-engine-elon-lab", { cache: "no-store" });
@@ -211,6 +211,45 @@ export default function KeywordEngineElonLabPage() {
   const stageThreeReady = allReady(stageThreeRows);
   const stageFourReady = allReady(stageFourRows);
 
+  const resumeStage = !stageOnePassed
+    ? 1
+    : !stageTwoPassed
+      ? 2
+      : !stageThreePassed
+        ? 3
+        : !stageFourPassed
+          ? 4
+          : 5;
+
+  useEffect(() => {
+    if (loading) return;
+    const saved = Number(window.localStorage.getItem(RESUME_STORAGE_KEY));
+    const savedStage = Number.isInteger(saved) && saved >= 1 && saved <= 41 ? saved : 0;
+    const target = Math.max(resumeStage, savedStage);
+    window.localStorage.setItem(RESUME_STORAGE_KEY, String(target));
+    setExpandedStages((current) => {
+      const next = new Set(current);
+      next.add(target);
+      return next;
+    });
+  }, [loading, resumeStage]);
+
+  const rememberStage = (stageNumber: number) => {
+    if (stageNumber < 1) return;
+    window.localStorage.setItem(RESUME_STORAGE_KEY, String(stageNumber));
+  };
+
+  const goToStage = (stageNumber: number) => {
+    rememberStage(stageNumber);
+    setExpandedStages((current) => new Set(current).add(stageNumber));
+    window.setTimeout(() => {
+      document.getElementById(`keyword-elon-stage-${stageNumber}`)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+  };
+
   const runStage = async (
     stageKey: string,
     stageNumber: number,
@@ -225,6 +264,7 @@ export default function KeywordEngineElonLabPage() {
 
     setRunningStage(stageNumber);
     setMessage("");
+    rememberStage(stageNumber);
     try {
       const response = await fetch("/api/keyword-engine-elon-lab", {
         method: "POST",
@@ -303,7 +343,44 @@ export default function KeywordEngineElonLabPage() {
     }
   };
 
+  const saveBulkPass = async (stageKey: string, stageNumber: number) => {
+    const confirmed = window.confirm(
+      `STEP ${stageNumber}의 6개 goods_key 결과를 모두 검수 완료한 것으로 보고 일괄 통과 처리하시겠습니까?`,
+    );
+    if (!confirmed) return;
+
+    setBulkSavingStage(stageNumber);
+    setMessage("");
+    rememberStage(stageNumber);
+    try {
+      const response = await fetch("/api/keyword-engine-elon-lab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "review_stage_batch",
+          stageKey,
+          goodsKeys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS,
+        }),
+      });
+      const data = (await response.json()) as ApiState;
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || "6개 일괄 통과를 저장하지 못했습니다.");
+      }
+      const updatedRows = data.rows ?? [];
+      if (updatedRows.length !== KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.length) {
+        throw new Error("6개 일괄 통과 결과를 모두 확인하지 못했습니다.");
+      }
+      setRows((current) => mergeStoredRows(current, updatedRows));
+      setMessage(`STEP ${stageNumber} · 6개 goods_key 일괄 통과 저장 완료`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "6개 일괄 통과를 저장하지 못했습니다.");
+    } finally {
+      setBulkSavingStage(null);
+    }
+  };
+
   const toggleStage = (index: number) => {
+    rememberStage(index);
     setExpandedStages((current) => {
       const next = new Set(current);
       if (next.has(index)) next.delete(index);
@@ -333,7 +410,7 @@ export default function KeywordEngineElonLabPage() {
         />
         <div className="mt-3 flex flex-wrap gap-2">
           <button
-            disabled={row.run_status !== "ready" || Boolean(reviewSaving)}
+            disabled={row.run_status !== "ready" || Boolean(reviewSaving) || bulkSavingStage !== null}
             onClick={() => void saveReview(stageKey, goodsKey, "pass")}
             className={`rounded-lg px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300 ${
               row.review_status === "pass"
@@ -348,7 +425,7 @@ export default function KeywordEngineElonLabPage() {
                 : "이 상품 통과"}
           </button>
           <button
-            disabled={row.run_status !== "ready" || Boolean(reviewSaving)}
+            disabled={row.run_status !== "ready" || Boolean(reviewSaving) || bulkSavingStage !== null}
             onClick={() => void saveReview(stageKey, goodsKey, "improve")}
             className={`rounded-lg px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300 ${
               row.review_status === "improve"
@@ -363,7 +440,7 @@ export default function KeywordEngineElonLabPage() {
                 : "개선 필요"}
           </button>
           <button
-            disabled={Boolean(reviewSaving)}
+            disabled={Boolean(reviewSaving) || bulkSavingStage !== null}
             onClick={() => void saveReview(stageKey, goodsKey, "pending")}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 disabled:bg-slate-100"
           >
@@ -398,26 +475,42 @@ export default function KeywordEngineElonLabPage() {
     return "잠금";
   };
 
-  const executionButton = (
+  const executionControls = (
     stageNumber: number,
     stageKey: string,
     ready: boolean,
+    passed: number,
   ) => (
-    <button
-      onClick={() => void runStage(stageKey, stageNumber, ready)}
-      disabled={runningStage !== null}
-      className={
-        ready
-          ? "rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 disabled:bg-slate-200"
-          : "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-300"
-      }
-    >
-      {runningStage === stageNumber
-        ? `STEP ${stageNumber} 실행 중…`
-        : ready
-          ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화`
-          : `STEP ${stageNumber} · 6개 모두 실행`}
-    </button>
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        onClick={() => void runStage(stageKey, stageNumber, ready)}
+        disabled={runningStage !== null || bulkSavingStage !== null}
+        className={
+          ready
+            ? "rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 disabled:bg-slate-200"
+            : "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-300"
+        }
+      >
+        {runningStage === stageNumber
+          ? `STEP ${stageNumber} 실행 중…`
+          : ready
+            ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화`
+            : `STEP ${stageNumber} · 6개 모두 실행`}
+      </button>
+      {ready ? (
+        <button
+          onClick={() => void saveBulkPass(stageKey, stageNumber)}
+          disabled={passed === 6 || bulkSavingStage !== null || runningStage !== null}
+          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-black text-white disabled:bg-emerald-200 disabled:text-emerald-700"
+        >
+          {bulkSavingStage === stageNumber
+            ? "6개 일괄 통과 저장 중…"
+            : passed === 6
+              ? "✓ 6개 모두 통과"
+              : `6개 일괄 통과 (${passed}/6 → 6/6)`}
+        </button>
+      ) : null}
+    </div>
   );
 
   return (
@@ -432,6 +525,25 @@ export default function KeywordEngineElonLabPage() {
         <p className="mt-2">
           Shopling은 읽기만 합니다. 키워드·상품명·가격·재고를 수정하지 않습니다. 단계 결과와 사람의 판정만 Supabase에 기록합니다.
         </p>
+      </section>
+
+      <section className="rounded-xl border border-blue-300 bg-blue-50 p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-blue-700">진행상태 자동 복원</p>
+            <p className="mt-1 text-lg font-black text-blue-950">현재 이어서 작업: STEP {resumeStage}</p>
+            <p className="mt-1 text-sm text-blue-900">
+              새로고침·재배포 후에도 Supabase의 실행/통과 결과를 기준으로 현재 STEP을 다시 계산합니다. 검수 클릭은 실행시각을 바꾸지 않아 다음 STEP을 오래된 결과로 만들지 않습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => goToStage(resumeStage)}
+            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-black text-white"
+          >
+            STEP {resumeStage}로 이동
+          </button>
+        </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -485,7 +597,11 @@ export default function KeywordEngineElonLabPage() {
                   : "bg-slate-100 text-slate-700";
 
           return (
-            <article key={stage.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <article
+              id={`keyword-elon-stage-${stage.index}`}
+              key={stage.key}
+              className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+            >
               <button
                 type="button"
                 onClick={() => toggleStage(stage.index)}
@@ -495,6 +611,9 @@ export default function KeywordEngineElonLabPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-black text-slate-500">STEP {stage.index}</span>
                     <span className={`rounded-full px-2 py-1 text-xs font-bold ${stateClass}`}>{stateLabel}</span>
+                    {stage.index === resumeStage ? (
+                      <span className="rounded-full bg-blue-700 px-2 py-1 text-xs font-black text-white">현재 작업</span>
+                    ) : null}
                   </div>
                   <h2 className="mt-2 text-lg font-bold text-slate-950">{stage.title}</h2>
                   <p className="mt-1 text-sm text-slate-600">{stage.purpose}</p>
@@ -527,8 +646,8 @@ export default function KeywordEngineElonLabPage() {
                   {stage.index === 1 ? (
                     <div className="mt-5 space-y-4">
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        {executionButton(1, STAGE_ONE_KEY, stageOneReady)}
-                        {stageOneReady ? <span className="ml-3 text-xs font-semibold text-amber-800">재실행은 기존 판정을 초기화합니다.</span> : null}
+                        {executionControls(1, STAGE_ONE_KEY, stageOneReady, stageOnePass)}
+                        {stageOneReady ? <p className="mt-2 text-xs font-semibold text-amber-800">재실행은 기존 판정을 초기화합니다. 결과가 그대로라면 일괄 통과 버튼을 사용하세요.</p> : null}
                       </div>
                       {KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
                         const row = stageOneRow(goodsKey);
@@ -550,7 +669,7 @@ export default function KeywordEngineElonLabPage() {
 
                   {stage.index === 2 ? (
                     <div className="mt-5 space-y-4">
-                      {!stageOnePassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 1이 {stageOnePass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(2, STAGE_TWO_KEY, stageTwoReady)}<span className="ml-3 text-xs font-semibold text-slate-700">현행 규칙: prod_nm → model_nm → goods_key</span></div>}
+                      {!stageOnePassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 1이 {stageOnePass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionControls(2, STAGE_TWO_KEY, stageTwoReady, stageTwoPass)}<p className="mt-2 text-xs font-semibold text-slate-700">현행 규칙: prod_nm → model_nm → goods_key</p></div>}
                       {stageOnePassed ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
                         const row = stageTwoRow(goodsKey);
                         const output = (row?.output_payload ?? {}) as StageTwoOutput;
@@ -562,7 +681,7 @@ export default function KeywordEngineElonLabPage() {
 
                   {stage.index === 3 ? (
                     <div className="mt-5 space-y-4">
-                      {!stageTwoPassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 2가 {stageTwoPass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(3, STAGE_THREE_KEY, stageThreeReady)}<span className="ml-3 text-xs font-semibold text-slate-700">현행 제거어: 색상랜덤 · 랜덤색상 · 색상 랜덤 · 랜덤 · 무료배송 · 당일배송</span></div>}
+                      {!stageTwoPassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 2가 {stageTwoPass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionControls(3, STAGE_THREE_KEY, stageThreeReady, stageThreePass)}<p className="mt-2 text-xs font-semibold text-slate-700">현행 제거어: 색상랜덤 · 랜덤색상 · 색상 랜덤 · 랜덤 · 무료배송 · 당일배송</p></div>}
                       {stageTwoPassed ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
                         const row = stageThreeRow(goodsKey);
                         const output = (row?.output_payload ?? {}) as StageThreeOutput;
@@ -578,7 +697,7 @@ export default function KeywordEngineElonLabPage() {
                         <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 3가 {stageThreePass}/6 통과 상태입니다.</p>
                       ) : (
                         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                          {executionButton(4, STAGE_FOUR_KEY, stageFourReady)}
+                          {executionControls(4, STAGE_FOUR_KEY, stageFourReady, stageFourPass)}
                           <p className="mt-2 text-xs font-semibold text-blue-950">
                             V2: AI는 상품 역할만 분류하고, Probe는 규칙으로 생성합니다. 디자인·형상어는 버리지 않고 Conditional에 보존하며 색상·옵션코드는 단독 Probe에서 차단합니다.
                           </p>
