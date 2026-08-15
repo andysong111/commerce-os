@@ -9,6 +9,7 @@ import {
 const TRACKER_API = "/api/product-launch-tracker/optimized";
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
 const PAGE_SIZE = 100;
+const ITEM_BATCH_SIZE = 50;
 const MAX_PAGES = 30;
 const CHECK_COOLDOWN_MS = 20_000;
 
@@ -115,8 +116,8 @@ async function loadCompletedDetailPageIds() {
 
 async function loadFullItems(ids: string[]) {
   const items: UnknownRecord[] = [];
-  for (let offset = 0; offset < ids.length; offset += PAGE_SIZE) {
-    const chunk = ids.slice(offset, offset + PAGE_SIZE);
+  for (let offset = 0; offset < ids.length; offset += ITEM_BATCH_SIZE) {
+    const chunk = ids.slice(offset, offset + ITEM_BATCH_SIZE);
     const params = new URLSearchParams({ mode: "items", id: chunk.join(",") });
     const body = await requestJson(`${TRACKER_API}?${params.toString()}`);
     if (Array.isArray(body.items)) {
@@ -144,11 +145,13 @@ async function patchDetailPageStageToNotStarted(itemId: string) {
 }
 
 async function requestJson(url: string, init?: RequestInit) {
+  const headers = new Headers(init?.headers);
+  headers.set("Accept", "application/json");
   const response = await fetch(url, {
+    ...init,
     cache: "no-store",
     credentials: "same-origin",
-    headers: { Accept: "application/json", ...(init?.headers ?? {}) },
-    ...init,
+    headers,
   });
   const body = (await response.json().catch(() => ({}))) as UnknownRecord;
   if (!response.ok || body.ok !== true) {
