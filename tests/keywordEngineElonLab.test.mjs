@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { buildKeywordIdentityProbes } from "../src/lib/keywordEngineElonLabIdentity.ts";
 
-const [labFile, moduleFile, registryFile, pageFile, routeFile, shoplingFile] = await Promise.all([
+const [labFile, identityFile, moduleFile, registryFile, pageFile, routeFile, shoplingFile] = await Promise.all([
   readFile("src/lib/keywordEngineElonLab.ts", "utf8"),
+  readFile("src/lib/keywordEngineElonLabIdentity.ts", "utf8"),
   readFile("src/lib/keywordEngineElonLabModule.ts", "utf8"),
   readFile("src/lib/opsModuleRegistry.ts", "utf8"),
   readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8"),
@@ -20,7 +22,8 @@ test("keyword engine Elon lab keeps the six fixed Shopling goods keys", () => {
 test("keyword engine Elon lab exposes 42 stages and connects stages one through four", () => {
   const stageCount = [...labFile.matchAll(/index:\s*\d+,\s*key:/g)].length;
   assert.equal(stageCount, 42);
-  assert.match(labFile, /index: 4, key: "probe_generation"[\s\S]*implemented: true/);
+  assert.match(labFile, /index: 4, key: "probe_generation"[\s\S]*상품 정체성 구조화 · Probe 생성[\s\S]*implemented: true/);
+  assert.match(labFile, /index: 5, key: "related_query_collection"[\s\S]*Primary \+ Conditional Probe/);
   assert.match(labFile, /CURRENT_IMPLEMENTED_STAGE = 4/);
   assert.match(routeFile, /const STAGE_FOUR =/);
   assert.match(routeFile, /if \(stageKey === STAGE_FOUR\.key\) return runStageFour/);
@@ -46,17 +49,73 @@ test("stage three exposes the current seed noise removal rule", () => {
   assert.match(pageFile, /executionButton\(3, STAGE_THREE_KEY/);
 });
 
-test("stage four mirrors current probe splitting exactly before redesign", () => {
-  assert.match(routeFile, /function buildCurrentProbeBreakdown/);
-  assert.match(routeFile, /baseSeed\.split\(\/\\s\+\/\)\.filter\(Boolean\)/);
-  assert.match(routeFile, /part\.length < 2/);
-  assert.match(routeFile, /probeTerms\.push\(part\)/);
-  assert.match(routeFile, /const probes = baseSeed/);
-  assert.match(routeFile, /ops-stage4-current-probe-split-v1/);
-  assert.match(pageFile, /executionButton\(4, STAGE_FOUR_KEY/);
-  assert.match(pageFile, /공백 분해 원소/);
-  assert.match(pageFile, /2자 이상 Probe term/);
-  assert.match(pageFile, /최종 Probe 목록/);
+test("stage four uses semantic product identity instead of whitespace probe splitting", () => {
+  assert.match(routeFile, /analyzeKeywordEngineIdentityBatch/);
+  assert.doesNotMatch(routeFile, /buildCurrentProbeBreakdown/);
+  assert.match(routeFile, /analysisMode: "semantic_product_identity_roles"/);
+  assert.match(routeFile, /ops-stage4-semantic-identity-v2/);
+  assert.match(identityFile, /coreProduct/);
+  assert.match(identityFile, /identityAnchor/);
+  assert.match(identityFile, /functionModifiers/);
+  assert.match(identityFile, /designShapeModifiers/);
+  assert.match(identityFile, /specAttributes/);
+  assert.match(identityFile, /variantNoise/);
+  assert.match(identityFile, /primaryProbes/);
+  assert.match(identityFile, /conditionalProbes/);
+  assert.match(identityFile, /blockedSingleProbes/);
+  assert.match(identityFile, /곰돌이 자수 반바지 B형/);
+  assert.match(identityFile, /투구 골무 핑크/);
+  assert.match(pageFile, /STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2"/);
+  assert.match(pageFile, /CORE_PRODUCT/);
+  assert.match(pageFile, /IDENTITY_ANCHOR/);
+  assert.match(pageFile, /PRIMARY PROBE/);
+  assert.match(pageFile, /CONDITIONAL PROBE/);
+  assert.match(pageFile, /기존 공백분해 STEP 4 결과는 V2에서 무효/);
+});
+
+test("stage four generates the agreed bear-shorts probes deterministically", () => {
+  const result = buildKeywordIdentityProbes({
+    coreProduct: "반바지",
+    identityAnchor: "자수 반바지",
+    functionModifiers: ["자수"],
+    designShapeModifiers: ["곰돌이"],
+    specAttributes: [],
+    variantNoise: ["B형"],
+    uncertainTerms: [],
+  });
+  assert.deepEqual(result.primaryProbes, ["반바지", "자수 반바지"]);
+  assert.deepEqual(result.conditionalProbes, ["곰돌이 반바지", "곰돌이 자수 반바지"]);
+  assert.ok(result.blockedSingleProbes.includes("곰돌이"));
+  assert.ok(result.blockedSingleProbes.includes("자수"));
+  assert.ok(result.blockedSingleProbes.includes("B형"));
+  assert.ok(!result.primaryProbes.includes("곰돌이"));
+  assert.ok(!result.primaryProbes.includes("B형"));
+});
+
+test("stage four generates the agreed helmet-thimble probes deterministically", () => {
+  const result = buildKeywordIdentityProbes({
+    coreProduct: "골무",
+    identityAnchor: "골무",
+    functionModifiers: [],
+    designShapeModifiers: ["투구"],
+    specAttributes: [],
+    variantNoise: ["핑크"],
+    uncertainTerms: [],
+  });
+  assert.deepEqual(result.primaryProbes, ["골무"]);
+  assert.deepEqual(result.conditionalProbes, ["투구 골무"]);
+  assert.ok(result.blockedSingleProbes.includes("투구"));
+  assert.ok(result.blockedSingleProbes.includes("핑크"));
+});
+
+test("stage four is grounded, fail-closed, and does not use AI to rank market value", () => {
+  assert.match(identityFile, /입력 cleanedSeed에 실제로 존재하는 표현만 사용/);
+  assert.match(identityFile, /isGrounded/);
+  assert.match(identityFile, /상품 핵심명사가 원 Seed에 근거하지 않습니다/);
+  assert.match(identityFile, /디자인어가 시장에서 유행할 가능성은 여기서 버리지 않는다/);
+  assert.match(identityFile, /Primary=core_product\+identity_anchor/);
+  assert.match(identityFile, /OPENAI_KEYWORD_IDENTITY_MODEL/);
+  assert.match(identityFile, /store: false/);
 });
 
 test("keyword engine Elon lab is registered as an isolated OPS card", () => {
@@ -94,9 +153,10 @@ test("rerunning an executed stage warns that review state will reset", () => {
   assert.match(pageFile, /결과 재실행 · 판정 초기화/);
 });
 
-test("downstream stage rows are fresh only when newer than the previous stage", () => {
+test("downstream stage rows are fresh and old step-four revision is rejected", () => {
   assert.match(pageFile, /function freshAfter/);
   assert.match(pageFile, /rowTime\(row\) >= rowTime\(previous\)/);
+  assert.match(pageFile, /row\?\.engine_revision !== STAGE_FOUR_REVISION/);
   assert.match(pageFile, /stageTwoRow/);
   assert.match(pageFile, /stageThreeRow/);
   assert.match(pageFile, /stageFourRow/);
