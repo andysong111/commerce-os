@@ -78,8 +78,8 @@ export default function KeywordEngineElonLabPage() {
   };
 
   // Initial lab history synchronization with the server-backed Supabase ledger.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh()
       .catch((error) => setMessage(error instanceof Error ? error.message : "이력을 불러오지 못했습니다."))
       .finally(() => setLoading(false));
