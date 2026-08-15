@@ -11,7 +11,7 @@ type DetailPageSourceJob = {
 };
 
 const EXPLICIT_LINK_FAILURE = /商品已下架|已下架|商品不存在|页面不存在|页面为空|空白页面|链接失效|无法访问|访问失败|not\s+found|\b404\b|\bgone\b|unavailable|blank\s+page|empty\s+page|page\s+is\s+empty|link.{0,20}unavailable|접근\s*불가|페이지.{0,20}(비어|없음|없습니다|찾을\s*수\s*없)|상품.{0,20}(내려|삭제|존재하지)|링크.{0,20}(만료|실패|접근)/i;
-const INFRASTRUCTURE_FAILURE = /studio|preview|보호\s*인증|로컬\s*수집기|local\s*bridge|local\s*network|권한|20초|15분|시간을\s*초과|timed?\s*out|timeout|network|네트워크|connection|연결\s*(실패|오류)|worker|서버\s*작업|인증\s*실패/i;
+const INFRASTRUCTURE_FAILURE = /studio|preview|보호\s*인증|로컬\s*수집기|local\s*bridge|local\s*network|권한|worker|서버\s*작업|인증\s*실패/i;
 
 export function isDetailPageSourceLinkUnavailable(jobValue: unknown) {
   const job = record(jobValue) as DetailPageSourceJob;
@@ -39,8 +39,9 @@ export function isDetailPageSourceLinkUnavailable(jobValue: unknown) {
   if (EXPLICIT_LINK_FAILURE.test(reason)) return true;
   if (INFRASTRUCTURE_FAILURE.test(reason)) return false;
 
-  // Studio 연결은 끝났지만 source_collection에서 원본 근거를 한 장도 만들지
-  // 못한 종료 작업은 운영 관점에서 고정링크 1번 접근 실패로 처리한다.
+  // Studio 자체 연결 오류가 아니라 source_collection에서 원본 근거를 한 장도
+  // 만들지 못한 종료 작업은, 상품이 내려갔거나 빈 페이지·응답 지연 등 원인과
+  // 관계없이 운영자가 다음 링크로 교체할 수 있도록 "링크 접근 불가"로 묶는다.
   return Boolean(text(job.sourceUrl) || text(payload.source_url));
 }
 
