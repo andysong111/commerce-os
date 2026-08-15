@@ -24,7 +24,7 @@ export const KEYWORD_ENGINE_ELON_LAB_STAGES: readonly KeywordEngineElonLabStage[
   { index: 0, key: "goods_key_input", title: "goods_key 입력·검증", input: "고정 테스트 goods_key 6개", output: "숫자형 goods_key 검증 결과와 테스트 대상 목록", purpose: "시험 대상을 고정해 이후 모든 단계의 비교 기준을 동일하게 유지합니다.", implemented: true },
   { index: 1, key: "shopling_product_context", title: "Shopling 상품 Context 조회", input: "goods_key", output: "prod_nm, model_no, model_nm, site_srch, sale_status, dtl_desc 길이·미리보기, 현재 엔진 seed 후보", purpose: "현재 키워드 엔진이 실제로 어떤 상품정보를 출발점으로 보고 있는지 확인합니다.", implemented: true },
   { index: 2, key: "seed_selection", title: "Seed 결정", input: "Shopling 상품 Context", output: "선택된 seed와 선택 근거", purpose: "상품명·모델명 중 어떤 값을 키워드 탐색의 원점으로 삼을지 검수합니다.", implemented: true },
-  { index: 3, key: "seed_cleaning", title: "Seed 잡음 제거", input: "선택된 seed", output: "정제 전/후 seed와 제거된 표현", purpose: "색상랜덤·배송문구 등 검색의도를 흐리는 표현을 제거합니다.", implemented: false },
+  { index: 3, key: "seed_cleaning", title: "Seed 잡음 제거", input: "선택된 seed", output: "정제 전/후 seed와 제거된 표현", purpose: "색상랜덤·배송문구 등 검색의도를 흐리는 표현을 제거합니다.", implemented: true },
   { index: 4, key: "probe_generation", title: "Probe 단어 분해", input: "정제 seed", output: "전체 seed + 구성 probe 목록", purpose: "연관검색 탐색에 사용할 시작 질의를 분해합니다.", implemented: false },
   { index: 5, key: "related_query_collection", title: "연관검색어 수집", input: "probe 목록", output: "네이버 자동완성/연관 후보와 출처", purpose: "원 상품 주변의 실제 검색 언어 후보를 확보합니다.", implemented: false },
   { index: 6, key: "seed_candidate_grading", title: "Seed 확장 후보 등급", input: "원 seed + 연관검색어", output: "A/B/C 등급, 구조점수, 의미판정", purpose: "원 상품 의도를 보존한 질의만 남깁니다.", implemented: false },
@@ -65,8 +65,12 @@ export const KEYWORD_ENGINE_ELON_LAB_STAGES: readonly KeywordEngineElonLabStage[
   { index: 41, key: "artifact_generation", title: "Artifact 생성", input: "최종 record", output: "approval/manual/result/audit/meta CSV·JSON", purpose: "OPS Center가 읽을 수 있는 검토 산출물을 생성합니다.", implemented: false },
 ] as const;
 
-export const KEYWORD_ENGINE_ELON_LAB_CURRENT_IMPLEMENTED_STAGE = 2;
+export const KEYWORD_ENGINE_ELON_LAB_CURRENT_IMPLEMENTED_STAGE = 3;
 
-export function isKeywordEngineElonLabGoodsKey(value: unknown): value is (typeof KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS)[number] {
-  return KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.includes(String(value ?? "").trim() as (typeof KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS)[number]);
+export function isKeywordEngineElonLabGoodsKey(
+  value: unknown,
+): value is (typeof KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS)[number] {
+  return KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.includes(
+    String(value ?? "").trim() as (typeof KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS)[number],
+  );
 }
