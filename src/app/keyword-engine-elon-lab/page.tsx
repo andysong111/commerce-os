@@ -32,7 +32,6 @@ type StageTwoOutput = {
   selectedSeed?: string;
   selectedSeedSource?: string;
   selectionReason?: string;
-  currentRule?: string;
 };
 
 type StageThreeOutput = {
@@ -41,18 +40,25 @@ type StageThreeOutput = {
   removedExpressions?: Array<{ term?: string; count?: number }>;
   changed?: boolean;
   warning?: string;
-  currentRule?: string;
 };
 
 type StageFourOutput = {
-  baseSeed?: string;
-  rawParts?: string[];
-  probeTerms?: string[];
-  excludedTerms?: Array<{ term?: string; reason?: string }>;
-  duplicateTerms?: string[];
-  probes?: string[];
-  probeCount?: number;
-  currentRule?: string;
+  cleanedSeed?: string;
+  coreProduct?: string;
+  identityAnchor?: string;
+  functionModifiers?: string[];
+  designShapeModifiers?: string[];
+  specAttributes?: string[];
+  variantNoise?: string[];
+  uncertainTerms?: string[];
+  primaryProbes?: string[];
+  conditionalProbes?: string[];
+  blockedSingleProbes?: string[];
+  confidence?: number;
+  reasoning?: string;
+  model?: string;
+  classifier?: string;
+  probePolicy?: string;
   warning?: string;
 };
 
@@ -60,6 +66,7 @@ const STAGE_ONE_KEY = "shopling_product_context";
 const STAGE_TWO_KEY = "seed_selection";
 const STAGE_THREE_KEY = "seed_cleaning";
 const STAGE_FOUR_KEY = "probe_generation";
+const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -117,6 +124,11 @@ function allReady(rows: Array<KeywordEngineElonLabStoredRow | undefined>) {
 
 function textList(values: string[] | undefined) {
   return values?.length ? values.join(" · ") : "없음";
+}
+
+function percent(value: number | undefined) {
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.round((value ?? 0) * 100)}%`;
 }
 
 export default function KeywordEngineElonLabPage() {
@@ -177,6 +189,7 @@ export default function KeywordEngineElonLabPage() {
   const stageFourRow = (goodsKey: string) => {
     const previous = stageThreeRow(goodsKey);
     const row = rowMap.get(`${STAGE_FOUR_KEY}:${goodsKey}`);
+    if (row?.engine_revision !== STAGE_FOUR_REVISION) return undefined;
     return freshAfter(row, previous) ? row : undefined;
   };
 
@@ -231,13 +244,14 @@ export default function KeywordEngineElonLabPage() {
         1: "Shopling 상품 Context",
         2: "현행 Seed 결정",
         3: "현행 Seed 잡음 제거",
-        4: "현행 Probe 단어 분해",
+        4: "상품 정체성 구조화 · Probe 생성",
       };
       setMessage(`STEP ${stageNumber} ${names[stageNumber] ?? ""} 6개 실행 완료 · 결과를 검수해 주세요.`);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : `STEP ${stageNumber} 실행에 실패했습니다.`,
       );
+      await refresh().catch(() => undefined);
     } finally {
       setRunningStage(null);
     }
@@ -388,7 +402,6 @@ export default function KeywordEngineElonLabPage() {
     stageNumber: number,
     stageKey: string,
     ready: boolean,
-    label: string,
   ) => (
     <button
       onClick={() => void runStage(stageKey, stageNumber, ready)}
@@ -404,7 +417,6 @@ export default function KeywordEngineElonLabPage() {
         : ready
           ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화`
           : `STEP ${stageNumber} · 6개 모두 실행`}
-      {!ready && label ? null : null}
     </button>
   );
 
@@ -515,7 +527,7 @@ export default function KeywordEngineElonLabPage() {
                   {stage.index === 1 ? (
                     <div className="mt-5 space-y-4">
                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                        {executionButton(1, STAGE_ONE_KEY, stageOneReady, "Shopling Context")}
+                        {executionButton(1, STAGE_ONE_KEY, stageOneReady)}
                         {stageOneReady ? <span className="ml-3 text-xs font-semibold text-amber-800">재실행은 기존 판정을 초기화합니다.</span> : null}
                       </div>
                       {KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
@@ -538,7 +550,7 @@ export default function KeywordEngineElonLabPage() {
 
                   {stage.index === 2 ? (
                     <div className="mt-5 space-y-4">
-                      {!stageOnePassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 1이 {stageOnePass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(2, STAGE_TWO_KEY, stageTwoReady, "Seed 결정")}<span className="ml-3 text-xs font-semibold text-slate-700">현행 규칙: prod_nm → model_nm → goods_key</span></div>}
+                      {!stageOnePassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 1이 {stageOnePass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(2, STAGE_TWO_KEY, stageTwoReady)}<span className="ml-3 text-xs font-semibold text-slate-700">현행 규칙: prod_nm → model_nm → goods_key</span></div>}
                       {stageOnePassed ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
                         const row = stageTwoRow(goodsKey);
                         const output = (row?.output_payload ?? {}) as StageTwoOutput;
@@ -550,7 +562,7 @@ export default function KeywordEngineElonLabPage() {
 
                   {stage.index === 3 ? (
                     <div className="mt-5 space-y-4">
-                      {!stageTwoPassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 2가 {stageTwoPass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(3, STAGE_THREE_KEY, stageThreeReady, "Seed 잡음 제거")}<span className="ml-3 text-xs font-semibold text-slate-700">현행 제거어: 색상랜덤 · 랜덤색상 · 색상 랜덤 · 랜덤 · 무료배송 · 당일배송</span></div>}
+                      {!stageTwoPassed ? <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 2가 {stageTwoPass}/6 통과 상태입니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionButton(3, STAGE_THREE_KEY, stageThreeReady)}<span className="ml-3 text-xs font-semibold text-slate-700">현행 제거어: 색상랜덤 · 랜덤색상 · 색상 랜덤 · 랜덤 · 무료배송 · 당일배송</span></div>}
                       {stageTwoPassed ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
                         const row = stageThreeRow(goodsKey);
                         const output = (row?.output_payload ?? {}) as StageThreeOutput;
@@ -566,10 +578,10 @@ export default function KeywordEngineElonLabPage() {
                         <p className="rounded-lg bg-slate-50 p-4 text-sm">STEP 3가 {stageThreePass}/6 통과 상태입니다.</p>
                       ) : (
                         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                          {executionButton(4, STAGE_FOUR_KEY, stageFourReady, "Probe 단어 분해")}
-                          <span className="ml-3 text-xs font-semibold text-blue-900">
-                            현행 규칙: 정제 Seed 전체 + 공백 분해한 2자 이상 고유 구성어
-                          </span>
+                          {executionButton(4, STAGE_FOUR_KEY, stageFourReady)}
+                          <p className="mt-2 text-xs font-semibold text-blue-950">
+                            V2: AI는 상품 역할만 분류하고, Probe는 규칙으로 생성합니다. 디자인·형상어는 버리지 않고 Conditional에 보존하며 색상·옵션코드는 단독 Probe에서 차단합니다.
+                          </p>
                         </div>
                       )}
                       {stageThreePassed ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => {
@@ -578,12 +590,35 @@ export default function KeywordEngineElonLabPage() {
                         const badge = statusBadge(row);
                         return (
                           <div key={goodsKey} className="rounded-xl border border-slate-200 p-4">
-                            <div className="flex items-center gap-2"><b>goods_key {goodsKey}</b><span className={`rounded-full px-2 py-1 text-xs font-bold ${badge.className}`}>{badge.label}</span></div>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2"><b>goods_key {goodsKey}</b><span className={`rounded-full px-2 py-1 text-xs font-bold ${badge.className}`}>{badge.label}</span></div>
+                              {row?.engine_revision ? <span className="text-xs text-slate-400">{row.engine_revision}</span> : null}
+                            </div>
                             {row ? <>
                               <div className="mt-4 grid gap-3 xl:grid-cols-2"><div><p className="mb-2 text-xs font-bold text-blue-700">실제 Input</p><JsonBlock value={row.input_payload} /></div><div><p className="mb-2 text-xs font-bold text-emerald-700">실제 Output</p><JsonBlock value={row.output_payload} /></div></div>
-                              <div className="mt-4 overflow-x-auto"><table className="min-w-full text-sm"><tbody className="divide-y divide-slate-100"><tr><th className="w-44 py-2 pr-4 text-left text-slate-500">정제 Seed</th><td className="py-2 font-bold text-blue-800">{output.baseSeed || "—"}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">공백 분해 원소</th><td className="py-2">{textList(output.rawParts)}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">2자 이상 Probe term</th><td className="py-2">{textList(output.probeTerms)}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">제외 단어</th><td className="py-2">{output.excludedTerms?.length ? output.excludedTerms.map((item) => `${item.term}(${item.reason})`).join(" · ") : "없음"}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">최종 Probe 목록</th><td className="py-2 font-semibold">{textList(output.probes)}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">Probe 수</th><td className="py-2">{output.probeCount ?? 0}</td></tr><tr><th className="py-2 pr-4 text-left text-slate-500">경고</th><td className="py-2">{output.warning || "없음"}</td></tr></tbody></table></div>
-                              {reviewControls(STAGE_FOUR_KEY, goodsKey, row, "전체 Seed + 구성어 Probe 구성이 적합한지 기록")}
-                            </> : <p className="mt-3 rounded-lg bg-blue-50 p-4 text-sm font-semibold text-blue-900">STEP 3는 6/6 통과했습니다. 위의 STEP 4 · 6개 모두 실행 버튼을 누르세요.</p>}
+                              {row.run_status === "error" ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">{row.error_message || "STEP 4 실행 오류"}</p> : null}
+                              <div className="mt-4 overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                  <tbody className="divide-y divide-slate-100">
+                                    <tr><th className="w-48 py-2 pr-4 text-left text-slate-500">정제 Seed</th><td className="py-2 font-semibold">{output.cleanedSeed || "—"}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">CORE_PRODUCT</th><td className="py-2 text-base font-black text-blue-800">{output.coreProduct || "—"}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">IDENTITY_ANCHOR</th><td className="py-2 text-base font-black text-emerald-800">{output.identityAnchor || "—"}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">기능·종류 수식어</th><td className="py-2">{textList(output.functionModifiers)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">디자인·형상 수식어</th><td className="py-2">{textList(output.designShapeModifiers)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">스펙·규격</th><td className="py-2">{textList(output.specAttributes)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">옵션·변형 Noise</th><td className="py-2">{textList(output.variantNoise)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">판단 보류 표현</th><td className="py-2">{textList(output.uncertainTerms)}</td></tr>
+                                    <tr className="bg-emerald-50"><th className="py-2 pr-4 text-left text-emerald-800">PRIMARY PROBE</th><td className="py-2 font-black text-emerald-900">{textList(output.primaryProbes)}</td></tr>
+                                    <tr className="bg-blue-50"><th className="py-2 pr-4 text-left text-blue-800">CONDITIONAL PROBE</th><td className="py-2 font-bold text-blue-900">{textList(output.conditionalProbes)}</td></tr>
+                                    <tr className="bg-slate-50"><th className="py-2 pr-4 text-left text-slate-600">단독 Probe 차단</th><td className="py-2">{textList(output.blockedSingleProbes)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">분류 신뢰도</th><td className="py-2">{percent(output.confidence)}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">판단 근거</th><td className="py-2">{output.reasoning || "—"}</td></tr>
+                                    <tr><th className="py-2 pr-4 text-left text-slate-500">경고</th><td className="py-2">{output.warning || "없음"}</td></tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                              {row.run_status === "ready" ? reviewControls(STAGE_FOUR_KEY, goodsKey, row, "core_product와 identity_anchor가 맞는지, 디자인/옵션 분류와 Primary/Conditional Probe가 적합한지 기록") : null}
+                            </> : <p className="mt-3 rounded-lg bg-blue-50 p-4 text-sm font-semibold text-blue-900">기존 공백분해 STEP 4 결과는 V2에서 무효입니다. 위의 STEP 4 · 6개 모두 실행 버튼을 눌러 새 상품 정체성 구조화를 실행하세요.</p>}
                           </div>
                         );
                       }) : null}
@@ -593,7 +628,7 @@ export default function KeywordEngineElonLabPage() {
                   {stage.index >= 5 ? (
                     <div className={`mt-4 rounded-lg p-4 text-sm ${stage.index === 5 && stageFourPassed ? "bg-blue-50 text-blue-950" : "bg-slate-50 text-slate-600"}`}>
                       {stage.index === 5 && stageFourPassed
-                        ? "STEP 4의 6개 결과가 모두 통과했습니다. STEP 5 연관검색어 수집이 다음 구현·개선 대상입니다."
+                        ? "STEP 4 V2의 6개 결과가 모두 통과했습니다. STEP 5 연관검색어 수집이 다음 구현·개선 대상입니다."
                         : "앞 단계가 아직 통과되지 않았거나 실제 실행이 연결되지 않았습니다. Input/Output 정의만 확인할 수 있습니다."}
                     </div>
                   ) : null}
