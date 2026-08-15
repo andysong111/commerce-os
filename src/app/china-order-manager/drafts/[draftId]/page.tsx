@@ -54,7 +54,7 @@ export default async function InternalChinaPurchaseDraftPage({
       <PageHeader
         eyebrow="COMMERCE OS · OPS CENTER NATIVE CHINA ORDER MVP"
         title="중국 발주초안"
-        description="빠른 발주안의 RESERVED 수량을 기준으로 실제 주문 직전 검증을 끝내고, 예산 잔액이나 같은 모델의 추가 옵션은 현재 월간 Draft 한 건에 수동으로 더할 수 있습니다."
+        description="기존 GPT Site의 주문 준비 단계를 대체하는 Ops Center 내부 화면입니다. 빠른 발주안의 RESERVED 수량을 기준으로 실제 주문 직전 검증을 끝내고, 예산 잔액이나 같은 모델의 추가 옵션은 현재 월간 Draft 한 건에 수동으로 더할 수 있습니다."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
