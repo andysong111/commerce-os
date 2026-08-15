@@ -11,6 +11,7 @@ const CONTENT_MODULE_IDS = [
   "detail-page-studio",
   "detail-page-studio-saas-test",
   "detail-page-studio-saas-test-260807",
+  "keyword-engine-elon-lab",
   "keyword-engine",
   "keyword-review-queue",
 ] as const;
