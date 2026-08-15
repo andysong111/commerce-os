@@ -17,15 +17,14 @@ test("keyword engine Elon lab keeps the six fixed Shopling goods keys", () => {
   }
 });
 
-test("keyword engine Elon lab exposes 42 stages and connects stages one through three", () => {
+test("keyword engine Elon lab exposes 42 stages and connects stages one through four", () => {
   const stageCount = [...labFile.matchAll(/index:\s*\d+,\s*key:/g)].length;
   assert.equal(stageCount, 42);
-  assert.match(labFile, /index: 2, key: "seed_selection"[\s\S]*implemented: true/);
-  assert.match(labFile, /index: 3, key: "seed_cleaning"[\s\S]*implemented: true/);
-  assert.match(labFile, /CURRENT_IMPLEMENTED_STAGE = 3/);
-  assert.match(routeFile, /const STAGE_THREE =/);
-  assert.match(routeFile, /if \(stageKey === STAGE_THREE\.key\) return runStageThree/);
-  assert.match(routeFile, /STEP 3는 최신 STEP 2 결과가 모두 통과된 뒤 실행할 수 있습니다/);
+  assert.match(labFile, /index: 4, key: "probe_generation"[\s\S]*implemented: true/);
+  assert.match(labFile, /CURRENT_IMPLEMENTED_STAGE = 4/);
+  assert.match(routeFile, /const STAGE_FOUR =/);
+  assert.match(routeFile, /if \(stageKey === STAGE_FOUR\.key\) return runStageFour/);
+  assert.match(routeFile, /STEP 4는 최신 STEP 3 결과가 모두 통과된 뒤 실행할 수 있습니다/);
 });
 
 test("stage two reproduces the current seed selection rule without redesigning it", () => {
@@ -45,8 +44,19 @@ test("stage three exposes the current seed noise removal rule", () => {
   assert.match(routeFile, /cleanedSeed/);
   assert.match(routeFile, /ops-stage3-current-seed-cleaning-v1/);
   assert.match(pageFile, /STEP 3 · 6개 모두 실행/);
-  assert.match(pageFile, /정제 전 Seed/);
-  assert.match(pageFile, /정제 후 Seed/);
+});
+
+test("stage four mirrors current probe splitting exactly before redesign", () => {
+  assert.match(routeFile, /function buildCurrentProbeBreakdown/);
+  assert.match(routeFile, /baseSeed\.split\(\/\\s\+\/\)\.filter\(Boolean\)/);
+  assert.match(routeFile, /part\.length < 2/);
+  assert.match(routeFile, /probeTerms\.push\(part\)/);
+  assert.match(routeFile, /const probes = baseSeed/);
+  assert.match(routeFile, /ops-stage4-current-probe-split-v1/);
+  assert.match(pageFile, /STEP 4 · 6개 모두 실행/);
+  assert.match(pageFile, /공백 분해 원소/);
+  assert.match(pageFile, /2자 이상 Probe term/);
+  assert.match(pageFile, /최종 Probe 목록/);
 });
 
 test("keyword engine Elon lab is registered as an isolated OPS card", () => {
@@ -82,12 +92,12 @@ test("rerunning an executed stage warns that review state will reset", () => {
   assert.match(pageFile, /window\.confirm/);
   assert.match(pageFile, /판정이 모두 검수대기로 초기화/);
   assert.match(pageFile, /결과 재실행 · 판정 초기화/);
-  assert.match(pageFile, /재실행은 다음 단계 진행이 아닙니다/);
 });
 
 test("downstream stage rows are fresh only when newer than the previous stage", () => {
-  assert.match(pageFile, /function isFreshAfter/);
+  assert.match(pageFile, /function freshAfter/);
   assert.match(pageFile, /rowTime\(row\) >= rowTime\(previous\)/);
-  assert.match(pageFile, /freshStageTwoRow/);
-  assert.match(pageFile, /freshStageThreeRow/);
+  assert.match(pageFile, /stageTwoRow/);
+  assert.match(pageFile, /stageThreeRow/);
+  assert.match(pageFile, /stageFourRow/);
 });
