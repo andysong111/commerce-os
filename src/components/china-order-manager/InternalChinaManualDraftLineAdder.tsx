@@ -116,8 +116,8 @@ export function InternalChinaManualDraftLineAdder({
     if (
       !window.confirm(
         candidate.inDraft
-          ? `${candidate.barcode}는 현재 Draft에 ${candidate.currentDraftQuantity.toLocaleString("ko-KR")}개가 있습니다.\n추가 ${addQuantity.toLocaleString("ko-KR")}개 → 총 ${currentAfter.toLocaleString("ko-KR")}개 RESERVED로 변경합니다.\n\n실제 1688 주문·결제는 실행되지 않습니다.`
-          : `${candidate.barcode} · ${candidate.productName}${candidate.optionName ? ` · ${candidate.optionName}` : ""}\n${addQuantity.toLocaleString("ko-KR")}개를 현재 월간 Draft에 RESERVED로 추가합니다.\n\n새 Draft를 만들지 않으며 실제 1688 주문·결제는 실행되지 않습니다.`,
+          ? `${candidate.barcode}는 현재 Draft에 ${candidate.currentDraftQuantity.toLocaleString("ko-KR")}개가 있습니다.\n추가 ${addQuantity.toLocaleString("ko-KR")}개 → 총 ${currentAfter.toLocaleString("ko-KR")}개 RESERVED로 변경합니다.\n\n추가분은 주문·입고 원장에는 포함되지만 다음 발주추천의 미입고 차감에서는 제외됩니다. 실제 1688 주문·결제는 실행되지 않습니다.`
+          : `${candidate.barcode} · ${candidate.productName}${candidate.optionName ? ` · ${candidate.optionName}` : ""}\n${addQuantity.toLocaleString("ko-KR")}개를 현재 월간 Draft에 RESERVED로 추가합니다.\n\n추가분은 주문·입고 원장에는 포함되지만 다음 발주추천의 미입고 차감에서는 제외됩니다. 새 Draft를 만들지 않으며 실제 1688 주문·결제는 실행되지 않습니다.`,
       )
     ) {
       return;
@@ -144,7 +144,7 @@ export function InternalChinaManualDraftLineAdder({
       if (!response.ok || !body.ok) {
         throw new Error(body.message || "현재 월간 Draft에 품목을 추가하지 못했습니다.");
       }
-      setNotice(`${body.message || "현재 Draft에 추가했습니다."} 화면을 갱신합니다.`);
+      setNotice(`${body.message || "현재 Draft에 추가했습니다."} 주문·입고 원장에는 반영하고 다음 발주추천 미입고 차감에서는 제외합니다. 화면을 갱신합니다.`);
       window.setTimeout(() => window.location.reload(), 450);
     } catch (error) {
       setNotice(
@@ -166,11 +166,11 @@ export function InternalChinaManualDraftLineAdder({
           </span>
           <h2 className="mt-1 text-xl font-black text-slate-950">주문품목 추가</h2>
           <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-700">
-            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 기존 B-code를 검색해 현재 월간 Draft 한 건에 바로 추가하며 새 Draft는 만들지 않습니다. 추가 수량은 즉시 RESERVED 미입고 약정에 반영되어 다음 발주 계산에서 중복 주문을 막습니다.
+            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 기존 B-code를 검색해 현재 월간 Draft 한 건에 바로 추가하며 새 Draft는 만들지 않습니다. 추가 수량은 RESERVED 주문·입고 원장에 정확히 남겨 실제 입고수량에 반영하지만, 다음 발주추천의 미입고 차감에서는 제외합니다. 다음 발주추천은 그 시점의 판매·재고 기준으로 다시 계산합니다.
           </p>
         </div>
         <span className="rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-black text-amber-800">
-          실제 1688 주문 실행 없음
+          입고원장 반영 · 다음 발주차감 제외
         </span>
       </div>
 
