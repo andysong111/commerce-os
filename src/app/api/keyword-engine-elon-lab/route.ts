@@ -10,6 +10,7 @@ import { loadKeywordEngineElonLabShoplingContexts } from "@/lib/keywordEngineElo
 import {
   listKeywordEngineElonLabRows,
   updateKeywordEngineElonLabReview,
+  updateKeywordEngineElonLabReviews,
   upsertKeywordEngineElonLabRows,
   type KeywordEngineElonLabStoredRow,
 } from "@/lib/keywordEngineElonLabStore";
@@ -22,6 +23,7 @@ const STAGE_ONE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index ===
 const STAGE_TWO = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 2)!;
 const STAGE_THREE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 3)!;
 const STAGE_FOUR = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 4)!;
+const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
 
 const CURRENT_SEED_NOISE_TERMS = [
   "색상 랜덤",
@@ -86,6 +88,12 @@ function cleanCurrentSeed(value: unknown) {
     whitespaceNormalized: true,
     warning: cleanedSeed ? "" : "CLEANED_SEED_EMPTY",
   };
+}
+
+function isCurrentReviewableRow(row: KeywordEngineElonLabStoredRow | undefined, stageKey: string) {
+  if (!row || row.run_status !== "ready") return false;
+  if (stageKey === STAGE_FOUR.key) return row.engine_revision === STAGE_FOUR_REVISION;
+  return true;
 }
 
 export async function GET(request: Request) {
@@ -385,7 +393,7 @@ async function runStageFour(goodsKeys: string[]) {
             ? ""
             : "상품 핵심명사 또는 상품 정체성 분석 결과를 만들지 못했습니다.",
           review_note: "",
-          engine_revision: "ops-stage4-semantic-identity-v2",
+          engine_revision: STAGE_FOUR_REVISION,
         };
       },
     );
@@ -417,7 +425,7 @@ async function runStageFour(goodsKeys: string[]) {
         output_payload: {},
         error_message: message,
         review_note: "",
-        engine_revision: "ops-stage4-semantic-identity-v2",
+        engine_revision: STAGE_FOUR_REVISION,
       }),
     );
     try {
@@ -455,6 +463,51 @@ export async function POST(request: Request) {
       "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1~4입니다.",
       409,
     );
+  }
+
+  if (action === "review_stage_batch") {
+    const stageKey = String(body.stageKey ?? "").trim();
+    const goodsKeys = requestedGoodsKeys(body);
+    if (!KEYWORD_ENGINE_ELON_LAB_STAGES.some((stage) => stage.key === stageKey)) {
+      return jsonError("알 수 없는 단계입니다.");
+    }
+    if (goodsKeys.length !== KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.length) {
+      return jsonError("일괄 통과는 고정 테스트 goods_key 6개 전체에만 적용할 수 있습니다.");
+    }
+    try {
+      const storedRows = await listKeywordEngineElonLabRows();
+      const rowByGoodsKey = new Map(
+        storedRows
+          .filter((row) => row.stage_key === stageKey)
+          .map((row) => [row.goods_key, row] as const),
+      );
+      const blockedGoodsKeys = goodsKeys.filter(
+        (goodsKey) => !isCurrentReviewableRow(rowByGoodsKey.get(goodsKey), stageKey),
+      );
+      if (blockedGoodsKeys.length) {
+        return jsonError(
+          `6개 일괄 통과 전에 현재 단계의 실행 결과가 모두 준비되어야 합니다. 미준비: ${blockedGoodsKeys.join(", ")}`,
+          409,
+        );
+      }
+      const rows = await updateKeywordEngineElonLabReviews({
+        goodsKeys,
+        stageKey,
+        reviewStatus: "pass",
+      });
+      if (rows.length !== goodsKeys.length) {
+        return jsonError("6개 일괄 통과 저장 결과를 모두 확인하지 못했습니다.", 500);
+      }
+      return NextResponse.json(
+        { ok: true, rows },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "6개 일괄 통과를 저장하지 못했습니다.",
+        500,
+      );
+    }
   }
 
   if (action === "review_stage") {
