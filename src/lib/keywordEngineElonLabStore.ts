@@ -79,28 +79,33 @@ export async function upsertKeywordEngineElonLabRows(rows: KeywordEngineElonLabS
   return Array.isArray(body) ? (body as KeywordEngineElonLabStoredRow[]) : [];
 }
 
-export async function updateKeywordEngineElonLabReview(input: {
-  goodsKey: string;
+async function patchKeywordEngineElonLabReview(input: {
+  goodsKeys: string[];
   stageKey: string;
   reviewStatus: KeywordEngineElonLabReviewStatus;
-  reviewNote: string;
+  reviewNote?: string;
 }) {
+  if (!input.goodsKeys.length) return [];
   const config = supabaseConfig();
   if (!config) throw new Error("KEYWORD_ELON_LAB_SUPABASE_NOT_CONFIGURED");
   const params = new URLSearchParams({
-    goods_key: `eq.${input.goodsKey}`,
+    goods_key: `in.(${input.goodsKeys.join(",")})`,
     stage_key: `eq.${input.stageKey}`,
   });
   const headers = createSupabaseAdminHeaders(config.secretKey);
   headers.Prefer = "return=representation";
+  const payload: Record<string, unknown> = {
+    review_status: input.reviewStatus,
+  };
+  if (input.reviewNote !== undefined) payload.review_note = input.reviewNote;
+
+  // updated_at intentionally represents the stage execution result timestamp.
+  // Review-only changes must not mutate it, otherwise downstream results look stale
+  // after a refresh or a later code deployment.
   const response = await fetch(`${config.baseUrl}/rest/v1/${TABLE}?${params.toString()}`, {
     method: "PATCH",
     headers,
-    body: JSON.stringify({
-      review_status: input.reviewStatus,
-      review_note: input.reviewNote,
-      updated_at: new Date().toISOString(),
-    }),
+    body: JSON.stringify(payload),
     cache: "no-store",
   });
   const body = await readJson(response);
@@ -108,4 +113,30 @@ export async function updateKeywordEngineElonLabReview(input: {
     throw new Error(`KEYWORD_ELON_LAB_SUPABASE_REVIEW_FAILED:${response.status}`);
   }
   return Array.isArray(body) ? (body as KeywordEngineElonLabStoredRow[]) : [];
+}
+
+export async function updateKeywordEngineElonLabReview(input: {
+  goodsKey: string;
+  stageKey: string;
+  reviewStatus: KeywordEngineElonLabReviewStatus;
+  reviewNote: string;
+}) {
+  return patchKeywordEngineElonLabReview({
+    goodsKeys: [input.goodsKey],
+    stageKey: input.stageKey,
+    reviewStatus: input.reviewStatus,
+    reviewNote: input.reviewNote,
+  });
+}
+
+export async function updateKeywordEngineElonLabReviews(input: {
+  goodsKeys: string[];
+  stageKey: string;
+  reviewStatus: KeywordEngineElonLabReviewStatus;
+}) {
+  return patchKeywordEngineElonLabReview({
+    goodsKeys: input.goodsKeys,
+    stageKey: input.stageKey,
+    reviewStatus: input.reviewStatus,
+  });
 }
