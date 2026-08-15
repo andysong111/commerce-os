@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { InternalChinaPurchaseBudgetAudit } from "@/components/china-order-manager/InternalChinaPurchaseBudgetAudit";
+import { InternalChinaManualDraftLineAdder } from "@/components/china-order-manager/InternalChinaManualDraftLineAdder";
 import { InternalChinaPurchaseDraftWorkspaceV2 } from "@/components/china-order-manager/InternalChinaPurchaseDraftWorkspaceV2";
 import { PageHeader } from "@/components/PageHeader";
 import { loadInternalChinaPurchaseBudgetAudit } from "@/lib/internalChinaPurchaseBudgetAudit";
@@ -53,7 +54,7 @@ export default async function InternalChinaPurchaseDraftPage({
       <PageHeader
         eyebrow="COMMERCE OS · OPS CENTER NATIVE CHINA ORDER MVP"
         title="중국 발주초안"
-        description="빠른 발주안의 RESERVED 수량을 그대로 사용하고, 상품출시진행관리·Product Master·Shopling의 B-code 정보를 재사용해 1688 주문 직전 검증을 Ops Center 안에서 끝냅니다."
+        description="기존 GPT Site의 주문 준비 단계를 대체하는 Ops Center 내부 화면입니다. 빠른 발주안의 RESERVED 수량을 기준으로 실제 주문 직전 검증을 끝내고, 예산 잔액이나 같은 모델의 추가 옵션은 현재 월간 Draft 한 건에 수동으로 더할 수 있습니다."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -73,10 +74,15 @@ export default async function InternalChinaPurchaseDraftPage({
       />
 
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
-        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 이 화면은 기존 GPT Site의 주문 준비 단계를 대체합니다. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다.
+        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다. 추가 주문품목도 별도 Draft 없이 이 월간 Draft에 RESERVED로 합칩니다.
       </section>
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
+
+      <InternalChinaManualDraftLineAdder
+        draftId={draft.draftId}
+        status={draft.status}
+      />
 
       <InternalChinaPurchaseDraftWorkspaceV2
         initialDraft={draft}
