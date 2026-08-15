@@ -8,6 +8,14 @@ const files = {
     "../src/app/api/product-launch-tracker/normalized-optimized/route.ts",
     import.meta.url,
   ),
+  cachedNormalized: new URL(
+    "../src/app/api/product-launch-tracker/normalized-optimized-cached/route.ts",
+    import.meta.url,
+  ),
+  cachedDetailJobs: new URL(
+    "../src/app/api/product-launch-tracker/detail-page-jobs-cached/route.ts",
+    import.meta.url,
+  ),
   state: new URL(
     "../src/app/api/product-launch-tracker/normalized-state/route.ts",
     import.meta.url,
@@ -33,7 +41,8 @@ const source = Object.fromEntries(
 );
 
 test("public tracker routes are wrapped without deleting the legacy source", () => {
-  assert.match(source.config, /normalized-optimized/);
+  assert.match(source.config, /normalized-optimized-cached/);
+  assert.match(source.config, /detail-page-jobs-cached/);
   assert.match(source.config, /normalized-state/);
   assert.match(source.normalized, /legacyGet/);
   assert.match(source.normalized, /legacyPatch/);
@@ -55,6 +64,22 @@ test("page and detail reads use normalized product and option rows", () => {
   assert.match(source.store, /product_launch_items/);
   assert.match(source.store, /product_launch_options/);
   assert.match(source.normalized, /return legacyGet\(request\)/);
+});
+
+test("hot list reads use shared Next Data Cache across function instances", () => {
+  assert.match(source.cachedNormalized, /unstable_cache/);
+  assert.match(source.cachedNormalized, /PAGE_REVALIDATE_SECONDS = 10/);
+  assert.match(source.cachedNormalized, /revalidateTag\([^\n]+, "max"\)/);
+  assert.match(source.cachedNormalized, /queryProductLaunchNormalizedPage/);
+  assert.match(source.cachedNormalized, /listCache: "next-data-cache"/);
+
+  assert.match(source.cachedDetailJobs, /unstable_cache/);
+  assert.match(source.cachedDetailJobs, /JOB_LIST_REVALIDATE_SECONDS = 15/);
+  assert.match(source.cachedDetailJobs, /revalidateTag\([^\n]+, "max"\)/);
+  assert.match(source.cachedDetailJobs, /listDetailPageJobs/);
+  assert.match(source.cachedDetailJobs, /listSource: "next-data-cache"/);
+  assert.doesNotMatch(source.cachedDetailJobs, /withDetailPageStoreRetry/);
+  assert.doesNotMatch(source.cachedDetailJobs, /"use cache: remote"/);
 });
 
 test("legacy writes remain authoritative and refresh normalized rows", () => {
