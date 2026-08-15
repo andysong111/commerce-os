@@ -64,3 +64,33 @@ test("업로드 원본의 실제 상품 데이터가 OPS Center 실행본에 포
     );
   }
 });
+
+test("서버가 느리면 최근 정상 목록을 읽기 전용으로 먼저 보여주고 숨은 worker는 대기 작업이 있을 때만 기동한다", async () => {
+  const appSource = await readFile(
+    new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
+    "utf8",
+  );
+  const previewSource = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/startup-page-cache-preview.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(appSource, /startup-page-cache-preview\.js/);
+  assert.match(appSource, /installStartupPageCachePreview/);
+  assert.match(appSource, /workerIdleCheckMs = 30_000/);
+  assert.match(appSource, /hasActiveJob/);
+  assert.match(appSource, /ensureWorkerModules/);
+  assert.match(appSource, /__commerceWorkerBootstrapForwarded/);
+
+  assert.match(previewSource, /partialPage === true/);
+  assert.match(previewSource, /MAX_CACHE_AGE_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(previewSource, /data-startup-cache-preview/);
+  assert.match(previewSource, /최근 정상 목록 먼저 표시/);
+  assert.match(previewSource, /최근 정상 목록 표시 · 서버 재연결 대기/);
+  assert.match(previewSource, /product-launch-tracker:page-loaded/);
+  assert.match(previewSource, /lockWrites\(true\)/);
+  assert.match(previewSource, /lockWrites\(false\)/);
+});
