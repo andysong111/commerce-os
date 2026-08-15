@@ -43,7 +43,7 @@ test("stage three exposes the current seed noise removal rule", () => {
   assert.match(routeFile, /removedExpressions/);
   assert.match(routeFile, /cleanedSeed/);
   assert.match(routeFile, /ops-stage3-current-seed-cleaning-v1/);
-  assert.match(pageFile, /STEP 3 · 6개 모두 실행/);
+  assert.match(pageFile, /executionButton\(3, STAGE_THREE_KEY/);
 });
 
 test("stage four mirrors current probe splitting exactly before redesign", () => {
@@ -53,7 +53,7 @@ test("stage four mirrors current probe splitting exactly before redesign", () =>
   assert.match(routeFile, /probeTerms\.push\(part\)/);
   assert.match(routeFile, /const probes = baseSeed/);
   assert.match(routeFile, /ops-stage4-current-probe-split-v1/);
-  assert.match(pageFile, /STEP 4 · 6개 모두 실행/);
+  assert.match(pageFile, /executionButton\(4, STAGE_FOUR_KEY/);
   assert.match(pageFile, /공백 분해 원소/);
   assert.match(pageFile, /2자 이상 Probe term/);
   assert.match(pageFile, /최종 Probe 목록/);
