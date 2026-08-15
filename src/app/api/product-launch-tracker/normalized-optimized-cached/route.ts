@@ -25,6 +25,11 @@ type PageQuery = {
   direction: string | null;
 };
 
+type CachedPageResult =
+  | { kind: "page"; body: Record<string, unknown> }
+  | { kind: "legacy" }
+  | { kind: "unavailable"; message: string };
+
 export async function GET(request: NextRequest) {
   const mode = request.nextUrl.searchParams.get("mode") || "page";
   if (mode !== "page") return legacyGet(request);
@@ -32,23 +37,12 @@ export async function GET(request: NextRequest) {
   const identity = await resolveProductLaunchIdentity(request);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
 
-  try {
-    const body = await readCachedPage(
-      identity.value.userId,
-      JSON.stringify(readPageQuery(request)),
-    );
-    if (!body) return legacyGet(request);
-    return Response.json(
-      { ...body, listCache: "next-data-cache" },
-      {
-        headers: {
-          "Cache-Control": "private, no-store",
-          "X-Commerce-List-Cache": "data-cache",
-        },
-      },
-    );
-  } catch (error) {
-    console.error("[product-launch-page-cache] read failed", error);
+  const result = await readCachedPage(
+    identity.value.userId,
+    JSON.stringify(readPageQuery(request)),
+  );
+  if (result.kind === "legacy") return legacyGet(request);
+  if (result.kind === "unavailable") {
     return Response.json(
       {
         ok: false,
@@ -59,12 +53,23 @@ export async function GET(request: NextRequest) {
       {
         status: 503,
         headers: {
-          "Retry-After": "5",
+          "Retry-After": String(PAGE_REVALIDATE_SECONDS),
           "Cache-Control": "private, no-store",
+          "X-Commerce-List-Cache": "cached-backpressure",
         },
       },
     );
   }
+
+  return Response.json(
+    { ...result.body, listCache: "next-data-cache" },
+    {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "X-Commerce-List-Cache": "data-cache",
+      },
+    },
+  );
 }
 
 export async function PATCH(request: NextRequest) {
@@ -78,40 +83,59 @@ export async function PATCH(request: NextRequest) {
 
 function readCachedPage(ownerId: string, queryJson: string) {
   return unstable_cache(
-    async () => {
-      const config = getProductLaunchAdminConfig();
-      if (!config.ok) {
-        throw new Error("상품출시진행관리 저장소 설정을 읽지 못했습니다.");
+    async (): Promise<CachedPageResult> => {
+      try {
+        const config = getProductLaunchAdminConfig();
+        if (!config.ok) {
+          return {
+            kind: "unavailable",
+            message: "상품출시진행관리 저장소 설정을 읽지 못했습니다.",
+          };
+        }
+
+        const workspace = await readProductLaunchNormalizedWorkspace(
+          config.value,
+          ownerId,
+        );
+        if (!workspace || workspace.normalized_read_enabled !== true) {
+          return { kind: "legacy" };
+        }
+
+        const query = JSON.parse(queryJson) as PageQuery;
+        const page = await queryProductLaunchNormalizedPage(
+          config.value,
+          ownerId,
+          workspace,
+          query,
+        );
+
+        return {
+          kind: "page",
+          body: {
+            ok: true,
+            stateExists: true,
+            ...page,
+            policy: isRecord(workspace.policy) ? workspace.policy : null,
+            sourceImportedAt: nullableText(workspace.source_imported_at),
+            updatedAt:
+              nullableText(workspace.source_state_updated_at) ??
+              nullableText(workspace.updated_at),
+            schemaVersion: numberOrNull(workspace.schema_version),
+            listSource: "normalized",
+          },
+        };
+      } catch (error) {
+        console.error("[product-launch-page-cache] store read failed", error);
+        return {
+          kind: "unavailable",
+          message:
+            error instanceof Error
+              ? error.message
+              : "상품 목록 저장소를 읽지 못했습니다.",
+        };
       }
-
-      const workspace = await readProductLaunchNormalizedWorkspace(
-        config.value,
-        ownerId,
-      );
-      if (!workspace || workspace.normalized_read_enabled !== true) return null;
-
-      const query = JSON.parse(queryJson) as PageQuery;
-      const page = await queryProductLaunchNormalizedPage(
-        config.value,
-        ownerId,
-        workspace,
-        query,
-      );
-
-      return {
-        ok: true,
-        stateExists: true,
-        ...page,
-        policy: isRecord(workspace.policy) ? workspace.policy : null,
-        sourceImportedAt: nullableText(workspace.source_imported_at),
-        updatedAt:
-          nullableText(workspace.source_state_updated_at) ??
-          nullableText(workspace.updated_at),
-        schemaVersion: numberOrNull(workspace.schema_version),
-        listSource: "normalized",
-      };
     },
-    ["product-launch-page-v2", ownerId, queryJson],
+    ["product-launch-page-v3-backpressure", ownerId, queryJson],
     {
       revalidate: PAGE_REVALIDATE_SECONDS,
       tags: [cacheTagFor(ownerId)],
