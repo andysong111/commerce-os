@@ -20,18 +20,34 @@ export async function GET(request: NextRequest) {
 
   try {
     const connection = resolveDetailPageStudioConnection();
-    const [studioProbe, callbackProbe] = await Promise.all([
-      probeDetailPageStudio(connection),
-      probeProtectedOpsCallback(request.url),
-    ]);
-    if (!studioProbe.ok) return Response.json(studioProbe, { status: 503 });
-    if (!callbackProbe.ok) return Response.json(callbackProbe, { status: 503 });
+
+    // The product-launch button only needs the stable Studio URLs in order to
+    // register a job and open the hidden Studio frame. Running two network
+    // health probes synchronously here can leave the browser showing
+    // "연결 확인 중" until an upstream request times out even though no job has
+    // been created. The real collection frame already has a 20-second
+    // handshake timeout, and the server worker reports its own start failure,
+    // so normal launches must not be blocked by this diagnostic probe.
+    //
+    // Keep the probes available for explicit diagnostics without putting them
+    // on the paid/normal launch path.
+    const diagnosticProbe = request.nextUrl.searchParams.get("probe") === "1";
+    if (diagnosticProbe) {
+      const [studioProbe, callbackProbe] = await Promise.all([
+        probeDetailPageStudio(connection),
+        probeProtectedOpsCallback(request.url),
+      ]);
+      if (!studioProbe.ok) return Response.json(studioProbe, { status: 503 });
+      if (!callbackProbe.ok) return Response.json(callbackProbe, { status: 503 });
+    }
+
     return Response.json({
       ok: true,
       engineUrl: connection.browserUrl.toString(),
       engineOrigin: connection.engineOrigin,
       workerUrl: connection.workerUrl.toString(),
       connectionMode: connection.isPreview ? "preview" : "production",
+      diagnosticProbe,
     });
   } catch (error) {
     return Response.json(
