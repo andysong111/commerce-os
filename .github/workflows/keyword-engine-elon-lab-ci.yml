@@ -9,6 +9,7 @@ on:
       - "src/lib/opsModuleRegistry.ts"
       - "src/components/dashboard/OpsDashboardWithSaasTestClone.tsx"
       - "tests/keywordEngineElonLab.test.mjs"
+      - "tests/keywordEngineElonLabRuntime.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -37,7 +38,10 @@ jobs:
           src/lib/keywordEngineElonLabShopling.ts
           src/lib/keywordEngineElonLabStore.ts
       - name: Test keyword lab contract
-        run: node --experimental-strip-types --test tests/keywordEngineElonLab.test.mjs
+        run: >-
+          node --experimental-strip-types --test
+          tests/keywordEngineElonLab.test.mjs
+          tests/keywordEngineElonLabRuntime.test.mjs
       - name: Build
         run: npm run build
         env:
