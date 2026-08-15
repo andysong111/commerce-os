@@ -59,7 +59,7 @@ test("detail-page complete state is invalid when HTML and main image materials a
   );
 });
 
-test("removed or blank 1688 source failures are classified as link access failures", () => {
+test("removed, blank, or stalled 1688 source failures are classified as link access failures", () => {
   const removed = sourceJob({
     error: "商品已下架 查看该店铺其他上架商品",
   });
@@ -73,9 +73,18 @@ test("removed or blank 1688 source failures are classified as link access failur
     detailPageSourceLinkFailureDetail(blankGeneric),
     "1688 수집 실패",
   );
+
+  assert.equal(
+    isDetailPageSourceLinkUnavailable(
+      sourceJob({
+        error: "1688 수집기 연결 시간이 15분을 초과했습니다.",
+      }),
+    ),
+    true,
+  );
 });
 
-test("infrastructure failures and jobs with collected evidence are not mislabeled as link access failures", () => {
+test("Studio infrastructure failures and jobs with collected evidence are not mislabeled as link access failures", () => {
   assert.equal(
     isDetailPageSourceLinkUnavailable(
       sourceJob({
@@ -88,7 +97,8 @@ test("infrastructure failures and jobs with collected evidence are not mislabele
   assert.equal(
     isDetailPageSourceLinkUnavailable(
       sourceJob({
-        error: "1688 수집기 연결 시간이 15분을 초과했습니다.",
+        stage: "source_collection",
+        error: "로컬 수집기 업데이트가 필요합니다.",
       }),
     ),
     false,
