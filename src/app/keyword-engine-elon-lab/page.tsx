@@ -66,6 +66,17 @@ const STAGE_FOUR_KEY = "probe_generation";
 const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
 const RESUME_STORAGE_KEY = "keywordEngineElonLab.resumeStage.v1";
 
+async function readApiState(response: Response): Promise<ApiState> {
+  const raw = await response.text();
+  if (!raw) return { ok: response.ok };
+  try {
+    return JSON.parse(raw) as ApiState;
+  } catch {
+    const preview = raw.replace(/\s+/g, " ").trim().slice(0, 180);
+    throw new Error(`HTTP ${response.status} · 서버 비정상 응답: ${preview || "EMPTY_BODY"}`);
+  }
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
@@ -130,6 +141,7 @@ export default function KeywordEngineElonLabPage() {
   const [rows, setRows] = useState<KeywordEngineElonLabStoredRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningStage, setRunningStage] = useState<number | null>(null);
+  const [stageOneProgress, setStageOneProgress] = useState(0);
   const [reviewSaving, setReviewSaving] = useState<string | null>(null);
   const [bulkSavingStage, setBulkSavingStage] = useState<number | null>(null);
   const [message, setMessage] = useState("");
@@ -139,7 +151,7 @@ export default function KeywordEngineElonLabPage() {
 
   const refresh = async () => {
     const response = await fetch("/api/keyword-engine-elon-lab", { cache: "no-store" });
-    const data = (await response.json()) as ApiState;
+    const data = await readApiState(response);
     if (!response.ok || !data.ok) throw new Error(data.message || "실험 이력을 불러오지 못했습니다.");
     setRows(data.rows ?? []);
     setNotes((current) => {
@@ -230,6 +242,51 @@ export default function KeywordEngineElonLabPage() {
     }, 0);
   };
 
+  const postRunStage = async (stageKey: string, goodsKeys: string[]) => {
+    const response = await fetch("/api/keyword-engine-elon-lab", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "run_stage", stageKey, goodsKeys }),
+    });
+    const data = await readApiState(response);
+    if (!response.ok || !data.ok) throw new Error(data.message || "단계 실행에 실패했습니다.");
+    return data;
+  };
+
+  const runStageOneIsolated = async () => {
+    const failures: string[] = [];
+    let completed = 0;
+    setStageOneProgress(0);
+    for (let index = 0; index < KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.length; index += 2) {
+      const group = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.slice(index, index + 2);
+      const results = await Promise.all(
+        group.map(async (goodsKey) => {
+          try {
+            const data = await postRunStage(STAGE_ONE_KEY, [goodsKey]);
+            const updatedRows = data.rows ?? [];
+            if (!updatedRows.length) throw new Error("저장 결과 행 없음");
+            setRows((current) => mergeStoredRows(current, updatedRows));
+            return "";
+          } catch (error) {
+            return `${goodsKey}: ${error instanceof Error ? error.message : "실행 실패"}`;
+          }
+        }),
+      );
+      failures.push(...results.filter(Boolean));
+      completed += group.length;
+      setStageOneProgress(completed);
+      setMessage(
+        failures.length
+          ? `STEP 1 진행 ${completed}/6 · 실패 ${failures.length}건`
+          : `STEP 1 진행 ${completed}/6`,
+      );
+    }
+    await refresh().catch(() => undefined);
+    if (failures.length) {
+      throw new Error(`STEP 1 일부 실패 · ${failures.join(" · ")}`);
+    }
+  };
+
   const runStage = async (stageKey: string, stageNumber: number, alreadyExecuted: boolean) => {
     if (alreadyExecuted) {
       const confirmed = window.confirm(
@@ -238,23 +295,24 @@ export default function KeywordEngineElonLabPage() {
       if (!confirmed) return;
     }
     setRunningStage(stageNumber);
-    setMessage("");
+    setMessage(stageNumber === 1 ? "STEP 1 요청 시작 · 0/6" : "");
     rememberStage(stageNumber);
     try {
-      const response = await fetch("/api/keyword-engine-elon-lab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "run_stage", stageKey, goodsKeys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS }),
-      });
-      const data = (await response.json()) as ApiState;
-      if (!response.ok || !data.ok) throw new Error(data.message || `STEP ${stageNumber} 실행에 실패했습니다.`);
-      await refresh();
+      if (stageNumber === 1) {
+        await runStageOneIsolated();
+      } else {
+        const data = await postRunStage(stageKey, [...KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS]);
+        const updatedRows = data.rows ?? [];
+        if (updatedRows.length) setRows((current) => mergeStoredRows(current, updatedRows));
+        await refresh();
+      }
       setMessage(`STEP ${stageNumber} · 6개 실행 완료 · 결과를 검수해 주세요.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : `STEP ${stageNumber} 실행에 실패했습니다.`);
       await refresh().catch(() => undefined);
     } finally {
       setRunningStage(null);
+      if (stageNumber === 1) setStageOneProgress(0);
     }
   };
 
@@ -278,7 +336,7 @@ export default function KeywordEngineElonLabPage() {
           reviewNote: notes[key] ?? "",
         }),
       });
-      const data = (await response.json()) as ApiState;
+      const data = await readApiState(response);
       if (!response.ok || !data.ok) throw new Error(data.message || "검수 판정을 저장하지 못했습니다.");
       const updatedRows = data.rows ?? [];
       if (!updatedRows.length) throw new Error("서버 저장 결과 행을 확인하지 못했습니다.");
@@ -305,7 +363,7 @@ export default function KeywordEngineElonLabPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "review_stage_batch", stageKey, goodsKeys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS }),
       });
-      const data = (await response.json()) as ApiState;
+      const data = await readApiState(response);
       if (!response.ok || !data.ok) throw new Error(data.message || "6개 일괄 통과를 저장하지 못했습니다.");
       const updatedRows = data.rows ?? [];
       if (updatedRows.length !== 6) throw new Error("6개 일괄 통과 결과를 모두 확인하지 못했습니다.");
@@ -401,7 +459,13 @@ export default function KeywordEngineElonLabPage() {
         disabled={runningStage !== null || bulkSavingStage !== null}
         className={ready ? "rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 disabled:bg-slate-200" : "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-300"}
       >
-        {runningStage === stageNumber ? `STEP ${stageNumber} 실행 중…` : ready ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화` : `STEP ${stageNumber} · 6개 모두 실행`}
+        {runningStage === stageNumber
+          ? stageNumber === 1
+            ? `STEP 1 실행 중 ${stageOneProgress}/6…`
+            : `STEP ${stageNumber} 실행 중…`
+          : ready
+            ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화`
+            : `STEP ${stageNumber} · 6개 모두 실행`}
       </button>
       {ready ? (
         <button
