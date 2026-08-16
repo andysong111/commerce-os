@@ -1,0 +1,5 @@
+Keyword Elon Lab persistence contract
+- do not use PostgREST bulk on_conflict for stage results
+- retry transient 502/503/504
+- row-level PATCH, then INSERT when missing
+- include bounded Supabase response body in persistence errors
