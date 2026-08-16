@@ -103,6 +103,14 @@ if (detailPageMode === "worker") {
     console.error("Product launch startup cache preview failed", error);
   }
 
+  // Product Master is the durable product authority. Mount its read-only control plane
+  // before the workflow list so the operator can still inspect products during OPS DB stalls.
+  try {
+    await import("./product-master-control-plane.js");
+  } catch (error) {
+    console.error("Product Master control plane failed to load", error);
+  }
+
   // Do not abort or replace the list request. If a cold start is slow, only show a
   // passive status message while the existing optimized app keeps waiting normally.
   const slowListTimer = window.setTimeout(() => {
