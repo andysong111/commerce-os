@@ -1,597 +1,322 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader } from "@/components/PageHeader";
+
 import {
-  KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS,
-  KEYWORD_ENGINE_ELON_LAB_STAGES,
-  type KeywordEngineElonLabReviewStatus,
-} from "@/lib/keywordEngineElonLab";
-import type { KeywordEngineElonLabStoredRow } from "@/lib/keywordEngineElonLabStore";
+  KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+  KEYWORD_ELON_V2_MINIMUM_KEYWORDS,
+  KEYWORD_ELON_V2_STORAGE_KEY,
+  emptyKeywordElonSession,
+  keywordElonUtf8Bytes,
+  validate1688Url,
+  type KeywordElonDiscovery,
+  type KeywordElonIdentity,
+  type KeywordElonLabSession,
+  type KeywordElonSourceDraft,
+  type KeywordElonTitleResult,
+  type KeywordElonCandidate,
+} from "@/lib/keywordEngineElonLabV2";
 
-type ApiState = {
-  ok: boolean;
-  message?: string;
-  rows?: KeywordEngineElonLabStoredRow[];
-};
+type Readiness = { openAiConfigured: boolean; searchAdConfigured: boolean };
+type ApiRecord = Record<string, unknown> & { ok?: boolean; error?: unknown };
 
-type StageOneOutput = {
-  productName?: string;
-  modelNo?: string;
-  modelName?: string;
-  currentSiteSearch?: string;
-  detailDescriptionRawLength?: number;
-  detailDescriptionTextLength?: number;
-  currentEngineSeed?: string;
-  currentEngineSeedSource?: string;
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-type StageTwoOutput = {
-  productName?: string;
-  modelName?: string;
-  selectedSeed?: string;
-  selectedSeedSource?: string;
-  selectionReason?: string;
-};
-
-type StageThreeOutput = {
-  rawSeed?: string;
-  cleanedSeed?: string;
-  removedExpressions?: Array<{ term?: string; count?: number }>;
-  changed?: boolean;
-  warning?: string;
-};
-
-type StageFourOutput = {
-  cleanedSeed?: string;
-  coreProduct?: string;
-  identityAnchor?: string;
-  functionModifiers?: string[];
-  designShapeModifiers?: string[];
-  specAttributes?: string[];
-  variantNoise?: string[];
-  uncertainTerms?: string[];
-  primaryProbes?: string[];
-  conditionalProbes?: string[];
-  blockedSingleProbes?: string[];
-  confidence?: number;
-  reasoning?: string;
-  warning?: string;
-};
-
-const STAGE_ONE_KEY = "shopling_product_context";
-const STAGE_TWO_KEY = "seed_selection";
-const STAGE_THREE_KEY = "seed_cleaning";
-const STAGE_FOUR_KEY = "probe_generation";
-const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
-const RESUME_STORAGE_KEY = "keywordEngineElonLab.resumeStage.v1";
-
-async function readApiState(response: Response): Promise<ApiState> {
+async function requestLab<T extends ApiRecord>(body?: Record<string, unknown>, method: "GET" | "POST" = "POST") {
+  const response = await fetch("/api/keyword-engine-elon-lab", {
+    method,
+    headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
+    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+    cache: "no-store",
+  });
   const raw = await response.text();
-  if (!raw) return { ok: response.ok };
+  let payload: unknown = null;
   try {
-    return JSON.parse(raw) as ApiState;
+    payload = raw ? JSON.parse(raw) : null;
   } catch {
-    const preview = raw.replace(/\s+/g, " ").trim().slice(0, 180);
-    throw new Error(`HTTP ${response.status} · 서버 비정상 응답: ${preview || "EMPTY_BODY"}`);
+    throw new Error(`서버가 JSON이 아닌 응답을 반환했습니다. HTTP ${response.status}: ${raw.slice(0, 220)}`);
+  }
+  if (!isRecord(payload)) throw new Error(`서버 응답 형식이 올바르지 않습니다. HTTP ${response.status}`);
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(typeof payload.error === "string" ? payload.error : `요청 실패 · HTTP ${response.status}`);
+  }
+  return payload as T;
+}
+
+function Chips({ values }: { values: string[] }) {
+  if (!values.length) return <span className="text-sm text-slate-400">없음</span>;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {values.map((value) => (
+        <span key={value} className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+          {value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ScoreCell({ value }: { value: number }) {
+  return <span className="font-semibold tabular-nums">{Number(value).toFixed(1)}</span>;
+}
+
+function loadLocalSession() {
+  if (typeof window === "undefined") return emptyKeywordElonSession();
+  try {
+    const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY);
+    if (!raw) return emptyKeywordElonSession();
+    const parsed = JSON.parse(raw) as Partial<KeywordElonLabSession>;
+    if (parsed.version !== 2 || !parsed.source) return emptyKeywordElonSession();
+    return {
+      ...emptyKeywordElonSession(),
+      ...parsed,
+      cutoff: Number.isFinite(Number(parsed.cutoff)) ? Number(parsed.cutoff) : KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+    } as KeywordElonLabSession;
+  } catch {
+    return emptyKeywordElonSession();
   }
 }
 
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-      {JSON.stringify(value ?? {}, null, 2)}
-    </pre>
-  );
-}
-
-function statusBadge(row: KeywordEngineElonLabStoredRow | undefined) {
-  if (!row) return { label: "미실행", className: "bg-slate-100 text-slate-600" };
-  if (row.run_status === "error") return { label: "실행오류", className: "bg-red-100 text-red-800" };
-  if (row.review_status === "pass") return { label: "통과", className: "bg-emerald-100 text-emerald-800" };
-  if (row.review_status === "improve") return { label: "개선필요", className: "bg-amber-100 text-amber-900" };
-  return { label: "검수대기", className: "bg-blue-100 text-blue-800" };
-}
-
-function mergeStoredRows(
-  current: KeywordEngineElonLabStoredRow[],
-  incoming: KeywordEngineElonLabStoredRow[],
-) {
-  const map = new Map(
-    current.map((row) => [`${row.stage_key}:${row.goods_key}`, row] as const),
-  );
-  for (const row of incoming) map.set(`${row.stage_key}:${row.goods_key}`, row);
-  return [...map.values()];
-}
-
-function rowTime(row: KeywordEngineElonLabStoredRow | undefined) {
-  const parsed = row?.updated_at ? Date.parse(row.updated_at) : 0;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function freshAfter(
-  row: KeywordEngineElonLabStoredRow | undefined,
-  previous: KeywordEngineElonLabStoredRow | undefined,
-) {
-  return Boolean(row && previous && rowTime(row) >= rowTime(previous));
-}
-
-function passCount(rows: Array<KeywordEngineElonLabStoredRow | undefined>) {
-  return rows.filter((row) => row?.review_status === "pass").length;
-}
-
-function improveCount(rows: Array<KeywordEngineElonLabStoredRow | undefined>) {
-  return rows.filter((row) => row?.review_status === "improve").length;
-}
-
-function allReady(rows: Array<KeywordEngineElonLabStoredRow | undefined>) {
-  return rows.length === 6 && rows.every((row) => row?.run_status === "ready");
-}
-
-function textList(values: string[] | undefined) {
-  return values?.length ? values.join(" · ") : "없음";
-}
-
-function percent(value: number | undefined) {
-  if (!Number.isFinite(value)) return "—";
-  return `${Math.round((value ?? 0) * 100)}%`;
-}
-
 export default function KeywordEngineElonLabPage() {
-  const [rows, setRows] = useState<KeywordEngineElonLabStoredRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [runningStage, setRunningStage] = useState<number | null>(null);
-  const [stageOneProgress, setStageOneProgress] = useState(0);
-  const [reviewSaving, setReviewSaving] = useState<string | null>(null);
-  const [bulkSavingStage, setBulkSavingStage] = useState<number | null>(null);
-  const [message, setMessage] = useState("");
-  const [reviewFeedback, setReviewFeedback] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set([0]));
-
-  const refresh = async () => {
-    const response = await fetch("/api/keyword-engine-elon-lab", { cache: "no-store" });
-    const data = await readApiState(response);
-    if (!response.ok || !data.ok) throw new Error(data.message || "실험 이력을 불러오지 못했습니다.");
-    setRows(data.rows ?? []);
-    setNotes((current) => {
-      const next = { ...current };
-      for (const row of data.rows ?? []) {
-        const key = `${row.stage_key}:${row.goods_key}`;
-        if (next[key] === undefined) next[key] = row.review_note ?? "";
-      }
-      return next;
-    });
-  };
+  const [session, setSession] = useState<KeywordElonLabSession>(() => emptyKeywordElonSession());
+  const [hydrated, setHydrated] = useState(false);
+  const [busy, setBusy] = useState<"" | "collect" | "identity" | "stage2" | "title">("");
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-      .catch((error) => setMessage(error instanceof Error ? error.message : "이력을 불러오지 못했습니다."))
-      .finally(() => setLoading(false));
+    setSession(loadLocalSession());
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHydrated(true);
   }, []);
 
-  const rowMap = useMemo(() => {
-    const map = new Map<string, KeywordEngineElonLabStoredRow>();
-    for (const row of rows) map.set(`${row.stage_key}:${row.goods_key}`, row);
-    return map;
-  }, [rows]);
-
-  const stageOneRow = (goodsKey: string) => rowMap.get(`${STAGE_ONE_KEY}:${goodsKey}`);
-  const stageTwoRow = (goodsKey: string) => {
-    const previous = stageOneRow(goodsKey);
-    const row = rowMap.get(`${STAGE_TWO_KEY}:${goodsKey}`);
-    return freshAfter(row, previous) ? row : undefined;
-  };
-  const stageThreeRow = (goodsKey: string) => {
-    const previous = stageTwoRow(goodsKey);
-    const row = rowMap.get(`${STAGE_THREE_KEY}:${goodsKey}`);
-    return freshAfter(row, previous) ? row : undefined;
-  };
-  const stageFourRow = (goodsKey: string) => {
-    const previous = stageThreeRow(goodsKey);
-    const row = rowMap.get(`${STAGE_FOUR_KEY}:${goodsKey}`);
-    if (row?.engine_revision !== STAGE_FOUR_REVISION) return undefined;
-    return freshAfter(row, previous) ? row : undefined;
-  };
-
-  const stageOneRows = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map(stageOneRow);
-  const stageTwoRows = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map(stageTwoRow);
-  const stageThreeRows = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map(stageThreeRow);
-  const stageFourRows = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map(stageFourRow);
-
-  const stageOnePass = passCount(stageOneRows);
-  const stageTwoPass = passCount(stageTwoRows);
-  const stageThreePass = passCount(stageThreeRows);
-  const stageFourPass = passCount(stageFourRows);
-  const stageOnePassed = stageOnePass === 6;
-  const stageTwoPassed = stageTwoPass === 6;
-  const stageThreePassed = stageThreePass === 6;
-  const stageFourPassed = stageFourPass === 6;
-  const stageOneReady = allReady(stageOneRows);
-  const stageTwoReady = allReady(stageTwoRows);
-  const stageThreeReady = allReady(stageThreeRows);
-  const stageFourReady = allReady(stageFourRows);
-
-  const resumeStage = !stageOnePassed
-    ? 1
-    : !stageTwoPassed
-      ? 2
-      : !stageThreePassed
-        ? 3
-        : !stageFourPassed
-          ? 4
-          : 5;
+  useEffect(() => {
+    if (!hydrated) return;
+    window.localStorage.setItem(KEYWORD_ELON_V2_STORAGE_KEY, JSON.stringify(session));
+  }, [hydrated, session]);
 
   useEffect(() => {
-    if (loading) return;
-    const saved = Number(window.localStorage.getItem(RESUME_STORAGE_KEY));
-    const savedStage = Number.isInteger(saved) && saved >= 1 && saved <= 41 ? saved : 0;
-    window.localStorage.setItem(RESUME_STORAGE_KEY, String(Math.max(resumeStage, savedStage)));
-  }, [loading, resumeStage]);
-
-  const rememberStage = (stageNumber: number) => {
-    if (stageNumber >= 1) window.localStorage.setItem(RESUME_STORAGE_KEY, String(stageNumber));
-  };
-
-  const goToStage = (stageNumber: number) => {
-    rememberStage(stageNumber);
-    setExpandedStages((current) => new Set(current).add(stageNumber));
-    window.setTimeout(() => {
-      document.getElementById(`keyword-elon-stage-${stageNumber}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  };
-
-  const postRunStage = async (stageKey: string, goodsKeys: string[]) => {
-    const response = await fetch("/api/keyword-engine-elon-lab", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "run_stage", stageKey, goodsKeys }),
-    });
-    const data = await readApiState(response);
-    if (!response.ok || !data.ok) throw new Error(data.message || "단계 실행에 실패했습니다.");
-    return data;
-  };
-
-  const runStageOneIsolated = async () => {
-    const failures: string[] = [];
-    let completed = 0;
-    setStageOneProgress(0);
-    for (let index = 0; index < KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.length; index += 2) {
-      const group = KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.slice(index, index + 2);
-      const results = await Promise.all(
-        group.map(async (goodsKey) => {
-          try {
-            const data = await postRunStage(STAGE_ONE_KEY, [goodsKey]);
-            const updatedRows = data.rows ?? [];
-            if (!updatedRows.length) throw new Error("저장 결과 행 없음");
-            setRows((current) => mergeStoredRows(current, updatedRows));
-            return "";
-          } catch (error) {
-            return `${goodsKey}: ${error instanceof Error ? error.message : "실행 실패"}`;
-          }
-        }),
-      );
-      failures.push(...results.filter(Boolean));
-      completed += group.length;
-      setStageOneProgress(completed);
-      setMessage(
-        failures.length
-          ? `STEP 1 진행 ${completed}/6 · 실패 ${failures.length}건`
-          : `STEP 1 진행 ${completed}/6`,
-      );
-    }
-    await refresh().catch(() => undefined);
-    if (failures.length) {
-      throw new Error(`STEP 1 일부 실패 · ${failures.join(" · ")}`);
-    }
-  };
-
-  const runStage = async (stageKey: string, stageNumber: number, alreadyExecuted: boolean) => {
-    if (alreadyExecuted) {
-      const confirmed = window.confirm(
-        `STEP ${stageNumber}을 다시 실행하면 이 단계의 기존 통과/개선필요 판정이 모두 검수대기로 초기화됩니다. 정말 재실행하시겠습니까?`,
-      );
-      if (!confirmed) return;
-    }
-    setRunningStage(stageNumber);
-    setMessage(stageNumber === 1 ? "STEP 1 요청 시작 · 0/6" : "");
-    rememberStage(stageNumber);
-    try {
-      if (stageNumber === 1) {
-        await runStageOneIsolated();
-      } else {
-        const data = await postRunStage(stageKey, [...KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS]);
-        const updatedRows = data.rows ?? [];
-        if (updatedRows.length) setRows((current) => mergeStoredRows(current, updatedRows));
-        await refresh();
-      }
-      setMessage(`STEP ${stageNumber} · 6개 실행 완료 · 결과를 검수해 주세요.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : `STEP ${stageNumber} 실행에 실패했습니다.`);
-      await refresh().catch(() => undefined);
-    } finally {
-      setRunningStage(null);
-      if (stageNumber === 1) setStageOneProgress(0);
-    }
-  };
-
-  const saveReview = async (
-    stageKey: string,
-    goodsKey: string,
-    reviewStatus: KeywordEngineElonLabReviewStatus,
-  ) => {
-    const key = `${stageKey}:${goodsKey}`;
-    setReviewSaving(key);
-    setReviewFeedback((current) => ({ ...current, [key]: "저장 중…" }));
-    try {
-      const response = await fetch("/api/keyword-engine-elon-lab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "review_stage",
-          goodsKey,
-          stageKey,
-          reviewStatus,
-          reviewNote: notes[key] ?? "",
-        }),
+    let cancelled = false;
+    requestLab<ApiRecord & Readiness>(undefined, "GET")
+      .then((result) => {
+        if (!cancelled) setReadiness({ openAiConfigured: result.openAiConfigured, searchAdConfigured: result.searchAdConfigured });
+      })
+      .catch(() => {
+        if (!cancelled) setReadiness(null);
       });
-      const data = await readApiState(response);
-      if (!response.ok || !data.ok) throw new Error(data.message || "검수 판정을 저장하지 못했습니다.");
-      const updatedRows = data.rows ?? [];
-      if (!updatedRows.length) throw new Error("서버 저장 결과 행을 확인하지 못했습니다.");
-      setRows((current) => mergeStoredRows(current, updatedRows));
-      const label = reviewStatus === "pass" ? "통과" : reviewStatus === "improve" ? "개선필요" : "검수대기";
-      setReviewFeedback((current) => ({ ...current, [key]: `✓ ${label} 저장 완료` }));
-    } catch (error) {
-      setReviewFeedback((current) => ({
-        ...current,
-        [key]: `저장 실패 · ${error instanceof Error ? error.message : "검수 판정을 저장하지 못했습니다."}`,
-      }));
-    } finally {
-      setReviewSaving(null);
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const saveBulkPass = async (stageKey: string, stageNumber: number) => {
-    if (!window.confirm(`STEP ${stageNumber}의 6개 goods_key 결과를 모두 일괄 통과 처리하시겠습니까?`)) return;
-    setBulkSavingStage(stageNumber);
-    rememberStage(stageNumber);
-    try {
-      const response = await fetch("/api/keyword-engine-elon-lab", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "review_stage_batch", stageKey, goodsKeys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS }),
-      });
-      const data = await readApiState(response);
-      if (!response.ok || !data.ok) throw new Error(data.message || "6개 일괄 통과를 저장하지 못했습니다.");
-      const updatedRows = data.rows ?? [];
-      if (updatedRows.length !== 6) throw new Error("6개 일괄 통과 결과를 모두 확인하지 못했습니다.");
-      setRows((current) => mergeStoredRows(current, updatedRows));
-      setMessage(`STEP ${stageNumber} · 6개 goods_key 일괄 통과 저장 완료`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "6개 일괄 통과를 저장하지 못했습니다.");
-    } finally {
-      setBulkSavingStage(null);
-    }
-  };
-
-  const toggleStage = (index: number) => {
-    rememberStage(index);
-    setExpandedStages((current) => {
-      const next = new Set(current);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
-      return next;
-    });
-  };
-
-  const reviewControls = (
-    stageKey: string,
-    goodsKey: string,
-    row: KeywordEngineElonLabStoredRow,
-    placeholder: string,
-  ) => {
-    const key = `${stageKey}:${goodsKey}`;
-    const savingThis = reviewSaving === key;
-    return (
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <label className="text-xs font-bold text-slate-600">내 검수 메모</label>
-        <textarea
-          value={notes[key] ?? ""}
-          onChange={(event) => setNotes((current) => ({ ...current, [key]: event.target.value }))}
-          placeholder={placeholder}
-          className="mt-2 min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-        />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            disabled={row.run_status !== "ready" || Boolean(reviewSaving) || bulkSavingStage !== null}
-            onClick={() => void saveReview(stageKey, goodsKey, "pass")}
-            className={`rounded-lg px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300 ${row.review_status === "pass" ? "bg-emerald-800 ring-2 ring-emerald-300" : "bg-emerald-700"}`}
-          >
-            {savingThis ? "저장 중…" : row.review_status === "pass" ? "✓ 통과 완료" : "이 상품 통과"}
-          </button>
-          <button
-            disabled={row.run_status !== "ready" || Boolean(reviewSaving) || bulkSavingStage !== null}
-            onClick={() => void saveReview(stageKey, goodsKey, "improve")}
-            className={`rounded-lg px-3 py-2 text-sm font-bold text-white disabled:bg-slate-300 ${row.review_status === "improve" ? "bg-amber-700 ring-2 ring-amber-300" : "bg-amber-600"}`}
-          >
-            {savingThis ? "저장 중…" : row.review_status === "improve" ? "✓ 개선 필요" : "개선 필요"}
-          </button>
-          <button
-            disabled={Boolean(reviewSaving) || bulkSavingStage !== null}
-            onClick={() => void saveReview(stageKey, goodsKey, "pending")}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 disabled:bg-slate-100"
-          >
-            판정 초기화
-          </button>
-        </div>
-        {reviewFeedback[key] ? <p className="mt-2 text-xs font-bold text-blue-800">{reviewFeedback[key]}</p> : null}
-      </div>
-    );
-  };
-
-  const stateForStage = (index: number) => {
-    if (index === 0) return "고정";
-    const stats = [
-      null,
-      { previous: true, ready: stageOneReady, pass: stageOnePass, improve: improveCount(stageOneRows) },
-      { previous: stageOnePassed, ready: stageTwoReady, pass: stageTwoPass, improve: improveCount(stageTwoRows) },
-      { previous: stageTwoPassed, ready: stageThreeReady, pass: stageThreePass, improve: improveCount(stageThreeRows) },
-      { previous: stageThreePassed, ready: stageFourReady, pass: stageFourPass, improve: improveCount(stageFourRows) },
-    ];
-    if (index >= 1 && index <= 4) {
-      const stat = stats[index]!;
-      if (!stat.previous) return "앞 단계 대기";
-      if (stat.pass === 6) return "통과";
-      if (stat.improve) return "개선 중";
-      if (stat.ready) return `검수 중 ${stat.pass}/6`;
-      return "실행 가능";
-    }
-    if (index === 5 && stageFourPassed) return "다음 개발 대상";
-    return "잠금";
-  };
-
-  const executionControls = (stageNumber: number, stageKey: string, ready: boolean, passed: number) => (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        onClick={() => void runStage(stageKey, stageNumber, ready)}
-        disabled={runningStage !== null || bulkSavingStage !== null}
-        className={ready ? "rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-900 disabled:bg-slate-200" : "rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white disabled:bg-slate-300"}
-      >
-        {runningStage === stageNumber
-          ? stageNumber === 1
-            ? `STEP 1 실행 중 ${stageOneProgress}/6…`
-            : `STEP ${stageNumber} 실행 중…`
-          : ready
-            ? `STEP ${stageNumber} 결과 재실행 · 판정 초기화`
-            : `STEP ${stageNumber} · 6개 모두 실행`}
-      </button>
-      {ready ? (
-        <button
-          onClick={() => void saveBulkPass(stageKey, stageNumber)}
-          disabled={passed === 6 || bulkSavingStage !== null || runningStage !== null}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-black text-white disabled:bg-emerald-200 disabled:text-emerald-700"
-        >
-          {bulkSavingStage === stageNumber ? "6개 일괄 통과 저장 중…" : passed === 6 ? "✓ 6개 모두 통과" : `6개 일괄 통과 (${passed}/6 → 6/6)`}
-        </button>
-      ) : null}
-    </div>
+  const passing = useMemo(
+    () => session.scoredCandidates.filter((row) => row.qualityScore >= session.cutoff),
+    [session.scoredCandidates, session.cutoff],
   );
+  const stage2Ready = session.stage1Review === "pass" && Boolean(session.identity);
+  const minimumMet = passing.length >= KEYWORD_ELON_V2_MINIMUM_KEYWORDS;
 
-  const stageSummary = (stageIndex: number, row: KeywordEngineElonLabStoredRow) => {
-    if (stageIndex === 1) {
-      const output = row.output_payload as StageOneOutput;
-      return <div className="mt-4 space-y-1 text-sm"><p><b>prod_nm:</b> {output.productName || "—"}</p><p><b>model_no / model_nm:</b> {output.modelNo || "—"} / {output.modelName || "—"}</p><p><b>현재 site_srch:</b> {output.currentSiteSearch || "—"}</p><p><b>현행 seed 후보:</b> {output.currentEngineSeed || "—"} ({output.currentEngineSeedSource || "—"})</p><p><b>상세설명:</b> raw {output.detailDescriptionRawLength ?? 0} / text {output.detailDescriptionTextLength ?? 0}</p></div>;
-    }
-    if (stageIndex === 2) {
-      const output = row.output_payload as StageTwoOutput;
-      return <div className="mt-4 space-y-1 text-sm"><p><b>prod_nm:</b> {output.productName || "—"}</p><p><b>model_nm:</b> {output.modelName || "—"}</p><p><b>선택 Seed:</b> <span className="font-bold text-blue-800">{output.selectedSeed || "—"}</span></p><p><b>Source:</b> {output.selectedSeedSource || "—"}</p><p><b>근거:</b> {output.selectionReason || "—"}</p></div>;
-    }
-    if (stageIndex === 3) {
-      const output = row.output_payload as StageThreeOutput;
-      return <div className="mt-4 space-y-1 text-sm"><p><b>정제 전:</b> {output.rawSeed || "—"}</p><p><b>정제 후:</b> <span className="font-bold text-blue-800">{output.cleanedSeed || "—"}</span></p><p><b>변경:</b> {output.changed ? "변경됨" : "변경 없음"}</p><p><b>제거:</b> {output.removedExpressions?.length ? output.removedExpressions.map((item) => `${item.term}×${item.count ?? 1}`).join(" · ") : "없음"}</p><p><b>경고:</b> {output.warning || "없음"}</p></div>;
-    }
-    const output = row.output_payload as StageFourOutput;
-    return (
-      <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full text-sm"><tbody className="divide-y divide-slate-100">
-          <tr><th className="w-48 py-2 pr-4 text-left text-slate-500">정제 Seed</th><td className="py-2">{output.cleanedSeed || "—"}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">CORE_PRODUCT</th><td className="py-2 text-base font-black text-blue-800">{output.coreProduct || "—"}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">IDENTITY_ANCHOR</th><td className="py-2 text-base font-black text-emerald-800">{output.identityAnchor || "—"}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">기능·종류 수식어</th><td className="py-2">{textList(output.functionModifiers)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">디자인·형상 수식어</th><td className="py-2">{textList(output.designShapeModifiers)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">스펙·규격</th><td className="py-2">{textList(output.specAttributes)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">옵션·변형 Noise</th><td className="py-2">{textList(output.variantNoise)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">판단 보류 표현</th><td className="py-2">{textList(output.uncertainTerms)}</td></tr>
-          <tr className="bg-emerald-50"><th className="py-2 pr-4 text-left text-emerald-800">PRIMARY PROBE</th><td className="py-2 font-black text-emerald-900">{textList(output.primaryProbes)}</td></tr>
-          <tr className="bg-blue-50"><th className="py-2 pr-4 text-left text-blue-800">CONDITIONAL PROBE</th><td className="py-2 font-bold text-blue-900">{textList(output.conditionalProbes)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">단독 Probe 차단</th><td className="py-2">{textList(output.blockedSingleProbes)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">분류 신뢰도</th><td className="py-2">{percent(output.confidence)}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">판단 근거</th><td className="py-2">{output.reasoning || "—"}</td></tr>
-          <tr><th className="py-2 pr-4 text-left text-slate-500">경고</th><td className="py-2">{output.warning || "없음"}</td></tr>
-        </tbody></table>
-      </div>
-    );
-  };
+  function resetDownstream(source: KeywordElonSourceDraft, message = "원본 정보가 변경되어 STEP 1 이후 결과를 초기화했습니다.") {
+    setSession((previous) => ({
+      ...previous,
+      source,
+      identity: null,
+      stage1Review: "pending",
+      discovery: null,
+      scoredCandidates: [],
+      titleResult: null,
+      stage2Status: "idle",
+      lastMessage: message,
+      updatedAt: new Date().toISOString(),
+    }));
+  }
 
-  const rowsForStage = (index: number) => index === 1 ? stageOneRows : index === 2 ? stageTwoRows : index === 3 ? stageThreeRows : stageFourRows;
-  const stageKeyForIndex = (index: number) => index === 1 ? STAGE_ONE_KEY : index === 2 ? STAGE_TWO_KEY : index === 3 ? STAGE_THREE_KEY : STAGE_FOUR_KEY;
-  const stageReadyForIndex = (index: number) => index === 1 ? stageOneReady : index === 2 ? stageTwoReady : index === 3 ? stageThreeReady : stageFourReady;
-  const stagePassForIndex = (index: number) => index === 1 ? stageOnePass : index === 2 ? stageTwoPass : index === 3 ? stageThreePass : stageFourPass;
-  const previousPassedForIndex = (index: number) => index === 1 || (index === 2 && stageOnePassed) || (index === 3 && stageTwoPassed) || (index === 4 && stageThreePassed);
+  function updateSourceField(field: "url" | "chineseTitle" | "optionText" | "supportingText", value: string) {
+    const source = { ...session.source, [field]: value };
+    if (field === "url") {
+      source.offerId = "";
+      source.autoStatus = "idle";
+      source.warnings = [];
+    }
+    resetDownstream(source);
+  }
+
+  async function collectSource() {
+    const url = session.source.url.trim();
+    if (!validate1688Url(url)) {
+      setSession((previous) => ({ ...previous, lastMessage: "1688.com 상품 링크를 입력해 주세요." }));
+      return;
+    }
+    setBusy("collect");
+    try {
+      const result = await requestLab<ApiRecord & { source: KeywordElonSourceDraft }>({ action: "collect_source", url });
+      const source: KeywordElonSourceDraft = {
+        ...result.source,
+        chineseTitle: result.source.chineseTitle || session.source.chineseTitle,
+        optionText: result.source.optionText || session.source.optionText,
+        supportingText: result.source.supportingText || session.source.supportingText,
+      };
+      resetDownstream(source, `1688 자동수집 ${source.autoStatus === "success" ? "완료" : source.autoStatus === "partial" ? "부분 완료" : "실패"}. 필요한 값은 아래에서 직접 보완할 수 있습니다.`);
+    } catch (error) {
+      setSession((previous) => ({ ...previous, lastMessage: error instanceof Error ? error.message : "1688 자동수집 실패" }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function analyzeIdentity() {
+    if (!session.source.chineseTitle.trim() && !session.source.optionText.trim()) {
+      setSession((previous) => ({ ...previous, lastMessage: "중국 상품명 또는 옵션정보를 입력해 주세요." }));
+      return;
+    }
+    setBusy("identity");
+    try {
+      const result = await requestLab<ApiRecord & { identity: KeywordElonIdentity }>({ action: "analyze_identity", source: session.source });
+      setSession((previous) => ({
+        ...previous,
+        identity: result.identity,
+        stage1Review: "pending",
+        discovery: null,
+        scoredCandidates: [],
+        titleResult: null,
+        stage2Status: "idle",
+        lastMessage: "STEP 1 분석 완료. 상품 정체성과 Seed를 검수한 뒤 통과시켜 주세요.",
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      setSession((previous) => ({ ...previous, lastMessage: error instanceof Error ? error.message : "STEP 1 분석 실패" }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function runStage2() {
+    if (!session.identity || session.stage1Review !== "pass") return;
+    const source = session.source;
+    const identity = session.identity;
+    const cutoff = session.cutoff;
+    setBusy("stage2");
+    setSession((previous) => ({ ...previous, stage2Status: "discovering", lastMessage: "STEP 2 · 후보를 넓게 수집하고 있습니다…" }));
+    try {
+      const discovered = await requestLab<ApiRecord & { discovery: KeywordElonDiscovery }>({ action: "discover_keywords", source, identity });
+      setSession((previous) => ({ ...previous, discovery: discovered.discovery, stage2Status: "scoring", lastMessage: `후보 ${discovered.discovery.candidates.length}개 수집 · 품질점수 계산 중…` }));
+      const scored = await requestLab<ApiRecord & { candidates: KeywordElonCandidate[] }>({ action: "score_keywords", source, identity, discovery: discovered.discovery });
+      setSession((previous) => ({ ...previous, scoredCandidates: scored.candidates, stage2Status: "title", lastMessage: "키워드 점수화 완료 · 고득점 키워드로 상품명을 조립 중…" }));
+      const titled = await requestLab<ApiRecord & { titleResult: KeywordElonTitleResult }>({ action: "generate_title", source, identity, candidates: scored.candidates, cutoff });
+      const passed = scored.candidates.filter((row) => row.qualityScore >= cutoff).length;
+      setSession((previous) => ({
+        ...previous,
+        discovery: discovered.discovery,
+        scoredCandidates: scored.candidates,
+        titleResult: titled.titleResult,
+        stage2Status: "done",
+        lastMessage: passed >= KEYWORD_ELON_V2_MINIMUM_KEYWORDS ? `STEP 2 완료 · ${cutoff}점 이상 ${passed}개 통과` : `STEP 2 완료 · ${cutoff}점 이상 ${passed}개. 최소 10개에 못 미쳐 추가 발굴이 필요합니다.`,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (error) {
+      setSession((previous) => ({ ...previous, stage2Status: "error", lastMessage: error instanceof Error ? error.message : "STEP 2 실패" }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function regenerateTitle() {
+    if (!session.identity || !session.scoredCandidates.length) return;
+    setBusy("title");
+    try {
+      const result = await requestLab<ApiRecord & { titleResult: KeywordElonTitleResult }>({ action: "generate_title", source: session.source, identity: session.identity, candidates: session.scoredCandidates, cutoff: session.cutoff });
+      setSession((previous) => ({ ...previous, titleResult: result.titleResult, lastMessage: `현재 ${session.cutoff}점 커트라인으로 상품명을 다시 만들었습니다.`, updatedAt: new Date().toISOString() }));
+    } catch (error) {
+      setSession((previous) => ({ ...previous, lastMessage: error instanceof Error ? error.message : "상품명 재생성 실패" }));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function changeCutoff(value: number) {
+    const cutoff = Math.max(0, Math.min(100, value));
+    setSession((previous) => ({ ...previous, cutoff, titleResult: null, lastMessage: `품질 커트라인을 ${cutoff}점으로 변경했습니다. 상품명은 새 커트라인으로 다시 생성해 주세요.`, updatedAt: new Date().toISOString() }));
+  }
+
+  function newExperiment() {
+    if (!window.confirm("현재 브라우저에 저장된 실험 결과를 비우고 새 1688 상품으로 시작할까요?")) return;
+    setSession(emptyKeywordElonSession());
+  }
+
+  async function copySession() {
+    await navigator.clipboard.writeText(JSON.stringify(session, null, 2));
+    setSession((previous) => ({ ...previous, lastMessage: "현재 실험 JSON을 클립보드에 복사했습니다." }));
+  }
+
+  const statusLabel = session.stage2Status === "discovering" ? "후보 수집 중" : session.stage2Status === "scoring" ? "점수화 중" : session.stage2Status === "title" ? "상품명 생성 중" : session.stage2Status === "done" ? "완료" : session.stage2Status === "error" ? "오류" : "대기";
 
   return (
-    <div className="space-y-6 pb-16">
-      <PageHeader title="키워드엔진 일론머스크식 분해개선작업" description="같은 6개 상품으로 각 단계의 실제 Input → Output을 보고, 만족스러운 단계만 통과시킨 뒤 다음 단계로 이동합니다." />
-
-      <section className="rounded-xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">
-        <p className="font-bold">격리 테스트 원칙</p>
-        <p className="mt-2">Shopling은 읽기만 합니다. 키워드·상품명·가격·재고를 수정하지 않습니다. 단계 결과와 사람의 판정만 Supabase에 기록합니다.</p>
-      </section>
-
-      <section className="rounded-xl border border-blue-300 bg-blue-50 p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-black uppercase tracking-wide text-blue-700">진행상태 자동 복원</p>
-            <p className="mt-1 text-lg font-black text-blue-950">현재 이어서 작업: STEP {resumeStage}</p>
-            <p className="mt-1 text-sm text-blue-900">새로고침·재배포 후에도 Supabase의 실행/통과 결과를 기준으로 현재 STEP을 다시 계산합니다. 검수 클릭은 실행시각을 바꾸지 않아 다음 STEP을 오래된 결과로 만들지 않습니다.</p>
-          </div>
-          <button type="button" onClick={() => goToStage(resumeStage)} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-black text-white">STEP {resumeStage}로 이동</button>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <main className="mx-auto max-w-[1500px] space-y-6 px-5 py-8 text-slate-900">
+      <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><h2 className="text-lg font-bold text-slate-950">고정 테스트 goods_key 6개</h2><p className="mt-1 text-sm text-slate-600">이 6개를 모든 단계에서 동일하게 비교합니다.</p></div>
-          <div className="flex flex-wrap gap-2">{KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey) => <span key={goodsKey} className="rounded-full bg-slate-900 px-3 py-1 text-sm font-bold text-white">{goodsKey}</span>)}</div>
+          <div>
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Commerce OS · Keyword Lab V2</div>
+            <h1 className="mt-2 text-3xl font-black">키워드엔진 일론머스크식 분해개선작업</h1>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">1688 중국 원본 링크에서 상품 정체성을 먼저 확정하고, 품질 커트라인을 넘는 키워드를 개수 제한 없이 점수순으로 보존한 뒤 상위 키워드로 상품명을 조립합니다.</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={copySession} className="rounded-lg border px-4 py-2 text-sm font-bold">실험 JSON 복사</button>
+            <button onClick={newExperiment} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">새 실험 시작</button>
+          </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-5">
-          <div className="rounded-lg bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500">실제 실행 연결</p><p className="mt-1 font-bold text-slate-950">STEP 1~4</p></div>
-          {[stageOnePass, stageTwoPass, stageThreePass, stageFourPass].map((count, index) => <div key={index} className="rounded-lg bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500">STEP {index + 1}</p><p className="mt-1 font-bold text-slate-950">{count}/6 통과</p></div>)}
+        <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold">
+          <span className={`rounded-full px-3 py-1 ${readiness?.openAiConfigured ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>OpenAI {readiness?.openAiConfigured ? "연결" : "미설정"}</span>
+          <span className={`rounded-full px-3 py-1 ${readiness?.searchAdConfigured ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>SearchAd {readiness?.searchAdConfigured ? "연결" : "선택적 미설정"}</span>
+          <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-800">브라우저 자동저장</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">Shopling/Supabase 쓰기 없음</span>
         </div>
-        {message ? <p className="mt-4 rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-800">{message}</p> : null}
+        {session.lastMessage ? <div className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-900">{session.lastMessage}</div> : null}
+      </header>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-5 flex items-center gap-3"><span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-black text-white">STEP 1</span><div><h2 className="text-xl font-black">1688 원본 → 상품 정체성 · Seed 확정</h2><p className="text-sm text-slate-500">판매자가 만든 모델명은 입력으로 사용하지 않습니다.</p></div></div>
+        <label className="text-sm font-bold">1688 중국 상품 링크</label>
+        <div className="mt-2 flex gap-2">
+          <input value={session.source.url} onChange={(event) => updateSourceField("url", event.target.value)} placeholder="https://detail.1688.com/offer/...html" className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm" />
+          <button disabled={busy !== ""} onClick={collectSource} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50">{busy === "collect" ? "자동수집 중…" : "1688 원본 자동수집"}</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded bg-slate-100 px-2 py-1">offerId: {session.source.offerId || "—"}</span><span className="rounded bg-slate-100 px-2 py-1">자동수집: {session.source.autoStatus}</span></div>
+        {session.source.warnings.length ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><div className="font-black">자동수집 참고</div>{session.source.warnings.map((warning) => <div key={warning} className="mt-1">• {warning}</div>)}</div> : null}
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="space-y-2 text-sm font-bold">중국 상품명 <textarea value={session.source.chineseTitle} onChange={(event) => updateSourceField("chineseTitle", event.target.value)} rows={4} placeholder="자동수집이 부족하면 1688 상품명을 그대로 붙여넣으세요." className="w-full rounded-xl border border-slate-300 p-3 font-normal" /></label>
+          <label className="space-y-2 text-sm font-bold">중국 옵션명 · 옵션값 <textarea value={session.source.optionText} onChange={(event) => updateSourceField("optionText", event.target.value)} rows={4} placeholder="예: 颜色: 粉色 / 款式: B款 / 尺码: XL" className="w-full rounded-xl border border-slate-300 p-3 font-normal" /></label>
+        </div>
+        <details className="mt-4 rounded-xl border border-slate-200 p-4"><summary className="cursor-pointer text-sm font-bold">자동수집 보조 텍스트 / 수동 보완</summary><textarea value={session.source.supportingText} onChange={(event) => updateSourceField("supportingText", event.target.value)} rows={7} className="mt-3 w-full rounded-xl border border-slate-300 p-3 text-xs" /></details>
+        <button disabled={busy !== "" || (!session.source.chineseTitle.trim() && !session.source.optionText.trim())} onClick={analyzeIdentity} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40">{busy === "identity" ? "상품 정체성 분석 중…" : "STEP 1 · 상품 정체성·Seed 분석"}</button>
+
+        {session.identity ? <div className="mt-6 rounded-2xl border border-indigo-200 bg-indigo-50/40 p-5">
+          <div className="grid gap-4 md:grid-cols-3"><div><div className="text-xs font-bold text-slate-500">상품 정체성</div><div className="mt-1 text-lg font-black">{session.identity.koreanProductIdentity}</div></div><div><div className="text-xs font-bold text-slate-500">CORE_PRODUCT</div><div className="mt-1 font-black">{session.identity.coreProduct}</div></div><div><div className="text-xs font-bold text-slate-500">IDENTITY_ANCHOR</div><div className="mt-1 font-black">{session.identity.identityAnchor}</div></div></div>
+          <div className="mt-5 grid gap-5 lg:grid-cols-2"><div><div className="mb-2 text-xs font-black text-blue-700">PRIMARY SEED</div><Chips values={session.identity.primarySeeds} /></div><div><div className="mb-2 text-xs font-black text-amber-700">CONDITIONAL SEED</div><Chips values={session.identity.conditionalSeeds} /></div></div>
+          <div className="mt-5 grid gap-4 md:grid-cols-4 text-sm"><div><div className="font-bold">기능/종류</div><Chips values={session.identity.functionModifiers} /></div><div><div className="font-bold">디자인/형상</div><Chips values={session.identity.designShapeModifiers} /></div><div><div className="font-bold">스펙</div><Chips values={session.identity.specAttributes} /></div><div><div className="font-bold">옵션 Noise</div><Chips values={session.identity.variantNoise} /></div></div>
+          <div className="mt-5 rounded-xl bg-white p-4 text-sm"><b>AI 신뢰도:</b> {(session.identity.confidence * 100).toFixed(0)}% · <b>근거:</b> {session.identity.reasoning}</div>
+          <div className="mt-4 flex gap-2"><button onClick={() => setSession((previous) => ({ ...previous, stage1Review: "pass", lastMessage: "STEP 1 통과. STEP 2를 실행할 수 있습니다." }))} className={`rounded-lg px-4 py-2 text-sm font-black text-white ${session.stage1Review === "pass" ? "bg-emerald-700" : "bg-emerald-600"}`}>✓ STEP 1 통과</button><button onClick={() => setSession((previous) => ({ ...previous, stage1Review: "improve", lastMessage: "STEP 1 개선 필요로 표시했습니다. 중국 원본을 보완하거나 다시 분석하세요." }))} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-black text-white">개선 필요</button></div>
+        </div> : null}
       </section>
 
-      {loading ? <section className="rounded-xl border border-slate-200 bg-white p-5">실험 이력을 불러오는 중입니다.</section> : null}
+      <section className={`rounded-2xl border bg-white p-6 shadow-sm ${stage2Ready ? "border-slate-200" : "border-slate-100 opacity-70"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-black text-white">STEP 2</span><div><h2 className="text-xl font-black">키워드 대량 발굴 → 품질점수 → 커트라인</h2><p className="text-sm text-slate-500">최대 10개가 아니라, 커트라인을 통과한 키워드는 모두 보존합니다.</p></div></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{statusLabel}</span></div>
+        {!stage2Ready ? <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm font-semibold text-slate-500">STEP 1의 상품 정체성과 Seed를 확인하고 `STEP 1 통과`를 눌러 주세요.</div> : <div className="mt-5 flex flex-wrap items-center gap-4"><button disabled={busy !== ""} onClick={runStage2} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40">{busy === "stage2" ? `STEP 2 실행 중 · ${statusLabel}` : session.stage2Status === "done" ? "STEP 2 · 추가 발굴 다시 실행" : "STEP 2 · 키워드 대량 발굴"}</button><label className="flex items-center gap-3 text-sm font-bold">품질 커트라인 <input type="number" min={0} max={100} step={1} value={session.cutoff} onChange={(event) => changeCutoff(Number(event.target.value))} className="w-20 rounded-lg border px-3 py-2" />점</label><span className="text-sm text-slate-500">최소 목표 {KEYWORD_ELON_V2_MINIMUM_KEYWORDS}개 · 상한 없음</span></div>}
 
-      <section className="space-y-3">
-        {KEYWORD_ENGINE_ELON_LAB_STAGES.map((stage) => {
-          const expanded = expandedStages.has(stage.index) || stage.index === resumeStage;
-          const stateLabel = stateForStage(stage.index);
-          const stateClass = stateLabel === "통과" ? "bg-emerald-100 text-emerald-800" : stateLabel === "개선 중" ? "bg-amber-100 text-amber-900" : stateLabel === "실행 가능" || stateLabel === "다음 개발 대상" ? "bg-blue-100 text-blue-800" : "bg-slate-100 text-slate-700";
-          return (
-            <article id={`keyword-elon-stage-${stage.index}`} key={stage.key} className="scroll-mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <button type="button" onClick={() => toggleStage(stage.index)} className="flex w-full items-start justify-between gap-4 p-5 text-left">
-                <div><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-black text-slate-500">STEP {stage.index}</span><span className={`rounded-full px-2 py-1 text-xs font-bold ${stateClass}`}>{stateLabel}</span>{stage.index === resumeStage ? <span className="rounded-full bg-blue-700 px-2 py-1 text-xs font-black text-white">현재 작업</span> : null}</div><h2 className="mt-2 text-lg font-bold text-slate-950">{stage.title}</h2><p className="mt-1 text-sm text-slate-600">{stage.purpose}</p></div>
-                <span className="text-xl text-slate-400">{expanded ? "−" : "+"}</span>
-              </button>
-
-              {expanded ? (
-                <div className="border-t border-slate-100 p-5">
-                  <div className="grid gap-3 md:grid-cols-2"><div className="rounded-lg border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-black uppercase tracking-wide text-blue-700">Input</p><p className="mt-2 text-sm font-semibold text-blue-950">{stage.input}</p></div><div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4"><p className="text-xs font-black uppercase tracking-wide text-emerald-700">Output</p><p className="mt-2 text-sm font-semibold text-emerald-950">{stage.output}</p></div></div>
-
-                  {stage.index === 0 ? <div className="mt-4 rounded-lg bg-slate-50 p-4"><p className="text-sm font-bold">실제 Input</p><JsonBlock value={{ goods_keys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS }} /><p className="mt-4 text-sm font-bold">실제 Output</p><JsonBlock value={{ valid: true, count: 6, normalized_goods_keys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS }} /></div> : null}
-
-                  {stage.index >= 1 && stage.index <= 4 ? (
-                    <div className="mt-5 space-y-4">
-                      {!previousPassedForIndex(stage.index) ? <p className="rounded-lg bg-slate-50 p-4 text-sm">앞 STEP의 6개 통과가 완료되어야 실행할 수 있습니다.</p> : <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">{executionControls(stage.index, stageKeyForIndex(stage.index), stageReadyForIndex(stage.index), stagePassForIndex(stage.index))}{stage.index === 2 ? <p className="mt-2 text-xs font-semibold text-slate-700">현행 규칙: prod_nm → model_nm → goods_key</p> : null}{stage.index === 3 ? <p className="mt-2 text-xs font-semibold text-slate-700">현행 제거어: 색상랜덤 · 랜덤색상 · 색상 랜덤 · 랜덤 · 무료배송 · 당일배송</p> : null}{stage.index === 4 ? <p className="mt-2 text-xs font-semibold text-blue-950">V2: AI는 상품 역할만 분류하고 Probe는 규칙으로 생성합니다. 디자인·형상어는 Conditional에 보존하고 색상·옵션코드는 단독 Probe에서 차단합니다.</p> : null}</div>}
-
-                      {previousPassedForIndex(stage.index) ? KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.map((goodsKey, goodsIndex) => {
-                        const row = rowsForStage(stage.index)[goodsIndex];
-                        const badge = statusBadge(row);
-                        return <div key={goodsKey} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><b>goods_key {goodsKey}</b><span className={`rounded-full px-2 py-1 text-xs font-bold ${badge.className}`}>{badge.label}</span></div>{row?.engine_revision ? <span className="text-xs text-slate-400">{row.engine_revision}</span> : null}</div>{row ? <><div className="mt-4 grid gap-3 xl:grid-cols-2"><div><p className="mb-2 text-xs font-bold text-blue-700">실제 Input</p><JsonBlock value={row.input_payload} /></div><div><p className="mb-2 text-xs font-bold text-emerald-700">실제 Output</p><JsonBlock value={row.output_payload} /></div></div>{row.run_status === "error" ? <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-800">{row.error_message || `STEP ${stage.index} 실행 오류`}</p> : null}{stageSummary(stage.index, row)}{row.run_status === "ready" ? reviewControls(stageKeyForIndex(stage.index), goodsKey, row, stage.index === 4 ? "core_product, identity_anchor, Primary/Conditional Probe가 적합한지 기록" : "현재 결과가 적합한지 기록") : null}</> : <p className="mt-3 text-sm text-slate-500">이 STEP을 먼저 실행하세요.</p>}</div>;
-                      }) : null}
-                    </div>
-                  ) : null}
-
-                  {stage.index >= 5 ? <div className={`mt-4 rounded-lg p-4 text-sm ${stage.index === 5 && stageFourPassed ? "bg-blue-50 text-blue-950" : "bg-slate-50 text-slate-600"}`}>{stage.index === 5 && stageFourPassed ? "STEP 4 V2의 6개 결과가 모두 통과했습니다. STEP 5 연관검색어 수집이 다음 구현·개선 대상입니다." : "앞 단계가 아직 통과되지 않았거나 실제 실행이 연결되지 않았습니다. Input/Output 정의만 확인할 수 있습니다."}</div> : null}
-                </div>
-              ) : null}
-            </article>
-          );
-        })}
+        {session.discovery ? <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="rounded-xl bg-slate-50 p-4"><div className="text-xs font-bold text-slate-500">전체 후보</div><div className="mt-1 text-2xl font-black">{session.discovery.candidates.length}</div></div><div className="rounded-xl bg-emerald-50 p-4"><div className="text-xs font-bold text-emerald-700">커트 통과</div><div className="mt-1 text-2xl font-black text-emerald-800">{passing.length}</div></div><div className="rounded-xl bg-blue-50 p-4"><div className="text-xs font-bold text-blue-700">AI 확장</div><div className="mt-1 text-2xl font-black">{session.discovery.aiGeneratedCount}</div></div><div className="rounded-xl bg-violet-50 p-4"><div className="text-xs font-bold text-violet-700">SearchAd 연관어</div><div className="mt-1 text-2xl font-black">{session.discovery.relatedKeywordCount}</div></div><div className="rounded-xl bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">수요 데이터</div><div className="mt-1 text-sm font-black">{session.discovery.searchAdConfigured ? "연결" : "없음"}</div></div></div> : null}
+        {session.discovery?.searchAdWarnings.length ? <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">{session.discovery.searchAdWarnings.join(" · ")}</div> : null}
+        {session.scoredCandidates.length ? <div className="mt-6 overflow-x-auto"><table className="min-w-[1150px] w-full border-collapse text-sm"><thead><tr className="border-b bg-slate-50 text-left text-xs text-slate-600"><th className="p-3">순위</th><th className="p-3">키워드</th><th className="p-3">품질</th><th className="p-3">월검색</th><th className="p-3">관련성</th><th className="p-3">쇼핑의도</th><th className="p-3">구체성</th><th className="p-3">경쟁기회</th><th className="p-3">상품명</th><th className="p-3">근거/출처</th></tr></thead><tbody>{session.scoredCandidates.map((row, index) => { const pass = row.qualityScore >= session.cutoff; return <tr key={`${row.searchKey}-${index}`} className={`border-b ${pass ? "bg-emerald-50/50" : "bg-white"}`}><td className="p-3 tabular-nums">{index + 1}</td><td className="p-3"><div className="font-black">{row.keyword}</div><div className={`mt-1 inline-block rounded px-2 py-0.5 text-[11px] font-bold ${pass ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>{pass ? "통과" : "컷 미만"}</div></td><td className="p-3"><ScoreCell value={row.qualityScore} /></td><td className="p-3 tabular-nums">{row.totalSearch === null ? "—" : row.totalSearch.toLocaleString()}</td><td className="p-3"><ScoreCell value={row.relevance} /></td><td className="p-3"><ScoreCell value={row.shoppingIntent} /></td><td className="p-3"><ScoreCell value={row.specificity} /></td><td className="p-3"><ScoreCell value={row.competitionOpportunity} /></td><td className="p-3">{row.titleEligible ? "✅" : "—"}</td><td className="max-w-[340px] p-3 text-xs text-slate-600"><div>{row.rationale}</div><div className="mt-1 text-slate-400">{row.sourceTags.join(", ") || "AI 평가"} · {row.dataConfidence}</div></td></tr>; })}</tbody></table></div> : null}
       </section>
-    </div>
+
+      {session.scoredCandidates.length ? <section className="rounded-2xl border-2 border-slate-900 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="text-xs font-black tracking-[0.16em] text-slate-500">FINAL RESULT</div><h2 className="mt-1 text-2xl font-black">상품명 + 품질 통과 키워드 전체</h2></div><span className={`rounded-full px-4 py-2 text-sm font-black ${minimumMet ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>{minimumMet ? `PASS · ${passing.length}개` : `추가 발굴 필요 · ${passing.length}/${KEYWORD_ELON_V2_MINIMUM_KEYWORDS}`}</span></div>
+        {!minimumMet ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">커트라인 미만 키워드를 억지로 채우지 않습니다. STEP 2를 다시 실행해 후보를 추가 발굴하거나, 결과를 검토한 뒤 품질 커트라인 자체를 조정하세요.</div> : null}
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1.5fr]"><div className="rounded-2xl bg-slate-900 p-5 text-white"><div className="text-xs font-bold text-slate-300">추천 상품명</div><div className="mt-2 text-2xl font-black">{session.titleResult?.title || "현재 커트라인으로 상품명을 생성해 주세요."}</div>{session.titleResult ? <><div className="mt-3 text-xs text-slate-300">{session.titleResult.byteLength} bytes · model {session.titleResult.model}</div><div className="mt-4"><div className="mb-2 text-xs font-bold text-slate-300">사용 키워드</div><div className="flex flex-wrap gap-2">{session.titleResult.usedKeywords.map((keyword) => <span key={keyword} className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold">{keyword}</span>)}</div></div></> : null}<button disabled={busy !== ""} onClick={regenerateTitle} className="mt-5 rounded-lg bg-white px-4 py-2 text-sm font-black text-slate-900 disabled:opacity-40">{busy === "title" ? "상품명 생성 중…" : "현재 커트라인으로 상품명 다시 생성"}</button></div><div className="rounded-2xl bg-slate-50 p-5"><div className="text-xs font-bold text-slate-500">상품 정체성</div><div className="mt-1 text-lg font-black">{session.identity?.koreanProductIdentity}</div><div className="mt-4 text-xs font-bold text-slate-500">Primary Seed</div><div className="mt-2"><Chips values={session.identity?.primarySeeds ?? []} /></div><div className="mt-4 text-xs font-bold text-slate-500">품질 커트라인</div><div className="mt-1 text-xl font-black">{session.cutoff}점</div></div></div>
+        <div className="mt-6"><h3 className="text-lg font-black">통과 키워드 · 점수 높은 순</h3><div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{passing.map((row, index) => <div key={`final-${row.searchKey}-${index}`} className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3"><div><span className="mr-3 text-xs font-black text-emerald-700">#{index + 1}</span><span className="font-black">{row.keyword}</span></div><span className="font-black tabular-nums text-emerald-800">{row.qualityScore.toFixed(1)}</span></div>)}</div></div>
+      </section> : null}
+
+      <footer className="pb-8 text-center text-xs text-slate-400">세션 저장키: {KEYWORD_ELON_V2_STORAGE_KEY} · 현재 추천 상품명 {session.titleResult ? keywordElonUtf8Bytes(session.titleResult.title) : 0} bytes</footer>
+    </main>
   );
 }

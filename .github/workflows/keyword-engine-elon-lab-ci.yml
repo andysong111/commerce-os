@@ -27,17 +27,16 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint keyword lab files
+      - name: Lint keyword lab V2 files
         run: >-
           npx eslint
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
-          src/lib/keywordEngineElonLab.ts
-          src/lib/keywordEngineElonLabIdentity.ts
           src/lib/keywordEngineElonLabModule.ts
-          src/lib/keywordEngineElonLabShopling.ts
-          src/lib/keywordEngineElonLabStore.ts
-      - name: Test keyword lab contract
+          src/lib/keywordEngineElonLabV2.ts
+          src/lib/keywordEngineElonLabV2SearchAd.ts
+          src/lib/keywordEngineElonLabV2Server.ts
+      - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
           tests/keywordEngineElonLab.test.mjs
