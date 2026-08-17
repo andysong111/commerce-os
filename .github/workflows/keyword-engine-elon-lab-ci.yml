@@ -11,6 +11,7 @@ on:
       - "public/keyword-lab-collector/**"
       - "tests/keywordEngineElonLab.test.mjs"
       - "tests/keywordEngineElonLabRuntime.test.mjs"
+      - "tests/keywordEngineElonLabClientScoringBridge.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -34,6 +35,8 @@ jobs:
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
+          src/app/keyword-engine-elon-lab/layout.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts
@@ -44,6 +47,7 @@ jobs:
           node --experimental-strip-types --test
           tests/keywordEngineElonLab.test.mjs
           tests/keywordEngineElonLabRuntime.test.mjs
+          tests/keywordEngineElonLabClientScoringBridge.test.mjs
       - name: Build
         run: npm run build
         env:
