@@ -23,6 +23,7 @@ jobs:
           node --experimental-strip-types --test
           tests/fastPurchaseInternalDraft.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
+          tests/internalChinaInlineQuantity.test.mjs
       - name: Lint internal draft files
         run: >-
           npx eslint
@@ -32,8 +33,11 @@ jobs:
           src/app/api/fast-purchase/drafts/route.ts
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           src/app/fast-purchase-mvp/page.tsx
+          src/components/china-order-manager/InternalChinaDraftInlineQuantityBridge.tsx
+          src/app/china-order-manager/drafts/[draftId]/page.tsx
           tests/fastPurchaseInternalDraft.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
+          tests/internalChinaInlineQuantity.test.mjs
       - name: Build
         run: npm run build
         env:
