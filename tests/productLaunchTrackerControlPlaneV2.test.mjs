@@ -4,15 +4,24 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
-test("Product Master v2 marks the core-first architecture and lazy-loads detail modules", () => {
+test("Product Master v2 is core-first and gates OPS UI behind a healthy workflow probe", () => {
   const app = read("public/product-launch-tracker-app/app.js");
   const controlPlane = read("public/product-launch-tracker-app/product-master-control-plane.js");
+  const gate = read("public/product-launch-tracker-app/workflow-ui-gate.js");
   assert.match(app, /productLaunchArchitecture = "v2-core-first"/);
   assert.match(app, /detail-page-jobs\/active/);
   assert.match(app, /installLazyDetailPageIntegrations/);
   assert.match(app, /button\[data-action='detail'\]/);
-  assert.match(app, /OPS Workflow 연결 중 · 상품마스터는 계속 사용할 수 있습니다/);
+  assert.match(app, /workflow-ui-gate\.js/);
+  assert.match(app, /installWorkflowUiGate/);
+  assert.doesNotMatch(app, /await import\("\.\/optimized-app\.js"\)/);
   assert.match(controlPlane, /MASTER_FALLBACK_DELAY_MS = 0/);
+
+  assert.match(gate, /pageSize: "1"/);
+  assert.match(gate, /PROBE_TIMEOUT_MS = 4_500/);
+  assert.match(gate, /optimizedAppPromise = import\("\.\/optimized-app\.js"\)/);
+  assert.match(gate, /response\.ok && body\?\.ok === true/);
+  assert.match(gate, /IDLE_RETRY_MS = 30_000/);
 
   const standalone = app.split("} else {")[1] ?? "";
   const beforeLazyInstaller = standalone.split("function installLazyDetailPageIntegrations")[0] ?? "";
