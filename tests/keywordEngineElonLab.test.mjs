@@ -5,6 +5,7 @@ import test from "node:test";
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "utf8");
 const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
+const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const moduleFile = await readFile("src/lib/keywordEngineElonLabModule.ts", "utf8");
 
 test("Elon Lab V2 starts from a 1688 URL and exposes only two execution steps", () => {
@@ -13,6 +14,24 @@ test("Elon Lab V2 starts from a 1688 URL and exposes only two execution steps", 
   assert.match(page, /STEP 2/);
   assert.match(page, /FINAL RESULT/);
   assert.doesNotMatch(page, /121073|121065|121059|121053|121050|121045/);
+});
+
+test("primary 1688 collection uses the same browser-import pattern as SaaS", () => {
+  assert.match(page, /SaaS 방식 자동수집/);
+  assert.match(page, /AI-Saurus Importer v\{KEYWORD_ELON_REQUIRED_IMPORTER_VERSION\}/);
+  assert.match(page, /startBrowserSourceCollection/);
+  assert.match(browserImport, /commerce_os_keyword_lab_import/);
+  assert.match(browserImport, /commerce_os_keyword_lab_return/);
+  assert.match(browserImport, /commerce_keyword_import/);
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_IMPORTER_VERSION = "0\.4\.3"/);
+});
+
+test("structured 1688 option groups become readable group and option-value lines", () => {
+  assert.match(browserImport, /supplierOptionGroups/);
+  assert.match(browserImport, /group\.sourceName/);
+  assert.match(browserImport, /group\.values\.map/);
+  assert.match(browserImport, /join\(" \/ "\)/);
+  assert.match(browserImport, /keywordElonOptionTextFromBrowserPayload/);
 });
 
 test("V2 session survives refresh with browser storage", () => {
@@ -26,7 +45,7 @@ test("quality policy means minimum ten, not maximum ten", () => {
   assert.match(domain, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70/);
   assert.match(page, /최소 목표/);
   assert.match(page, /상한 없음/);
-  assert.match(page, /커트라인을 통과한 키워드는 모두 보존/);
+  assert.match(page, /개수 제한 없이 모두 보존/);
 });
 
 test("final result includes a generated product title", () => {
@@ -35,10 +54,11 @@ test("final result includes a generated product title", () => {
   assert.match(page, /통과 키워드 · 점수 높은 순/);
 });
 
-test("API exposes the V2 pipeline actions", () => {
+test("API keeps server collection only as a fallback and exposes V2 pipeline actions", () => {
   for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "generate_title"]) {
     assert.match(route, new RegExp(`action === \\"${action}\\"`));
   }
+  assert.match(page, /서버 보조수집/);
   assert.doesNotMatch(route, /keywordEngineElonLabStore|keywordEngineElonLabShopling/);
 });
 
