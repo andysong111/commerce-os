@@ -8,6 +8,8 @@ import {
 const BASE_URL = "https://api.searchad.naver.com";
 const KEYWORDSTOOL_URI = "/keywordstool";
 const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_INTERVAL_MS = 1_200;
+const RATE_LIMIT_BACKOFF_MS = 6_500;
 
 function env() {
   const apiKey = normalizeKeywordElonText(process.env.NAVER_SEARCHAD_API_KEY);
@@ -23,6 +25,10 @@ function signature(timestamp: string, method: string, uri: string, secretKey: st
     .digest("base64");
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function numberOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const raw = String(value).replace(/,/g, "").replace(/^<\s*/, "").trim();
@@ -32,6 +38,21 @@ function numberOrNull(value: unknown) {
 
 function totalCount(pc: number | null, mobile: number | null) {
   return pc === null && mobile === null ? null : (pc ?? 0) + (mobile ?? 0);
+}
+
+function safeErrorBody(raw: string, status: number) {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const safe = {
+      status,
+      type: normalizeKeywordElonText(parsed.type),
+      title: normalizeKeywordElonText(parsed.title),
+      detail: normalizeKeywordElonText(parsed.detail),
+    };
+    return JSON.stringify(safe);
+  } catch {
+    return raw.replace(/"?apikey"?\s*:\s*"[^"]+"/gi, '"apikey":"[REDACTED]"').replace(/\s+/g, " ").slice(0, 180);
+  }
 }
 
 function parseRow(item: Record<string, unknown>, sourceSeed: string): KeywordElonSearchAdStat | null {
@@ -58,10 +79,22 @@ function parseRow(item: Record<string, unknown>, sourceSeed: string): KeywordElo
   };
 }
 
-async function fetchSeed(seed: string) {
+type FetchSeedResult = {
+  ok: boolean;
+  rows: KeywordElonSearchAdStat[];
+  warning: string;
+  rateLimited: boolean;
+};
+
+async function fetchSeedOnce(seed: string): Promise<FetchSeedResult> {
   const credentials = env();
   if (!credentials.configured) {
-    return { ok: false as const, rows: [] as KeywordElonSearchAdStat[], warning: "SEARCHAD_NOT_CONFIGURED" };
+    return {
+      ok: false,
+      rows: [],
+      warning: "SEARCHAD_NOT_CONFIGURED",
+      rateLimited: false,
+    };
   }
   const timestamp = String(Date.now());
   const headers = {
@@ -81,16 +114,22 @@ async function fetchSeed(seed: string) {
     const raw = await response.text();
     if (!response.ok) {
       return {
-        ok: false as const,
-        rows: [] as KeywordElonSearchAdStat[],
-        warning: `SEARCHAD_HTTP_${response.status}:${raw.replace(/\s+/g, " ").slice(0, 180)}`,
+        ok: false,
+        rows: [],
+        warning: `SEARCHAD_HTTP_${response.status}:${safeErrorBody(raw, response.status)}`,
+        rateLimited: response.status === 429,
       };
     }
     let payload: unknown;
     try {
       payload = JSON.parse(raw);
     } catch {
-      return { ok: false as const, rows: [] as KeywordElonSearchAdStat[], warning: "SEARCHAD_INVALID_JSON" };
+      return {
+        ok: false,
+        rows: [],
+        warning: "SEARCHAD_INVALID_JSON",
+        rateLimited: false,
+      };
     }
     const keywordList =
       payload && typeof payload === "object" && Array.isArray((payload as { keywordList?: unknown[] }).keywordList)
@@ -100,13 +139,28 @@ async function fetchSeed(seed: string) {
       .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
       .map((item) => parseRow(item, seed))
       .filter((item): item is KeywordElonSearchAdStat => Boolean(item));
-    return { ok: true as const, rows, warning: "" };
+    return { ok: true, rows, warning: "", rateLimited: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : "SEARCHAD_REQUEST_FAILED";
-    return { ok: false as const, rows: [] as KeywordElonSearchAdStat[], warning: message };
+    return { ok: false, rows: [], warning: message, rateLimited: false };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchSeedWithRateLimitRecovery(seed: string): Promise<FetchSeedResult> {
+  const first = await fetchSeedOnce(seed);
+  if (!first.rateLimited) return first;
+
+  await sleep(RATE_LIMIT_BACKOFF_MS);
+  const retry = await fetchSeedOnce(seed);
+  if (!retry.rateLimited) return retry;
+
+  return {
+    ...retry,
+    warning:
+      "SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED: 키워드도구 429가 반복되었습니다. 일부 성공 결과만 사용하고 SearchAd 추가 호출을 중단했습니다. 최소 5분 뒤 다시 실행해 주세요.",
+  };
 }
 
 function mergeStat(
@@ -137,13 +191,17 @@ export async function discoverKeywordElonSearchAd(seeds: string[]) {
   }
 
   const normalizedSeeds = [...new Set(seeds.map(normalizeKeywordElonText).filter(Boolean))].slice(0, 8);
-  const results = await Promise.all(normalizedSeeds.map(fetchSeed));
   const map = new Map<string, KeywordElonSearchAdStat>();
   const warnings: string[] = [];
-  for (const result of results) {
+
+  for (let index = 0; index < normalizedSeeds.length; index += 1) {
+    if (index > 0) await sleep(REQUEST_INTERVAL_MS);
+    const result = await fetchSeedWithRateLimitRecovery(normalizedSeeds[index]);
     if (!result.ok && result.warning) warnings.push(result.warning);
     for (const row of result.rows) mergeStat(map, row);
+    if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) break;
   }
+
   return {
     configured: true,
     rows: [...map.values()].sort((a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1)),

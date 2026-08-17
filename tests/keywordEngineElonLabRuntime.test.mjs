@@ -100,6 +100,17 @@ test("SearchAd is optional and does not block discovery", () => {
   assert.match(server, /Promise\.all/);
 });
 
+test("SearchAd keyword tool calls are paced, recover once from 429, and redact API keys", () => {
+  assert.match(searchAd, /REQUEST_INTERVAL_MS = 1_200/);
+  assert.match(searchAd, /RATE_LIMIT_BACKOFF_MS = 6_500/);
+  assert.match(searchAd, /fetchSeedWithRateLimitRecovery/);
+  assert.match(searchAd, /for \(let index = 0; index < normalizedSeeds\.length; index \+= 1\)/);
+  assert.doesNotMatch(searchAd, /Promise\.all\(normalizedSeeds\.map\(fetchSeed/);
+  assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
+  assert.match(searchAd, /\[REDACTED\]/);
+  assert.match(searchAd, /delete|safeErrorBody/);
+});
+
 test("title generation is derived from scored title-eligible keywords and capped at 100 UTF-8 bytes", () => {
   assert.match(server, /qualityScore >= input\.cutoff && row\.titleEligible/);
   assert.match(server, /truncateUtf8\(.*100/);
