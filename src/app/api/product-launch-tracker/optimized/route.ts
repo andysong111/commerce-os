@@ -52,6 +52,7 @@ type ListStoredRow = {
 
 type Config = { supabaseUrl: string; secretKey: string };
 type Identity = { userId: string; email: string };
+type ReadMode = "page" | "item" | "items" | "export";
 
 export async function GET(request: NextRequest) {
   const identity = await resolveProductLaunchIdentity(request);
@@ -60,160 +61,8 @@ export async function GET(request: NextRequest) {
   const config = getProductLaunchAdminConfig();
   if (!config.ok) return Response.json(config.body, { status: config.status });
 
-  try {
-    const mode = request.nextUrl.searchParams.get("mode") || "page";
-    const workspace = await withDeadline(
-      readProductLaunchNormalizedWorkspace(config.value, identity.value.userId),
-      HUMAN_READ_TIMEOUT_MS,
-      "OPS Workflow 연결이 4초를 초과했습니다.",
-    );
-
-    if (mode === "page" && workspace?.normalized_read_enabled === true) {
-      const page = await withDeadline(
-        queryProductLaunchNormalizedPage(
-          config.value,
-          identity.value.userId,
-          workspace,
-          pageQuery(request),
-        ),
-        HUMAN_READ_TIMEOUT_MS,
-        "OPS Workflow 목록 조회가 4초를 초과했습니다.",
-      );
-      return Response.json({
-        ok: true,
-        stateExists: true,
-        ...page,
-        policy: isRecord(workspace.policy) ? workspace.policy : null,
-        sourceImportedAt: nullableText(workspace.source_imported_at),
-        updatedAt:
-          nullableText(workspace.source_state_updated_at) ??
-          nullableText(workspace.updated_at),
-        schemaVersion: numberOrNull(workspace.schema_version),
-        listSource: "normalized",
-        workflowSource: "normalized",
-      });
-    }
-
-    if (mode === "items") {
-      const requestedIds = requestedItemIds(request);
-      if (!requestedIds.length) {
-        return Response.json(
-          {
-            ok: false,
-            code: "PRODUCT_LAUNCH_TRACKER_ITEM_IDS_REQUIRED",
-            message: "불러올 상품 ID가 필요합니다.",
-          },
-          { status: 400 },
-        );
-      }
-      if (requestedIds.length > 100) {
-        return Response.json(
-          {
-            ok: false,
-            code: "PRODUCT_LAUNCH_TRACKER_ITEM_LIMIT_EXCEEDED",
-            message: "한 번에 최대 100개 상품까지 불러올 수 있습니다.",
-          },
-          { status: 400 },
-        );
-      }
-      if (workspace?.normalized_read_enabled === true) {
-        const items = await withDeadline(
-          readProductLaunchNormalizedItems(
-            config.value,
-            identity.value.userId,
-            requestedIds,
-          ),
-          HUMAN_READ_TIMEOUT_MS,
-          "OPS Workflow 상품 상세 조회가 4초를 초과했습니다.",
-        );
-        if (items.length !== requestedIds.length) {
-          return Response.json(
-            {
-              ok: false,
-              code: "PRODUCT_LAUNCH_TRACKER_ITEMS_NOT_FOUND",
-              message: "일부 상품 기록을 찾지 못했습니다. 목록을 새로고침한 뒤 다시 선택하세요.",
-            },
-            { status: 404 },
-          );
-        }
-        return Response.json({
-          ok: true,
-          stateExists: true,
-          items,
-          updatedAt:
-            nullableText(workspace.source_state_updated_at) ??
-            nullableText(workspace.updated_at),
-          schemaVersion: numberOrNull(workspace.schema_version),
-          workflowSource: "normalized",
-        });
-      }
-      return legacyItemsResponse(config.value, identity.value.userId, requestedIds);
-    }
-
-    if (mode === "item") {
-      const itemId = String(request.nextUrl.searchParams.get("id") ?? "").trim();
-      if (workspace?.normalized_read_enabled === true) {
-        const item = await withDeadline(
-          readProductLaunchNormalizedItem(
-            config.value,
-            identity.value.userId,
-            itemId,
-          ),
-          HUMAN_READ_TIMEOUT_MS,
-          "OPS Workflow 상품 상세 조회가 4초를 초과했습니다.",
-        );
-        if (!item) {
-          return Response.json(
-            {
-              ok: false,
-              code: "PRODUCT_LAUNCH_TRACKER_ITEM_NOT_FOUND",
-              message: "상품 기록을 찾지 못했습니다.",
-            },
-            { status: 404 },
-          );
-        }
-        return Response.json({
-          ok: true,
-          stateExists: true,
-          item,
-          policy: isRecord(workspace.policy) ? workspace.policy : null,
-          updatedAt:
-            nullableText(workspace.source_state_updated_at) ??
-            nullableText(workspace.updated_at),
-          schemaVersion: numberOrNull(workspace.schema_version),
-          workflowSource: "normalized",
-        });
-      }
-      return legacyItemResponse(config.value, identity.value.userId, itemId);
-    }
-
-    if (mode === "page") {
-      return legacyPageResponse(config.value, identity.value.userId, request);
-    }
-
-    if (mode === "export") {
-      const row = (await readProductLaunchState(
-        config.value,
-        identity.value.userId,
-      )) as StoredRow | null;
-      if (!row || !isRecord(row.state_payload)) {
-        return Response.json({
-          ok: true,
-          stateExists: false,
-          updatedAt: null,
-          schemaVersion: null,
-        });
-      }
-      return Response.json({
-        ok: true,
-        stateExists: true,
-        state: row.state_payload,
-        updatedAt: nullableText(row.updated_at),
-        schemaVersion: numberOrNull(row.schema_version),
-        workflowSource: "legacy-export",
-      });
-    }
-
+  const rawMode = request.nextUrl.searchParams.get("mode") || "page";
+  if (!isReadMode(rawMode)) {
     return Response.json(
       {
         ok: false,
@@ -222,20 +71,151 @@ export async function GET(request: NextRequest) {
       },
       { status: 400 },
     );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "OPS Workflow를 불러오지 못했습니다.";
-    return Response.json(
-      {
-        ok: false,
-        code: "PRODUCT_LAUNCH_TRACKER_WORKFLOW_UNAVAILABLE",
-        message,
-        retryable: true,
-      },
-      { status: 503 },
+  }
+  const mode: ReadMode = rawMode;
+
+  if (mode === "export") {
+    try {
+      return await legacyExportResponse(config.value, identity.value.userId);
+    } catch (error) {
+      return workflowUnavailableResponse(error);
+    }
+  }
+
+  const requestedIds = mode === "items" ? requestedItemIds(request) : [];
+  if (mode === "items") {
+    const invalid = validateRequestedItemIds(requestedIds);
+    if (invalid) return invalid;
+  }
+  const itemId =
+    mode === "item"
+      ? String(request.nextUrl.searchParams.get("id") ?? "").trim()
+      : "";
+
+  let workspace: Awaited<ReturnType<typeof readProductLaunchNormalizedWorkspace>>;
+  try {
+    workspace = await withDeadline(
+      readProductLaunchNormalizedWorkspace(config.value, identity.value.userId),
+      HUMAN_READ_TIMEOUT_MS,
+      "OPS Workflow 연결이 4초를 초과했습니다.",
     );
+  } catch (error) {
+    return degradedLegacyRead(
+      config.value,
+      identity.value.userId,
+      request,
+      mode,
+      requestedIds,
+      itemId,
+      error,
+    );
+  }
+
+  try {
+    if (mode === "page" && workspace?.normalized_read_enabled === true) {
+      try {
+        const page = await withDeadline(
+          queryProductLaunchNormalizedPage(
+            config.value,
+            identity.value.userId,
+            workspace,
+            pageQuery(request),
+          ),
+          HUMAN_READ_TIMEOUT_MS,
+          "OPS Workflow 목록 조회가 4초를 초과했습니다.",
+        );
+        return Response.json({
+          ok: true,
+          stateExists: true,
+          ...page,
+          policy: isRecord(workspace.policy) ? workspace.policy : null,
+          sourceImportedAt: nullableText(workspace.source_imported_at),
+          updatedAt:
+            nullableText(workspace.source_state_updated_at) ??
+            nullableText(workspace.updated_at),
+          schemaVersion: numberOrNull(workspace.schema_version),
+          listSource: "normalized",
+          workflowSource: "normalized",
+        });
+      } catch (error) {
+        return degradedLegacyRead(
+          config.value,
+          identity.value.userId,
+          request,
+          mode,
+          requestedIds,
+          itemId,
+          error,
+        );
+      }
+    }
+
+    if (mode === "items") {
+      if (workspace?.normalized_read_enabled === true) {
+        try {
+          const items = await withDeadline(
+            readProductLaunchNormalizedItems(
+              config.value,
+              identity.value.userId,
+              requestedIds,
+            ),
+            HUMAN_READ_TIMEOUT_MS,
+            "OPS Workflow 상품 상세 조회가 4초를 초과했습니다.",
+          );
+          if (items.length === requestedIds.length) {
+            return Response.json({
+              ok: true,
+              stateExists: true,
+              items,
+              updatedAt:
+                nullableText(workspace.source_state_updated_at) ??
+                nullableText(workspace.updated_at),
+              schemaVersion: numberOrNull(workspace.schema_version),
+              workflowSource: "normalized",
+            });
+          }
+        } catch (error) {
+          console.warn("Normalized Product Launch items read failed; using legacy fallback", error);
+        }
+      }
+      return legacyItemsResponse(config.value, identity.value.userId, requestedIds);
+    }
+
+    if (mode === "item") {
+      if (workspace?.normalized_read_enabled === true) {
+        try {
+          const item = await withDeadline(
+            readProductLaunchNormalizedItem(
+              config.value,
+              identity.value.userId,
+              itemId,
+            ),
+            HUMAN_READ_TIMEOUT_MS,
+            "OPS Workflow 상품 상세 조회가 4초를 초과했습니다.",
+          );
+          if (item) {
+            return Response.json({
+              ok: true,
+              stateExists: true,
+              item,
+              policy: isRecord(workspace.policy) ? workspace.policy : null,
+              updatedAt:
+                nullableText(workspace.source_state_updated_at) ??
+                nullableText(workspace.updated_at),
+              schemaVersion: numberOrNull(workspace.schema_version),
+              workflowSource: "normalized",
+            });
+          }
+        } catch (error) {
+          console.warn("Normalized Product Launch item read failed; using legacy fallback", error);
+        }
+      }
+      return legacyItemResponse(config.value, identity.value.userId, itemId);
+    }
+
+    return legacyPageResponse(config.value, identity.value.userId, request);
+  } catch (error) {
+    return workflowUnavailableResponse(error);
   }
 }
 
@@ -315,6 +295,95 @@ function requestedItemIds(request: NextRequest) {
         .filter(Boolean),
     ),
   ];
+}
+
+function validateRequestedItemIds(requestedIds: string[]) {
+  if (!requestedIds.length) {
+    return Response.json(
+      {
+        ok: false,
+        code: "PRODUCT_LAUNCH_TRACKER_ITEM_IDS_REQUIRED",
+        message: "불러올 상품 ID가 필요합니다.",
+      },
+      { status: 400 },
+    );
+  }
+  if (requestedIds.length > 100) {
+    return Response.json(
+      {
+        ok: false,
+        code: "PRODUCT_LAUNCH_TRACKER_ITEM_LIMIT_EXCEEDED",
+        message: "한 번에 최대 100개 상품까지 불러올 수 있습니다.",
+      },
+      { status: 400 },
+    );
+  }
+  return null;
+}
+
+async function degradedLegacyRead(
+  config: Config,
+  ownerId: string,
+  request: NextRequest,
+  mode: Exclude<ReadMode, "export">,
+  requestedIds: string[],
+  itemId: string,
+  normalizedError: unknown,
+) {
+  try {
+    const response =
+      mode === "page"
+        ? await legacyPageResponse(config, ownerId, request)
+        : mode === "items"
+          ? await legacyItemsResponse(config, ownerId, requestedIds)
+          : await legacyItemResponse(config, ownerId, itemId);
+    response.headers.set("X-Commerce-OS-Workflow-Fallback", "legacy-fast");
+    return response;
+  } catch (legacyError) {
+    console.error("Product Launch normalized and legacy reads both failed", {
+      normalizedError,
+      legacyError,
+    });
+    return workflowUnavailableResponse(legacyError, normalizedError);
+  }
+}
+
+function workflowUnavailableResponse(error: unknown, primaryError?: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : primaryError instanceof Error
+        ? primaryError.message
+        : "OPS Workflow를 불러오지 못했습니다.";
+  return Response.json(
+    {
+      ok: false,
+      code: "PRODUCT_LAUNCH_TRACKER_WORKFLOW_UNAVAILABLE",
+      message,
+      retryable: true,
+    },
+    { status: 503 },
+  );
+}
+
+async function legacyExportResponse(config: Config, ownerId: string) {
+  const row = (await readProductLaunchState(config, ownerId)) as StoredRow | null;
+  if (!row || !isRecord(row.state_payload)) {
+    return Response.json({
+      ok: true,
+      stateExists: false,
+      updatedAt: null,
+      schemaVersion: null,
+    });
+  }
+  return Response.json({
+    ok: true,
+    stateExists: true,
+    state: row.state_payload,
+    updatedAt: nullableText(row.updated_at),
+    schemaVersion: numberOrNull(row.schema_version),
+    workflowSource: "legacy-export",
+  });
 }
 
 async function legacyPageResponse(
@@ -610,6 +679,10 @@ function nullableText(value: unknown) {
 function numberOrNull(value: unknown) {
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
+}
+
+function isReadMode(value: string): value is ReadMode {
+  return value === "page" || value === "item" || value === "items" || value === "export";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
