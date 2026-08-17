@@ -67,6 +67,7 @@ type CategoryStatusBody = {
 type Tone = "blue" | "green" | "amber" | "red" | "slate";
 
 const JOBS_API = "/api/product-launch-tracker/detail-page-jobs";
+const ACTIVE_JOBS_API = "/api/product-launch-tracker/detail-page-jobs/active";
 const CATEGORY_STATUS_API = "/api/shopling-categories/status";
 const CATEGORY_TASK_KEY = "commerce-os-work-assistant:category-update:v1";
 const CATEGORY_EVENT_SOURCE = "commerce-os-category-update";
@@ -74,7 +75,9 @@ const DETAIL_DOCK_EVENT_SOURCE = "commerce-os-detail-page-dock";
 const WORK_ASSISTANT_SOURCE = "commerce-os-work-assistant";
 const DISMISSED_KEY = "commerce-os-work-assistant:dismissed-jobs:v1";
 const COLLAPSED_KEY = "commerce-os-work-assistant:collapsed:v1";
-const POLL_MS = 2_500;
+const ACTIVE_POLL_MS = 5_000;
+const IDLE_POLL_MS = 30_000;
+const HIDDEN_POLL_MS = 60_000;
 const RECENT_MS = 12 * 60 * 60 * 1_000;
 const ACTIVE_DETAIL = new Set<DetailStatus>([
   "collecting",
@@ -267,6 +270,7 @@ function elapsed(startedAt: string, now: number) {
 
 export function OpsWorkAssistant() {
   const workerRef = useRef<HTMLIFrameElement>(null);
+  const activeDetailRef = useRef(false);
   const [jobs, setJobs] = useState<DetailJob[]>([]);
   const [categoryTask, setCategoryTask] = useState<CategoryTask | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -288,11 +292,35 @@ export function OpsWorkAssistant() {
         jobs?: DetailJob[];
       };
       if (response.ok && body.ok === true && Array.isArray(body.jobs)) {
+        activeDetailRef.current = body.jobs.some((job) => ACTIVE_DETAIL.has(job.status));
         setJobs(body.jobs);
+        return activeDetailRef.current;
       }
     } catch {
       // Keep the last known jobs visible during transient failures.
     }
+    return activeDetailRef.current;
+  }, []);
+
+  const refreshDetailActivity = useCallback(async () => {
+    try {
+      const response = await fetch(ACTIVE_JOBS_API, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        active?: boolean | null;
+      };
+      if (response.ok && body.ok === true && typeof body.active === "boolean") {
+        activeDetailRef.current = body.active;
+        return body.active;
+      }
+    } catch {
+      // Keep the last known activity state and probe again later.
+    }
+    return activeDetailRef.current;
   }, []);
 
   const refreshCategory = useCallback(async () => {
@@ -388,10 +416,21 @@ export function OpsWorkAssistant() {
     setCategoryTask(task);
   }, []);
 
-  const refreshAll = useCallback(async () => {
-    await Promise.all([refreshDetailJobs(), refreshCategory()]);
-    setNow(Date.now());
-  }, [refreshCategory, refreshDetailJobs]);
+  const refreshAll = useCallback(
+    async (forceDetailList = false) => {
+      await refreshCategory();
+      let active = activeDetailRef.current;
+      if (forceDetailList || active) {
+        active = await refreshDetailJobs();
+      } else {
+        active = await refreshDetailActivity();
+        if (active) active = await refreshDetailJobs();
+      }
+      setNow(Date.now());
+      return active;
+    },
+    [refreshCategory, refreshDetailActivity, refreshDetailJobs],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -415,6 +454,7 @@ export function OpsWorkAssistant() {
       ) return;
 
       const job = payload.job;
+      activeDetailRef.current = true;
       setJobs((current) => [job, ...current.filter((item) => item.jobId !== job.jobId)]);
       setNow(Date.now());
       workerRef.current?.contentWindow?.postMessage(
@@ -425,10 +465,11 @@ export function OpsWorkAssistant() {
         },
         window.location.origin,
       );
+      window.setTimeout(() => void refreshDetailJobs(), 1_000);
     };
     window.addEventListener("message", onDetailDockMessage);
     return () => window.removeEventListener("message", onDetailDockMessage);
-  }, []);
+  }, [refreshDetailJobs]);
 
   useEffect(() => {
     const syncCategory = () => {
@@ -452,16 +493,41 @@ export function OpsWorkAssistant() {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => void refreshAll(), 0);
-    const interval = window.setInterval(() => void refreshAll(), POLL_MS);
-    const whenVisible = () => {
-      if (document.visibilityState === "visible") void refreshAll();
+    let stopped = false;
+    let timer: number | null = null;
+    let inFlight = false;
+
+    const schedule = (delay: number) => {
+      if (stopped) return;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(false), delay);
     };
+
+    const tick = async (forceDetailList: boolean) => {
+      if (stopped || inFlight) return;
+      if (document.visibilityState !== "visible" && !forceDetailList) {
+        schedule(HIDDEN_POLL_MS);
+        return;
+      }
+      inFlight = true;
+      try {
+        const active = await refreshAll(forceDetailList);
+        schedule(active ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const whenVisible = () => {
+      if (document.visibilityState === "visible") void tick(false);
+    };
+
+    void tick(true);
     window.addEventListener("focus", whenVisible);
     document.addEventListener("visibilitychange", whenVisible);
     return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
       window.removeEventListener("focus", whenVisible);
       document.removeEventListener("visibilitychange", whenVisible);
     };
@@ -517,6 +583,7 @@ export function OpsWorkAssistant() {
   }
 
   function retryDetail(itemId: string) {
+    activeDetailRef.current = true;
     workerRef.current?.contentWindow?.postMessage(
       {
         source: WORK_ASSISTANT_SOURCE,
