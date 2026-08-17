@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InternalChinaDraftStickySave } from "@/components/china-order-manager/InternalChinaDraftStickySave";
 import { InternalChinaPurchaseBudgetAudit } from "@/components/china-order-manager/InternalChinaPurchaseBudgetAudit";
 import { InternalChinaManualDraftLineAdder } from "@/components/china-order-manager/InternalChinaManualDraftLineAdder";
 import { InternalChinaPurchaseDraftWorkspaceV2 } from "@/components/china-order-manager/InternalChinaPurchaseDraftWorkspaceV2";
@@ -74,7 +75,7 @@ export default async function InternalChinaPurchaseDraftPage({
       />
 
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
-        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다. 추가 주문품목도 별도 Draft 없이 이 월간 Draft에 RESERVED로 합칩니다.
+        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장` 또는 우측의 `입력값 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다. 추가 주문품목도 별도 Draft 없이 이 월간 Draft에 RESERVED로 합칩니다.
       </section>
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
@@ -88,6 +89,8 @@ export default async function InternalChinaPurchaseDraftPage({
         initialDraft={draft}
         budgetAudit={budgetAudit}
       />
+
+      <InternalChinaDraftStickySave status={draft.status} />
     </div>
   );
 }
