@@ -5,6 +5,7 @@ import test from "node:test";
 const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "utf8");
 const server = await readFile("src/lib/keywordEngineElonLabV2Server.ts", "utf8");
 const searchAd = await readFile("src/lib/keywordEngineElonLabV2SearchAd.ts", "utf8");
+const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 
 test("V2 has no Shopling or Supabase write dependency", () => {
@@ -12,11 +13,27 @@ test("V2 has no Shopling or Supabase write dependency", () => {
   assert.doesNotMatch(page, /review_stage_batch|run_stage_one|goods_key/);
 });
 
-test("1688 collection fails soft and supports manual source continuation", () => {
+test("browser collection is primary and server scraping remains an explicit fallback", () => {
+  assert.match(page, /SaaS 방식 자동수집/);
+  assert.match(page, /브라우저 수집이 안 될 때만 서버 보조수집 사용/);
+  assert.match(page, /buildKeywordElonBrowserImportUrl/);
+  assert.match(page, /parseKeywordElonBrowserImportHash/);
+  assert.match(browserImport, /keywordElonSourceFromBrowserPayload/);
+  assert.match(server, /collectKeywordElon1688Source/);
+});
+
+test("browser payload carries rendered product name and structured option groups without image data", () => {
+  assert.match(browserImport, /productName/);
+  assert.match(browserImport, /supplierOptionGroups/);
+  assert.match(browserImport, /supplierOptions/);
+  assert.doesNotMatch(browserImport, /base64.*image|imageCandidates|image_index/i);
+});
+
+test("server 1688 collection still fails soft for emergency manual continuation", () => {
   assert.match(server, /validate1688Url/);
-  assert.match(server, /自动|자동 수집 실패/);
+  assert.match(server, /자동 수집 실패/);
   assert.match(server, /중국 상품명과 옵션명을 직접 붙여넣으면 STEP 1을 계속할 수 있습니다/);
-  assert.match(page, /자동수집이 부족하면 1688 상품명을 그대로 붙여넣으세요/);
+  assert.match(page, /서버 보조수집/);
 });
 
 test("identity analysis explicitly forbids seller model names", () => {
