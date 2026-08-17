@@ -5,6 +5,7 @@ import {
 } from "@/lib/chinaOrderLedger";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadProductLaunchPurchaseMetadataByBarcode } from "@/lib/productLaunchPurchaseMetadata";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
@@ -34,6 +35,10 @@ function normalizeBarcode(value: unknown) {
 function integer(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+}
+
+function joinedLabels(values: unknown[]) {
+  return [...new Set(values.map(text).filter(Boolean))].join(" / ");
 }
 
 function normalizeRequestId(value: unknown) {
@@ -99,10 +104,11 @@ export async function searchInternalChinaManualDraftCandidates(
   const query = text(queryInput);
   if (query.length < 2) return [];
 
-  const [draft, planning, ledger] = await Promise.all([
+  const [draft, planning, ledger, tracker] = await Promise.all([
     loadInternalChinaPurchaseDraft(draftIdInput),
     loadProductPlanningSnapshot(),
     loadChinaOrderLedger(),
+    loadProductLaunchPurchaseMetadataByBarcode(),
   ]);
   if (draft.status !== "DRAFT") {
     throw new Error("INTERNAL_CHINA_DRAFT_ALREADY_ORDERED");
@@ -132,11 +138,13 @@ export async function searchInternalChinaManualDraftCandidates(
     const barcode = normalizeBarcode(product.barcode);
     if (!BARCODE.test(barcode) || candidates.has(barcode)) continue;
     const current = currentDraftByBarcode.get(barcode);
+    const trackerRow = tracker.byBarcode.get(barcode);
     const candidate: InternalChinaManualDraftCandidate = {
       barcode,
-      modelNo: text(product.modelNo),
-      productName: text(product.productName) || barcode,
-      optionName: text(product.optionName),
+      modelNo: joinedLabels([trackerRow?.modelNumber, product.modelNo]),
+      productName:
+        joinedLabels([trackerRow?.productName, product.productName]) || barcode,
+      optionName: joinedLabels([trackerRow?.saleOption, product.optionName]),
       inDraft: Boolean(current),
       currentDraftQuantity: current?.quantity ?? 0,
       otherOpenQuantity: otherOpenByBarcode.get(barcode) ?? 0,
