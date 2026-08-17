@@ -104,15 +104,11 @@ function InlineQuantityControl({
   status: "DRAFT" | "ORDERED";
   barcode: string;
   quantity: number;
-  onSaved: (barcode: string, quantity: number, message: string) => void;
+  onSaved: (message: string) => void;
 }) {
   const [value, setValue] = useState(String(quantity));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    setValue(String(quantity));
-  }, [quantity]);
 
   const targetQuantity = Math.round(Number(value));
   const changed = Number.isFinite(targetQuantity) && targetQuantity !== quantity;
@@ -153,7 +149,7 @@ function InlineQuantityControl({
         body.draft?.lines?.find((line) => line.barcode === barcode)?.quantity ?? targetQuantity;
       setValue(String(savedQuantity));
       setMessage("저장됨");
-      onSaved(barcode, savedQuantity, body.message || `${barcode} 수량을 변경했습니다.`);
+      onSaved(body.message || `${barcode} 수량을 변경했습니다.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "저장 실패");
     } finally {
@@ -221,18 +217,7 @@ export function InternalChinaDraftInlineQuantityBridge({
 }) {
   const router = useRouter();
   const [targets, setTargets] = useState<TargetCell[]>([]);
-  const [quantities, setQuantities] = useState<Record<string, number>>(() =>
-    Object.fromEntries(lines.map((line) => [line.barcode, line.quantity])),
-  );
   const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    setQuantities((current) => {
-      const next = { ...current };
-      for (const line of lines) next[line.barcode] = line.quantity;
-      return next;
-    });
-  }, [lines]);
 
   const scan = useCallback(() => {
     const next = findQuantityTargets();
@@ -240,11 +225,12 @@ export function InternalChinaDraftInlineQuantityBridge({
   }, []);
 
   useEffect(() => {
-    scan();
+    const frame = window.requestAnimationFrame(scan);
     const observer = new MutationObserver(scan);
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", scan);
     return () => {
+      window.cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", scan);
     };
@@ -255,8 +241,7 @@ export function InternalChinaDraftInlineQuantityBridge({
     [lines],
   );
 
-  function saved(barcode: string, quantity: number, message: string) {
-    setQuantities((current) => ({ ...current, [barcode]: quantity }));
+  function saved(message: string) {
     setNotice(message);
     // Re-render server totals/budget without a full location reload; Next.js refresh
     // preserves the operator's current scroll position.
@@ -270,15 +255,15 @@ export function InternalChinaDraftInlineQuantityBridge({
         if (!line) return null;
         return createPortal(
           <InlineQuantityControl
-            key={target.barcode}
+            key={`${target.barcode}:${line.quantity}`}
             draftId={draftId}
             status={status}
             barcode={target.barcode}
-            quantity={quantities[target.barcode] ?? line.quantity}
+            quantity={line.quantity}
             onSaved={saved}
           />,
           target.cell,
-          `inline-qty-${target.barcode}`,
+          `inline-qty-${target.barcode}-${line.quantity}`,
         );
       })}
       {notice ? (
