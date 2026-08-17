@@ -110,7 +110,7 @@ test("same-origin operator API creates requests and exposes a manual one-step fa
   assert.doesNotMatch(api, /x-commerce-os-integration-secret/);
 });
 
-test("cron is bearer protected, idles when credentials are missing and is scheduled once per minute", () => {
+test("cron is bearer protected, idles when credentials are missing and stays automatically scheduled without minute-level DB pressure", () => {
   assert.match(cron, /Bearer \$\{expected\}/);
   assert.match(cron, /productDecisionLiveRefreshConfigured/);
   assert.match(cron, /configured: false/);
@@ -118,7 +118,7 @@ test("cron is bearer protected, idles when credentials are missing and is schedu
     vercel.crons.some(
       (entry) =>
         entry.path === "/api/cron/product-decision-live-refresh" &&
-        entry.schedule === "* * * * *",
+        entry.schedule === "2,17,32,47 * * * *",
     ),
   );
 });
