@@ -10,16 +10,29 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isProductMasterClientFrame(frame) {
+  try {
+    const url = new URL(frame.url());
+    return (
+      url.pathname === "/product-launch-tracker-app/index.html" &&
+      url.searchParams.get("detail_page_mode") !== "worker"
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function trackerFrame(page) {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
-    const frame = page.frames().find((candidate) =>
-      candidate.url().includes("/product-launch-tracker-app/index.html"),
-    );
+    const frame = page.frames().find(isProductMasterClientFrame);
     if (frame) return frame;
     await sleep(250);
   }
-  throw new Error("상품마스터 iframe을 찾지 못했습니다.");
+  const frameUrls = page.frames().map((frame) => frame.url()).filter(Boolean);
+  throw new Error(
+    `상품마스터 client iframe을 찾지 못했습니다. frames=${JSON.stringify(frameUrls)}`,
+  );
 }
 
 async function waitForProductionMarker(page) {
@@ -36,7 +49,7 @@ async function waitForProductionMarker(page) {
       const marker = await frame.evaluate(
         () => document.documentElement.dataset.productLaunchArchitecture || "",
       );
-      last = marker;
+      last = `${frame.url()} marker=${marker}`;
       if (marker === ARCHITECTURE_MARKER) return frame;
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
@@ -50,7 +63,23 @@ async function waitForUsableRows(frame, { requireFallback = false } = {}) {
   const selector = requireFallback
     ? "#launch-table-body tr.master-core-fallback-row"
     : "#launch-table-body tr";
-  await frame.waitForSelector(selector, { state: "visible", timeout: PAGE_READY_MS });
+  try {
+    await frame.waitForSelector(selector, { state: "visible", timeout: PAGE_READY_MS });
+  } catch (error) {
+    const diagnostic = await frame.evaluate(() => ({
+      url: location.href,
+      architecture: document.documentElement.dataset.productLaunchArchitecture || "",
+      workflowUi: document.documentElement.dataset.opsWorkflowUi || "",
+      fallback: document.body.dataset.productMasterFallback || "",
+      title: document.title,
+      rowCount: document.querySelectorAll("#launch-table-body tr").length,
+      bodyText: (document.body.innerText || "").slice(0, 2_000),
+      saveStatus: document.querySelector("#save-status")?.textContent || "",
+    })).catch(() => ({}));
+    throw new Error(
+      `상품마스터 행 대기 실패: ${error instanceof Error ? error.message : String(error)} diagnostic=${JSON.stringify(diagnostic)}`,
+    );
+  }
 
   const result = await frame.evaluate(({ requireFallback }) => {
     const rows = [...document.querySelectorAll("#launch-table-body tr")];
@@ -59,6 +88,8 @@ async function waitForUsableRows(frame, { requireFallback = false } = {}) {
     const tableWrap = document.querySelector(".table-wrap");
     return {
       architecture: document.documentElement.dataset.productLaunchArchitecture || "",
+      workflowUi: document.documentElement.dataset.opsWorkflowUi || "",
+      frameUrl: location.href,
       title: document.title,
       rowCount: rows.length,
       fallbackRowCount: fallbackRows.length,
@@ -115,7 +146,7 @@ async function runNormal(browser) {
     );
   }
   console.log(
-    `[normal] rows=${result.rowCount} fallback=${result.fallbackRowCount} fullJobListRequests=${fullJobListRequests}`,
+    `[normal] frame=${result.frameUrl} rows=${result.rowCount} fallback=${result.fallbackRowCount} workflowUi=${result.workflowUi || "none"} fullJobListRequests=${fullJobListRequests}`,
   );
   await context.close();
 }
@@ -151,7 +182,7 @@ async function runWorkflowFailureIsolation(browser) {
   }
   const result = await waitForUsableRows(frame, { requireFallback: true });
   console.log(
-    `[workflow-503] rows=${result.rowCount} fallback=${result.fallbackRowCount} cursor=${result.cursor || "default"}`,
+    `[workflow-503] frame=${result.frameUrl} rows=${result.rowCount} fallback=${result.fallbackRowCount} workflowUi=${result.workflowUi || "none"} cursor=${result.cursor || "default"}`,
   );
   await context.close();
 }
