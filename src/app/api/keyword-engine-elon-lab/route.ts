@@ -1,549 +1,79 @@
-import { NextResponse } from "next/server";
-import {
-  KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS,
-  KEYWORD_ENGINE_ELON_LAB_STAGES,
-  isKeywordEngineElonLabGoodsKey,
-  type KeywordEngineElonLabReviewStatus,
-} from "@/lib/keywordEngineElonLab";
-import { analyzeKeywordEngineIdentityBatch } from "@/lib/keywordEngineElonLabIdentity";
-import { loadKeywordEngineElonLabShoplingContexts } from "@/lib/keywordEngineElonLabShopling";
-import {
-  listKeywordEngineElonLabRows,
-  updateKeywordEngineElonLabReview,
-  updateKeywordEngineElonLabReviews,
-  upsertKeywordEngineElonLabRows,
-  type KeywordEngineElonLabStoredRow,
-} from "@/lib/keywordEngineElonLabStore";
-import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import { NextRequest, NextResponse } from "next/server";
+
+import type { KeywordElonCandidate, KeywordElonDiscovery, KeywordElonIdentity, KeywordElonSourceDraft } from "@/lib/keywordEngineElonLabV2";
+import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, discoverKeywordElonCandidates, generateKeywordElonTitle, scoreKeywordElonCandidates } from "@/lib/keywordEngineElonLabV2Server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const STAGE_ONE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 1)!;
-const STAGE_TWO = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 2)!;
-const STAGE_THREE = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 3)!;
-const STAGE_FOUR = KEYWORD_ENGINE_ELON_LAB_STAGES.find((stage) => stage.index === 4)!;
-const STAGE_FOUR_REVISION = "ops-stage4-semantic-identity-v2";
-
-const CURRENT_SEED_NOISE_TERMS = [
-  "색상 랜덤",
-  "색상랜덤",
-  "랜덤색상",
-  "무료배송",
-  "당일배송",
-  "랜덤",
-] as const;
-
-function jsonError(message: string, status = 400) {
-  return NextResponse.json(
-    { ok: false, message },
-    { status, headers: { "Cache-Control": "no-store" } },
-  );
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
-
-function assertSameOrigin(request: Request) {
-  return isSameOriginOpsRequest(request);
-}
-
-function text(value: unknown) {
-  return String(value ?? "").normalize("NFKC").trim();
-}
-
-function rowTime(row: KeywordEngineElonLabStoredRow | undefined) {
-  const parsed = row?.updated_at ? Date.parse(row.updated_at) : 0;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function requestedGoodsKeys(body: Record<string, unknown>) {
-  const requested = Array.isArray(body.goodsKeys)
-    ? body.goodsKeys.map((value) => String(value ?? "").trim())
-    : [...KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS];
-  return [...new Set(requested.filter(isKeywordEngineElonLabGoodsKey))];
-}
-
-function countOccurrences(source: string, target: string) {
-  if (!target || !source.includes(target)) return 0;
-  return source.split(target).length - 1;
-}
-
-function cleanCurrentSeed(value: unknown) {
-  const rawSeed = text(value);
-  let cleanedSeed = rawSeed;
-  const removedExpressions: { term: string; count: number }[] = [];
-
-  for (const term of CURRENT_SEED_NOISE_TERMS) {
-    const count = countOccurrences(cleanedSeed, term);
-    if (!count) continue;
-    removedExpressions.push({ term, count });
-    cleanedSeed = cleanedSeed.replaceAll(term, " ");
-  }
-
-  cleanedSeed = cleanedSeed.replace(/\s+/g, " ").trim();
+function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+function sourceFrom(value: unknown): KeywordElonSourceDraft {
+  if (!isRecord(value)) throw new Error("source 입력이 없습니다.");
   return {
-    rawSeed,
-    cleanedSeed,
-    removedExpressions,
-    changed: cleanedSeed !== rawSeed,
-    currentNoiseTerms: [...CURRENT_SEED_NOISE_TERMS],
-    whitespaceNormalized: true,
-    warning: cleanedSeed ? "" : "CLEANED_SEED_EMPTY",
+    url: text(value.url), offerId: text(value.offerId),
+    autoStatus: value.autoStatus === "success" || value.autoStatus === "partial" || value.autoStatus === "failed" ? value.autoStatus : "idle",
+    chineseTitle: text(value.chineseTitle), optionText: text(value.optionText), supportingText: text(value.supportingText),
+    warnings: Array.isArray(value.warnings) ? value.warnings.map(text).filter(Boolean).slice(0, 20) : [], collectedAt: text(value.collectedAt),
+  };
+}
+function identityFrom(value: unknown): KeywordElonIdentity {
+  if (!isRecord(value)) throw new Error("identity 입력이 없습니다.");
+  const strings = (key: string) => Array.isArray(value[key]) ? (value[key] as unknown[]).map(text).filter(Boolean).slice(0, 20) : [];
+  return {
+    koreanProductIdentity: text(value.koreanProductIdentity), coreProduct: text(value.coreProduct), identityAnchor: text(value.identityAnchor),
+    primarySeeds: strings("primarySeeds"), conditionalSeeds: strings("conditionalSeeds"), functionModifiers: strings("functionModifiers"),
+    designShapeModifiers: strings("designShapeModifiers"), specAttributes: strings("specAttributes"), variantNoise: strings("variantNoise"),
+    confidence: Math.max(0, Math.min(1, Number(value.confidence) || 0)), reasoning: text(value.reasoning), model: text(value.model),
+  };
+}
+function discoveryFrom(value: unknown): KeywordElonDiscovery {
+  if (!isRecord(value)) throw new Error("discovery 입력이 없습니다.");
+  return value as unknown as KeywordElonDiscovery;
+}
+function candidatesFrom(value: unknown): KeywordElonCandidate[] {
+  if (!Array.isArray(value)) throw new Error("candidates 입력이 없습니다.");
+  return value.filter(isRecord) as unknown as KeywordElonCandidate[];
+}
+function readiness() {
+  return {
+    openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
   };
 }
 
-function isCurrentReviewableRow(row: KeywordEngineElonLabStoredRow | undefined, stageKey: string) {
-  if (!row || row.run_status !== "ready") return false;
-  if (stageKey === STAGE_FOUR.key) return row.engine_revision === STAGE_FOUR_REVISION;
-  return true;
-}
+export async function GET() { return NextResponse.json({ ok: true, version: 2, ...readiness() }); }
 
-export async function GET(request: Request) {
-  if (!assertSameOrigin(request)) {
-    return jsonError("OPS Center 화면에서만 조회할 수 있습니다.", 403);
-  }
+export async function POST(request: NextRequest) {
   try {
-    const rows = await listKeywordEngineElonLabRows();
-    return NextResponse.json(
-      {
-        ok: true,
-        goodsKeys: KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS,
-        stages: KEYWORD_ENGINE_ELON_LAB_STAGES,
-        rows,
-      },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+    const body: unknown = await request.json();
+    if (!isRecord(body)) throw new Error("요청 본문이 올바르지 않습니다.");
+    const action = text(body.action);
+    if (action === "collect_source") {
+      const url = text(body.url); if (!url) throw new Error("1688 링크를 입력해 주세요.");
+      return NextResponse.json({ ok: true, action, source: await collectKeywordElon1688Source(url) });
+    }
+    if (action === "analyze_identity") {
+      return NextResponse.json({ ok: true, action, identity: await analyzeKeywordElonIdentity(sourceFrom(body.source)) });
+    }
+    if (action === "discover_keywords") {
+      const source = sourceFrom(body.source); const identity = identityFrom(body.identity);
+      return NextResponse.json({ ok: true, action, discovery: await discoverKeywordElonCandidates(source, identity) });
+    }
+    if (action === "score_keywords") {
+      const result = await scoreKeywordElonCandidates({ source: sourceFrom(body.source), identity: identityFrom(body.identity), discovery: discoveryFrom(body.discovery) });
+      return NextResponse.json({ ok: true, action, ...result });
+    }
+    if (action === "generate_title") {
+      const cutoff = Math.max(0, Math.min(100, Number(body.cutoff) || 70));
+      const titleResult = await generateKeywordElonTitle({ source: sourceFrom(body.source), identity: identityFrom(body.identity), candidates: candidatesFrom(body.candidates), cutoff });
+      return NextResponse.json({ ok: true, action, titleResult });
+    }
+    return NextResponse.json({ ok: false, error: `지원하지 않는 action: ${action || "(없음)"}` }, { status: 400 });
   } catch (error) {
-    return jsonError(
-      error instanceof Error ? error.message : "실험 이력을 불러오지 못했습니다.",
-      500,
-    );
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "키워드 실험실 처리 실패" }, { status: 500 });
   }
-}
-
-async function runStageOne(goodsKeys: string[]) {
-  const inputPayload = {
-    source: "Shopling prod_gather_api",
-    requestedFields: [
-      "goods_key",
-      "ptn_goods_cd",
-      "prod_nm",
-      "model_no",
-      "model_nm",
-      "site_srch",
-      "sale_status",
-      "dtl_desc",
-    ],
-    writesEnabled: false,
-  };
-
-  try {
-    const contexts = await loadKeywordEngineElonLabShoplingContexts(goodsKeys);
-    const rows: KeywordEngineElonLabStoredRow[] = contexts.map((context) => ({
-      goods_key: context.goodsKey,
-      stage_key: STAGE_ONE.key,
-      stage_index: STAGE_ONE.index,
-      run_status: context.found ? "ready" : "error",
-      review_status: "pending",
-      input_payload: { goods_key: context.goodsKey, ...inputPayload },
-      output_payload: context,
-      error_message: context.found ? "" : "Shopling에서 goods_key를 찾지 못했습니다.",
-      review_note: "",
-      engine_revision: "ops-stage1-shopling-context-v1",
-    }));
-    await upsertKeywordEngineElonLabRows(rows);
-    return NextResponse.json(
-      { ok: true, stage: STAGE_ONE, rows },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Shopling Context 조회에 실패했습니다.";
-    const errorRows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => ({
-      goods_key: goodsKey,
-      stage_key: STAGE_ONE.key,
-      stage_index: STAGE_ONE.index,
-      run_status: "error",
-      review_status: "pending",
-      input_payload: { goods_key: goodsKey, ...inputPayload },
-      output_payload: {},
-      error_message: message,
-      review_note: "",
-      engine_revision: "ops-stage1-shopling-context-v1",
-    }));
-    try {
-      await upsertKeywordEngineElonLabRows(errorRows);
-    } catch {
-      // Preserve the original Shopling error even if persistence is unavailable.
-    }
-    return jsonError(message, 502);
-  }
-}
-
-async function runStageTwo(goodsKeys: string[]) {
-  const storedRows = await listKeywordEngineElonLabRows();
-  const stageOneByGoodsKey = new Map(
-    storedRows
-      .filter((row) => row.stage_key === STAGE_ONE.key)
-      .map((row) => [row.goods_key, row] as const),
-  );
-
-  const blockedGoodsKeys = goodsKeys.filter((goodsKey) => {
-    const row = stageOneByGoodsKey.get(goodsKey);
-    return row?.run_status !== "ready" || row?.review_status !== "pass";
-  });
-  if (blockedGoodsKeys.length) {
-    return jsonError(
-      `STEP 2는 STEP 1 최신 결과가 모두 통과된 뒤 실행할 수 있습니다. 미통과: ${blockedGoodsKeys.join(", ")}`,
-      409,
-    );
-  }
-
-  const rows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => {
-    const stageOne = stageOneByGoodsKey.get(goodsKey)!;
-    const context = stageOne.output_payload ?? {};
-    const productName = text(context.productName);
-    const modelName = text(context.modelName);
-    const selectedSeed = productName || modelName || goodsKey;
-    const selectedSeedSource = productName
-      ? "prod_nm"
-      : modelName
-        ? "model_nm"
-        : "goods_key";
-    const selectionReason =
-      selectedSeedSource === "prod_nm"
-        ? "현행 엔진은 Shopling prod_nm이 존재하면 이를 최우선 seed로 사용합니다."
-        : selectedSeedSource === "model_nm"
-          ? "prod_nm이 비어 있어 model_nm을 seed로 사용합니다."
-          : "prod_nm과 model_nm이 모두 비어 있어 goods_key를 최후 fallback seed로 사용합니다.";
-
-    return {
-      goods_key: goodsKey,
-      stage_key: STAGE_TWO.key,
-      stage_index: STAGE_TWO.index,
-      run_status: "ready",
-      review_status: "pending",
-      input_payload: {
-        sourceStage: STAGE_ONE.key,
-        sourceStageUpdatedAt: stageOne.updated_at ?? "",
-        goodsKey,
-        productName,
-        modelName,
-      },
-      output_payload: {
-        goodsKey,
-        productName,
-        modelName,
-        selectedSeed,
-        selectedSeedSource,
-        selectionReason,
-        currentRule: "prod_nm || model_nm || goods_key",
-        candidateOrder: ["prod_nm", "model_nm", "goods_key"],
-        productNameEqualsSeed: Boolean(productName && productName === selectedSeed),
-        modelNameEqualsSeed: Boolean(modelName && modelName === selectedSeed),
-      },
-      error_message: "",
-      review_note: "",
-      engine_revision: "ops-stage2-current-seed-selection-v1",
-    };
-  });
-
-  await upsertKeywordEngineElonLabRows(rows);
-  return NextResponse.json(
-    { ok: true, stage: STAGE_TWO, rows },
-    { headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-async function runStageThree(goodsKeys: string[]) {
-  const storedRows = await listKeywordEngineElonLabRows();
-  const stageOneByGoodsKey = new Map(
-    storedRows
-      .filter((row) => row.stage_key === STAGE_ONE.key)
-      .map((row) => [row.goods_key, row] as const),
-  );
-  const stageTwoByGoodsKey = new Map(
-    storedRows
-      .filter((row) => row.stage_key === STAGE_TWO.key)
-      .map((row) => [row.goods_key, row] as const),
-  );
-
-  const blockedGoodsKeys = goodsKeys.filter((goodsKey) => {
-    const stageOne = stageOneByGoodsKey.get(goodsKey);
-    const stageTwo = stageTwoByGoodsKey.get(goodsKey);
-    return (
-      stageTwo?.run_status !== "ready" ||
-      stageTwo?.review_status !== "pass" ||
-      rowTime(stageTwo) < rowTime(stageOne)
-    );
-  });
-  if (blockedGoodsKeys.length) {
-    return jsonError(
-      `STEP 3는 최신 STEP 2 결과가 모두 통과된 뒤 실행할 수 있습니다. 미통과 또는 오래된 결과: ${blockedGoodsKeys.join(", ")}`,
-      409,
-    );
-  }
-
-  const rows: KeywordEngineElonLabStoredRow[] = goodsKeys.map((goodsKey) => {
-    const stageTwo = stageTwoByGoodsKey.get(goodsKey)!;
-    const selectedSeed = text(stageTwo.output_payload?.selectedSeed);
-    const cleaned = cleanCurrentSeed(selectedSeed);
-    return {
-      goods_key: goodsKey,
-      stage_key: STAGE_THREE.key,
-      stage_index: STAGE_THREE.index,
-      run_status: "ready",
-      review_status: "pending",
-      input_payload: {
-        sourceStage: STAGE_TWO.key,
-        sourceStageUpdatedAt: stageTwo.updated_at ?? "",
-        goodsKey,
-        selectedSeed,
-      },
-      output_payload: {
-        goodsKey,
-        ...cleaned,
-        currentRule:
-          "색상 랜덤 / 색상랜덤 / 랜덤색상 / 무료배송 / 당일배송 / 랜덤 제거 후 공백 정규화",
-      },
-      error_message: cleaned.cleanedSeed ? "" : "잡음 제거 후 seed가 비었습니다.",
-      review_note: "",
-      engine_revision: "ops-stage3-current-seed-cleaning-v1",
-    };
-  });
-
-  await upsertKeywordEngineElonLabRows(rows);
-  return NextResponse.json(
-    { ok: true, stage: STAGE_THREE, rows },
-    { headers: { "Cache-Control": "no-store" } },
-  );
-}
-
-async function runStageFour(goodsKeys: string[]) {
-  const storedRows = await listKeywordEngineElonLabRows();
-  const stageTwoByGoodsKey = new Map(
-    storedRows
-      .filter((row) => row.stage_key === STAGE_TWO.key)
-      .map((row) => [row.goods_key, row] as const),
-  );
-  const stageThreeByGoodsKey = new Map(
-    storedRows
-      .filter((row) => row.stage_key === STAGE_THREE.key)
-      .map((row) => [row.goods_key, row] as const),
-  );
-
-  const blockedGoodsKeys = goodsKeys.filter((goodsKey) => {
-    const stageTwo = stageTwoByGoodsKey.get(goodsKey);
-    const stageThree = stageThreeByGoodsKey.get(goodsKey);
-    return (
-      stageThree?.run_status !== "ready" ||
-      stageThree?.review_status !== "pass" ||
-      rowTime(stageThree) < rowTime(stageTwo)
-    );
-  });
-  if (blockedGoodsKeys.length) {
-    return jsonError(
-      `STEP 4는 최신 STEP 3 결과가 모두 통과된 뒤 실행할 수 있습니다. 미통과 또는 오래된 결과: ${blockedGoodsKeys.join(", ")}`,
-      409,
-    );
-  }
-
-  const inputs = goodsKeys.map((goodsKey) => {
-    const stageThree = stageThreeByGoodsKey.get(goodsKey)!;
-    return {
-      goodsKey,
-      cleanedSeed: text(stageThree.output_payload?.cleanedSeed),
-      stageThree,
-    };
-  });
-  const emptyGoodsKeys = inputs
-    .filter((item) => !item.cleanedSeed)
-    .map((item) => item.goodsKey);
-  if (emptyGoodsKeys.length) {
-    return jsonError(
-      `STEP 4 상품 정체성 분석에 사용할 정제 Seed가 비었습니다: ${emptyGoodsKeys.join(", ")}`,
-      409,
-    );
-  }
-
-  try {
-    const analysis = await analyzeKeywordEngineIdentityBatch(
-      inputs.map(({ goodsKey, cleanedSeed }) => ({ goodsKey, cleanedSeed })),
-    );
-    const resultByGoodsKey = new Map(
-      analysis.results.map((result) => [result.goodsKey, result] as const),
-    );
-    const rows: KeywordEngineElonLabStoredRow[] = inputs.map(
-      ({ goodsKey, cleanedSeed, stageThree }) => {
-        const result = resultByGoodsKey.get(goodsKey);
-        return {
-          goods_key: goodsKey,
-          stage_key: STAGE_FOUR.key,
-          stage_index: STAGE_FOUR.index,
-          run_status: result?.coreProduct ? "ready" : "error",
-          review_status: "pending",
-          input_payload: {
-            sourceStage: STAGE_THREE.key,
-            sourceStageUpdatedAt: stageThree.updated_at ?? "",
-            goodsKey,
-            cleanedSeed,
-            analysisMode: "semantic_product_identity_roles",
-            writesEnabled: false,
-          },
-          output_payload: result ?? {},
-          error_message: result?.coreProduct
-            ? ""
-            : "상품 핵심명사 또는 상품 정체성 분석 결과를 만들지 못했습니다.",
-          review_note: "",
-          engine_revision: STAGE_FOUR_REVISION,
-        };
-      },
-    );
-    await upsertKeywordEngineElonLabRows(rows);
-    return NextResponse.json(
-      { ok: true, stage: STAGE_FOUR, model: analysis.model, rows },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "STEP 4 상품 정체성 구조화에 실패했습니다.";
-    const errorRows: KeywordEngineElonLabStoredRow[] = inputs.map(
-      ({ goodsKey, cleanedSeed, stageThree }) => ({
-        goods_key: goodsKey,
-        stage_key: STAGE_FOUR.key,
-        stage_index: STAGE_FOUR.index,
-        run_status: "error",
-        review_status: "pending",
-        input_payload: {
-          sourceStage: STAGE_THREE.key,
-          sourceStageUpdatedAt: stageThree.updated_at ?? "",
-          goodsKey,
-          cleanedSeed,
-          analysisMode: "semantic_product_identity_roles",
-          writesEnabled: false,
-        },
-        output_payload: {},
-        error_message: message,
-        review_note: "",
-        engine_revision: STAGE_FOUR_REVISION,
-      }),
-    );
-    try {
-      await upsertKeywordEngineElonLabRows(errorRows);
-    } catch {
-      // Preserve the identity-analysis error even if persistence is unavailable.
-    }
-    return jsonError(message, 502);
-  }
-}
-
-export async function POST(request: Request) {
-  if (!assertSameOrigin(request)) {
-    return jsonError("OPS Center 화면에서만 실행할 수 있습니다.", 403);
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return jsonError("요청 JSON을 읽을 수 없습니다.");
-  }
-
-  const action = String(body.action ?? "").trim();
-  if (action === "run_stage") {
-    const stageKey = String(body.stageKey ?? "").trim();
-    const goodsKeys = requestedGoodsKeys(body);
-    if (!goodsKeys.length) return jsonError("고정 테스트 goods_key가 없습니다.");
-
-    if (stageKey === STAGE_ONE.key) return runStageOne(goodsKeys);
-    if (stageKey === STAGE_TWO.key) return runStageTwo(goodsKeys);
-    if (stageKey === STAGE_THREE.key) return runStageThree(goodsKeys);
-    if (stageKey === STAGE_FOUR.key) return runStageFour(goodsKeys);
-    return jsonError(
-      "현재 실험실에서 실제 실행이 연결된 단계는 STEP 1~4입니다.",
-      409,
-    );
-  }
-
-  if (action === "review_stage_batch") {
-    const stageKey = String(body.stageKey ?? "").trim();
-    const goodsKeys = requestedGoodsKeys(body);
-    if (!KEYWORD_ENGINE_ELON_LAB_STAGES.some((stage) => stage.key === stageKey)) {
-      return jsonError("알 수 없는 단계입니다.");
-    }
-    if (goodsKeys.length !== KEYWORD_ENGINE_ELON_LAB_GOODS_KEYS.length) {
-      return jsonError("일괄 통과는 고정 테스트 goods_key 6개 전체에만 적용할 수 있습니다.");
-    }
-    try {
-      const storedRows = await listKeywordEngineElonLabRows();
-      const rowByGoodsKey = new Map(
-        storedRows
-          .filter((row) => row.stage_key === stageKey)
-          .map((row) => [row.goods_key, row] as const),
-      );
-      const blockedGoodsKeys = goodsKeys.filter(
-        (goodsKey) => !isCurrentReviewableRow(rowByGoodsKey.get(goodsKey), stageKey),
-      );
-      if (blockedGoodsKeys.length) {
-        return jsonError(
-          `6개 일괄 통과 전에 현재 단계의 실행 결과가 모두 준비되어야 합니다. 미준비: ${blockedGoodsKeys.join(", ")}`,
-          409,
-        );
-      }
-      const rows = await updateKeywordEngineElonLabReviews({
-        goodsKeys,
-        stageKey,
-        reviewStatus: "pass",
-      });
-      if (rows.length !== goodsKeys.length) {
-        return jsonError("6개 일괄 통과 저장 결과를 모두 확인하지 못했습니다.", 500);
-      }
-      return NextResponse.json(
-        { ok: true, rows },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    } catch (error) {
-      return jsonError(
-        error instanceof Error ? error.message : "6개 일괄 통과를 저장하지 못했습니다.",
-        500,
-      );
-    }
-  }
-
-  if (action === "review_stage") {
-    const goodsKey = String(body.goodsKey ?? "").trim();
-    const stageKey = String(body.stageKey ?? "").trim();
-    const reviewStatus = String(
-      body.reviewStatus ?? "",
-    ).trim() as KeywordEngineElonLabReviewStatus;
-    const reviewNote = String(body.reviewNote ?? "").trim().slice(0, 2000);
-    if (!isKeywordEngineElonLabGoodsKey(goodsKey)) {
-      return jsonError("허용되지 않은 테스트 goods_key입니다.");
-    }
-    if (!KEYWORD_ENGINE_ELON_LAB_STAGES.some((stage) => stage.key === stageKey)) {
-      return jsonError("알 수 없는 단계입니다.");
-    }
-    if (!(["pending", "pass", "improve"] as string[]).includes(reviewStatus)) {
-      return jsonError("검수 상태가 올바르지 않습니다.");
-    }
-    try {
-      const rows = await updateKeywordEngineElonLabReview({
-        goodsKey,
-        stageKey,
-        reviewStatus,
-        reviewNote,
-      });
-      return NextResponse.json(
-        { ok: true, rows },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    } catch (error) {
-      return jsonError(
-        error instanceof Error ? error.message : "검수 판정을 저장하지 못했습니다.",
-        500,
-      );
-    }
-  }
-
-  return jsonError("지원하지 않는 action입니다.");
 }
