@@ -6,8 +6,7 @@ import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, discoverKeywo
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// STEP 2 may score up to 500 candidates in bounded OpenAI waves. The prior
-// 60-second ceiling could terminate an otherwise healthy scoring run midway.
+// STEP 2 may score up to 500 candidates in bounded OpenAI waves.
 export const maxDuration = 500;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -51,10 +50,11 @@ function readiness() {
 export async function GET() { return NextResponse.json({ ok: true, version: 2, ...readiness() }); }
 
 export async function POST(request: NextRequest) {
+  let action = "request";
   try {
     const body: unknown = await request.json();
     if (!isRecord(body)) throw new Error("요청 본문이 올바르지 않습니다.");
-    const action = text(body.action);
+    action = text(body.action) || "request";
     if (action === "collect_source") {
       const url = text(body.url); if (!url) throw new Error("1688 링크를 입력해 주세요.");
       return NextResponse.json({ ok: true, action, source: await collectKeywordElon1688Source(url) });
@@ -75,8 +75,13 @@ export async function POST(request: NextRequest) {
       const titleResult = await generateKeywordElonTitle({ source: sourceFrom(body.source), identity: identityFrom(body.identity), candidates: candidatesFrom(body.candidates), cutoff });
       return NextResponse.json({ ok: true, action, titleResult });
     }
-    return NextResponse.json({ ok: false, error: `지원하지 않는 action: ${action || "(없음)"}` }, { status: 400 });
+    return NextResponse.json({ ok: false, errorStage: action, error: `지원하지 않는 action: ${action}` }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "키워드 실험실 처리 실패" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "키워드 실험실 처리 실패";
+    console.error("[keyword-engine-elon-lab]", action, message);
+    return NextResponse.json(
+      { ok: false, errorStage: action, error: `[${action}] ${message}` },
+      { status: 500 },
+    );
   }
 }
