@@ -2,6 +2,8 @@ const WORKFLOW_API = "/api/product-launch-tracker/optimized";
 const PROBE_TIMEOUT_MS = 4_500;
 const IDLE_RETRY_MS = 30_000;
 const HIDDEN_RETRY_MS = 60_000;
+const INITIAL_WORKFLOW_PAGE_SIZE = 25;
+const WARM_HANDOFF_TTL_MS = 8_000;
 
 let installed = false;
 let optimizedAppPromise = null;
@@ -51,28 +53,34 @@ async function probeWorkflow() {
   probeInFlight = true;
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const params = initialWorkflowParams();
+  const targetUrl = `${WORKFLOW_API}?${params.toString()}`;
   try {
-    const params = new URLSearchParams({
-      mode: "page",
-      page: "1",
-      pageSize: "1",
-      unfinishedOnly: "false",
-    });
-    const response = await fetch(`${WORKFLOW_API}?${params.toString()}`, {
+    const response = await fetch(targetUrl, {
       cache: "no-store",
       credentials: "same-origin",
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
     const body = await response.json().catch(() => ({}));
-    if (response.ok && body?.ok === true && body?.stateExists !== false) {
+    const hasUsablePage =
+      response.ok &&
+      body?.ok === true &&
+      body?.stateExists !== false &&
+      Array.isArray(body?.items) &&
+      Number(body?.pageSize || 0) >= INITIAL_WORKFLOW_PAGE_SIZE;
+
+    if (hasUsablePage) {
       document.documentElement.dataset.opsWorkflowUi = "loading";
+      const releaseWarmHandoff = installWarmWorkflowPage(targetUrl, body);
       optimizedAppPromise = import("./optimized-app.js")
         .then(() => {
+          releaseWarmHandoff();
           document.documentElement.dataset.opsWorkflowUi = "live";
           return true;
         })
         .catch((error) => {
+          releaseWarmHandoff();
           optimizedAppPromise = null;
           document.documentElement.dataset.opsWorkflowUi = "deferred";
           console.error("OPS Workflow UI failed to attach", error);
@@ -93,4 +101,80 @@ async function probeWorkflow() {
 
   document.documentElement.dataset.opsWorkflowUi = "deferred";
   scheduleProbe(IDLE_RETRY_MS);
+}
+
+function initialWorkflowParams() {
+  return new URLSearchParams({
+    mode: "page",
+    page: "1",
+    pageSize: String(INITIAL_WORKFLOW_PAGE_SIZE),
+    search: "",
+    batch: "",
+    assignee: "",
+    overall: "",
+    unfinishedOnly: "true",
+    sort: "",
+    direction: "desc",
+  });
+}
+
+function installWarmWorkflowPage(targetUrl, body) {
+  const originalFetch = window.fetch;
+  const target = new URL(targetUrl, window.location.href);
+  let active = true;
+  const expiryTimer = window.setTimeout(() => release(), WARM_HANDOFF_TTL_MS);
+
+  window.fetch = async function commerceWorkflowWarmFetch(input, init = {}) {
+    const request = input instanceof Request ? input : null;
+    const method = String(init.method || request?.method || "GET").toUpperCase();
+    const url = new URL(request?.url || String(input), window.location.href);
+    if (
+      active &&
+      method === "GET" &&
+      sameWorkflowPage(url, target)
+    ) {
+      active = false;
+      window.clearTimeout(expiryTimer);
+      window.fetch = originalFetch;
+      if (init.signal?.aborted || request?.signal?.aborted) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Commerce-Workflow-Warm-Handoff": "1",
+        },
+      });
+    }
+    return originalFetch.call(window, input, init);
+  };
+
+  function release() {
+    if (!active) return;
+    active = false;
+    window.clearTimeout(expiryTimer);
+    if (window.fetch?.name === "commerceWorkflowWarmFetch") {
+      window.fetch = originalFetch;
+    }
+  }
+
+  return release;
+}
+
+function sameWorkflowPage(left, right) {
+  if (left.origin !== right.origin || left.pathname !== right.pathname) return false;
+  const keys = [
+    "mode",
+    "page",
+    "pageSize",
+    "search",
+    "batch",
+    "assignee",
+    "overall",
+    "unfinishedOnly",
+    "sort",
+    "direction",
+  ];
+  return keys.every((key) => left.searchParams.get(key) === right.searchParams.get(key));
 }
