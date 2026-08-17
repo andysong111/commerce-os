@@ -1,0 +1,34 @@
+name: OPS Supabase Load Shedding CI
+
+on:
+  pull_request:
+    paths:
+      - "vercel.json"
+      - "src/lib/commerceOperationsDashboard.ts"
+      - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
+      - "tests/opsSupabaseLoadShedding.test.mjs"
+      - ".github/workflows/ops-supabase-load-shedding.yml"
+  push:
+    branches: [main]
+    paths:
+      - "vercel.json"
+      - "src/lib/commerceOperationsDashboard.ts"
+      - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
+      - "tests/opsSupabaseLoadShedding.test.mjs"
+      - ".github/workflows/ops-supabase-load-shedding.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Validate OPS Supabase load shedding contracts
+        run: node --test tests/opsSupabaseLoadShedding.test.mjs
+      - name: Lint dashboard read model
+        run: npx eslint src/lib/commerceOperationsDashboard.ts

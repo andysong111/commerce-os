@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type OperationRun = {
@@ -34,6 +35,14 @@ type PriceBulkJob = {
   completed_at: string | null;
 };
 
+type DashboardSnapshot = {
+  configured: boolean;
+  error: string | null;
+  runs: OperationRun[];
+  sources: DataSourceHealth[];
+  priceJobs: PriceBulkJob[];
+};
+
 export type OperationsDashboardData = {
   configured: boolean;
   error: string | null;
@@ -54,42 +63,71 @@ export type OperationsDashboardData = {
   };
 };
 
+const DASHBOARD_REVALIDATE_SECONDS = 15;
+
+const loadOperationsDashboardSnapshot = unstable_cache(
+  async (): Promise<DashboardSnapshot> => {
+    const admin = await createSupabaseAdminClient();
+    if (!admin) {
+      return {
+        configured: false,
+        error: "Supabase 운영 연결이 설정되지 않았습니다.",
+        runs: [],
+        sources: [],
+        priceJobs: [],
+      };
+    }
+
+    const [runsResult, healthResult, priceJobsResult] = await Promise.all([
+      admin
+        .from("commerce_operation_runs")
+        .select(
+          "id,operation_type,status,source,correlation_id,error_message,started_at,finished_at,created_at",
+        )
+        .order("started_at", { ascending: false })
+        .limit(50),
+      admin
+        .from("commerce_data_source_health")
+        .select(
+          "source_key,status,generated_at,received_at,max_age_minutes,details,updated_at",
+        )
+        .order("source_key", { ascending: true }),
+      admin
+        .from("shopling_price_adjustment_bulk_jobs")
+        .select(
+          "id,status,valid_count,last_error,created_at,updated_at,completed_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+
+    const errors = [runsResult.error, healthResult.error, priceJobsResult.error]
+      .map((item) => item?.message)
+      .filter(Boolean);
+
+    return {
+      configured: true,
+      error: errors.length ? errors.join(" · ") : null,
+      runs: errors.length ? [] : rows<OperationRun>(runsResult.data),
+      sources: errors.length ? [] : rows<DataSourceHealth>(healthResult.data),
+      priceJobs: errors.length ? [] : rows<PriceBulkJob>(priceJobsResult.data),
+    };
+  },
+  ["commerce-operations-dashboard-v2"],
+  { revalidate: DASHBOARD_REVALIDATE_SECONDS },
+);
+
 export async function loadOperationsDashboard(
   now = new Date(),
 ): Promise<OperationsDashboardData> {
-  const admin = await createSupabaseAdminClient();
-  if (!admin) return empty(false, "Supabase 운영 연결이 설정되지 않았습니다.");
+  const snapshot = await loadOperationsDashboardSnapshot();
+  if (!snapshot.configured) {
+    return empty(false, snapshot.error || "Supabase 운영 연결이 설정되지 않았습니다.");
+  }
+  if (snapshot.error) return empty(true, snapshot.error);
 
-  const [runsResult, healthResult, priceJobsResult] = await Promise.all([
-    admin
-      .from("commerce_operation_runs")
-      .select(
-        "id,operation_type,status,source,correlation_id,error_message,started_at,finished_at,created_at",
-      )
-      .order("started_at", { ascending: false })
-      .limit(50),
-    admin
-      .from("commerce_data_source_health")
-      .select(
-        "source_key,status,generated_at,received_at,max_age_minutes,details,updated_at",
-      )
-      .order("source_key", { ascending: true }),
-    admin
-      .from("shopling_price_adjustment_bulk_jobs")
-      .select(
-        "id,status,valid_count,last_error,created_at,updated_at,completed_at",
-      )
-      .order("created_at", { ascending: false })
-      .limit(20),
-  ]);
-
-  const errors = [runsResult.error, healthResult.error, priceJobsResult.error]
-    .map((item) => item?.message)
-    .filter(Boolean);
-  if (errors.length) return empty(true, errors.join(" · "));
-
-  const runs = rows<OperationRun>(runsResult.data);
-  const sources = rows<DataSourceHealth>(healthResult.data).map((source) => {
+  const runs = snapshot.runs;
+  const sources = snapshot.sources.map((source) => {
     const generated = source.generated_at
       ? Date.parse(source.generated_at)
       : Number.NaN;
@@ -108,7 +146,7 @@ export async function loadOperationsDashboard(
             : source.status;
     return { ...source, effectiveStatus, ageMinutes };
   });
-  const priceJobs = rows<PriceBulkJob>(priceJobsResult.data);
+  const priceJobs = snapshot.priceJobs;
 
   return {
     configured: true,
