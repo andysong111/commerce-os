@@ -6,7 +6,9 @@ import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, discoverKeywo
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// STEP 2 may score up to 500 candidates in bounded OpenAI waves. The prior
+// 60-second ceiling could terminate an otherwise healthy scoring run midway.
+export const maxDuration = 500;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
