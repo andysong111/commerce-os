@@ -6,7 +6,8 @@ import {
   buildKeywordElonBrowserImportUrl,
   keywordElonSourceFromBrowserPayload,
   parseKeywordElonBrowserImportHash,
-  KEYWORD_ELON_REQUIRED_IMPORTER_VERSION,
+  versionAtLeast,
+  KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION,
 } from "@/lib/keywordEngineElonLabBrowserImport";
 import {
   KEYWORD_ELON_V2_DEFAULT_CUTOFF,
@@ -129,6 +130,7 @@ export default function KeywordEngineElonLabPage() {
     "" | "collect" | "identity" | "stage2" | "title"
   >("");
   const [readiness, setReadiness] = useState<Readiness | null>(null);
+  const [collectorVersion, setCollectorVersion] = useState("");
 
   useEffect(() => {
     let next = loadLocalSession();
@@ -140,7 +142,7 @@ export default function KeywordEngineElonLabPage() {
         next = withNewSource(
           next,
           source,
-          `AI-Saurus Importer v${imported.importerVersion || "?"} 브라우저 수집 완료 · 중국 상품명과 옵션 ${imported.supplierOptionGroups.length}개 그룹을 불러왔습니다.`,
+          `Commerce OS Keyword Lab Collector v${imported.collectorVersion || "?"} 수집 완료 · 중국 상품명과 옵션 ${imported.supplierOptionGroups.length}개 그룹을 불러왔습니다.`,
         );
         clearHash = true;
       }
@@ -150,7 +152,7 @@ export default function KeywordEngineElonLabPage() {
         lastMessage:
           error instanceof Error
             ? error.message
-            : "AI-Saurus Importer 자료를 읽지 못했습니다.",
+            : "키워드 실험실 수집 자료를 읽지 못했습니다.",
       };
       clearHash = true;
     }
@@ -191,6 +193,24 @@ export default function KeywordEngineElonLabPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const detect = () => {
+      const version =
+        document.documentElement.dataset.commerceOsKeywordLabCollectorVersion || "";
+      setCollectorVersion(version);
+    };
+    detect();
+    const listener = () => detect();
+    document.addEventListener("commerce-os-keyword-lab-collector-ready", listener);
+    const timer = window.setInterval(detect, 600);
+    const stop = window.setTimeout(() => window.clearInterval(timer), 6000);
+    return () => {
+      document.removeEventListener("commerce-os-keyword-lab-collector-ready", listener);
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
+  }, []);
+
   const passing = useMemo(
     () =>
       session.scoredCandidates.filter(
@@ -200,6 +220,10 @@ export default function KeywordEngineElonLabPage() {
   );
   const stage2Ready = session.stage1Review === "pass" && Boolean(session.identity);
   const minimumMet = passing.length >= KEYWORD_ELON_V2_MINIMUM_KEYWORDS;
+  const collectorReady = versionAtLeast(
+    collectorVersion,
+    KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION,
+  );
 
   function resetDownstream(
     source: KeywordElonSourceDraft,
@@ -230,31 +254,28 @@ export default function KeywordEngineElonLabPage() {
       }));
       return;
     }
+    if (!collectorReady) {
+      setSession((previous) => ({
+        ...previous,
+        lastMessage:
+          `Commerce OS Keyword Lab Collector v${KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION}을 먼저 설치하거나 업데이트한 뒤 이 페이지를 새로고침해 주세요.`,
+      }));
+      return;
+    }
     try {
       const returnUrl = new URL(
         "/keyword-engine-elon-lab",
         window.location.origin,
       ).toString();
       const target = buildKeywordElonBrowserImportUrl(url, returnUrl);
-      const opened = window.open(target, "_blank");
-      if (!opened) {
-        throw new Error("1688 팝업을 허용한 뒤 다시 시도해 주세요.");
-      }
-      try {
-        opened.opener = null;
-      } catch {
-        // Browser security policy can block opener mutation; collection is still safe.
-      }
-      setSession((previous) => ({
-        ...previous,
-        lastMessage:
-          `1688 페이지를 열었습니다. AI-Saurus Importer v${KEYWORD_ELON_REQUIRED_IMPORTER_VERSION}+가 실제 화면에서 상품명·옵션을 수집한 뒤 이 실험실로 자동 복귀합니다.`,
-      }));
+      window.location.assign(target);
     } catch (error) {
       setSession((previous) => ({
         ...previous,
         lastMessage:
-          error instanceof Error ? error.message : "1688 브라우저 수집을 시작하지 못했습니다.",
+          error instanceof Error
+            ? error.message
+            : "1688 브라우저 수집을 시작하지 못했습니다.",
       }));
     }
   }
@@ -282,7 +303,7 @@ export default function KeywordEngineElonLabPage() {
       };
       resetDownstream(
         source,
-        `서버 보조수집 ${source.autoStatus === "success" ? "완료" : source.autoStatus === "partial" ? "부분 완료" : "실패"}. 1688 차단 때문에 SaaS 방식 브라우저 수집보다 정확도가 낮을 수 있습니다.`,
+        `서버 보조수집 ${source.autoStatus === "success" ? "완료" : source.autoStatus === "partial" ? "부분 완료" : "실패"}. 기본 수집은 전용 브라우저 수집기를 사용하세요.`,
       );
     } catch (error) {
       setSession((previous) => ({
@@ -484,15 +505,12 @@ export default function KeywordEngineElonLabPage() {
               키워드엔진 일론머스크식 분해개선작업
             </h1>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              1688 중국 원본에서 상품 정체성을 확정하고, 품질 커트라인을 넘는 키워드를
-              개수 제한 없이 보존한 뒤 상위 키워드로 상품명을 조립합니다.
+              1688 실제 화면에서 중국 상품명·옵션을 수집하고 상품 정체성을 확정한 뒤,
+              품질 커트라인을 넘는 키워드를 개수 제한 없이 보존해 상품명까지 만듭니다.
             </p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={copySession}
-              className="rounded-lg border px-4 py-2 text-sm font-bold"
-            >
+            <button onClick={copySession} className="rounded-lg border px-4 py-2 text-sm font-bold">
               실험 JSON 복사
             </button>
             <button
@@ -505,22 +523,19 @@ export default function KeywordEngineElonLabPage() {
         </div>
         <div className="mt-5 flex flex-wrap gap-2 text-xs font-bold">
           <span
-            className={`rounded-full px-3 py-1 ${
-              readiness?.openAiConfigured
-                ? "bg-emerald-100 text-emerald-800"
-                : "bg-rose-100 text-rose-800"
-            }`}
+            className={`rounded-full px-3 py-1 ${readiness?.openAiConfigured ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
           >
             OpenAI {readiness?.openAiConfigured ? "연결" : "미설정"}
           </span>
           <span
-            className={`rounded-full px-3 py-1 ${
-              readiness?.searchAdConfigured
-                ? "bg-emerald-100 text-emerald-800"
-                : "bg-amber-100 text-amber-800"
-            }`}
+            className={`rounded-full px-3 py-1 ${readiness?.searchAdConfigured ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
           >
             SearchAd {readiness?.searchAdConfigured ? "연결" : "선택적 미설정"}
+          </span>
+          <span
+            className={`rounded-full px-3 py-1 ${collectorReady ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}
+          >
+            Keyword Lab Collector {collectorVersion || "미설치"}
           </span>
           <span className="rounded-full bg-blue-100 px-3 py-1 text-blue-800">
             브라우저 자동저장
@@ -544,13 +559,35 @@ export default function KeywordEngineElonLabPage() {
           <div>
             <h2 className="text-xl font-black">1688 원본 → 상품 정체성 · Seed 확정</h2>
             <p className="text-sm text-slate-500">
-              SaaS 상세페이지 엔진과 같은 AI-Saurus Importer가 실제 1688 렌더링 화면에서 상품명과 SKU 옵션을 읽습니다.
+              판매자가 만든 모델명은 사용하지 않습니다. 중국 원본 상품명과 실제 옵션만 사용합니다.
             </p>
           </div>
         </div>
 
+        {!collectorReady ? (
+          <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+            <div className="font-black">
+              Commerce OS Keyword Lab Collector v{KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION} 설치 필요
+            </div>
+            <p className="mt-1 leading-6">
+              상세페이지 SaaS와는 별개의 키워드 실험실 전용 수집기입니다. ZIP을 받아 압축을 풀고
+              chrome://extensions에서 `압축해제된 확장 프로그램 로드` 후 이 탭을 새로고침하세요.
+            </p>
+            <a
+              href="/api/keyword-engine-elon-lab/collector-zip"
+              className="mt-3 inline-block rounded-lg bg-slate-900 px-4 py-2 font-black text-white"
+            >
+              전용 수집기 ZIP 다운로드
+            </a>
+          </div>
+        ) : (
+          <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+            전용 수집기 v{collectorVersion} 연결 완료 · 1688 렌더링 DOM에서 상품명·옵션명·옵션값을 직접 읽습니다.
+          </div>
+        )}
+
         <label className="text-sm font-bold">1688 중국 상품 링크</label>
-        <div className="mt-2 flex flex-col gap-2 md:flex-row">
+        <div className="mt-2 flex flex-col gap-2 lg:flex-row">
           <input
             value={session.source.url}
             onChange={(event) => updateSourceField("url", event.target.value)}
@@ -558,57 +595,29 @@ export default function KeywordEngineElonLabPage() {
             className="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm"
           />
           <button
-            disabled={busy !== ""}
+            disabled={busy !== "" || !collectorReady}
             onClick={startBrowserSourceCollection}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-50"
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40"
           >
-            SaaS 방식 자동수집
+            1688 브라우저 자동수집
           </button>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold">
-          <span className="rounded bg-emerald-50 px-2 py-1 text-emerald-800">
-            AI-Saurus Importer v{KEYWORD_ELON_REQUIRED_IMPORTER_VERSION}+ 필요
-          </span>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <span className="rounded bg-slate-100 px-2 py-1">
             offerId: {session.source.offerId || "—"}
           </span>
           <span className="rounded bg-slate-100 px-2 py-1">
             자동수집: {session.source.autoStatus}
           </span>
-          <a
-            href="https://ai-saurus.com/extension/install"
-            target="_blank"
-            rel="noreferrer"
-            className="text-blue-700 underline"
-          >
-            Importer 설치·업데이트
-          </a>
         </div>
-        <p className="mt-3 text-xs leading-5 text-slate-500">
-          버튼을 누르면 1688 탭이 열립니다. 확장프로그램이 중국 상품명과 실제 옵션 그룹·옵션값을 수집한 뒤 그 탭이 이 실험실로 자동 복귀합니다. 이미지 다운로드·상세페이지 생성은 하지 않습니다.
-        </p>
-
-        <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <summary className="cursor-pointer text-sm font-bold">
-            브라우저 수집이 안 될 때만 서버 보조수집 사용
-          </summary>
-          <p className="mt-2 text-xs leading-5 text-slate-500">
-            1688의 클라우드 차단 때문에 서버 수집은 정확도가 낮을 수 있습니다. 가능하면 위 SaaS 방식 자동수집을 사용하세요.
-          </p>
-          <button
-            disabled={busy !== ""}
-            onClick={collectSourceServerFallback}
-            className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-black text-slate-700 disabled:opacity-50"
-          >
-            {busy === "collect" ? "서버 보조수집 중…" : "서버 보조수집"}
-          </button>
-        </details>
 
         {session.source.warnings.length ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            <div className="font-black">자동수집 참고</div>
+            <div className="font-black">수집 참고</div>
             {session.source.warnings.map((warning) => (
-              <div key={warning} className="mt-1">• {warning}</div>
+              <div key={warning} className="mt-1">
+                • {warning}
+              </div>
             ))}
           </div>
         ) : null}
@@ -620,7 +629,7 @@ export default function KeywordEngineElonLabPage() {
               value={session.source.chineseTitle}
               onChange={(event) => updateSourceField("chineseTitle", event.target.value)}
               rows={4}
-              placeholder="SaaS 방식 자동수집 결과가 여기에 들어옵니다."
+              placeholder="브라우저 자동수집 결과가 들어옵니다. 필요하면 직접 수정할 수 있습니다."
               className="w-full rounded-xl border border-slate-300 p-3 font-normal"
             />
           </label>
@@ -630,15 +639,23 @@ export default function KeywordEngineElonLabPage() {
               value={session.source.optionText}
               onChange={(event) => updateSourceField("optionText", event.target.value)}
               rows={4}
-              placeholder="예: 颜色: 粉色 / 白色\n规格: 大号 / 小号"
+              placeholder="예: 颜色: 粉色 / 黑色\n规格: 大号 / 小号"
               className="w-full rounded-xl border border-slate-300 p-3 font-normal"
             />
           </label>
         </div>
+
         <details className="mt-4 rounded-xl border border-slate-200 p-4">
           <summary className="cursor-pointer text-sm font-bold">
-            자동수집 보조 텍스트 / 수동 보완
+            보조 텍스트 / 서버 보조수집
           </summary>
+          <button
+            disabled={busy !== ""}
+            onClick={collectSourceServerFallback}
+            className="mt-3 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-black"
+          >
+            {busy === "collect" ? "서버 보조수집 중…" : "서버 보조수집 실행"}
+          </button>
           <textarea
             value={session.source.supportingText}
             onChange={(event) => updateSourceField("supportingText", event.target.value)}
@@ -646,6 +663,7 @@ export default function KeywordEngineElonLabPage() {
             className="mt-3 w-full rounded-xl border border-slate-300 p-3 text-xs"
           />
         </details>
+
         <button
           disabled={
             busy !== "" ||
@@ -694,7 +712,8 @@ export default function KeywordEngineElonLabPage() {
               <div><div className="font-bold">옵션 Noise</div><Chips values={session.identity.variantNoise} /></div>
             </div>
             <div className="mt-5 rounded-xl bg-white p-4 text-sm">
-              <b>AI 신뢰도:</b> {(session.identity.confidence * 100).toFixed(0)}% · <b>근거:</b> {session.identity.reasoning}
+              <b>AI 신뢰도:</b> {(session.identity.confidence * 100).toFixed(0)}% · <b>근거:</b>{" "}
+              {session.identity.reasoning}
             </div>
             <div className="mt-4 flex gap-2">
               <button
@@ -705,9 +724,7 @@ export default function KeywordEngineElonLabPage() {
                     lastMessage: "STEP 1 통과. STEP 2를 실행할 수 있습니다.",
                   }))
                 }
-                className={`rounded-lg px-4 py-2 text-sm font-black text-white ${
-                  session.stage1Review === "pass" ? "bg-emerald-700" : "bg-emerald-600"
-                }`}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-black text-white"
               >
                 ✓ STEP 1 통과
               </button>
@@ -716,8 +733,7 @@ export default function KeywordEngineElonLabPage() {
                   setSession((previous) => ({
                     ...previous,
                     stage1Review: "improve",
-                    lastMessage:
-                      "STEP 1 개선 필요로 표시했습니다. 중국 원본을 보완하거나 다시 분석하세요.",
+                    lastMessage: "STEP 1 개선 필요로 표시했습니다. 원본을 보완하거나 다시 분석하세요.",
                   }))
                 }
                 className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-black text-white"
@@ -730,19 +746,23 @@ export default function KeywordEngineElonLabPage() {
       </section>
 
       <section
-        className={`rounded-2xl border bg-white p-6 shadow-sm ${
-          stage2Ready ? "border-slate-200" : "border-slate-100 opacity-70"
-        }`}
+        className={`rounded-2xl border bg-white p-6 shadow-sm ${stage2Ready ? "border-slate-200" : "border-slate-100 opacity-70"}`}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-black text-white">STEP 2</span>
+            <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-black text-white">
+              STEP 2
+            </span>
             <div>
               <h2 className="text-xl font-black">키워드 대량 발굴 → 품질점수 → 커트라인</h2>
-              <p className="text-sm text-slate-500">커트라인을 통과한 키워드는 개수 제한 없이 모두 보존합니다.</p>
+              <p className="text-sm text-slate-500">
+                최소 목표는 10개이며, 커트라인을 통과한 키워드는 상한 없이 모두 보존합니다.
+              </p>
             </div>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">{statusLabel}</span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold">
+            {statusLabel}
+          </span>
         </div>
 
         {!stage2Ready ? (
@@ -790,6 +810,7 @@ export default function KeywordEngineElonLabPage() {
             <div className="rounded-xl bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">수요 데이터</div><div className="mt-1 text-sm font-black">{session.discovery.searchAdConfigured ? "연결" : "없음"}</div></div>
           </div>
         ) : null}
+
         {session.discovery?.searchAdWarnings.length ? (
           <div className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
             {session.discovery.searchAdWarnings.join(" · ")}
@@ -798,7 +819,7 @@ export default function KeywordEngineElonLabPage() {
 
         {session.scoredCandidates.length ? (
           <div className="mt-6 overflow-x-auto">
-            <table className="w-full min-w-[1150px] border-collapse text-sm">
+            <table className="min-w-[1150px] w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-xs text-slate-600">
                   <th className="p-3">순위</th><th className="p-3">키워드</th><th className="p-3">품질</th><th className="p-3">월검색</th><th className="p-3">관련성</th><th className="p-3">쇼핑의도</th><th className="p-3">구체성</th><th className="p-3">경쟁기회</th><th className="p-3">상품명</th><th className="p-3">근거/출처</th>
@@ -832,11 +853,13 @@ export default function KeywordEngineElonLabPage() {
         <section className="rounded-2xl border-2 border-slate-900 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><div className="text-xs font-black tracking-[0.16em] text-slate-500">FINAL RESULT</div><h2 className="mt-1 text-2xl font-black">상품명 + 품질 통과 키워드 전체</h2></div>
-            <span className={`rounded-full px-4 py-2 text-sm font-black ${minimumMet ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>{minimumMet ? `PASS · ${passing.length}개` : `추가 발굴 필요 · ${passing.length}/${KEYWORD_ELON_V2_MINIMUM_KEYWORDS}`}</span>
+            <span className={`rounded-full px-4 py-2 text-sm font-black ${minimumMet ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
+              {minimumMet ? `PASS · ${passing.length}개` : `추가 발굴 필요 · ${passing.length}/${KEYWORD_ELON_V2_MINIMUM_KEYWORDS}`}
+            </span>
           </div>
           {!minimumMet ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">
-              커트라인 미만 키워드를 억지로 채우지 않습니다. STEP 2를 다시 실행해 후보를 추가 발굴하거나 품질 커트라인을 검토하세요.
+              커트라인 미만 키워드를 억지로 채우지 않습니다. STEP 2를 다시 실행해 후보를 추가 발굴하거나 품질 커트라인을 조정하세요.
             </div>
           ) : null}
           <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1.5fr]">
@@ -844,27 +867,19 @@ export default function KeywordEngineElonLabPage() {
               <div className="text-xs font-bold text-slate-300">추천 상품명</div>
               <div className="mt-2 text-2xl font-black">{session.titleResult?.title || "현재 커트라인으로 상품명을 생성해 주세요."}</div>
               {session.titleResult ? (
-                <>
-                  <div className="mt-3 text-xs text-slate-300">{session.titleResult.byteLength} bytes · model {session.titleResult.model}</div>
-                  <div className="mt-4"><div className="mb-2 text-xs font-bold text-slate-300">사용 키워드</div><div className="flex flex-wrap gap-2">{session.titleResult.usedKeywords.map((keyword) => <span key={keyword} className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold">{keyword}</span>)}</div></div>
-                </>
+                <><div className="mt-3 text-xs text-slate-300">{session.titleResult.byteLength} bytes · model {session.titleResult.model}</div><div className="mt-4"><div className="mb-2 text-xs font-bold text-slate-300">사용 키워드</div><div className="flex flex-wrap gap-2">{session.titleResult.usedKeywords.map((keyword) => <span key={keyword} className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold">{keyword}</span>)}</div></div></>
               ) : null}
               <button disabled={busy !== ""} onClick={regenerateTitle} className="mt-5 rounded-lg bg-white px-4 py-2 text-sm font-black text-slate-900 disabled:opacity-40">{busy === "title" ? "상품명 생성 중…" : "현재 커트라인으로 상품명 다시 생성"}</button>
             </div>
             <div className="rounded-2xl bg-slate-50 p-5">
-              <div className="text-xs font-bold text-slate-500">상품 정체성</div><div className="mt-1 text-lg font-black">{session.identity?.koreanProductIdentity}</div>
-              <div className="mt-4 text-xs font-bold text-slate-500">Primary Seed</div><div className="mt-2"><Chips values={session.identity?.primarySeeds ?? []} /></div>
-              <div className="mt-4 text-xs font-bold text-slate-500">품질 커트라인</div><div className="mt-1 text-xl font-black">{session.cutoff}점</div>
+              <div className="text-xs font-bold text-slate-500">상품 정체성</div><div className="mt-1 text-lg font-black">{session.identity?.koreanProductIdentity}</div><div className="mt-4 text-xs font-bold text-slate-500">Primary Seed</div><div className="mt-2"><Chips values={session.identity?.primarySeeds ?? []} /></div><div className="mt-4 text-xs font-bold text-slate-500">품질 커트라인</div><div className="mt-1 text-xl font-black">{session.cutoff}점</div>
             </div>
           </div>
           <div className="mt-6">
             <h3 className="text-lg font-black">통과 키워드 · 점수 높은 순</h3>
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {passing.map((row, index) => (
-                <div key={`final-${row.searchKey}-${index}`} className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <div><span className="mr-3 text-xs font-black text-emerald-700">#{index + 1}</span><span className="font-black">{row.keyword}</span></div>
-                  <span className="font-black tabular-nums text-emerald-800">{row.qualityScore.toFixed(1)}</span>
-                </div>
+                <div key={`final-${row.searchKey}-${index}`} className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3"><div><span className="mr-3 text-xs font-black text-emerald-700">#{index + 1}</span><span className="font-black">{row.keyword}</span></div><span className="font-black tabular-nums text-emerald-800">{row.qualityScore.toFixed(1)}</span></div>
               ))}
             </div>
           </div>

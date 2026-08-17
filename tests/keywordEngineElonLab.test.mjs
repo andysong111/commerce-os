@@ -7,31 +7,15 @@ const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "ut
 const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const moduleFile = await readFile("src/lib/keywordEngineElonLabModule.ts", "utf8");
+const manifest = await readFile("public/keyword-lab-collector/manifest.json", "utf8");
+const collector1688 = await readFile("public/keyword-lab-collector/content-1688.js", "utf8");
 
-test("Elon Lab V2 starts from a 1688 URL and exposes only two execution steps", () => {
+test("Elon Lab starts from a 1688 URL and exposes only two execution steps", () => {
   assert.match(page, /1688 중국 상품 링크/);
   assert.match(page, /STEP 1/);
   assert.match(page, /STEP 2/);
   assert.match(page, /FINAL RESULT/);
   assert.doesNotMatch(page, /121073|121065|121059|121053|121050|121045/);
-});
-
-test("primary 1688 collection uses the same browser-import pattern as SaaS", () => {
-  assert.match(page, /SaaS 방식 자동수집/);
-  assert.match(page, /AI-Saurus Importer v\{KEYWORD_ELON_REQUIRED_IMPORTER_VERSION\}/);
-  assert.match(page, /startBrowserSourceCollection/);
-  assert.match(browserImport, /commerce_os_keyword_lab_import/);
-  assert.match(browserImport, /commerce_os_keyword_lab_return/);
-  assert.match(browserImport, /commerce_keyword_import/);
-  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_IMPORTER_VERSION = "0\.4\.3"/);
-});
-
-test("structured 1688 option groups become readable group and option-value lines", () => {
-  assert.match(browserImport, /supplierOptionGroups/);
-  assert.match(browserImport, /group\.sourceName/);
-  assert.match(browserImport, /group\.values\.map/);
-  assert.match(browserImport, /join\(" \/ "\)/);
-  assert.match(browserImport, /keywordElonOptionTextFromBrowserPayload/);
 });
 
 test("V2 session survives refresh with browser storage", () => {
@@ -45,7 +29,7 @@ test("quality policy means minimum ten, not maximum ten", () => {
   assert.match(domain, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70/);
   assert.match(page, /최소 목표/);
   assert.match(page, /상한 없음/);
-  assert.match(page, /개수 제한 없이 모두 보존/);
+  assert.match(page, /커트라인을 통과한 키워드는 상한 없이 모두 보존/);
 });
 
 test("final result includes a generated product title", () => {
@@ -54,12 +38,23 @@ test("final result includes a generated product title", () => {
   assert.match(page, /통과 키워드 · 점수 높은 순/);
 });
 
-test("API keeps server collection only as a fallback and exposes V2 pipeline actions", () => {
+test("API exposes the V2 pipeline actions", () => {
   for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "generate_title"]) {
     assert.match(route, new RegExp(`action === \\"${action}\\"`));
   }
-  assert.match(page, /서버 보조수집/);
   assert.doesNotMatch(route, /keywordEngineElonLabStore|keywordEngineElonLabShopling/);
+});
+
+test("Keyword Lab owns its dedicated 1688 collector and does not depend on AI-Saurus", () => {
+  assert.match(page, /Commerce OS Keyword Lab Collector/);
+  assert.match(page, /전용 수집기 ZIP 다운로드/);
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.0"/);
+  assert.match(browserImport, /commerce_os_keyword_lab_collect/);
+  assert.match(manifest, /Commerce OS Keyword Lab Collector/);
+  assert.match(collector1688, /extractProductName/);
+  assert.match(collector1688, /extractStructuredOptionGroups/);
+  assert.doesNotMatch(page, /AI-Saurus|SaaS 방식 자동수집/);
+  assert.doesNotMatch(browserImport, /AI-Saurus/);
 });
 
 test("module registry copy describes the 1688 V2 lab", () => {
