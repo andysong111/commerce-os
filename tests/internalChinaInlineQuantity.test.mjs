@@ -19,7 +19,7 @@ test("China draft quantity can be changed directly inside each order table row",
   assert.match(bridge, /label === "수량"/);
   assert.match(bridge, /createPortal/);
   assert.match(bridge, /aria-label=\{`\$\{barcode\} 주문수량`\}/);
-  assert.match(bridge, />\s*변경\s*</);
+  assert.match(bridge, /saving \? "저장" : "변경"/);
 });
 
 test("inline quantity change preserves current order-entry work and refreshes totals without full reload", () => {
