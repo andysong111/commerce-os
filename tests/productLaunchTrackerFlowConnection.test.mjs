@@ -17,6 +17,10 @@ const trackerAppSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
+const workflowGateSource = await readFile(
+  new URL("../public/product-launch-tracker-app/workflow-ui-gate.js", import.meta.url),
+  "utf8",
+);
 const optimizedTrackerSource = await readFile(
   new URL(
     "../public/product-launch-tracker-app/optimized-app.js",
@@ -33,8 +37,10 @@ test("상품출시플로우는 실재고 입력 화면 대신 진행관리 연�
   assert.match(connectedSource, /진행관리 상품 선택/);
 });
 
-test("진행관리 표에 행번호와 체크 선택 일괄 전달 기능이 최적화 앱에 통합된다", () => {
-  assert.match(trackerAppSource, /optimized-app\.js/);
+test("진행관리 표의 일괄 전달 기능은 건강한 Workflow gate 뒤의 최적화 앱에 통합된다", () => {
+  assert.match(trackerAppSource, /workflow-ui-gate\.js/);
+  assert.match(workflowGateSource, /import\("\.\/optimized-app\.js"\)/);
+  assert.match(workflowGateSource, /installWarmWorkflowPage/);
   assert.match(optimizedTrackerSource, /optimized-row-number/);
   assert.match(optimizedTrackerSource, /선택 상품을 출시플로우로 등록 진행/);
   assert.match(
