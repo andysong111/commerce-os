@@ -1,6 +1,7 @@
 name: Product Launch Browser Smoke
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -8,6 +9,8 @@ on:
       - "public/product-launch-tracker-app/**"
       - "src/components/OpsWorkAssistant.tsx"
       - "src/app/api/product-launch-tracker/**"
+      - "src/lib/commerceOperationsDashboard.ts"
+      - "vercel.json"
       - "scripts/product-launch-browser-smoke.mjs"
       - ".github/workflows/product-launch-browser-smoke.yml"
 
