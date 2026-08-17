@@ -103,17 +103,13 @@ if (detailPageMode === "worker") {
     console.error("Product Master control plane failed to load", error);
   }
 
-  const slowListTimer = window.setTimeout(() => {
-    const status = document.querySelector("#save-status");
-    if (status?.textContent === "불러오는 중") {
-      status.textContent = "OPS Workflow 연결 중 · 상품마스터는 계속 사용할 수 있습니다";
-    }
-  }, 8_000);
+  // OPS Workflow is a secondary layer. Do not mount optimized-app until a bounded
+  // health probe succeeds, otherwise its skeleton/error UI can overwrite Product Master.
   try {
-    // Workflow paging and item-scoped writes load independently from Product Master.
-    await import("./optimized-app.js");
-  } finally {
-    window.clearTimeout(slowListTimer);
+    const workflowGate = await import("./workflow-ui-gate.js");
+    workflowGate.installWorkflowUiGate?.();
+  } catch (error) {
+    console.error("OPS Workflow UI gate failed to load", error);
   }
 
   // Product and purchase metadata integrations stay available with the main read model.
