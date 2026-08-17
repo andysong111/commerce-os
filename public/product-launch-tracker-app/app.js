@@ -2,8 +2,10 @@ const pageParams = new URLSearchParams(window.location.search);
 const detailPageMode = pageParams.get("detail_page_mode") || "standalone";
 const dockEventSource = "commerce-os-detail-page-dock";
 const workAssistantSource = "commerce-os-work-assistant";
-const detailJobsApi = "/api/product-launch-tracker/detail-page-jobs";
+const detailJobsActiveApi = "/api/product-launch-tracker/detail-page-jobs/active";
 const workerIdleCheckMs = 30_000;
+
+document.documentElement.dataset.productLaunchArchitecture = "v2-core-first";
 
 function signalDetailPageWorkerReady() {
   window.parent?.postMessage(
@@ -36,28 +38,18 @@ if (detailPageMode === "worker") {
     workerCheckTimer = window.setTimeout(async () => {
       if (workerModulesPromise) return;
       try {
-        const response = await fetch(detailJobsApi, {
+        const response = await fetch(detailJobsActiveApi, {
           cache: "no-store",
           credentials: "same-origin",
           headers: { Accept: "application/json" },
         });
         const payload = await response.json().catch(() => ({}));
-        const hasActiveJob =
-          response.ok &&
-          payload?.ok === true &&
-          Array.isArray(payload.jobs) &&
-          payload.jobs.some(
-            (job) =>
-              !["success", "failed", "cancelled"].includes(
-                String(job?.status || ""),
-              ),
-          );
-        if (hasActiveJob) {
+        if (response.ok && payload?.ok === true && payload?.active === true) {
           await ensureWorkerModules();
           return;
         }
       } catch {
-        // The shared jobs cache may be unavailable while Supabase is overloaded.
+        // Active-job probing is intentionally lightweight and retries later.
       }
       scheduleWorkerCheck(workerIdleCheckMs);
     }, delay);
@@ -103,58 +95,106 @@ if (detailPageMode === "worker") {
     console.error("Product launch startup cache preview failed", error);
   }
 
-  // Product Master is the durable product authority. Mount its read-only control plane
-  // before the workflow list so the operator can still inspect products during OPS DB stalls.
+  // Product Master is the durable product authority. Mount its control plane first so
+  // the operator sees the product ledger even while OPS Workflow is unavailable.
   try {
     await import("./product-master-control-plane.js");
   } catch (error) {
     console.error("Product Master control plane failed to load", error);
   }
 
-  // Do not abort or replace the list request. If a cold start is slow, only show a
-  // passive status message while the existing optimized app keeps waiting normally.
   const slowListTimer = window.setTimeout(() => {
     const status = document.querySelector("#save-status");
     if (status?.textContent === "불러오는 중") {
-      status.textContent = "목록 응답 지연 · 서버 응답을 기다리는 중";
+      status.textContent = "OPS Workflow 연결 중 · 상품마스터는 계속 사용할 수 있습니다";
     }
   }, 8_000);
   try {
-    // The optimized app owns list loading, paging, lazy details and item-scoped saves.
+    // Workflow paging and item-scoped writes load independently from Product Master.
     await import("./optimized-app.js");
   } finally {
     window.clearTimeout(slowListTimer);
   }
-  // Optimized tracker owns the active detail dialog, so B-code China purchasing
-  // metadata must mount on that path rather than the retired legacy extension.
+
+  // Product and purchase metadata integrations stay available with the main read model.
   await import("./optimized-china-order-mapping.js");
-  // Product Master is the authority for which B-codes actually belong to a model.
-  // Remove stale or cross-model option rows before the operator edits or saves them.
   await import("./model-bcode-option-guard.js");
-  // The China-option panel must always mirror the B-codes that are actually visible
-  // in the order/receipt option-price table. Blank and stale rows are never shown.
   await import("./china-option-table-authority.js");
-  // Every successful purchase-metadata save is copied to Product Master so that its
-  // latest-value ledger reflects whichever side — launch tracker or order Draft —
-  // the operator edited last.
   await import("./purchase-metadata-auto-sync.js");
 
-  // Lightweight table and dialog behavior is available immediately after first render.
+  // Lightweight table behavior is available immediately. Detail-page job modules are
+  // intentionally not mounted here; they load only when the operator opens a detail flow.
   await import("./table-horizontal-scroll.js");
   await import("./dialog-close-fix.js");
   await import("./table-inline-ops-loader.js");
   await import("./table-frozen-columns-fix.js");
-  await import("./detail-page-product-scope.js");
-  await import("./detail-page-dock.js");
-  await import("./detail-page-bgrade-main-only-dock.js");
-  await import("./detail-page-dock-repair.js");
-  await import("./detail-page-option-guard.js");
   await import("./empty-cell-placeholder-cleanup.js");
   await import("./shopling-upload-ui.js");
   await import("./product-launch-flow-handoff.js");
 
-  // Network-heavy and rarely used category integrations wait until the browser is idle.
+  installLazyDetailPageIntegrations();
   scheduleIdleIntegrations();
+}
+
+function installLazyDetailPageIntegrations() {
+  let modulesPromise = null;
+  let observer = null;
+
+  const start = () => {
+    if (!modulesPromise) {
+      modulesPromise = (async () => {
+        const modules = [
+          "./detail-page-product-scope.js",
+          "./detail-page-dock.js",
+          "./detail-page-bgrade-main-only-dock.js",
+          "./detail-page-dock-repair.js",
+          "./detail-page-option-guard.js",
+        ];
+        for (const path of modules) {
+          try {
+            await import(path);
+          } catch (error) {
+            console.error(`Detail-page integration failed to load: ${path}`, error);
+          }
+        }
+      })();
+    }
+    return modulesPromise;
+  };
+
+  const eagerStart = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      target?.closest(
+        "button[data-action='detail'], button[data-action='preview'], #preview-button, #add-items-button, #detail-dialog",
+      )
+    ) {
+      void start();
+    }
+  };
+  document.addEventListener("pointerdown", eagerStart, true);
+
+  const detailDialog = document.querySelector("#detail-dialog");
+  if (detailDialog) {
+    observer = new MutationObserver(() => {
+      if (detailDialog.hasAttribute("open")) void start();
+    });
+    observer.observe(detailDialog, { attributes: true, attributeFilter: ["open"] });
+    if (detailDialog.hasAttribute("open")) void start();
+  }
+
+  if (pageParams.get("detailPageItem") || pageParams.get("open_item")) {
+    void start();
+  }
+
+  window.addEventListener(
+    "pagehide",
+    () => {
+      document.removeEventListener("pointerdown", eagerStart, true);
+      observer?.disconnect();
+    },
+    { once: true },
+  );
 }
 
 function scheduleIdleIntegrations() {
