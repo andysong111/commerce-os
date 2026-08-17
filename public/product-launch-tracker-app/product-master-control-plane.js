@@ -1,7 +1,13 @@
 const PRODUCT_MASTER_CORE_API = "/api/product-launch-tracker/product-master-core";
+const WORKFLOW_API = "/api/product-launch-tracker/optimized";
 const PRODUCT_MASTER_BASE_URL = "https://commerce-os-product-master.vercel.app";
-const MASTER_FALLBACK_DELAY_MS = 3_000;
+const MASTER_FALLBACK_DELAY_MS = 2_500;
 const MASTER_PAGE_SIZE = 25;
+const MASTER_SEARCH_DELAY_MS = 280;
+const WORKFLOW_PROBE_TIMEOUT_MS = 4_500;
+const WORKFLOW_RECONNECT_DELAYS_MS = [5_000, 10_000, 20_000, 30_000];
+const WORKFLOW_CACHE_KEY = "commerce-os-product-launch-workflow-last-known:v1";
+const WORKFLOW_CACHE_MAX_ITEMS = 5_000;
 const MASTER_DISABLED_SELECTOR = [
   "#batch-filter",
   "#assignee-filter",
@@ -15,21 +21,41 @@ const MASTER_DISABLED_SELECTOR = [
   "#add-items-button",
   "#policy-button",
 ].join(",");
+const WORKFLOW_STAGES = [
+  "detailPage",
+  "priceKeyword",
+  "shoplingUpload",
+  "marketRegistration",
+  "orderMapping",
+  "inventoryReflection",
+];
 
 let livePageLoaded = false;
 let masterFallbackActive = false;
 let masterProducts = [];
+let masterPage = 1;
+let masterPageCount = 1;
+let masterTotal = 0;
 let fallbackRequest = null;
+let fallbackController = null;
 let fallbackRenderGuard = false;
 let defaultMasterViewApplied = false;
+let masterSearchTimer = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+let reconnectInFlight = false;
+let reconnectDueAt = 0;
 
 upgradePageIdentity();
 installProductMasterDetailLink();
 installFallbackObserver();
+installRecoverySignals();
+bindMasterSearch();
 scheduleMasterFallback();
 
 window.addEventListener("product-launch-tracker:page-loaded", () => {
   livePageLoaded = true;
+  captureWorkflowCache();
   deactivateMasterFallback();
   applyDefaultMasterView();
 });
@@ -87,12 +113,46 @@ function installFallbackObserver() {
     ) {
       void ensureMasterFallback();
     }
-    if (masterFallbackActive && !fallbackRenderGuard && bodyText.includes("목록을 불러오지 못했습니다")) {
+    if (
+      masterFallbackActive &&
+      !fallbackRenderGuard &&
+      bodyText.includes("목록을 불러오지 못했습니다")
+    ) {
       renderMasterFallback();
     }
   });
   observer.observe(status, { childList: true, subtree: true, characterData: true });
   observer.observe(body, { childList: true, subtree: true });
+}
+
+function installRecoverySignals() {
+  window.addEventListener("online", () => {
+    if (masterFallbackActive) scheduleWorkflowReconnect(800, true);
+  });
+  window.addEventListener("focus", () => {
+    if (masterFallbackActive && document.visibilityState === "visible") {
+      scheduleWorkflowReconnect(1_000, true);
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (masterFallbackActive && document.visibilityState === "visible") {
+      scheduleWorkflowReconnect(1_000, true);
+    }
+  });
+}
+
+function bindMasterSearch() {
+  const search = document.querySelector("#search-input");
+  if (!(search instanceof HTMLInputElement) || search.dataset.masterFallbackBound === "true") return;
+  search.dataset.masterFallbackBound = "true";
+  search.addEventListener("input", () => {
+    if (!masterFallbackActive) return;
+    window.clearTimeout(masterSearchTimer);
+    masterSearchTimer = window.setTimeout(() => {
+      masterPage = 1;
+      void loadMasterPage();
+    }, MASTER_SEARCH_DELAY_MS);
+  });
 }
 
 function scheduleMasterFallback() {
@@ -102,42 +162,49 @@ function scheduleMasterFallback() {
 }
 
 async function ensureMasterFallback() {
-  if (livePageLoaded || masterFallbackActive) return;
-  if (!fallbackRequest) {
-    fallbackRequest = fetch(PRODUCT_MASTER_CORE_API, {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload?.ok !== true || !Array.isArray(payload.products)) {
-          throw new Error(payload?.message || `Product Master 응답 오류 (${response.status})`);
-        }
-        return payload;
-      })
-      .finally(() => {
-        fallbackRequest = null;
-      });
-  }
+  if (livePageLoaded) return;
+  masterFallbackActive = true;
+  document.body.dataset.productMasterFallback = "true";
+  lockWorkflowWrites(true);
+  ensureMasterPager();
+  await loadMasterPage();
+  if (masterFallbackActive && !livePageLoaded) scheduleWorkflowReconnect();
+}
 
+async function loadMasterPage() {
+  if (!masterFallbackActive || livePageLoaded) return;
+  fallbackController?.abort();
+  fallbackController = new AbortController();
+  const search = currentMasterSearch();
+  const params = new URLSearchParams({
+    page: String(masterPage),
+    pageSize: String(MASTER_PAGE_SIZE),
+    search,
+  });
+  fallbackRequest = fetch(`${PRODUCT_MASTER_CORE_API}?${params.toString()}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+    signal: fallbackController.signal,
+  });
   try {
-    const payload = await fallbackRequest;
-    if (livePageLoaded) return;
-    masterProducts = payload.products;
-    masterFallbackActive = true;
-    document.body.dataset.productMasterFallback = "true";
-    lockWorkflowWrites(true);
-    renderMasterFallback();
-    const search = document.querySelector("#search-input");
-    if (search && search.dataset.masterFallbackBound !== "true") {
-      search.dataset.masterFallbackBound = "true";
-      search.addEventListener("input", () => {
-        if (masterFallbackActive) renderMasterFallback();
-      });
+    const response = await fallbackRequest;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.ok !== true || !Array.isArray(payload.products)) {
+      throw new Error(payload?.message || `Product Master 응답 오류 (${response.status})`);
     }
+    if (!masterFallbackActive || livePageLoaded) return;
+    masterProducts = payload.products;
+    masterPage = Math.max(1, Number(payload.page) || 1);
+    masterPageCount = Math.max(1, Number(payload.pageCount) || 1);
+    masterTotal = Math.max(0, Number(payload.total) || 0);
+    renderMasterFallback();
   } catch (error) {
+    if (error?.name === "AbortError") return;
     console.error("Product Master fallback failed", error);
+    setFallbackStatus("Product Master 재연결 중 · 상품 원장 응답을 기다리는 중");
+  } finally {
+    fallbackRequest = null;
   }
 }
 
@@ -145,60 +212,45 @@ function renderMasterFallback() {
   if (!masterFallbackActive || livePageLoaded) return;
   const body = document.querySelector("#launch-table-body");
   if (!body) return;
-  const search = String(document.querySelector("#search-input")?.value || "")
-    .normalize("NFKC")
-    .trim()
-    .toLowerCase();
-  const filtered = masterProducts.filter((product) => {
-    if (!search) return true;
-    return [
-      product.modelNumber,
-      product.productName,
-      ...(product.barcodes || []),
-      ...(product.optionLabels || []),
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(search);
-  });
-  const visible = filtered.slice(0, MASTER_PAGE_SIZE);
+  const workflowCache = readWorkflowCache();
 
   fallbackRenderGuard = true;
-  body.innerHTML = visible.map(renderMasterRow).join("");
+  body.innerHTML = masterProducts
+    .map((product, index) => renderMasterRow(product, index, workflowCache))
+    .join("");
   fallbackRenderGuard = false;
   body.dataset.masterFallback = "true";
 
-  const status = document.querySelector("#save-status");
-  if (status) {
-    status.textContent = "Product Master 핵심 원장 표시 · OPS Workflow 재연결 대기";
-    status.dataset.tone = "warning";
-  }
+  updateReconnectStatus();
   const visibleCount = document.querySelector("#visible-count");
   if (visibleCount) {
-    visibleCount.textContent = `${formatNumber(filtered.length)}개 상품 · 핵심 원장 임시 보기`;
+    const start = masterTotal ? (masterPage - 1) * MASTER_PAGE_SIZE + 1 : 0;
+    const end = Math.min(masterPage * MASTER_PAGE_SIZE, masterTotal);
+    visibleCount.textContent = `${formatNumber(masterTotal)}개 상품 · ${formatNumber(start)}-${formatNumber(end)} · 핵심 원장`;
   }
   const selectedCount = document.querySelector("#selected-count");
   if (selectedCount) selectedCount.textContent = "읽기 전용";
   const sourceMeta = document.querySelector("#source-meta");
-  if (sourceMeta) sourceMeta.textContent = "Product Master 독립 원장 · OPS 작업상태 연결 대기";
+  if (sourceMeta) sourceMeta.textContent = "Product Master 서버 페이지 · OPS Workflow 백그라운드 재연결";
 
-  renderMasterSummary(filtered);
+  renderMasterSummary();
+  renderMasterPager();
   bindMasterRowButtons();
 }
 
-function renderMasterSummary(products) {
+function renderMasterSummary() {
   const summary = document.querySelector("#summary");
   if (!summary) return;
-  const skuCount = products.reduce(
+  const skuCount = masterProducts.reduce(
     (sum, product) => sum + (Array.isArray(product.options) ? product.options.length : 0),
     0,
   );
-  const withOptions = products.filter((product) => (product.options || []).length > 1).length;
+  const withOptions = masterProducts.filter((product) => (product.options || []).length > 1).length;
   summary.innerHTML = [
-    ["핵심 원장 상품", products.length],
-    ["활성 SKU", skuCount],
-    ["복수 옵션 상품", withOptions],
-    ["OPS Workflow", "연결 대기"],
+    ["핵심 원장 상품", masterTotal],
+    ["현재 페이지 SKU", skuCount],
+    ["현재 페이지 복수옵션", withOptions],
+    ["OPS Workflow", "재연결 중"],
   ]
     .map(
       ([label, value]) =>
@@ -207,27 +259,75 @@ function renderMasterSummary(products) {
     .join("");
 }
 
-function renderMasterRow(product, index) {
+function renderMasterRow(product, index, workflowCache) {
   const barcodes = Array.isArray(product.barcodes) ? product.barcodes : [];
   const options = Array.isArray(product.optionLabels) ? product.optionLabels : [];
+  const model = normalizeModelNumber(product.modelNumber);
+  const cached = model ? workflowCache.items?.[model] : null;
   const barcodeCell = barcodes.length > 1
     ? `<div class="inline-option-location-list"><div class="inline-option-location-title">B-code</div>${barcodes.map((barcode) => `<div class="inline-option-location-row"><strong>${escapeHtml(barcode)}</strong></div>`).join("")}</div>`
     : `<strong>${escapeHtml(barcodes[0] || "미등록")}</strong>`;
-  const pendingCell = '<td><span class="status-select" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;pointer-events:none">연결 대기</span></td>';
+  const stageCells = WORKFLOW_STAGES.map((stage) =>
+    renderWorkflowStageCell(cached?.stages?.[stage], cached?.savedAt),
+  ).join("");
+  const rowNumber = (masterPage - 1) * MASTER_PAGE_SIZE + index + 1;
   return `
-    <tr data-master-model="${escapeAttribute(product.modelNumber)}" class="master-core-fallback-row">
+    <tr data-master-model="${escapeAttribute(model)}" class="master-core-fallback-row">
       <td class="check-column"><input type="checkbox" disabled aria-label="읽기 전용" /></td>
-      <td class="cell-truncate"><span class="optimized-row-number">#M${index + 1}</span>상품마스터</td>
+      <td class="cell-truncate"><span class="optimized-row-number">#M${formatNumber(rowNumber)}</span>상품마스터</td>
       <td>${barcodeCell}</td>
-      <td><strong>${escapeHtml(product.modelNumber)}</strong></td>
+      <td><strong>${escapeHtml(model)}</strong></td>
       <td class="product-name"><strong>${escapeHtml(product.productName)}</strong></td>
       <td><span class="sync-status">핵심 원장</span></td>
       <td>${escapeHtml(options.join(", ") || "단품")}</td>
       <td><span class="readiness-badge is-ready">원장 확인</span></td>
-      ${pendingCell}${pendingCell}${pendingCell}${pendingCell}${pendingCell}${pendingCell}
+      ${stageCells}
       <td class="next-stage">OPS 재연결<span class="progress-text">핵심 원장은 정상</span></td>
-      <td class="row-actions"><button class="row-action" type="button" data-master-core-model="${escapeAttribute(product.modelNumber)}">핵심 원장</button></td>
+      <td class="row-actions"><button class="row-action" type="button" data-master-core-model="${escapeAttribute(model)}">핵심 원장</button></td>
     </tr>`;
+}
+
+function renderWorkflowStageCell(status, savedAt) {
+  const safeStatus = String(status || "").trim();
+  if (!safeStatus) {
+    return '<td><span class="status-select" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;pointer-events:none">연결 대기</span></td>';
+  }
+  return `<td><span class="status-select status-${escapeAttribute(safeStatus.replaceAll(" ", "-"))}" title="마지막 정상 Workflow 상태 · ${escapeAttribute(formatCacheTime(savedAt))}" style="display:inline-flex;align-items:center;justify-content:center;min-width:72px;pointer-events:none">${escapeHtml(safeStatus)}</span></td>`;
+}
+
+function ensureMasterPager() {
+  if (document.querySelector("#product-master-fallback-pager")) return;
+  const visibleCount = document.querySelector("#visible-count");
+  const host = visibleCount?.parentElement;
+  if (!host) return;
+  const pager = document.createElement("span");
+  pager.id = "product-master-fallback-pager";
+  pager.style.cssText = "display:none;align-items:center;gap:6px;margin-left:10px";
+  pager.innerHTML = `
+    <button type="button" class="button button-ghost" data-master-page-action="prev">이전</button>
+    <strong data-master-page-label></strong>
+    <button type="button" class="button button-ghost" data-master-page-action="next">다음</button>`;
+  host.append(pager);
+  pager.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-master-page-action]");
+    if (!button || !masterFallbackActive) return;
+    const nextPage = button.dataset.masterPageAction === "prev" ? masterPage - 1 : masterPage + 1;
+    if (nextPage < 1 || nextPage > masterPageCount || nextPage === masterPage) return;
+    masterPage = nextPage;
+    void loadMasterPage();
+  });
+}
+
+function renderMasterPager() {
+  const pager = document.querySelector("#product-master-fallback-pager");
+  if (!pager) return;
+  pager.style.display = masterFallbackActive ? "inline-flex" : "none";
+  const label = pager.querySelector("[data-master-page-label]");
+  if (label) label.textContent = `${formatNumber(masterPage)} / ${formatNumber(masterPageCount)} 페이지`;
+  const prev = pager.querySelector("[data-master-page-action='prev']");
+  const next = pager.querySelector("[data-master-page-action='next']");
+  if (prev) prev.disabled = masterPage <= 1;
+  if (next) next.disabled = masterPage >= masterPageCount;
 }
 
 function bindMasterRowButtons() {
@@ -238,6 +338,120 @@ function bindMasterRowButtons() {
       const model = normalizeModelNumber(button.dataset.masterCoreModel);
       if (model) window.open(productMasterCoreUrl(model), "_blank", "noopener,noreferrer");
     });
+  }
+}
+
+function scheduleWorkflowReconnect(delay, reset = false) {
+  if (!masterFallbackActive || livePageLoaded) return;
+  if (reset) reconnectAttempt = 0;
+  window.clearTimeout(reconnectTimer);
+  const reconnectDelay = Number.isFinite(delay)
+    ? delay
+    : WORKFLOW_RECONNECT_DELAYS_MS[
+        Math.min(reconnectAttempt, WORKFLOW_RECONNECT_DELAYS_MS.length - 1)
+      ];
+  reconnectDueAt = Date.now() + reconnectDelay;
+  reconnectTimer = window.setTimeout(() => void probeWorkflow(), reconnectDelay);
+  updateReconnectStatus();
+}
+
+async function probeWorkflow() {
+  if (!masterFallbackActive || livePageLoaded || reconnectInFlight) return;
+  reconnectInFlight = true;
+  reconnectDueAt = 0;
+  updateReconnectStatus("OPS Workflow 연결 확인 중");
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), WORKFLOW_PROBE_TIMEOUT_MS);
+  try {
+    const params = new URLSearchParams({
+      mode: "page",
+      page: "1",
+      pageSize: "1",
+      unfinishedOnly: "false",
+    });
+    const response = await fetch(`${WORKFLOW_API}?${params.toString()}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.ok && body?.ok === true && body?.stateExists !== false) {
+      window.location.reload();
+      return;
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") console.debug("OPS Workflow reconnect deferred", error);
+  } finally {
+    window.clearTimeout(timer);
+    reconnectInFlight = false;
+  }
+  reconnectAttempt += 1;
+  scheduleWorkflowReconnect();
+}
+
+function updateReconnectStatus(override) {
+  if (override) {
+    setFallbackStatus(override);
+    return;
+  }
+  const seconds = reconnectDueAt > Date.now()
+    ? Math.max(1, Math.ceil((reconnectDueAt - Date.now()) / 1000))
+    : null;
+  setFallbackStatus(
+    seconds
+      ? `Product Master 핵심 원장 표시 · OPS Workflow ${seconds}초 후 재연결`
+      : "Product Master 핵심 원장 표시 · OPS Workflow 재연결 준비",
+  );
+}
+
+function setFallbackStatus(message) {
+  const status = document.querySelector("#save-status");
+  if (status) {
+    status.textContent = message;
+    status.dataset.tone = "warning";
+  }
+}
+
+function captureWorkflowCache() {
+  window.setTimeout(() => {
+    const previous = readWorkflowCache();
+    const items = { ...(previous.items || {}) };
+    const savedAt = new Date().toISOString();
+    for (const row of document.querySelectorAll("#launch-table-body tr[data-id]")) {
+      const model = normalizeModelNumber(
+        row.querySelector(".inline-model-number-editor")?.value ||
+          row.querySelector("[data-column-key='modelNumber']")?.textContent,
+      );
+      if (!model) continue;
+      const stages = {};
+      for (const select of row.querySelectorAll("select.status-select[data-stage]")) {
+        if (WORKFLOW_STAGES.includes(select.dataset.stage)) {
+          stages[select.dataset.stage] = select.value;
+        }
+      }
+      items[model] = { savedAt, stages };
+    }
+    const ordered = Object.entries(items)
+      .sort((left, right) => Date.parse(right[1]?.savedAt || "") - Date.parse(left[1]?.savedAt || ""))
+      .slice(0, WORKFLOW_CACHE_MAX_ITEMS);
+    try {
+      localStorage.setItem(
+        WORKFLOW_CACHE_KEY,
+        JSON.stringify({ version: 1, savedAt, items: Object.fromEntries(ordered) }),
+      );
+    } catch {
+      // Cache is optional; Product Master remains authoritative without it.
+    }
+  }, 0);
+}
+
+function readWorkflowCache() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORKFLOW_CACHE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
   }
 }
 
@@ -255,10 +469,14 @@ function lockWorkflowWrites(locked) {
 }
 
 function deactivateMasterFallback() {
-  if (!masterFallbackActive) return;
   masterFallbackActive = false;
   delete document.body.dataset.productMasterFallback;
+  fallbackController?.abort();
+  window.clearTimeout(reconnectTimer);
+  reconnectDueAt = 0;
   lockWorkflowWrites(false);
+  const pager = document.querySelector("#product-master-fallback-pager");
+  if (pager) pager.style.display = "none";
 }
 
 function applyDefaultMasterView() {
@@ -270,6 +488,13 @@ function applyDefaultMasterView() {
   unfinished.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function currentMasterSearch() {
+  return String(document.querySelector("#search-input")?.value || "")
+    .normalize("NFKC")
+    .trim()
+    .slice(0, 160);
+}
+
 function productMasterCoreUrl(model) {
   return `${PRODUCT_MASTER_BASE_URL}/core/${encodeURIComponent(model)}`;
 }
@@ -279,6 +504,17 @@ function normalizeModelNumber(value) {
   const match = candidate.match(/^AAA0*(\d+)$/);
   if (!match) return /^AAA\d{3,}$/.test(candidate) ? candidate : "";
   return `AAA${match[1].padStart(3, "0")}`;
+}
+
+function formatCacheTime(value) {
+  const parsed = Date.parse(String(value || ""));
+  if (!Number.isFinite(parsed)) return "시간 미상";
+  return new Date(parsed).toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatNumber(value) {

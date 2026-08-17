@@ -15,6 +15,11 @@ import {
   writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
 import {
+  setProductLaunchNormalizedReadEnabled,
+  syncProductLaunchNormalizedChangedItems,
+  syncProductLaunchNormalizedFull,
+} from "@/lib/productLaunchTrackerNormalizedStore";
+import {
   isOpsLoginTemporarilyDisabled,
   isSameOriginOpsRequest,
 } from "@/lib/opsLoginBypass";
@@ -38,6 +43,9 @@ type StoredStateRow = {
   updated_at?: unknown;
   schema_version?: unknown;
 };
+
+type Config = { supabaseUrl: string; secretKey: string };
+type Identity = { userId: string; email: string };
 
 export async function GET(request: NextRequest) {
   if (isOpsLoginTemporarilyDisabled() && !isSameOriginOpsRequest(request)) {
@@ -117,11 +125,20 @@ export async function PUT(request: NextRequest) {
         identity.value,
         incoming,
       );
+      const changedIds = partialChangedIds(incoming);
+      const normalizedSynced = await syncPartialMirrorSafely(
+        config.value,
+        identity.value,
+        saved.state,
+        saved.updatedAt,
+        changedIds,
+      );
       return Response.json({
         ok: true,
         updatedAt: saved.updatedAt,
         schemaVersion: saved.schemaVersion,
         partialMerged: true,
+        normalizedSynced,
       });
     }
 
@@ -143,12 +160,20 @@ export async function PUT(request: NextRequest) {
       identity.value,
       state,
     )) as StoredStateRow;
+    const updatedAt = nullableText(saved?.updated_at) ?? new Date().toISOString();
+    const normalizedSynced = await syncFullMirrorSafely(
+      config.value,
+      identity.value,
+      state,
+      updatedAt,
+    );
 
     return Response.json({
       ok: true,
-      updatedAt: saved?.updated_at ?? new Date().toISOString(),
+      updatedAt,
       schemaVersion: saved?.schema_version ?? Number(state.schemaVersion ?? 3),
       partialMerged: false,
+      normalizedSynced,
     });
   } catch (error) {
     return Response.json(
@@ -165,9 +190,76 @@ export async function PUT(request: NextRequest) {
   }
 }
 
+async function syncFullMirrorSafely(
+  config: Config,
+  identity: Identity,
+  state: TrackerStatePayload,
+  updatedAt: string,
+) {
+  try {
+    await syncProductLaunchNormalizedFull(
+      config,
+      identity,
+      state as ProductLaunchTrackerState,
+      updatedAt,
+      {
+        readEnabled: true,
+        backfilledAt: new Date().toISOString(),
+      },
+    );
+    return true;
+  } catch (error) {
+    console.error("Product Launch normalized full sync failed", error);
+    await disableNormalizedReadSafely(config, identity.userId);
+    return false;
+  }
+}
+
+async function syncPartialMirrorSafely(
+  config: Config,
+  identity: Identity,
+  state: TrackerStatePayload,
+  updatedAt: string,
+  changedIds: string[],
+) {
+  try {
+    const result = await syncProductLaunchNormalizedChangedItems(
+      config,
+      identity,
+      state as ProductLaunchTrackerState,
+      updatedAt,
+      changedIds,
+    );
+    if (result.synced === true) return true;
+  } catch (error) {
+    console.error("Product Launch normalized partial sync failed", error);
+  }
+  await disableNormalizedReadSafely(config, identity.userId);
+  return false;
+}
+
+async function disableNormalizedReadSafely(config: Config, ownerId: string) {
+  try {
+    await setProductLaunchNormalizedReadEnabled(config, ownerId, false);
+  } catch (error) {
+    console.error("Product Launch normalized read disable failed", error);
+  }
+}
+
+function partialChangedIds(incoming: TrackerStatePayload) {
+  const explicit = stringArray(incoming.partialItemIds);
+  if (explicit.length) return explicit;
+  return Array.isArray(incoming.items)
+    ? incoming.items
+        .filter(isRecord)
+        .map((item) => String(item.id ?? "").trim())
+        .filter(Boolean)
+    : [];
+}
+
 async function mergePartialStateWithRetry(
-  config: { supabaseUrl: string; secretKey: string },
-  identity: { userId: string; email: string },
+  config: Config,
+  identity: Identity,
   incoming: TrackerStatePayload,
 ) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -198,6 +290,7 @@ async function mergePartialStateWithRetry(
         state,
       )) as StoredStateRow;
       return {
+        state,
         updatedAt: nullableText(saved?.updated_at) ?? new Date().toISOString(),
         schemaVersion: numberOrDefault(saved?.schema_version, Number(state.schemaVersion ?? 3)),
       };
@@ -211,6 +304,7 @@ async function mergePartialStateWithRetry(
     );
     if (saved) {
       return {
+        state,
         updatedAt: nullableText(saved.updated_at) ?? new Date().toISOString(),
         schemaVersion: numberOrDefault(saved.schema_version, Number(state.schemaVersion ?? 3)),
       };
@@ -222,8 +316,8 @@ async function mergePartialStateWithRetry(
 }
 
 async function conditionalWritePartialState(
-  config: { supabaseUrl: string; secretKey: string },
-  identity: { userId: string; email: string },
+  config: Config,
+  identity: Identity,
   state: TrackerStatePayload,
   previousUpdatedAt: string,
 ) {

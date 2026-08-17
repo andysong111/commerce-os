@@ -1,109 +1,85 @@
-import { unstable_cache } from "next/cache";
-import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
 import { resolveProductLaunchIdentity } from "@/lib/productLaunchTrackerServer";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 10;
 
-const CORE_REVALIDATE_SECONDS = 60;
+const DEFAULT_PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
+const PRODUCT_MASTER_TIMEOUT_MS = 5_000;
+const REVALIDATE_SECONDS = 15;
 
-type CoreOption = {
-  skuId: string;
-  barcode: string;
-  optionName: string;
-  moq: number;
-  cartonQuantity: number;
-};
-
-type CoreProduct = {
-  modelNumber: string;
-  productName: string;
-  barcodes: string[];
-  optionLabels: string[];
-  options: CoreOption[];
-};
-
-const readCoreSnapshot = unstable_cache(
-  async () => loadProductPlanningSnapshot(),
-  ["product-master-core-fallback-v1"],
-  { revalidate: CORE_REVALIDATE_SECONDS },
-);
-
-function text(value: unknown) {
-  return String(value ?? "").normalize("NFKC").trim();
+function positiveInteger(value: string | null, fallback: number, maximum?: number) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  const normalized = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return maximum ? Math.min(normalized, maximum) : normalized;
 }
 
-function modelNumber(value: unknown) {
-  const candidate = text(value).toUpperCase().replace(/\s+/g, "");
-  const match = candidate.match(/^AAA0*(\d+)$/);
-  if (!match) return candidate;
-  return `AAA${match[1].padStart(3, "0")}`;
-}
-
-function positiveInteger(value: unknown, fallback = 1) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(1, Math.round(parsed)) : fallback;
+function productMasterConnection() {
+  const secret = process.env.PRODUCT_MASTER_INTEGRATION_SECRET?.trim();
+  if (!secret) throw new Error("PRODUCT_MASTER_INTEGRATION_SECRET_REQUIRED");
+  const baseUrl = (
+    process.env.PRODUCT_MASTER_BASE_URL?.trim() || DEFAULT_PRODUCT_MASTER_URL
+  ).replace(/\/$/, "");
+  if (!/^https:\/\//.test(baseUrl)) {
+    throw new Error("PRODUCT_MASTER_BASE_URL_INVALID");
+  }
+  return { baseUrl, secret };
 }
 
 export async function GET(request: Request) {
   const identity = await resolveProductLaunchIdentity(request);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
 
+  const incoming = new URL(request.url);
+  const page = positiveInteger(incoming.searchParams.get("page"), 1);
+  const pageSize = positiveInteger(
+    incoming.searchParams.get("pageSize"),
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+  );
+  const search = String(incoming.searchParams.get("search") ?? "")
+    .normalize("NFKC")
+    .trim()
+    .slice(0, 160);
+
   try {
-    const snapshot = await readCoreSnapshot();
-    const grouped = new Map<string, CoreProduct>();
-
-    for (const row of snapshot.products) {
-      if (row.skuActive === false) continue;
-      const model = modelNumber(row.modelNo);
-      const barcode = text(row.barcode).toUpperCase().replace(/\s+/g, "");
-      if (!model || !barcode) continue;
-      const optionName = text(row.optionName) || "단품";
-      const current = grouped.get(model) ?? {
-        modelNumber: model,
-        productName: text(row.productName) || model,
-        barcodes: [],
-        optionLabels: [],
-        options: [],
-      };
-      if (!current.barcodes.includes(barcode)) current.barcodes.push(barcode);
-      if (!current.optionLabels.includes(optionName)) current.optionLabels.push(optionName);
-      if (!current.options.some((option) => option.barcode === barcode)) {
-        current.options.push({
-          skuId: text(row.skuId),
-          barcode,
-          optionName,
-          moq: positiveInteger(row.moq),
-          cartonQuantity: positiveInteger(row.cartonQuantity),
-        });
-      }
-      grouped.set(model, current);
+    const { baseUrl, secret } = productMasterConnection();
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+      search,
+    });
+    const response = await fetch(
+      `${baseUrl}/api/integrations/core-page?${params.toString()}`,
+      {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "x-commerce-os-integration-secret": secret,
+        },
+        next: { revalidate: REVALIDATE_SECONDS },
+        signal: AbortSignal.timeout(PRODUCT_MASTER_TIMEOUT_MS),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.ok !== true || !Array.isArray(payload?.products)) {
+      throw new Error(
+        payload?.message || `PRODUCT_MASTER_CORE_PAGE_FAILED:${response.status}`,
+      );
     }
-
-    const products = [...grouped.values()]
-      .map((product) => ({
-        ...product,
-        barcodes: [...product.barcodes].sort((left, right) => left.localeCompare(right, "ko")),
-        optionLabels: [...product.optionLabels],
-        options: [...product.options].sort((left, right) => left.barcode.localeCompare(right.barcode, "ko")),
-      }))
-      .sort((left, right) => left.modelNumber.localeCompare(right.modelNumber, "ko"));
-
     return Response.json(
       {
-        ok: true,
+        ...payload,
         source: "commerce-os-product-master",
-        mode: "core-ledger-fallback",
-        generatedAt: snapshot.generatedAt,
-        contentFingerprint: snapshot.contentFingerprint,
-        productCount: products.length,
-        skuCount: products.reduce((sum, product) => sum + product.options.length, 0),
-        products,
+        mode: "core-ledger-page",
       },
       {
         status: 200,
         headers: {
-          "Cache-Control": "private, max-age=0, stale-while-revalidate=60",
-          "X-Commerce-Master-Source": "product-master-core",
+          "Cache-Control": "private, max-age=0, stale-while-revalidate=30",
+          "X-Commerce-Master-Source": "product-master-core-page",
         },
       },
     );
@@ -117,7 +93,7 @@ export async function GET(request: Request) {
             ? `Product Master 핵심 원장을 불러오지 못했습니다: ${error.message}`
             : "Product Master 핵심 원장을 불러오지 못했습니다.",
       },
-      { status: 503, headers: { "Retry-After": "30" } },
+      { status: 503, headers: { "Retry-After": "15" } },
     );
   }
 }
