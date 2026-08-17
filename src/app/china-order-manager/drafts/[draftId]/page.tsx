@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { InternalChinaDraftQuantityEditor } from "@/components/china-order-manager/InternalChinaDraftQuantityEditor";
+import { InternalChinaDraftInlineQuantityBridge } from "@/components/china-order-manager/InternalChinaDraftInlineQuantityBridge";
 import { InternalChinaDraftStickySave } from "@/components/china-order-manager/InternalChinaDraftStickySave";
 import { InternalChinaPurchaseBudgetAudit } from "@/components/china-order-manager/InternalChinaPurchaseBudgetAudit";
 import { InternalChinaManualDraftLineAdder } from "@/components/china-order-manager/InternalChinaManualDraftLineAdder";
@@ -78,7 +78,7 @@ export default async function InternalChinaPurchaseDraftPage({
       />
 
       <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
-        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크와 중국옵션은 아래 표에서 직접 입력하고 `발주초안 저장` 또는 우측의 `입력값 저장`으로 상품출시진행관리·상품마스터까지 양방향 반영합니다. 기존 B-code 수량은 `현재 Draft 수량 조정`, 새 B-code는 `주문품목 추가`에서 처리합니다.
+        <strong>현재 Draft</strong> · <span className="font-mono">{draft.draftId}</span> · {draft.lineCount.toLocaleString("ko-KR")} SKU · {draft.totalQuantity.toLocaleString("ko-KR")}개. 링크·중국옵션·위안단가는 아래 표에서 바로 입력하고, <strong>주문수량도 각 행의 수량 칸에서 직접 변경</strong>합니다. 수량 변경 버튼은 현재 입력값을 먼저 자동 저장한 뒤 ORDERED·입고 기준 수량을 갱신합니다. 새 B-code만 `주문품목 추가`에서 처리합니다.
       </section>
 
       <InternalChinaPurchaseBudgetAudit audit={budgetAudit} />
@@ -88,21 +88,18 @@ export default async function InternalChinaPurchaseDraftPage({
         status={draft.status}
       />
 
-      <InternalChinaDraftQuantityEditor
+      <InternalChinaPurchaseDraftWorkspaceV2
+        initialDraft={draft}
+        budgetAudit={budgetAudit}
+      />
+
+      <InternalChinaDraftInlineQuantityBridge
         draftId={draft.draftId}
         status={draft.status}
         lines={draft.lines.map((line) => ({
           barcode: line.barcode,
-          modelNo: line.modelNo,
-          modelName: line.modelName,
-          saleOption: line.saleOption,
           quantity: line.quantity,
         }))}
-      />
-
-      <InternalChinaPurchaseDraftWorkspaceV2
-        initialDraft={draft}
-        budgetAudit={budgetAudit}
       />
 
       <InternalChinaDraftStickySave status={draft.status} />
