@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Commerce OS Keyword Lab Collector",
   "short_name": "Keyword Lab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "1688 실제 렌더링 화면에서 중국 상품명과 옵션명·옵션값을 읽어 Commerce OS Keyword Lab으로 전달합니다.",
   "host_permissions": [
     "https://detail.1688.com/*",
     "https://*.1688.com/*",
-    "https://commerce-os-ops-center.vercel.app/*"
+    "https://commerce-os-ops-center.vercel.app/*",
+    "https://*.vercel.app/*"
   ],
   "content_scripts": [
     {
@@ -19,7 +20,14 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://commerce-os-ops-center.vercel.app/*"],
+      "matches": [
+        "https://commerce-os-ops-center.vercel.app/*",
+        "https://*.vercel.app/*"
+      ],
+      "include_globs": [
+        "https://commerce-os-ops-center.vercel.app/*",
+        "https://commerce-os-ops-center-*.vercel.app/*"
+      ],
       "js": ["content-ops.js"],
       "run_at": "document_idle"
     }
