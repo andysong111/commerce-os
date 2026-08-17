@@ -32,6 +32,7 @@ jobs:
           npx eslint
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
+          src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts
           src/lib/keywordEngineElonLabV2SearchAd.ts
