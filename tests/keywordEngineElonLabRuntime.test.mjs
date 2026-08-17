@@ -112,8 +112,9 @@ test("SearchAd keyword tool calls are paced, recover once from 429, and redact A
   assert.match(searchAd, /delete|safeErrorBody/);
 });
 
-test("AI scoring is bounded to two concurrent chunks and preserves partial results", () => {
+test("AI scoring is bounded to two concurrent chunks, preserves partial results, and has enough function time", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
+  assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /SCORE_CHUNK_SIZE = 50/);
   assert.match(scoring, /SCORE_CONCURRENCY = 2/);
   assert.match(scoring, /for \(let index = 0; index < chunks\.length; index \+= SCORE_CONCURRENCY\)/);
