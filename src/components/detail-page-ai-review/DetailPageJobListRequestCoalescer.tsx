@@ -5,11 +5,11 @@ import { useLayoutEffect } from "react";
 const JOBS_PATH = "/api/product-launch-tracker/detail-page-jobs";
 const SHARED_RESULT_TTL_MS = 10_000;
 
-type FetchArgs = Parameters<typeof window.fetch>;
+type FetchArgs = Parameters<typeof fetch>;
 
 export function DetailPageJobListRequestCoalescer() {
   useLayoutEffect(() => {
-    const originalFetch = window.fetch;
+    const originalFetch = window.fetch.bind(window);
     let cachedResponse: Response | null = null;
     let cachedAt = 0;
     let inFlight: Promise<Response> | null = null;
@@ -33,7 +33,7 @@ export function DetailPageJobListRequestCoalescer() {
           window.location.origin,
         );
       } catch {
-        return originalFetch.apply(window, args);
+        return originalFetch(...args);
       }
 
       const method = String(init?.method || request?.method || "GET").toUpperCase();
@@ -44,7 +44,7 @@ export function DetailPageJobListRequestCoalescer() {
         !url.searchParams.toString();
 
       if (!isSharedListRead) {
-        const response = await originalFetch.apply(window, args);
+        const response = await originalFetch(...args);
         if (isJobRoute && method !== "GET" && response.ok) invalidate();
         return response;
       }
@@ -58,7 +58,7 @@ export function DetailPageJobListRequestCoalescer() {
         return shared.clone();
       }
 
-      inFlight = originalFetch.apply(window, args);
+      inFlight = originalFetch(...args);
       try {
         const response = await inFlight;
         if (response.ok) {
