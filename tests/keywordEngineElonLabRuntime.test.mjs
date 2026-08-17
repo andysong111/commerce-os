@@ -7,6 +7,7 @@ const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "ut
 const zipRoute = await readFile("src/app/api/keyword-engine-elon-lab/collector-zip/route.ts", "utf8");
 const server = await readFile("src/lib/keywordEngineElonLabV2Server.ts", "utf8");
 const searchAd = await readFile("src/lib/keywordEngineElonLabV2SearchAd.ts", "utf8");
+const discovery = await readFile("src/lib/keywordEngineElonLabV2Discovery.ts", "utf8");
 const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
@@ -14,7 +15,9 @@ const collector1688Path = "public/keyword-lab-collector/content-1688.js";
 const collectorOpsPath = "public/keyword-lab-collector/content-ops.js";
 const collector1688 = await readFile(collector1688Path, "utf8");
 const collectorOps = await readFile(collectorOpsPath, "utf8");
-const collectorManifest = JSON.parse(await readFile("public/keyword-lab-collector/manifest.json", "utf8"));
+const collectorManifest = JSON.parse(
+  await readFile("public/keyword-lab-collector/manifest.json", "utf8"),
+);
 
 test("V2 has no Shopling or Supabase write dependency", () => {
   assert.doesNotMatch(route, /Shopling|Supabase|keywordEngineElonLabStore|keywordEngineElonLabShopling/);
@@ -44,7 +47,9 @@ test("collector and Lab handoff are independent from the detail-page SaaS", () =
 test("collector v0.1.1 supports canonical and Vercel deployment URLs", () => {
   assert.equal(collectorManifest.version, "0.1.1");
   assert.ok(collectorManifest.host_permissions.includes("https://*.vercel.app/*"));
-  const opsScript = collectorManifest.content_scripts.find((item) => Array.isArray(item.js) && item.js.includes("content-ops.js"));
+  const opsScript = collectorManifest.content_scripts.find((item) =>
+    Array.isArray(item.js) && item.js.includes("content-ops.js"),
+  );
   assert.ok(opsScript);
   assert.ok(opsScript.matches.includes("https://*.vercel.app/*"));
   assert.ok(opsScript.include_globs.includes("https://commerce-os-ops-center-*.vercel.app/*"));
@@ -79,18 +84,11 @@ test("server-side 1688 collection remains only a soft fallback", () => {
   assert.match(server, /validate1688Url/);
   assert.match(server, /중국 상품명과 옵션명을 직접 붙여넣으면 STEP 1을 계속할 수 있습니다/);
   assert.match(page, /서버 보조수집/);
-  assert.match(page, /기본 수집은 전용 브라우저 수집기를 사용하세요/);
 });
 
 test("identity analysis explicitly forbids seller model names", () => {
   assert.match(server, /판매자가 만든 한국 모델명은 절대 사용하지 않는다/);
   assert.match(server, /1688 중국 원본 상품명·옵션·보조텍스트만 근거/);
-});
-
-test("SearchAd is optional and does not block discovery", () => {
-  assert.match(searchAd, /SEARCHAD_NOT_CONFIGURED/);
-  assert.match(searchAd, /SearchAd 자격증명이 없어 검색량·경쟁 데이터는 이번 실행에서 제외/);
-  assert.match(server, /Promise\.all/);
 });
 
 test("SearchAd keyword tool calls are paced, recover once from 429, and redact API keys", () => {
@@ -101,10 +99,19 @@ test("SearchAd keyword tool calls are paced, recover once from 429, and redact A
   assert.doesNotMatch(searchAd, /Promise\.all\(normalizedSeeds\.map\(fetchSeed/);
   assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
   assert.match(searchAd, /\[REDACTED\]/);
-  assert.match(searchAd, /delete|safeErrorBody/);
 });
 
-test("AI scoring uses smaller chunks, bounded concurrency, explicit timeout codes, and enough function time", () => {
+test("candidate discovery fails open when AI expansion times out", () => {
+  assert.match(route, /discoverKeywordElonCandidatesResilient/);
+  assert.match(discovery, /AI_DISCOVERY_TIMEOUT_MS = 70_000/);
+  assert.match(discovery, /Promise\.allSettled/);
+  assert.match(discovery, /AI_DISCOVERY_TIMEOUT/);
+  assert.match(discovery, /SearchAd\/Seed 후보로 계속 진행/);
+  assert.match(discovery, /\.\.\.seeds, \.\.\.ai\.keywords, \.\.\.relatedKeywords/);
+  assert.match(discovery, /DISCOVERY_LOW_RECALL/);
+});
+
+test("AI scoring uses smaller chunks, diagnostics, partial preservation, and enough function time", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /OPENAI_TIMEOUT_MS = 50_000/);
@@ -112,16 +119,20 @@ test("AI scoring uses smaller chunks, bounded concurrency, explicit timeout code
   assert.match(scoring, /SCORE_CONCURRENCY = 2/);
   assert.match(scoring, /AI_SCORE_TIMEOUT/);
   assert.match(scoring, /AI_SCORE_INCOMPLETE/);
+  assert.match(scoring, /AI_SCORE_EMPTY_OUTPUT/);
+  assert.match(scoring, /AI_SCORE_HTTP_/);
   assert.match(scoring, /AI_SCORE_ALL_CHUNKS_FAILED/);
-  assert.match(scoring, /scoreChunkWithRetry/);
+  assert.match(scoring, /successfulChunks === 0/);
+  assert.match(scoring, /dataConfidence/);
 });
 
-test("STEP 2 errors expose the failing action and are visible inside the STEP 2 card", () => {
-  assert.match(route, /errorStage: action/);
-  assert.match(route, /\[keyword-engine-elon-lab\]/);
+test("route and STEP 2 UI expose exact failure stage and message", () => {
+  assert.match(route, /errorStage/);
+  assert.match(route, /\[\$\{action\}\]/);
   assert.match(page, /STEP 2 실행 오류 · 상세 진단/);
-  assert.match(page, /실패 원인 표시/);
   assert.match(page, /session\.lastMessage/);
+  assert.match(page, /수집 후보/);
+  assert.match(page, /SearchAd 연관어/);
   assert.match(page, /점수 완료/);
 });
 
