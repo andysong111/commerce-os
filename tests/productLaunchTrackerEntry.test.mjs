@@ -65,7 +65,7 @@ test("업로드 원본의 실제 상품 데이터가 OPS Center 실행본에 포
   }
 });
 
-test("서버가 느리면 최근 정상 목록을 읽기 전용으로 먼저 보여주고 숨은 worker는 대기 작업이 있을 때만 기동한다", async () => {
+test("서버가 느리면 최근 정상 목록을 읽기 전용으로 먼저 보여주고 숨은 worker는 활성 작업만 가볍게 확인한다", async () => {
   const appSource = await readFile(
     new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
     "utf8",
@@ -81,7 +81,8 @@ test("서버가 느리면 최근 정상 목록을 읽기 전용으로 먼저 보
   assert.match(appSource, /startup-page-cache-preview\.js/);
   assert.match(appSource, /installStartupPageCachePreview/);
   assert.match(appSource, /workerIdleCheckMs = 30_000/);
-  assert.match(appSource, /hasActiveJob/);
+  assert.match(appSource, /detail-page-jobs\/active/);
+  assert.match(appSource, /payload\?\.active === true/);
   assert.match(appSource, /ensureWorkerModules/);
   assert.match(appSource, /__commerceWorkerBootstrapForwarded/);
 
