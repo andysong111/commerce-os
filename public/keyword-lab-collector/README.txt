@@ -10,4 +10,8 @@ Commerce OS Keyword Lab Collector v0.1.0
 4. 압축해제된 확장프로그램을 로드합니다.
 5. Commerce OS Ops Center의 Keyword Lab 탭을 새로고침합니다.
 
-이 수집기는 상세페이지 SaaS/AI-Saurus와 독립적이며 상품 수정, 주문, 가격 변경을 수행하지 않습니다.
+수집 원칙:
+- 상세페이지 SaaS에서 검증된 렌더링 DOM 접근 방식을 참고하지만, 코드는 Commerce OS Ops Center 내부의 독립 수집기입니다.
+- AI-Saurus 저장소나 상세페이지 제작 기능을 호출하거나 수정하지 않습니다.
+
+이 수집기는 상품 수정, 주문, 가격 변경을 수행하지 않습니다.
