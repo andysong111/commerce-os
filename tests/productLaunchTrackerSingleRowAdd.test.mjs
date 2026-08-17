@@ -13,6 +13,10 @@ const appSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
+const workflowGateSource = await readFile(
+  new URL("../public/product-launch-tracker-app/workflow-ui-gate.js", import.meta.url),
+  "utf8",
+);
 const optimizedSource = await readFile(
   new URL(
     "../public/product-launch-tracker-app/optimized-app.js",
@@ -21,8 +25,9 @@ const optimizedSource = await readFile(
   "utf8",
 );
 
-test("상품 추가 버튼과 단건·다건 생성이 최적화 진행관리 앱에 연결된다", () => {
-  assert.match(appSource, /optimized-app\.js/);
+test("상품 추가 버튼과 단건·다건 생성이 건강한 Workflow UI에 연결된다", () => {
+  assert.match(appSource, /workflow-ui-gate\.js/);
+  assert.match(workflowGateSource, /import\("\.\/optimized-app\.js"\)/);
   assert.doesNotMatch(appSource, /single-row-add\.js/);
   assert.match(optimizedSource, /#add-items-button/);
   assert.match(optimizedSource, /operation: "create_items"/);

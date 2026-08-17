@@ -23,6 +23,10 @@ const entrySource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
 );
+const workflowGateSource = await readFile(
+  new URL("../public/product-launch-tracker-app/workflow-ui-gate.js", import.meta.url),
+  "utf8",
+);
 
 test("신규 상품 진행관리의 업무 헤더 14개가 서버 정렬 버튼을 제공한다", () => {
   assert.equal(
@@ -55,8 +59,9 @@ test("바코드는 모델번호 왼쪽에서 직접 입력하고 상품 1건만 
   );
 });
 
-test("진행관리 앱은 페이지 조회와 상품 단위 PATCH API로 실행된다", () => {
-  assert.match(entrySource, /optimized-app\.js/);
+test("진행관리 앱은 건강한 Workflow gate 뒤에서 페이지 조회와 상품 단위 PATCH API로 실행된다", () => {
+  assert.match(entrySource, /workflow-ui-gate\.js/);
+  assert.match(workflowGateSource, /import\("\.\/optimized-app\.js"\)/);
   assert.doesNotMatch(entrySource, /bootstrap\.js/);
   assert.match(
     optimizedSource,
