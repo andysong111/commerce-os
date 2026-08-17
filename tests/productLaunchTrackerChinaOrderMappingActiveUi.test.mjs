@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { alignChinaOptionMappingsToRegisteredOptions } from "../public/product-launch-tracker-app/lib/china-option-table-authority.mjs";
 
-const [loader, extension, authorityUi, page] = await Promise.all([
+const [loader, workflowGate, extension, authorityUi, page] = await Promise.all([
   readFile("public/product-launch-tracker-app/app.js", "utf8"),
+  readFile("public/product-launch-tracker-app/workflow-ui-gate.js", "utf8"),
   readFile(
     "public/product-launch-tracker-app/optimized-china-order-mapping.js",
     "utf8",
@@ -16,8 +17,9 @@ const [loader, extension, authorityUi, page] = await Promise.all([
   readFile("src/app/product-launch-tracker/page.tsx", "utf8"),
 ]);
 
-test("optimized product-launch path loads the B-code China option extensions", () => {
-  assert.match(loader, /await import\("\.\/optimized-app\.js"\)/);
+test("optimized product-launch path loads the B-code China option extensions after workflow health gate", () => {
+  assert.match(loader, /workflow-ui-gate\.js/);
+  assert.match(workflowGate, /import\("\.\/optimized-app\.js"\)/);
   assert.match(
     loader,
     /await import\("\.\/optimized-china-order-mapping\.js"\)/,
