@@ -1,4 +1,9 @@
 import {
+  loadInternalChinaDraftWithQuantityOverrides,
+  recordOrderedQuantityOverrideCorrections,
+  stripDraftInputQuantities,
+} from "@/lib/internalChinaDraftQuantityOverride";
+import {
   loadInternalChinaPurchaseDraft,
   markInternalChinaPurchaseDraftOrdered,
   saveInternalChinaPurchaseDraft,
@@ -39,7 +44,7 @@ function errorResponse(error: unknown) {
   } else if (code === "INTERNAL_CHINA_EXCHANGE_RATE_INVALID") {
     message = "적용 환율을 확인하세요.";
   } else if (code === "INTERNAL_CHINA_QUANTITY_LOCKED") {
-    message = "빠른 발주안에서 RESERVED로 고정한 주문수량은 이 화면에서 변경하지 않습니다.";
+    message = "주문수량은 상단 `현재 Draft 수량 조정`에서 변경한 뒤 다시 저장하세요.";
   } else if (code === "INTERNAL_CHINA_ORDER_REQUIRED") {
     message = `실제 주문완료 기록 전에 필수값을 확인하세요. ${raw.split(":").slice(1).join(":")}`;
   } else if (code === "PRODUCT_LAUNCH_SUPPLIER_LINK_REQUIRED") {
@@ -76,7 +81,8 @@ export async function GET(request: Request, context: RouteContext) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   const { draftId } = await context.params;
   try {
-    const draft = await loadInternalChinaPurchaseDraft(decodeURIComponent(draftId));
+    const base = await loadInternalChinaPurchaseDraft(decodeURIComponent(draftId));
+    const draft = await loadInternalChinaDraftWithQuantityOverrides(base);
     return Response.json(
       { ok: true, draft, externalOrderExecuted: false },
       { headers: { "cache-control": "no-store" } },
@@ -91,15 +97,16 @@ export async function PUT(request: Request, context: RouteContext) {
   const { draftId } = await context.params;
   try {
     const input = (await request.json()) as InternalChinaPurchaseDraftInput;
-    const draft = await saveInternalChinaPurchaseDraft(
+    const saved = await saveInternalChinaPurchaseDraft(
       decodeURIComponent(draftId),
-      input,
+      stripDraftInputQuantities(input),
     );
+    const draft = await loadInternalChinaDraftWithQuantityOverrides(saved);
     return Response.json(
       {
         ok: true,
         draft,
-        message: "Ops Center 중국 발주초안을 저장했습니다. 실제 1688 주문·결제는 실행하지 않았습니다.",
+        message: "Ops Center 중국 발주초안을 저장했습니다. 수량 조정값도 유지하며 실제 1688 주문·결제는 실행하지 않았습니다.",
         externalOrderExecuted: false,
       },
       { headers: { "cache-control": "no-store" } },
@@ -145,7 +152,8 @@ export async function PATCH(request: Request, context: RouteContext) {
       source: "CHINA_ORDER_DRAFT",
       draftId: decodedDraftId,
     });
-    const draft = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    const base = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    const draft = await loadInternalChinaDraftWithQuantityOverrides(base);
     return Response.json(
       {
         ok: true,
@@ -170,6 +178,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   const { draftId } = await context.params;
+  const decodedDraftId = decodeURIComponent(draftId);
   try {
     const body = (await request.json().catch(() => ({}))) as {
       action?: unknown;
@@ -187,16 +196,23 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
     const result = await markInternalChinaPurchaseDraftOrdered(
-      decodeURIComponent(draftId),
-      body.prep ?? {},
+      decodedDraftId,
+      stripDraftInputQuantities(body.prep ?? {}),
     );
+    const quantityCorrections = await recordOrderedQuantityOverrideCorrections(
+      decodedDraftId,
+    );
+    const reloaded = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    const draft = await loadInternalChinaDraftWithQuantityOverrides(reloaded);
     return Response.json(
       {
         ok: true,
         ...result,
+        draft,
+        quantityCorrections: quantityCorrections.correctedCount,
         message: result.duplicate
-          ? "이미 실제 1688 주문완료로 기록된 Draft입니다."
-          : "실제 1688 주문을 완료한 것으로 Ops Center 원장에 기록했습니다. 이 버튼 자체가 1688 주문·결제를 실행한 것은 아닙니다.",
+          ? "이미 실제 1688 주문완료로 기록된 Draft입니다. 수량 조정 원장도 다시 확인했습니다."
+          : `실제 1688 주문을 완료한 것으로 Ops Center 원장에 기록했습니다. 수량 조정 ${quantityCorrections.correctedCount.toLocaleString("ko-KR")}건도 ORDERED·입고 기준에 반영했습니다. 이 버튼 자체가 1688 주문·결제를 실행한 것은 아닙니다.`,
       },
       { headers: { "cache-control": "no-store" } },
     );
