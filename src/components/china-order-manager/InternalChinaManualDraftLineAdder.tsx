@@ -99,6 +99,12 @@ export function InternalChinaManualDraftLineAdder({
 
   async function add(candidate: ManualDraftCandidate) {
     if (status !== "DRAFT") return;
+    if (candidate.inDraft) {
+      setNotice(
+        `${candidate.barcode}는 이미 현재 Draft에 있습니다. 아래 '현재 Draft 수량 조정'에서 총 주문수량을 변경하세요.`,
+      );
+      return;
+    }
     const addQuantity = quantity(quantities[candidate.barcode]);
     if (addQuantity < 1 || addQuantity > 9_999) {
       setNotice("추가수량은 1개 이상 9,999개 이하로 입력하세요.");
@@ -112,12 +118,9 @@ export function InternalChinaManualDraftLineAdder({
     ) {
       return;
     }
-    const currentAfter = candidate.currentDraftQuantity + addQuantity;
     if (
       !window.confirm(
-        candidate.inDraft
-          ? `${candidate.barcode}는 현재 Draft에 ${candidate.currentDraftQuantity.toLocaleString("ko-KR")}개가 있습니다.\n추가 ${addQuantity.toLocaleString("ko-KR")}개 → 총 ${currentAfter.toLocaleString("ko-KR")}개 RESERVED로 변경합니다.\n\n추가분은 주문·입고 원장에는 포함되지만 다음 발주추천의 미입고 차감에서는 제외됩니다. 실제 1688 주문·결제는 실행되지 않습니다.`
-          : `${candidate.barcode} · ${candidate.productName}${candidate.optionName ? ` · ${candidate.optionName}` : ""}\n${addQuantity.toLocaleString("ko-KR")}개를 현재 월간 Draft에 RESERVED로 추가합니다.\n\n추가분은 주문·입고 원장에는 포함되지만 다음 발주추천의 미입고 차감에서는 제외됩니다. 새 Draft를 만들지 않으며 실제 1688 주문·결제는 실행되지 않습니다.`,
+        `${candidate.barcode} · ${candidate.productName}${candidate.optionName ? ` · ${candidate.optionName}` : ""}\n${addQuantity.toLocaleString("ko-KR")}개를 현재 월간 Draft에 RESERVED로 추가합니다.\n\n추가분은 주문·입고 원장에는 포함되지만 다음 발주추천의 미입고 차감에서는 제외됩니다. 새 Draft를 만들지 않으며 실제 1688 주문·결제는 실행되지 않습니다.`,
       )
     ) {
       return;
@@ -166,7 +169,7 @@ export function InternalChinaManualDraftLineAdder({
           </span>
           <h2 className="mt-1 text-xl font-black text-slate-950">주문품목 추가</h2>
           <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-700">
-            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 기존 B-code를 검색해 현재 월간 Draft 한 건에 바로 추가하며 새 Draft는 만들지 않습니다. 추가 수량은 RESERVED 주문·입고 원장에 정확히 남겨 실제 입고수량에 반영하지만, 다음 발주추천의 미입고 차감에서는 제외합니다. 다음 발주추천은 그 시점의 판매·재고 기준으로 다시 계산합니다.
+            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 현재 Draft에 없는 활성 B-code를 검색해 이 월간 Draft 한 건에 추가합니다. 이미 들어온 B-code는 아래 `현재 Draft 수량 조정`에서 총수량을 변경합니다. 새 Draft는 만들지 않습니다.
           </p>
         </div>
         <span className="rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-black text-amber-800">
@@ -184,7 +187,7 @@ export function InternalChinaManualDraftLineAdder({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="B-code / 모델번호 / 상품명 / 옵션명 검색 · 예: BCA5-1, aaa100"
+              placeholder="B-code / 모델번호 / 상품명 / 옵션명 검색 · 예: 토끼브로치, BBA2-2, aaa092"
               className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-amber-500"
             />
             <button
@@ -237,26 +240,27 @@ export function InternalChinaManualDraftLineAdder({
                           min={1}
                           max={9999}
                           value={quantities[candidate.barcode] ?? 1}
+                          disabled={candidate.inDraft}
                           onChange={(event) =>
                             setQuantities((current) => ({
                               ...current,
                               [candidate.barcode]: quantity(event.target.value),
                             }))
                           }
-                          className="w-28 rounded-lg border border-amber-300 px-3 py-2 text-right font-black text-slate-900 outline-none focus:border-amber-500"
+                          className="w-28 rounded-lg border border-amber-300 px-3 py-2 text-right font-black text-slate-900 outline-none focus:border-amber-500 disabled:bg-slate-100 disabled:text-slate-400"
                         />
                       </td>
                       <td className="px-3 py-3">
                         <button
                           type="button"
                           onClick={() => void add(candidate)}
-                          disabled={addingBarcode === candidate.barcode}
-                          className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 font-black text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={addingBarcode === candidate.barcode || candidate.inDraft}
+                          className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-2 font-black text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500"
                         >
                           {addingBarcode === candidate.barcode
                             ? "반영 중..."
                             : candidate.inDraft
-                              ? "추가수량 반영"
+                              ? "수량 조정 사용"
                               : "현재 Draft에 추가"}
                         </button>
                       </td>
