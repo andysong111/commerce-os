@@ -8,6 +8,7 @@ on:
       - "src/lib/keywordEngineElonLab*"
       - "src/lib/opsModuleRegistry.ts"
       - "src/components/dashboard/OpsDashboardWithSaasTestClone.tsx"
+      - "public/keyword-lab-collector/**"
       - "tests/keywordEngineElonLab.test.mjs"
       - "tests/keywordEngineElonLabRuntime.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
@@ -31,6 +32,7 @@ jobs:
         run: >-
           npx eslint
           src/app/api/keyword-engine-elon-lab/route.ts
+          src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
