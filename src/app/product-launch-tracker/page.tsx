@@ -1,5 +1,3 @@
-import { ProductLaunchTrackerCanonicalPriceBridge } from "@/components/product-launch-flow/ProductLaunchTrackerCanonicalPriceBridge";
-import { ProductLaunchDetailPageStatusGuard } from "@/components/product-launch-flow/ProductLaunchDetailPageStatusGuard";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION = "20260815-bidirectional-purchase-metadata-v1";
@@ -21,8 +19,15 @@ export default async function ProductLaunchTrackerPage({
 
   return (
     <section className="space-y-3">
-      <ProductLaunchTrackerCanonicalPriceBridge />
-      <ProductLaunchDetailPageStatusGuard />
+      <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
+        <strong className="block text-sm">백그라운드 자동화 · 상품마스터와 분리 운영</strong>
+        <span className="mt-1 block text-xs leading-5">
+          중앙 가격정책과 상세페이지 오류 판정은 등록·생성 서버 후처리에서 실행됩니다. 상품마스터 화면은 이를 확인하기 위해 전체 출시원장을 주기적으로 반복 조회하지 않습니다.
+        </span>
+        <span className="mt-1 block text-xs opacity-80">
+          상품마스터 조회와 자동화 실행을 분리해 한쪽의 지연이 다른 쪽의 화면 사용을 막지 않도록 운영합니다.
+        </span>
+      </section>
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
@@ -36,7 +41,7 @@ export default async function ProductLaunchTrackerPage({
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <iframe
-          title="신규 상품 출시 진행관리"
+          title="상품마스터 · 출시관리"
           src={`/product-launch-tracker-app/index.html?${iframeParams.toString()}`}
           allow="local-network; loopback-network; local-network-access"
           className="h-[calc(100vh-10rem)] min-h-[720px] w-full border-0"

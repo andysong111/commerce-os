@@ -47,6 +47,7 @@ let reconnectInFlight = false;
 let reconnectDueAt = 0;
 
 upgradePageIdentity();
+installProductMasterPerformanceStyles();
 installProductMasterDetailLink();
 installFallbackObserver();
 installRecoverySignals();
@@ -74,6 +75,18 @@ function upgradePageIdentity() {
     notice.textContent =
       "이 화면을 Commerce OS 상품마스터 메인 UI로 사용합니다. 상품 핵심 원장과 OPS 실행상태는 분리되어 장애가 서로 전파되지 않도록 운영합니다.";
   }
+}
+
+function installProductMasterPerformanceStyles() {
+  if (document.querySelector("#product-master-performance-style")) return;
+  const style = document.createElement("style");
+  style.id = "product-master-performance-style";
+  style.textContent = `
+    .optimized-table-loading .table-wrap {
+      cursor: default !important;
+    }
+  `;
+  document.head.append(style);
 }
 
 function installProductMasterDetailLink() {
@@ -129,7 +142,8 @@ function installRecoverySignals() {
   window.addEventListener("online", () => {
     if (masterFallbackActive) scheduleWorkflowReconnect(800, true);
   });
-  window.addEventListener("focus", () => {
+  window.addEventListener("focus", (event) => {
+    if (!event.isTrusted) return;
     if (masterFallbackActive && document.visibilityState === "visible") {
       scheduleWorkflowReconnect(1_000, true);
     }
@@ -377,7 +391,10 @@ async function probeWorkflow() {
     });
     const body = await response.json().catch(() => ({}));
     if (response.ok && body?.ok === true && body?.stateExists !== false) {
-      window.location.reload();
+      reconnectAttempt = 0;
+      setFallbackStatus("Product Master 핵심 원장 표시 · OPS Workflow 최신 상태 불러오는 중");
+      window.dispatchEvent(new Event("focus"));
+      scheduleWorkflowReconnect(10_000);
       return;
     }
   } catch (error) {
