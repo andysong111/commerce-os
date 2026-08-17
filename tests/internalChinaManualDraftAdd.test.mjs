@@ -40,6 +40,14 @@ test("manual addition validates active Product Master B-codes and caps total qua
   assert.match(helper, /INTERNAL_CHINA_MANUAL_ADD_QUANTITY_EXCEEDED/);
 });
 
+test("manual addition search also uses product-launch model names and sale options", () => {
+  assert.match(helper, /loadProductLaunchPurchaseMetadataByBarcode/);
+  assert.match(helper, /tracker\.byBarcode\.get\(barcode\)/);
+  assert.match(helper, /trackerRow\?\.productName/);
+  assert.match(helper, /trackerRow\?\.saleOption/);
+  assert.match(helper, /joinedLabels/);
+});
+
 test("manual addition API is same-origin only and exposes search plus add", () => {
   assert.match(route, /isSameOriginOpsRequest/);
   assert.match(route, /export async function GET/);
