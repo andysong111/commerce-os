@@ -1,6 +1,6 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
-const PRODUCT_LAUNCH_ASSET_VERSION = "20260817-background-decouple-v2";
+const PRODUCT_LAUNCH_ASSET_VERSION = "20260815-bidirectional-purchase-metadata-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
