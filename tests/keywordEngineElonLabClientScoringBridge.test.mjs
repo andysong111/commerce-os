@@ -20,7 +20,7 @@ test("Keyword Lab persists completed scoring chunks and resumes without rediscov
   assert.match(bridge, /sessionDiscoveryForResume/);
   assert.match(bridge, /stage2Status !== "error"/);
   assert.match(bridge, /이전 후보 .*SearchAd 재호출 없이 점수화를 재개/);
-  assert.match(bridge, /다시 실행하면 완료된 묶음은 건너뛰고 실패 지점부터 재개/);
+  assert.match(bridge, /STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개/);
 });
 
 test("route layout always mounts the scoring bridge", () => {
