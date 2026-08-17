@@ -1,7 +1,6 @@
-import { ProductLaunchDetailPageStatusGuard } from "@/components/product-launch-flow/ProductLaunchDetailPageStatusGuard";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
-const PRODUCT_LAUNCH_ASSET_VERSION = "20260817-background-decouple-v1";
+const PRODUCT_LAUNCH_ASSET_VERSION = "20260817-background-decouple-v2";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -21,16 +20,14 @@ export default async function ProductLaunchTrackerPage({
   return (
     <section className="space-y-3">
       <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
-        <strong className="block text-sm">중앙 가격정책 자동화 · 서버 분리 운영</strong>
+        <strong className="block text-sm">백그라운드 자동화 · 상품마스터와 분리 운영</strong>
         <span className="mt-1 block text-xs leading-5">
-          신규 상품 등록 후 중앙 가격정책은 서버 후처리에서 실행됩니다. 상품마스터 화면은 가격정책 확인을 위해 전체 출시원장을 5초마다 반복 조회하지 않습니다.
+          중앙 가격정책과 상세페이지 오류 판정은 등록·생성 서버 후처리에서 실행됩니다. 상품마스터 화면은 이를 확인하기 위해 전체 출시원장을 주기적으로 반복 조회하지 않습니다.
         </span>
         <span className="mt-1 block text-xs opacity-80">
-          상품마스터 조회와 가격정책 실행을 분리해 한쪽의 지연이 다른 쪽의 화면 사용을 막지 않도록 운영합니다.
+          상품마스터 조회와 자동화 실행을 분리해 한쪽의 지연이 다른 쪽의 화면 사용을 막지 않도록 운영합니다.
         </span>
       </section>
-
-      <ProductLaunchDetailPageStatusGuard />
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
