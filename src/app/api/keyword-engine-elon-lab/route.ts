@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { KeywordElonCandidate, KeywordElonDiscovery, KeywordElonIdentity, KeywordElonSourceDraft } from "@/lib/keywordEngineElonLabV2";
+import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
-import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, discoverKeywordElonCandidates, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
+import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     }
     if (action === "discover_keywords") {
       const source = sourceFrom(body.source); const identity = identityFrom(body.identity);
-      return NextResponse.json({ ok: true, action, discovery: await discoverKeywordElonCandidates(source, identity) });
+      return NextResponse.json({ ok: true, action, discovery: await discoverKeywordElonCandidatesResilient(source, identity) });
     }
     if (action === "score_keywords") {
       const result = await scoreKeywordElonCandidatesBatched({ source: sourceFrom(body.source), identity: identityFrom(body.identity), discovery: discoveryFrom(body.discovery) });
