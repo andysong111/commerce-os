@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { after, NextRequest } from "next/server";
 import {
   getDetailPageJobConfig,
@@ -15,6 +16,7 @@ const COMPILER_WORKER_SLOT_COUNT = 3;
 const JOB_LIST_CACHE_TTL_MS = 8_000;
 const JOB_LIST_STALE_TTL_MS = 60_000;
 const JOB_LIST_CACHE_MAX_KEYS = 40;
+const SHARED_JOB_LIST_REVALIDATE_SECONDS = 10;
 
 type DetailPageJobList = Awaited<ReturnType<typeof listDetailPageJobs>>;
 type JobListCacheEntry = {
@@ -25,6 +27,17 @@ type JobListCacheEntry = {
 };
 
 const jobListCache = new Map<string, JobListCacheEntry>();
+const sharedDetailPageJobs = unstable_cache(
+  async (ownerId: string, normalizedQuery: string) => {
+    const config = getDetailPageJobConfig();
+    if (!config.ok) {
+      throw new Error("상세페이지 작업 저장소 설정을 읽지 못했습니다.");
+    }
+    return loadDetailPageJobs(config.value, ownerId, normalizedQuery);
+  },
+  ["detail-page-job-list-shared-v1"],
+  { revalidate: SHARED_JOB_LIST_REVALIDATE_SECONDS },
+);
 
 export async function GET(request: NextRequest) {
   const identity = await resolveDetailPageJobIdentity(request);
@@ -33,11 +46,7 @@ export async function GET(request: NextRequest) {
   if (!config.ok) return Response.json(config.body, { status: config.status });
   try {
     const query = request.nextUrl.searchParams.get("query")?.trim() ?? "";
-    const jobs = await cachedDetailPageJobs(
-      config.value,
-      identity.value.userId,
-      query,
-    );
+    const jobs = await cachedDetailPageJobs(identity.value.userId, query);
     return Response.json({
       ok: true,
       scope: query ? "search" : "recent",
@@ -195,11 +204,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function cachedDetailPageJobs(
-  config: Parameters<typeof listDetailPageJobs>[0],
-  ownerId: string,
-  query: string,
-) {
+async function cachedDetailPageJobs(ownerId: string, query: string) {
   const normalizedQuery = query.trim();
   const key = `${ownerId}:${normalizedQuery.toLocaleLowerCase("ko-KR")}`;
   const now = Date.now();
@@ -211,7 +216,7 @@ async function cachedDetailPageJobs(
     return cached.inFlight;
   }
 
-  const request = loadDetailPageJobs(config, ownerId, normalizedQuery);
+  const request = sharedDetailPageJobs(ownerId, normalizedQuery);
 
   if (cached && cached.staleUntil > now) {
     jobListCache.set(key, { ...cached, inFlight: request });
