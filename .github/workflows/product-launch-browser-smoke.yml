@@ -1,0 +1,39 @@
+name: Product Launch Browser Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "public/product-launch-tracker-app/**"
+      - "src/components/OpsWorkAssistant.tsx"
+      - "src/app/api/product-launch-tracker/**"
+      - "scripts/product-launch-browser-smoke.mjs"
+      - ".github/workflows/product-launch-browser-smoke.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-launch-browser-smoke-production
+  cancel-in-progress: true
+
+jobs:
+  production-browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium smoke dependency
+        run: |
+          npm install --no-save --package-lock=false playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Validate production Product Master control plane
+        env:
+          PRODUCT_LAUNCH_SMOKE_URL: https://commerce-os-ops-center.vercel.app/product-launch-tracker
+        run: node scripts/product-launch-browser-smoke.mjs

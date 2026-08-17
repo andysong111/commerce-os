@@ -43,6 +43,7 @@ jobs:
         run: >-
           npx tsx --test
           tests/productLaunchTrackerEntry.test.mjs
+          tests/productLaunchTrackerControlPlaneV2.test.mjs
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
