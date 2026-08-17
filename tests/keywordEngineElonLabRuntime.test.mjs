@@ -31,7 +31,7 @@ test("dedicated collector uses rendered 1688 DOM for title and structured option
 });
 
 test("collector and Lab handoff are independent from the detail-page SaaS", () => {
-  assert.match(browserImport, /commerce-os-keyword-lab-collector/);
+  assert.match(collector1688, /commerce-os-keyword-lab-collector/);
   assert.match(browserImport, /collectorVersion/);
   assert.match(page, /Keyword Lab Collector/);
   assert.doesNotMatch(page, /AI-Saurus/);
