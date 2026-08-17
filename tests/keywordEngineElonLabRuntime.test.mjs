@@ -13,6 +13,9 @@ const collector1688Path = "public/keyword-lab-collector/content-1688.js";
 const collectorOpsPath = "public/keyword-lab-collector/content-ops.js";
 const collector1688 = await readFile(collector1688Path, "utf8");
 const collectorOps = await readFile(collectorOpsPath, "utf8");
+const collectorManifest = JSON.parse(
+  await readFile("public/keyword-lab-collector/manifest.json", "utf8"),
+);
 
 test("V2 has no Shopling or Supabase write dependency", () => {
   assert.doesNotMatch(route, /Shopling|Supabase|keywordEngineElonLabStore|keywordEngineElonLabShopling/);
@@ -39,13 +42,30 @@ test("collector and Lab handoff are independent from the detail-page SaaS", () =
   assert.doesNotMatch(collector1688, /ai-saurus|detail-page/i);
 });
 
+test("collector v0.1.1 supports canonical and Vercel deployment URLs", () => {
+  assert.equal(collectorManifest.version, "0.1.1");
+  assert.ok(collectorManifest.host_permissions.includes("https://*.vercel.app/*"));
+  const opsScript = collectorManifest.content_scripts.find((item) =>
+    Array.isArray(item.js) && item.js.includes("content-ops.js"),
+  );
+  assert.ok(opsScript);
+  assert.ok(opsScript.matches.includes("https://*.vercel.app/*"));
+  assert.ok(
+    opsScript.include_globs.includes(
+      "https://commerce-os-ops-center-*.vercel.app/*",
+    ),
+  );
+  assert.match(collectorOps, /host\.startsWith\("commerce-os-ops-center-"\)/);
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.1"/);
+});
+
 test("collector installer zip contains only the dedicated collector package", () => {
   assert.match(zipRoute, /public\/keyword-lab-collector/);
   assert.match(zipRoute, /manifest\.json/);
   assert.match(zipRoute, /content-1688\.js/);
   assert.match(zipRoute, /content-ops\.js/);
   assert.match(zipRoute, /README\.txt/);
-  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.0\.zip/);
+  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.1\.zip/);
 });
 
 test("collector exposes its installed version to the Ops Center page", () => {

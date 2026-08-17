@@ -9,7 +9,7 @@ export const KEYWORD_ELON_BROWSER_IMPORT_PARAMETER =
 export const KEYWORD_ELON_BROWSER_RETURN_PARAMETER =
   "commerce_os_keyword_lab_return";
 export const KEYWORD_ELON_BROWSER_HASH_PARAMETER = "commerce_keyword_import";
-export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.0";
+export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.1";
 
 type BrowserOptionValue = {
   id?: unknown;

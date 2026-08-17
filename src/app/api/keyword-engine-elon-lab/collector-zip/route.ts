@@ -22,7 +22,7 @@ export async function GET() {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition":
-          'attachment; filename="commerce-os-keyword-lab-collector-v0.1.0.zip"',
+          'attachment; filename="commerce-os-keyword-lab-collector-v0.1.1.zip"',
         "Cache-Control": "no-store",
       },
     });
