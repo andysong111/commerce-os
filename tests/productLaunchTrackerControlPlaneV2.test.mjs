@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
-test("Product Master v2 is core-first and gates OPS UI behind a healthy workflow probe", () => {
+test("Product Master v2 is core-first and hands OPS UI a verified full first page", () => {
   const app = read("public/product-launch-tracker-app/app.js");
   const controlPlane = read("public/product-launch-tracker-app/product-master-control-plane.js");
   const gate = read("public/product-launch-tracker-app/workflow-ui-gate.js");
@@ -17,10 +17,13 @@ test("Product Master v2 is core-first and gates OPS UI behind a healthy workflow
   assert.doesNotMatch(app, /await import\("\.\/optimized-app\.js"\)/);
   assert.match(controlPlane, /MASTER_FALLBACK_DELAY_MS = 0/);
 
-  assert.match(gate, /pageSize: "1"/);
+  assert.match(gate, /INITIAL_WORKFLOW_PAGE_SIZE = 25/);
+  assert.match(gate, /unfinishedOnly: "true"/);
   assert.match(gate, /PROBE_TIMEOUT_MS = 4_500/);
+  assert.match(gate, /Array\.isArray\(body\?\.items\)/);
+  assert.match(gate, /installWarmWorkflowPage/);
+  assert.match(gate, /X-Commerce-Workflow-Warm-Handoff/);
   assert.match(gate, /optimizedAppPromise = import\("\.\/optimized-app\.js"\)/);
-  assert.match(gate, /response\.ok && body\?\.ok === true/);
   assert.match(gate, /IDLE_RETRY_MS = 30_000/);
 
   const standalone = app.split("} else {")[1] ?? "";
