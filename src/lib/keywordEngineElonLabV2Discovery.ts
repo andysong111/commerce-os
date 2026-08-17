@@ -1,0 +1,255 @@
+import {
+  compactKeywordElonKey,
+  normalizeKeywordElonText,
+  uniqueKeywordElonTexts,
+  type KeywordElonDiscovery,
+  type KeywordElonIdentity,
+  type KeywordElonSourceDraft,
+} from "@/lib/keywordEngineElonLabV2";
+import { discoverKeywordElonSearchAd } from "@/lib/keywordEngineElonLabV2SearchAd";
+
+const OPENAI_URL = "https://api.openai.com/v1/responses";
+const AI_DISCOVERY_TIMEOUT_MS = 70_000;
+const DEFAULT_MODEL = "gpt-5-mini";
+
+type OpenAiPayload = {
+  status?: unknown;
+  incomplete_details?: { reason?: unknown };
+  output_text?: unknown;
+  output?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }>;
+  error?: { message?: unknown };
+};
+
+function openAiModel() {
+  return (
+    normalizeKeywordElonText(process.env.OPENAI_KEYWORD_ELON_MODEL) ||
+    normalizeKeywordElonText(process.env.OPENAI_KEYWORD_IDENTITY_MODEL) ||
+    normalizeKeywordElonText(process.env.OPENAI_MODEL) ||
+    DEFAULT_MODEL
+  );
+}
+
+function outputText(payload: OpenAiPayload) {
+  const direct = normalizeKeywordElonText(payload.output_text);
+  if (direct) return direct;
+  for (const item of payload.output ?? []) {
+    for (const content of item.content ?? []) {
+      if (content.type === "output_text" && normalizeKeywordElonText(content.text)) {
+        return normalizeKeywordElonText(content.text);
+      }
+    }
+  }
+  return "";
+}
+
+function generationSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["keywords"],
+    properties: {
+      keywords: {
+        type: "array",
+        minItems: 8,
+        maxItems: 60,
+        items: { type: "string", minLength: 1, maxLength: 60 },
+      },
+    },
+  };
+}
+
+async function discoverAiCandidates(
+  source: KeywordElonSourceDraft,
+  identity: KeywordElonIdentity,
+) {
+  const apiKey = normalizeKeywordElonText(process.env.OPENAI_API_KEY);
+  if (!apiKey) {
+    return { keywords: [] as string[], model: openAiModel(), warning: "AI_DISCOVERY_NOT_CONFIGURED" };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_DISCOVERY_TIMEOUT_MS);
+  const model = openAiModel();
+  try {
+    const response = await fetch(OPENAI_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        max_output_tokens: 3_500,
+        input: [
+          {
+            role: "system",
+            content: [
+              {
+                type: "input_text",
+                text: [
+                  "당신은 한국 쇼핑 검색어 후보 발굴기다.",
+                  "최종 키워드를 고르는 단계가 아니라 후보 recall을 넓히는 단계다.",
+                  "상품과 다른 물건, 브랜드 발명, 근거 없는 성별·효능·재질·규격은 금지한다.",
+                  "동의어, 일반 시장명, 기능·디자인·용도 조합을 폭넓게 제안하되 상품 정체성을 벗어나지 않는다.",
+                  "한국 소비자가 실제 검색창에 입력할 법한 짧은 명사구만 만든다.",
+                  "중복을 피하고 30~50개 정도를 제안한다. 품질 평가는 다음 단계가 한다.",
+                ].join("\n"),
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: JSON.stringify(
+                  {
+                    chineseTitle: source.chineseTitle,
+                    optionText: source.optionText,
+                    productIdentity: identity.koreanProductIdentity,
+                    coreProduct: identity.coreProduct,
+                    identityAnchor: identity.identityAnchor,
+                    primarySeeds: identity.primarySeeds,
+                    conditionalSeeds: identity.conditionalSeeds,
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "keyword_elon_candidate_pool_v3",
+            strict: true,
+            schema: generationSchema(),
+          },
+        },
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    const raw = await response.text();
+    let payload: OpenAiPayload = {};
+    try {
+      payload = JSON.parse(raw) as OpenAiPayload;
+    } catch {
+      return { keywords: [] as string[], model, warning: "AI_DISCOVERY_INVALID_JSON" };
+    }
+    if (!response.ok) {
+      return {
+        keywords: [] as string[],
+        model,
+        warning: `AI_DISCOVERY_HTTP_${response.status}: ${normalizeKeywordElonText(payload.error?.message) || "OpenAI 요청 실패"}`,
+      };
+    }
+    const status = normalizeKeywordElonText(payload.status);
+    if (status === "incomplete") {
+      const reason = normalizeKeywordElonText(payload.incomplete_details?.reason);
+      return { keywords: [] as string[], model, warning: `AI_DISCOVERY_INCOMPLETE: ${reason || "unknown"}` };
+    }
+    const text = outputText(payload);
+    if (!text) return { keywords: [] as string[], model, warning: "AI_DISCOVERY_EMPTY_OUTPUT" };
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return { keywords: [] as string[], model, warning: "AI_DISCOVERY_OUTPUT_PARSE_FAILED" };
+    }
+    const keywords = uniqueKeywordElonTexts(
+      Array.isArray(parsed.keywords) ? (parsed.keywords as unknown[]) : [],
+      80,
+    );
+    return { keywords, model, warning: "" };
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    const message = error instanceof Error ? error.message : "AI 후보확장 실패";
+    return {
+      keywords: [] as string[],
+      model,
+      warning:
+        name === "AbortError"
+          ? `AI_DISCOVERY_TIMEOUT: ${AI_DISCOVERY_TIMEOUT_MS / 1000}초 내 응답 없음 · SearchAd/Seed 후보로 계속 진행`
+          : `AI_DISCOVERY_FAILED: ${message}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function discoverKeywordElonCandidatesResilient(
+  source: KeywordElonSourceDraft,
+  identity: KeywordElonIdentity,
+): Promise<KeywordElonDiscovery> {
+  const seeds = uniqueKeywordElonTexts(
+    [...identity.primarySeeds, ...identity.conditionalSeeds],
+    8,
+  );
+  if (!seeds.length) throw new Error("DISCOVERY_NO_SEED: STEP 1 Seed가 없습니다.");
+
+  const [aiSettled, searchAdSettled] = await Promise.allSettled([
+    discoverAiCandidates(source, identity),
+    discoverKeywordElonSearchAd(seeds),
+  ]);
+
+  const ai =
+    aiSettled.status === "fulfilled"
+      ? aiSettled.value
+      : {
+          keywords: [] as string[],
+          model: openAiModel(),
+          warning: `AI_DISCOVERY_FAILED: ${aiSettled.reason instanceof Error ? aiSettled.reason.message : String(aiSettled.reason)}`,
+        };
+
+  const searchAd =
+    searchAdSettled.status === "fulfilled"
+      ? searchAdSettled.value
+      : {
+          configured: Boolean(
+            process.env.NAVER_SEARCHAD_API_KEY?.trim() &&
+              process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() &&
+              process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim(),
+          ),
+          rows: [],
+          warnings: [
+            `SEARCHAD_DISCOVERY_FAILED: ${searchAdSettled.reason instanceof Error ? searchAdSettled.reason.message : String(searchAdSettled.reason)}`,
+          ],
+        };
+
+  const relatedKeywords = searchAd.rows.map((row) => row.keyword);
+  const candidates = uniqueKeywordElonTexts(
+    [...seeds, ...ai.keywords, ...relatedKeywords],
+    500,
+  );
+  const sourceTagsByKeyword: Record<string, string[]> = {};
+  const addTag = (keyword: string, tag: string) => {
+    const key = compactKeywordElonKey(keyword);
+    if (!key) return;
+    sourceTagsByKeyword[key] = [...new Set([...(sourceTagsByKeyword[key] ?? []), tag])];
+  };
+  for (const seed of identity.primarySeeds) addTag(seed, "primary_seed");
+  for (const seed of identity.conditionalSeeds) addTag(seed, "conditional_seed");
+  for (const keyword of ai.keywords) addTag(keyword, "ai_identity_expansion");
+  for (const row of searchAd.rows) {
+    addTag(row.keyword, "searchad_related");
+    for (const seed of row.sourceSeeds) addTag(row.keyword, `related:${seed}`);
+  }
+
+  const warnings = [...searchAd.warnings, ai.warning].filter(Boolean);
+  if (candidates.length < 10) {
+    warnings.push(`DISCOVERY_LOW_RECALL: 후보 ${candidates.length}개 · 최소 목표 10개 미만`);
+  }
+
+  return {
+    candidates,
+    sourceTagsByKeyword,
+    searchAdStats: searchAd.rows,
+    searchAdConfigured: searchAd.configured,
+    searchAdWarnings: warnings,
+    aiGeneratedCount: ai.keywords.length,
+    relatedKeywordCount: relatedKeywords.length,
+    model: ai.model,
+  };
+}
