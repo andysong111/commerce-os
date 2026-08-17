@@ -7,6 +7,7 @@ const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "ut
 const zipRoute = await readFile("src/app/api/keyword-engine-elon-lab/collector-zip/route.ts", "utf8");
 const server = await readFile("src/lib/keywordEngineElonLabV2Server.ts", "utf8");
 const searchAd = await readFile("src/lib/keywordEngineElonLabV2SearchAd.ts", "utf8");
+const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const collector1688Path = "public/keyword-lab-collector/content-1688.js";
@@ -109,6 +110,16 @@ test("SearchAd keyword tool calls are paced, recover once from 429, and redact A
   assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
   assert.match(searchAd, /\[REDACTED\]/);
   assert.match(searchAd, /delete|safeErrorBody/);
+});
+
+test("AI scoring is bounded to two concurrent chunks and preserves partial results", () => {
+  assert.match(route, /scoreKeywordElonCandidatesBatched/);
+  assert.match(scoring, /SCORE_CHUNK_SIZE = 50/);
+  assert.match(scoring, /SCORE_CONCURRENCY = 2/);
+  assert.match(scoring, /for \(let index = 0; index < chunks\.length; index \+= SCORE_CONCURRENCY\)/);
+  assert.match(scoring, /scoreChunkWithRetry/);
+  assert.match(scoring, /successfulChunks === 0/);
+  assert.match(scoring, /dataConfidence/);
 });
 
 test("title generation is derived from scored title-eligible keywords and capped at 100 UTF-8 bytes", () => {
