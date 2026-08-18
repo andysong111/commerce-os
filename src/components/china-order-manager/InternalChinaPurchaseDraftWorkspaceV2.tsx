@@ -50,6 +50,12 @@ type MetadataSyncResponse = DraftSaveResponse & {
   syncedBcodes?: number;
 };
 
+type QuantityResponse = {
+  ok?: boolean;
+  message?: string;
+  saved?: { targetQuantity?: number };
+};
+
 export function InternalChinaPurchaseDraftWorkspaceV2({
   initialDraft,
   budgetAudit,
@@ -128,13 +134,11 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
 
     for (const line of draft.lines) {
       const group = groups.get(lineKey(line)) ?? { quantity: 0, freight: 0 };
-      const freightPerUnitCny =
-        group.quantity > 0 ? group.freight / group.quantity : 0;
+      const freightPerUnitCny = group.quantity > 0 ? group.freight / group.quantity : 0;
       const finalUnitCny = decimal(line.unitPriceCny) + freightPerUnitCny;
       const actualUnitKrw = finalUnitCny * draft.exchangeRateKrwPerCny;
       const rowTotalKrw = actualUnitKrw * line.quantity;
-      const internalStandardUnitKrw =
-        actualUnitKrw * draft.internalOrderCostMultiplier;
+      const internalStandardUnitKrw = actualUnitKrw * draft.internalOrderCostMultiplier;
       byBarcode.set(line.barcode, {
         freightPerUnitCny,
         finalUnitCny,
@@ -143,13 +147,9 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
       });
       productCny += decimal(line.unitPriceCny) * line.quantity;
       totalKrw += rowTotalKrw;
-      internalStandardTotalKrw +=
-        rowTotalKrw * draft.internalOrderCostMultiplier;
+      internalStandardTotalKrw += rowTotalKrw * draft.internalOrderCostMultiplier;
     }
-    freightCny = [...groups.values()].reduce(
-      (sum, group) => sum + group.freight,
-      0,
-    );
+    freightCny = [...groups.values()].reduce((sum, group) => sum + group.freight, 0);
     const productKrw = productCny * draft.exchangeRateKrwPerCny;
     const budgetKrw = budgetAudit.productOrderBudgetKrw;
     const budgetUsedPercent =
@@ -164,8 +164,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
       budgetUsedPercent,
       budgetRemainingKrw: Math.max(0, budgetKrw - productKrw),
       budgetOverKrw: Math.max(0, productKrw - budgetKrw),
-      actualPriceCount: draft.lines.filter((line) => decimal(line.unitPriceCny) > 0)
-        .length,
+      actualPriceCount: draft.lines.filter((line) => decimal(line.unitPriceCny) > 0).length,
     };
   }, [budgetAudit.productOrderBudgetKrw, draft]);
 
@@ -173,9 +172,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
     const issues: string[] = [];
     for (const line of draft.lines) {
       if (line.unitPriceCny <= 0) issues.push(`${line.barcode} 위안단가`);
-      if (!validHttpUrl(line.supplierLink)) {
-        issues.push(`${line.barcode} 모델 1번 1688 링크`);
-      }
+      if (!validHttpUrl(line.supplierLink)) issues.push(`${line.barcode} 모델 1번 1688 링크`);
       if (!line.chinaOption.trim()) issues.push(`${line.barcode} 중국옵션`);
     }
     return issues;
@@ -186,10 +183,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
     [draft.lines],
   );
 
-  function updateLine(
-    barcode: string,
-    patch: Partial<InternalChinaPurchaseDraftLine>,
-  ) {
+  function updateLine(barcode: string, patch: Partial<InternalChinaPurchaseDraftLine>) {
     if (draft.status !== "DRAFT") return;
     setDraft((current) => ({
       ...current,
@@ -197,6 +191,20 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
         line.barcode === barcode ? { ...line, ...patch } : line,
       ),
     }));
+  }
+
+  function applySavedQuantity(barcode: string, targetQuantity: number, message: string) {
+    setDraft((current) => {
+      const lines = current.lines.map((line) =>
+        line.barcode === barcode ? { ...line, quantity: targetQuantity } : line,
+      );
+      return {
+        ...current,
+        lines,
+        totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
+      };
+    });
+    setNotice(message);
   }
 
   function updateModelSupplierLink(
@@ -262,8 +270,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
       const metadata = (await metadataResponse.json().catch(() => ({}))) as MetadataSyncResponse;
       if (!metadataResponse.ok || !metadata.ok) {
         throw new Error(
-          metadata.message ||
-            "Draft는 저장됐지만 상품출시진행관리 역저장을 완료하지 못했습니다.",
+          metadata.message || "Draft는 저장됐지만 상품출시진행관리 역저장을 완료하지 못했습니다.",
         );
       }
       if (metadata.draft) nextDraft = metadata.draft;
@@ -279,9 +286,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
     }
 
     setDraft(nextDraft);
-    if (!options.quiet) {
-      setNotice(`발주초안을 저장했습니다. ${metadataMessage}`);
-    }
+    if (!options.quiet) setNotice(`발주초안을 저장했습니다. ${metadataMessage}`);
     router.refresh();
     return nextDraft;
   }
@@ -343,9 +348,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
       router.refresh();
     } catch (error) {
       setNotice(
-        error instanceof Error
-          ? error.message
-          : "실제 주문완료 기록 요청이 일시적으로 실패했습니다.",
+        error instanceof Error ? error.message : "실제 주문완료 기록 요청이 일시적으로 실패했습니다.",
       );
     } finally {
       setOrdering(false);
@@ -377,7 +380,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
             <span className="text-xs font-black tracking-[0.12em] text-blue-700">OPS CENTER NATIVE · BIDIRECTIONAL</span>
             <h2 className="mt-1 text-xl font-black text-slate-950">실제 1688 주문 준비</h2>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              링크와 중국옵션은 이 표에서 바로 입력할 수 있습니다. `발주초안 저장`을 누르면 모델 고정 1번 링크와 B-code별 중국옵션이 상품출시진행관리로 역저장되고 상품마스터 최신 구매정보 원장에도 반영됩니다. 같은 모델의 링크는 모든 B-code에 즉시 공통 적용됩니다. 수량은 RESERVED 기준값이라 변경하지 않습니다.
+              링크·중국옵션·단가는 이 표에서 바로 입력하고 `발주초안 저장`으로 양방향 반영합니다. 주문수량은 각 B-code 행에 항상 표시되는 수량 입력칸에서 즉시 저장하며, 별도 DOM 삽입이나 화면 새로고침에 의존하지 않습니다.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
@@ -388,15 +391,9 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
               </strong>
               <span className="mt-0.5 block text-[11px] text-emerald-700">실주문 원가 × 내부 주문 수수료율 {draft.internalOrderCostMultiplier.toFixed(2)}</span>
             </div>
-            <a href="https://commerce-os-product-master.vercel.app/purchase-metadata" target="_blank" rel="noreferrer" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-800 hover:bg-slate-50">
-              상품마스터 최신 원장
-            </a>
-            <button type="button" onClick={() => void saveDraft()} disabled={saving || draft.status !== "DRAFT"} className="rounded-xl border border-blue-300 bg-white px-4 py-2.5 text-sm font-black text-blue-800 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">
-              {saving ? "양방향 저장 중..." : "발주초안 저장"}
-            </button>
-            <button type="button" onClick={() => void markOrdered()} disabled={ordering || draft.status !== "DRAFT" || requiredIssues.length > 0} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">
-              {draft.status === "ORDERED" ? "실주문 기록완료" : ordering ? "기록 중..." : "1688 주문완료 후 기록"}
-            </button>
+            <a href="https://commerce-os-product-master.vercel.app/purchase-metadata" target="_blank" rel="noreferrer" className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-black text-slate-800 hover:bg-slate-50">상품마스터 최신 원장</a>
+            <button type="button" onClick={() => void saveDraft()} disabled={saving || draft.status !== "DRAFT"} className="rounded-xl border border-blue-300 bg-white px-4 py-2.5 text-sm font-black text-blue-800 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "양방향 저장 중..." : "발주초안 저장"}</button>
+            <button type="button" onClick={() => void markOrdered()} disabled={ordering || draft.status !== "DRAFT" || requiredIssues.length > 0} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">{draft.status === "ORDERED" ? "실주문 기록완료" : ordering ? "기록 중..." : "1688 주문완료 후 기록"}</button>
           </div>
         </div>
 
@@ -419,22 +416,20 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
         <div className="sticky top-0 z-30 rounded-t-2xl border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur">
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => scrollTable(-1)} className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">← 왼쪽</button>
-            <div ref={topScrollRef} className="h-4 min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded bg-slate-100" aria-label="표 좌우 스크롤">
-              <div style={{ width: scrollWidth, height: 1 }} />
-            </div>
+            <div ref={topScrollRef} className="h-4 min-w-0 flex-1 overflow-x-auto overflow-y-hidden rounded bg-slate-100" aria-label="표 좌우 스크롤"><div style={{ width: scrollWidth, height: 1 }} /></div>
             <button type="button" onClick={() => scrollTable(1)} className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50">오른쪽 →</button>
           </div>
           <p className="mt-1 text-[11px] font-semibold text-slate-500">위 스크롤바 또는 좌우 버튼으로 표를 이동할 수 있습니다. 아래 기본 가로 스크롤바와 위치가 동기화됩니다.</p>
         </div>
 
         <div ref={tableScrollRef} className="overflow-x-auto overscroll-x-contain">
-          <table className="min-w-[2200px] text-left text-xs">
+          <table className="min-w-[2240px] text-left text-xs">
             <thead className="border-b border-slate-200 bg-slate-50 font-bold text-slate-500">
               <tr>
                 <th className="px-3 py-3">B-code / 모델 / 옵션</th>
                 <th className="px-3 py-3">중국옵션 · 역저장</th>
                 <th className="px-3 py-3">모델 고정 1번 1688 링크 · 역저장</th>
-                <th className="px-3 py-3 text-right">수량</th>
+                <th className="px-3 py-3 text-right">수량 · 즉시저장</th>
                 <th className="px-3 py-3 text-right">위안단가</th>
                 <th className="px-3 py-3">운임그룹</th>
                 <th className="px-3 py-3 text-right">중국내 운임</th>
@@ -470,7 +465,16 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
                       </div>
                       <span className="mt-1 block text-[10px] font-bold text-indigo-700">같은 모델 모든 B-code에 공통 적용 · 저장 시 상품출시 1번 링크로 역저장</span>
                     </td>
-                    <td className="px-3 py-3 text-right text-sm font-black text-slate-950">{number.format(line.quantity)}</td>
+                    <td className="min-w-[190px] px-2 py-2 text-right">
+                      <NativeQuantityControl
+                        key={`${line.barcode}:${line.quantity}`}
+                        draftId={draft.draftId}
+                        status={draft.status}
+                        barcode={line.barcode}
+                        quantity={line.quantity}
+                        onSaved={applySavedQuantity}
+                      />
+                    </td>
                     <td className="px-2 py-2"><NumberInput value={line.unitPriceCny} disabled={!editable} required={line.unitPriceCny <= 0} onChange={(value) => updateLine(line.barcode, { unitPriceCny: value })} /></td>
                     <td className="px-2 py-2"><Input value={line.freightGroupId} disabled={!editable} placeholder="같은 공급처면 동일 그룹" onChange={(value) => updateLine(line.barcode, { freightGroupId: value })} /></td>
                     <td className="px-2 py-2"><NumberInput value={line.domesticChinaFreightCny} disabled={!editable} onChange={(value) => updateLine(line.barcode, { domesticChinaFreightCny: value })} /></td>
@@ -487,6 +491,103 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
           </table>
         </div>
       </section>
+    </div>
+  );
+}
+
+function NativeQuantityControl({
+  draftId,
+  status,
+  barcode,
+  quantity,
+  onSaved,
+}: {
+  draftId: string;
+  status: "DRAFT" | "ORDERED";
+  barcode: string;
+  quantity: number;
+  onSaved: (barcode: string, quantity: number, message: string) => void;
+}) {
+  const [value, setValue] = useState(String(quantity));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const targetQuantity = Math.round(Number(value));
+  const valid = Number.isFinite(targetQuantity) && targetQuantity >= 1 && targetQuantity <= 9_999;
+  const changed = valid && targetQuantity !== quantity;
+
+  async function saveQuantity() {
+    if (status !== "DRAFT" || saving) return;
+    if (!valid) {
+      setMessage("1~9,999");
+      return;
+    }
+    if (!changed) {
+      setMessage("동일");
+      return;
+    }
+    setSaving(true);
+    setMessage("저장 중");
+    try {
+      const response = await fetch(
+        `/api/china-order-manager/drafts/${encodeURIComponent(draftId)}/quantity`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ barcode, targetQuantity }),
+          credentials: "same-origin",
+          cache: "no-store",
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as QuantityResponse;
+      if (!response.ok || !body.ok) {
+        throw new Error(body.message || "수량 변경 저장에 실패했습니다.");
+      }
+      const savedQuantity = Math.round(Number(body.saved?.targetQuantity ?? targetQuantity));
+      setValue(String(savedQuantity));
+      setMessage("저장됨");
+      onSaved(
+        barcode,
+        savedQuantity,
+        body.message || `${barcode} 수량을 ${savedQuantity.toLocaleString("ko-KR")}개로 저장했습니다.`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "저장 실패");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-end gap-1.5" data-native-draft-quantity={barcode}>
+      <input
+        type="number"
+        min={1}
+        max={9999}
+        step={1}
+        value={value}
+        disabled={status !== "DRAFT" || saving}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setMessage("");
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void saveQuantity();
+          }
+        }}
+        aria-label={`${barcode} 주문수량`}
+        className={`w-20 rounded-lg border bg-white px-2 py-2 text-right text-xs font-black outline-none disabled:bg-slate-100 ${changed ? "border-blue-400 text-blue-900" : "border-slate-300 text-slate-800"}`}
+      />
+      <button
+        type="button"
+        onClick={() => void saveQuantity()}
+        disabled={status !== "DRAFT" || saving || !changed}
+        className="rounded-lg bg-blue-700 px-2.5 py-2 text-[11px] font-black text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+      >
+        {saving ? "저장" : "변경"}
+      </button>
+      {message ? <span className={`max-w-[74px] truncate text-[10px] font-bold ${message === "저장됨" ? "text-emerald-700" : "text-slate-500"}`}>{message}</span> : null}
     </div>
   );
 }
