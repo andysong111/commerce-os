@@ -46,6 +46,27 @@ test("native quantity change uses the lightweight quantity-only save path", () =
   assert.doesNotMatch(postRoute, /applyInternalChinaQuantityOverrides/);
 });
 
+test("draft table can freeze every column through an operator-selected last column", () => {
+  assert.match(workspace, /const TABLE_COLUMNS/);
+  assert.match(workspace, /freezeThrough/);
+  assert.match(workspace, /function stickyCellStyle/);
+  assert.match(workspace, /고정할 마지막 열/);
+  assert.match(workspace, /선택한 열까지 왼쪽에 고정/);
+  assert.match(workspace, /position: "sticky"/);
+});
+
+test("zero domestic China freight is visible and same-link SKUs can be grouped automatically", () => {
+  assert.match(workspace, /showZero/);
+  assert.match(workspace, /value=\{showZero \? value : value \|\| ""\}/);
+  assert.match(workspace, /같은 1688 링크 자동 합배송/);
+  assert.match(workspace, /function autoGroupSameSupplierLinks/);
+  assert.match(workspace, /function supplierPageKey/);
+  assert.match(workspace, /그룹 총운임/);
+  assert.match(workspace, /그룹 공유/);
+  assert.match(workspace, /무료배송은 0/);
+  assert.match(workspace, /updateGroupFreight/);
+});
+
 test("draft page no longer mounts the DOM quantity bridge", () => {
   assert.doesNotMatch(page, /InternalChinaDraftInlineQuantityBridge/);
   assert.doesNotMatch(page, /InternalChinaDraftQuantityEditor/);
