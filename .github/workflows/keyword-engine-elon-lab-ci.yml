@@ -37,6 +37,7 @@ jobs:
           src/app/keyword-engine-elon-lab/page.tsx
           src/app/keyword-engine-elon-lab/layout.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts

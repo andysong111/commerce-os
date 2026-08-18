@@ -1,6 +1,8 @@
 export const KEYWORD_ELON_V2_STORAGE_KEY = "keywordEngineElonLab.v2.session";
 export const KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70;
 export const KEYWORD_ELON_V2_MINIMUM_KEYWORDS = 10;
+export const KEYWORD_ELON_V2_RELEVANCE_GATE = 80;
+export const KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70;
 
 export type KeywordElonSourceDraft = {
   url: string;
@@ -63,6 +65,8 @@ export type KeywordElonCandidate = KeywordElonSemanticScore & {
   demandScore: number;
   competitionOpportunity: number;
   qualityScore: number;
+  safetyPass: boolean;
+  safetyReason: string;
   dataConfidence: "high" | "medium" | "low";
 };
 
@@ -74,6 +78,9 @@ export type KeywordElonDiscovery = {
   searchAdWarnings: string[];
   aiGeneratedCount: number;
   relatedKeywordCount: number;
+  demandExpansionSeeds?: string[];
+  demandExpansionSeedCount?: number;
+  demandExplorationDepth?: number;
   model: string;
 };
 
@@ -180,10 +187,37 @@ function clamp100(value: number) {
   return Math.max(0, Math.min(100, Math.round(value * 10) / 10));
 }
 
+const DEMAND_SCORE_ANCHORS = [
+  [0, 0],
+  [10, 20],
+  [50, 35],
+  [200, 50],
+  [1_000, 65],
+  [5_000, 80],
+  [20_000, 90],
+  [100_000, 100],
+] as const;
+
 export function keywordElonDemandScore(totalSearch: number | null) {
-  if (totalSearch === null || !Number.isFinite(totalSearch)) return 45;
-  if (totalSearch <= 0) return 0;
-  return clamp100((Math.log10(totalSearch + 1) / 5) * 100);
+  if (totalSearch === null || !Number.isFinite(totalSearch)) return 15;
+  const value = Math.max(0, totalSearch);
+  if (value <= 0) return 0;
+  if (value >= 100_000) return 100;
+
+  for (let index = 1; index < DEMAND_SCORE_ANCHORS.length; index += 1) {
+    const [upperSearch, upperScore] = DEMAND_SCORE_ANCHORS[index];
+    if (value > upperSearch) continue;
+    const [lowerSearch, lowerScore] = DEMAND_SCORE_ANCHORS[index - 1];
+    if (lowerSearch === 0) {
+      return clamp100(lowerScore + ((value - lowerSearch) / (upperSearch - lowerSearch)) * (upperScore - lowerScore));
+    }
+    const lowerLog = Math.log10(lowerSearch);
+    const upperLog = Math.log10(upperSearch);
+    const valueLog = Math.log10(Math.max(1, value));
+    const ratio = (valueLog - lowerLog) / Math.max(0.0001, upperLog - lowerLog);
+    return clamp100(lowerScore + ratio * (upperScore - lowerScore));
+  }
+  return 100;
 }
 
 export function keywordElonCompetitionOpportunity(compIdx: string | number | null, plAvgDepth: number | null) {
@@ -209,12 +243,20 @@ export function calculateKeywordElonQuality(input: {
 }) {
   const demandScore = keywordElonDemandScore(input.totalSearch);
   const competitionOpportunity = keywordElonCompetitionOpportunity(input.compIdx, input.plAvgDepth);
-  const qualityScore = clamp100(
-    input.relevance * 0.45 +
-      input.shoppingIntent * 0.2 +
-      input.specificity * 0.1 +
-      demandScore * 0.2 +
-      competitionOpportunity * 0.05,
+  const safetyPass =
+    input.relevance >= KEYWORD_ELON_V2_RELEVANCE_GATE &&
+    input.shoppingIntent >= KEYWORD_ELON_V2_SHOPPING_INTENT_GATE;
+  const safetyReason = safetyPass
+    ? `안전Gate 통과 · 관련성 ${input.relevance.toFixed(0)} / 쇼핑의도 ${input.shoppingIntent.toFixed(0)}`
+    : `안전Gate 탈락 · 관련성 ${input.relevance.toFixed(0)} / 쇼핑의도 ${input.shoppingIntent.toFixed(0)} (기준 ${KEYWORD_ELON_V2_RELEVANCE_GATE}/${KEYWORD_ELON_V2_SHOPPING_INTENT_GATE})`;
+
+  const opportunityScore = clamp100(
+    demandScore * 0.55 +
+      input.relevance * 0.2 +
+      input.shoppingIntent * 0.1 +
+      competitionOpportunity * 0.1 +
+      input.specificity * 0.05,
   );
-  return { demandScore, competitionOpportunity, qualityScore };
+  const qualityScore = safetyPass ? opportunityScore : 0;
+  return { demandScore, competitionOpportunity, qualityScore, safetyPass, safetyReason };
 }

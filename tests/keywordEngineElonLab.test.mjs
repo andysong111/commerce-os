@@ -9,6 +9,8 @@ const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.
 const moduleFile = await readFile("src/lib/keywordEngineElonLabModule.ts", "utf8");
 const manifest = await readFile("public/keyword-lab-collector/manifest.json", "utf8");
 const collector1688 = await readFile("public/keyword-lab-collector/content-1688.js", "utf8");
+const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
+const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
 
 test("Elon Lab starts from a 1688 URL and exposes only two execution steps", () => {
   assert.match(page, /1688 중국 상품 링크/);
@@ -32,10 +34,27 @@ test("quality policy means minimum ten, not maximum ten", () => {
   assert.match(page, /커트라인을 통과한 키워드는 상한 없이 모두 보존/);
 });
 
-test("final result includes a generated product title", () => {
+test("demand-first policy gates safety before monthly-search opportunity ranking", () => {
+  assert.match(domain, /KEYWORD_ELON_V2_RELEVANCE_GATE = 80/);
+  assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
+  assert.match(domain, /demandScore \* 0\.55/);
+  assert.match(domain, /input\.relevance \* 0\.2/);
+  assert.match(domain, /input\.shoppingIntent \* 0\.1/);
+  assert.match(domain, /competitionOpportunity \* 0\.1/);
+  assert.match(domain, /input\.specificity \* 0\.05/);
+  assert.match(domain, /qualityScore = safetyPass \? opportunityScore : 0/);
+  assert.match(domain, /totalSearch === null.*return 15/);
+});
+
+test("final result includes generated title plus demand and accuracy diagnostics", () => {
   assert.match(page, /추천 상품명/);
   assert.match(page, /현재 커트라인으로 상품명 다시 생성/);
   assert.match(page, /통과 키워드 · 점수 높은 순/);
+  assert.match(layout, /KeywordElonDemandSummary/);
+  assert.match(demandSummary, /월검색량 TOP/);
+  assert.match(demandSummary, /상품 정확성 TOP/);
+  assert.match(demandSummary, /월검색수요 55%/);
+  assert.match(demandSummary, /안전 Gate/);
 });
 
 test("API exposes the V2 pipeline actions", () => {
