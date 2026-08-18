@@ -100,14 +100,11 @@ export async function POST(request: Request, context: RouteContext) {
       barcode,
       targetQuantity: body.targetQuantity,
     });
-    const overrides = await loadInternalChinaQuantityOverrides(decodedDraftId);
-    const draft = applyInternalChinaQuantityOverrides(base, overrides);
     return Response.json(
       {
         ok: true,
-        draft,
         saved,
-        message: `${barcode} 주문수량을 ${saved.targetQuantity.toLocaleString("ko-KR")}개로 저장했습니다. 실제 주문완료 기록 시 ORDERED·입고 원장에도 이 수량을 반영합니다.`,
+        message: `${barcode} 주문수량을 ${saved.targetQuantity.toLocaleString("ko-KR")}개로 즉시 저장했습니다. 실제 주문완료 기록 시 ORDERED·입고 원장에도 이 수량을 반영합니다.`,
         externalOrderExecuted: false,
       },
       { headers: { "cache-control": "no-store" } },
