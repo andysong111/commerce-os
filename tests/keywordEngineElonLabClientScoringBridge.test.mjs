@@ -26,13 +26,21 @@ test("Keyword Lab adaptively splits slow scoring chunks", () => {
   assert.match(bridge, /12개 묶음이 느리면 6개 → 3개로 자동 축소/);
 });
 
-test("Keyword Lab persists completed scoring chunks and resumes without rediscovering", () => {
-  assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\.scoreBridge\.v2"/);
+test("Keyword Lab persists completed scoring chunks with a new market-recall cache namespace", () => {
+  assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\.scoreBridge\.v3\.marketRecall"/);
+  assert.match(bridge, /marketRecallVersion: 4/);
   assert.match(bridge, /window\.localStorage\.setItem\(key/);
   assert.match(bridge, /sessionDiscoveryForResume/);
   assert.match(bridge, /stage2Status !== "error"/);
   assert.match(bridge, /이전 후보 .*SearchAd 재호출 없이 점수화를 재개/);
   assert.match(bridge, /STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개/);
+});
+
+test("Keyword Lab enriches monthly demand after semantic safety scoring", () => {
+  assert.match(bridge, /action: "enrich_demand"/);
+  assert.match(bridge, /안전Gate 통과 후보의 월검색 미측정 값을 SearchAd로 보강/);
+  assert.match(bridge, /demandEnriched: true/);
+  assert.match(bridge, /월검색 보강/);
 });
 
 test("route layout always mounts the scoring bridge", () => {

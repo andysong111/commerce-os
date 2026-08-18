@@ -8,6 +8,8 @@ const zipRoute = await readFile("src/app/api/keyword-engine-elon-lab/collector-z
 const server = await readFile("src/lib/keywordEngineElonLabV2Server.ts", "utf8");
 const searchAd = await readFile("src/lib/keywordEngineElonLabV2SearchAd.ts", "utf8");
 const discovery = await readFile("src/lib/keywordEngineElonLabV2Discovery.ts", "utf8");
+const marketRecall = await readFile("src/lib/keywordEngineElonLabV2MarketRecall.ts", "utf8");
+const demandEnrichment = await readFile("src/lib/keywordEngineElonLabV2DemandEnrichment.ts", "utf8");
 const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
 const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
@@ -93,26 +95,43 @@ test("identity analysis explicitly forbids seller model names", () => {
   assert.match(server, /1688 중국 원본 상품명·옵션·보조텍스트만 근거/);
 });
 
-test("SearchAd calls are paced, recover from 429, and expand top demand seeds at depth two", () => {
+test("Market Recall bridges descriptive 1688 seeds into Korean market language", () => {
+  assert.match(marketRecall, /Market Bridge Seed 생성기/);
+  assert.match(marketRecall, /코집게·코교정기·코높이기·콧대높이기·코뽕/);
+  assert.match(marketRecall, /NAVER_SHOPPING_URL/);
+  assert.match(marketRecall, /NAVER_SEARCH_CLIENT_ID/);
+  assert.match(marketRecall, /normalizeNaverItem/);
+  assert.match(marketRecall, /extractMarketTerms/);
+  assert.match(marketRecall, /marketTokens/);
+  assert.match(discovery, /buildKeywordElonMarketRecall/);
+  assert.match(discovery, /market_bridge_seed/);
+  assert.match(discovery, /naver_shopping_market_term/);
+  assert.match(discovery, /observedNaverShoppingTerms/);
+  assert.match(discovery, /MARKET_RECALL_SUMMARY/);
+  assert.match(discovery, /Prefer real market\/SearchAd forms before AI descriptive forms/);
+});
+
+test("SearchAd calls are paced, recover from 429, expand demand seeds, and enrich missing exact demand", () => {
   assert.match(searchAd, /REQUEST_INTERVAL_MS = 1_800/);
   assert.match(searchAd, /RATE_LIMIT_BACKOFF_MS = 6_500/);
   assert.match(searchAd, /DEMAND_EXPANSION_SEED_LIMIT = 3/);
   assert.match(searchAd, /DEMAND_EXPANSION_MIN_SEARCH = 50/);
+  assert.match(searchAd, /DEMAND_ENRICH_LIMIT = 8/);
   assert.match(searchAd, /chooseDemandExpansionSeeds/);
   assert.match(searchAd, /fetchSeedWithRateLimitRecovery/);
-  assert.match(searchAd, /expansionSeeds/);
-  assert.match(searchAd, /explorationDepth: expansionSeeds\.length \? 2 : 1/);
+  assert.match(searchAd, /enrichKeywordElonSearchAdDemand/);
+  assert.match(searchAd, /exactMatched/);
   assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
   assert.match(searchAd, /\[REDACTED\]/);
 });
 
-test("candidate discovery fails open and tags second-depth demand exploration", () => {
+test("candidate discovery uses market recall before SearchAd and keeps depth-two exploration", () => {
   assert.match(route, /discoverKeywordElonCandidatesResilient/);
   assert.match(discovery, /AI_DISCOVERY_TIMEOUT_MS = 70_000/);
-  assert.match(discovery, /Promise\.allSettled/);
-  assert.match(discovery, /AI_DISCOVERY_TIMEOUT/);
-  assert.match(discovery, /SearchAd\/Seed 후보로 계속 진행/);
-  assert.match(discovery, /\.\.\.seeds, \.\.\.ai\.keywords, \.\.\.relatedKeywords/);
+  assert.match(discovery, /buildKeywordElonMarketRecall/);
+  assert.match(discovery, /shortAiSearchSeeds/);
+  assert.match(discovery, /discoverKeywordElonSearchAd\(searchAdSeeds\)/);
+  assert.match(discovery, /\.\.\.relatedKeywords[\s\S]*\.\.\.market\.marketTerms[\s\S]*\.\.\.market\.bridgeSeeds/);
   assert.match(discovery, /searchad_demand_depth2/);
   assert.match(discovery, /DEMAND_DEPTH2_USED/);
   assert.match(discovery, /demandExpansionSeeds/);
@@ -142,6 +161,17 @@ test("AI scoring uses small low-output chunks and applies demand-first safety ga
   assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
   assert.match(domain, /demandScore \* 0\.55/);
   assert.match(domain, /qualityScore = safetyPass \? opportunityScore : 0/);
+});
+
+test("safety-pass candidates receive an exact-demand enrichment pass", () => {
+  assert.match(route, /action === "enrich_demand"/);
+  assert.match(route, /enrichKeywordElonDemand/);
+  assert.match(demandEnrichment, /row\.safetyPass && row\.totalSearch === null/);
+  assert.match(demandEnrichment, /enrichKeywordElonSearchAdDemand/);
+  assert.match(demandEnrichment, /DEMAND_ENRICH_SUMMARY/);
+  assert.match(demandSummary, /MARKET RECALL V4/);
+  assert.match(demandSummary, /Market Bridge Seed/);
+  assert.match(demandSummary, /네이버 쇼핑에서 관찰된 시장어/);
   assert.match(demandSummary, /월검색량 TOP/);
   assert.match(demandSummary, /상품 정확성 TOP/);
 });
