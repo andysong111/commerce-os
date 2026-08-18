@@ -24,6 +24,7 @@ jobs:
           tests/fastPurchaseInternalDraft.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/internalChinaInlineQuantity.test.mjs
+          tests/internalChinaManualBulkAdd.test.mjs
       - name: Lint internal draft files
         run: >-
           npx eslint
@@ -34,10 +35,12 @@ jobs:
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           src/app/fast-purchase-mvp/page.tsx
           src/components/china-order-manager/InternalChinaDraftInlineQuantityBridge.tsx
+          src/components/china-order-manager/InternalChinaManualDraftLineAdder.tsx
           src/app/china-order-manager/drafts/[draftId]/page.tsx
           tests/fastPurchaseInternalDraft.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/internalChinaInlineQuantity.test.mjs
+          tests/internalChinaManualBulkAdd.test.mjs
       - name: Build
         run: npm run build
         env:
