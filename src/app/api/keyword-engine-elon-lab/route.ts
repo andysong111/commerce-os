@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { KeywordElonCandidate, KeywordElonDiscovery, KeywordElonIdentity, KeywordElonSourceDraft } from "@/lib/keywordEngineElonLabV2";
+import { enrichKeywordElonDemand } from "@/lib/keywordEngineElonLabV2DemandEnrichment";
 import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// STEP 2 may score up to 500 candidates in bounded OpenAI waves.
 export const maxDuration = 500;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,10 +45,11 @@ function readiness() {
   return {
     openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
+    naverShoppingConfigured: Boolean(process.env.NAVER_SEARCH_CLIENT_ID?.trim() && process.env.NAVER_SEARCH_CLIENT_SECRET?.trim()),
   };
 }
 
-export async function GET() { return NextResponse.json({ ok: true, version: 2, ...readiness() }); }
+export async function GET() { return NextResponse.json({ ok: true, version: 4, ...readiness() }); }
 
 export async function POST(request: NextRequest) {
   let action = "request";
@@ -69,6 +70,13 @@ export async function POST(request: NextRequest) {
     }
     if (action === "score_keywords") {
       const result = await scoreKeywordElonCandidatesBatched({ source: sourceFrom(body.source), identity: identityFrom(body.identity), discovery: discoveryFrom(body.discovery) });
+      return NextResponse.json({ ok: true, action, ...result });
+    }
+    if (action === "enrich_demand") {
+      const result = await enrichKeywordElonDemand({
+        candidates: candidatesFrom(body.candidates),
+        discovery: discoveryFrom(body.discovery),
+      });
       return NextResponse.json({ ok: true, action, ...result });
     }
     if (action === "generate_title") {
