@@ -78,9 +78,9 @@ export type KeywordElonDiscovery = {
   searchAdWarnings: string[];
   aiGeneratedCount: number;
   relatedKeywordCount: number;
-  demandExpansionSeeds: string[];
-  demandExpansionSeedCount: number;
-  demandExplorationDepth: number;
+  demandExpansionSeeds?: string[];
+  demandExpansionSeedCount?: number;
+  demandExplorationDepth?: number;
   model: string;
 };
 
