@@ -67,6 +67,20 @@ test("zero domestic China freight is visible and same-link SKUs can be grouped a
   assert.match(workspace, /updateGroupFreight/);
 });
 
+test("CNY price and freight inputs support two decimal places", () => {
+  assert.match(workspace, /maximumFractionDigits: 2/);
+  assert.match(workspace, /function cnyCent/);
+  assert.match(workspace, /step="0\.01"/);
+  assert.match(workspace, /inputMode="decimal"/);
+  assert.match(workspace, /cnyCent\(event\.target\.value\)/);
+});
+
+test("optionless 1688 products can be marked as single item with one click", () => {
+  assert.match(workspace, /chinaOption: "단품"/);
+  assert.match(workspace, />단품<\/button>/);
+  assert.match(workspace, /옵션 없음은 `단품`/);
+});
+
 test("draft page no longer mounts the DOM quantity bridge", () => {
   assert.doesNotMatch(page, /InternalChinaDraftInlineQuantityBridge/);
   assert.doesNotMatch(page, /InternalChinaDraftQuantityEditor/);
