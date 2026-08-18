@@ -12,11 +12,10 @@ import {
 } from "@/lib/keywordEngineElonLabV2";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
-const OPENAI_TIMEOUT_MS = 50_000;
+const OPENAI_TIMEOUT_MS = 42_000;
 const DEFAULT_MODEL = "gpt-5-mini";
-const SCORE_CHUNK_SIZE = 20;
-const SCORE_CONCURRENCY = 2;
-const SCORE_RETRY_DELAY_MS = 1_500;
+const SCORE_CHUNK_SIZE = 12;
+const SCORE_CONCURRENCY = 1;
 
 type OpenAiPayload = {
   status?: unknown;
@@ -25,10 +24,6 @@ type OpenAiPayload = {
   output?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }>;
   error?: { message?: unknown };
 };
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function openAiModel() {
   return (
@@ -71,7 +66,6 @@ function scoringSchema() {
             "shoppingIntent",
             "specificity",
             "titleEligible",
-            "rationale",
           ],
           properties: {
             keyword: { type: "string", minLength: 1, maxLength: 60 },
@@ -79,12 +73,21 @@ function scoringSchema() {
             shoppingIntent: { type: "number", minimum: 0, maximum: 100 },
             specificity: { type: "number", minimum: 0, maximum: 100 },
             titleEligible: { type: "boolean" },
-            rationale: { type: "string", minLength: 1, maxLength: 140 },
           },
         },
       },
     },
   };
+}
+
+function scoreRationale(input: {
+  relevance: number;
+  shoppingIntent: number;
+  specificity: number;
+  titleEligible: boolean;
+}) {
+  const title = input.titleEligible ? " · 상품명사용 가능" : "";
+  return `관련성 ${input.relevance.toFixed(0)} · 쇼핑의도 ${input.shoppingIntent.toFixed(0)} · 구체성 ${input.specificity.toFixed(0)}${title}`;
 }
 
 async function callScoreOpenAi(input: {
@@ -107,7 +110,7 @@ async function callScoreOpenAi(input: {
       body: JSON.stringify({
         model,
         store: false,
-        max_output_tokens: 4_500,
+        max_output_tokens: 2_600,
         input: [
           {
             role: "system",
@@ -123,7 +126,7 @@ async function callScoreOpenAi(input: {
                   "titleEligible: 실제 상품명에 넣어도 원본 사실을 왜곡하지 않고 자연스러운 표현일 때만 true다.",
                   "검색량은 여기서 추측하지 않는다. 수요점수는 서버가 SearchAd 데이터로 별도 계산한다.",
                   "브랜드, 성별, 재질, 용도, 효능을 원본 근거 없이 추론하면 안 된다.",
-                  "rationale은 한 문장으로 짧고 직접적으로 작성한다.",
+                  "설명문은 생성하지 말고 요청된 점수 필드만 반환한다.",
                 ].join("\n"),
               },
             ],
@@ -152,7 +155,7 @@ async function callScoreOpenAi(input: {
         text: {
           format: {
             type: "json_schema",
-            name: "keyword_elon_semantic_scores_v4",
+            name: "keyword_elon_semantic_scores_v5",
             strict: true,
             schema: scoringSchema(),
           },
@@ -198,13 +201,17 @@ async function callScoreOpenAi(input: {
       const keyword = normalizeKeywordElonText(row.keyword);
       const key = compactKeywordElonKey(keyword);
       if (!key) continue;
+      const relevance = Math.max(0, Math.min(100, Number(row.relevance) || 0));
+      const shoppingIntent = Math.max(0, Math.min(100, Number(row.shoppingIntent) || 0));
+      const specificity = Math.max(0, Math.min(100, Number(row.specificity) || 0));
+      const titleEligible = Boolean(row.titleEligible);
       byKey.set(key, {
         keyword,
-        relevance: Math.max(0, Math.min(100, Number(row.relevance) || 0)),
-        shoppingIntent: Math.max(0, Math.min(100, Number(row.shoppingIntent) || 0)),
-        specificity: Math.max(0, Math.min(100, Number(row.specificity) || 0)),
-        titleEligible: Boolean(row.titleEligible),
-        rationale: normalizeKeywordElonText(row.rationale).slice(0, 140),
+        relevance,
+        shoppingIntent,
+        specificity,
+        titleEligible,
+        rationale: scoreRationale({ relevance, shoppingIntent, specificity, titleEligible }),
       });
     }
     return {
@@ -222,7 +229,7 @@ async function callScoreOpenAi(input: {
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("AI_SCORE_TIMEOUT: OpenAI 점수화가 50초 안에 응답하지 않았습니다.");
+      throw new Error("AI_SCORE_TIMEOUT: OpenAI 점수화가 42초 안에 응답하지 않았습니다.");
     }
     throw error;
   } finally {
@@ -230,37 +237,33 @@ async function callScoreOpenAi(input: {
   }
 }
 
-async function scoreChunkWithRetry(
+async function scoreChunkOnce(
   keywords: string[],
   source: KeywordElonSourceDraft,
   identity: KeywordElonIdentity,
 ) {
-  let firstError = "";
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      return {
-        ok: true as const,
-        ...(await callScoreOpenAi({ keywords, source, identity })),
-        warning: "",
-      };
-    } catch (error) {
-      firstError = error instanceof Error ? error.message : "AI 점수화 실패";
-      if (attempt === 0) await sleep(SCORE_RETRY_DELAY_MS);
-    }
+  try {
+    return {
+      ok: true as const,
+      ...(await callScoreOpenAi({ keywords, source, identity })),
+      warning: "",
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "AI 점수화 실패";
+    return {
+      ok: false as const,
+      model: openAiModel(),
+      warning: message,
+      scores: keywords.map<KeywordElonSemanticScore>((keyword) => ({
+        keyword,
+        relevance: 0,
+        shoppingIntent: 0,
+        specificity: 0,
+        titleEligible: false,
+        rationale: `AI 점수화 실패 · ${message.slice(0, 120)}`,
+      })),
+    };
   }
-  return {
-    ok: false as const,
-    model: openAiModel(),
-    warning: firstError,
-    scores: keywords.map<KeywordElonSemanticScore>((keyword) => ({
-      keyword,
-      relevance: 0,
-      shoppingIntent: 0,
-      specificity: 0,
-      titleEligible: false,
-      rationale: `AI 점수화 실패 · ${firstError.slice(0, 120)}`,
-    })),
-  };
 }
 
 function statMap(stats: KeywordElonSearchAdStat[]) {
@@ -288,7 +291,7 @@ export async function scoreKeywordElonCandidatesBatched(input: {
   for (let index = 0; index < chunks.length; index += SCORE_CONCURRENCY) {
     const wave = chunks.slice(index, index + SCORE_CONCURRENCY);
     const waveResults = await Promise.all(
-      wave.map((chunk) => scoreChunkWithRetry(chunk, input.source, input.identity)),
+      wave.map((chunk) => scoreChunkOnce(chunk, input.source, input.identity)),
     );
     for (const result of waveResults) {
       scored.push(...result.scores);
