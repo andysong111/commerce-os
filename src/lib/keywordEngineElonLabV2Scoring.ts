@@ -329,8 +329,12 @@ export async function scoreKeywordElonCandidatesBatched(input: {
         : hasDemand || sourceTags.length >= 2
           ? "medium"
           : "low";
+    const demandLabel = stat?.totalSearch === null || stat?.totalSearch === undefined
+      ? "월검색 미측정"
+      : `월검색 ${stat.totalSearch.toLocaleString()}`;
     return {
       ...row,
+      rationale: `${row.rationale} · ${calculated.safetyReason} · ${demandLabel}`,
       searchKey: key,
       sourceTags,
       totalSearch: stat?.totalSearch ?? null,
@@ -345,6 +349,7 @@ export async function scoreKeywordElonCandidatesBatched(input: {
 
   result.sort(
     (a, b) =>
+      Number(b.safetyPass) - Number(a.safetyPass) ||
       b.qualityScore - a.qualityScore ||
       (b.totalSearch ?? -1) - (a.totalSearch ?? -1),
   );
