@@ -56,6 +56,7 @@ export type KeywordElonSemanticScore = {
 
 export type KeywordElonCandidate = KeywordElonSemanticScore & {
   searchKey: string;
+  searchKeyword: string;
   sourceTags: string[];
   totalSearch: number | null;
   pcSearch: number | null;
@@ -81,6 +82,12 @@ export type KeywordElonDiscovery = {
   demandExpansionSeeds?: string[];
   demandExpansionSeedCount?: number;
   demandExplorationDepth?: number;
+  marketBridgeSeeds?: string[];
+  marketTerms?: string[];
+  apiHubConfigured?: boolean;
+  apiHubQueries?: string[];
+  apiHubDocumentCount?: number;
+  marketRecallVersion?: string;
   model: string;
 };
 
@@ -139,6 +146,10 @@ export function compactKeywordElonKey(value: unknown) {
   return normalizeKeywordElonText(value)
     .replace(/[^0-9A-Za-z가-힣]/g, "")
     .toLocaleLowerCase();
+}
+
+export function keywordElonSearchKeyword(value: unknown) {
+  return compactKeywordElonKey(value);
 }
 
 export function uniqueKeywordElonTexts(values: unknown[], limit = 500) {
