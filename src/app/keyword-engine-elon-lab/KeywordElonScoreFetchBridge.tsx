@@ -12,7 +12,7 @@ import {
 
 const SCORE_CLIENT_CHUNK_SIZE = 12;
 const SCORE_MIN_ADAPTIVE_CHUNK_SIZE = 3;
-const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v2";
+const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v3.marketRecall";
 
 type BridgeProgress = {
   active: boolean;
@@ -30,7 +30,7 @@ type CachedChunk = {
 };
 
 type ScoreCache = {
-  version: 2;
+  version: 3;
   fingerprint: string;
   updatedAt: string;
   chunks: Record<string, CachedChunk>;
@@ -84,6 +84,7 @@ function cacheKey(body: Record<string, unknown>, discovery: KeywordElonDiscovery
     coreProduct: identity.coreProduct ?? "",
     identityAnchor: identity.identityAnchor ?? "",
     chunkSize: SCORE_CLIENT_CHUNK_SIZE,
+    marketRecallVersion: 4,
     candidates: discovery.candidates,
   }));
   return { fingerprint, key: `${SCORE_CACHE_PREFIX}:${fingerprint}` };
@@ -94,10 +95,10 @@ function loadCache(key: string, fingerprint: string): ScoreCache {
     const raw = window.localStorage.getItem(key);
     if (!raw) throw new Error("empty");
     const parsed = JSON.parse(raw) as ScoreCache;
-    if (parsed.version !== 2 || parsed.fingerprint !== fingerprint || !parsed.chunks) throw new Error("stale");
+    if (parsed.version !== 3 || parsed.fingerprint !== fingerprint || !parsed.chunks) throw new Error("stale");
     return parsed;
   } catch {
-    return { version: 2, fingerprint, updatedAt: new Date().toISOString(), chunks: {} };
+    return { version: 3, fingerprint, updatedAt: new Date().toISOString(), chunks: {} };
   }
 }
 
@@ -347,12 +348,48 @@ export default function KeywordElonScoreFetchBridge() {
       const merged = chunks.flatMap((_, index) => cache.chunks[String(index)]?.candidates ?? []);
       merged.sort((a, b) => b.qualityScore - a.qualityScore || (b.totalSearch ?? -1) - (a.totalSearch ?? -1));
       const warnings = [...new Set(Object.values(cache.chunks).flatMap((chunk) => chunk.warnings))].slice(0, 10);
+
+      let finalCandidates = merged;
+      let enrichmentWarning = "";
+      try {
+        setProgress({
+          active: true,
+          done: chunks.length,
+          total: chunks.length,
+          scored: merged.length,
+          message: "안전Gate 통과 후보의 월검색 미측정 값을 SearchAd로 보강합니다…",
+          error: "",
+        });
+        const enrichResponse = await nativeFetch(input, {
+          ...init,
+          body: JSON.stringify({
+            action: "enrich_demand",
+            discovery,
+            candidates: merged,
+          }),
+        });
+        const raw = await enrichResponse.text();
+        const payload = raw ? JSON.parse(raw) as Record<string, unknown> : null;
+        if (enrichResponse.ok && payload?.ok === true && Array.isArray(payload.candidates)) {
+          finalCandidates = payload.candidates as KeywordElonCandidate[];
+          const requested = Array.isArray(payload.requestedKeywords) ? payload.requestedKeywords.length : 0;
+          const matched = Array.isArray(payload.exactMatchedKeywords) ? payload.exactMatchedKeywords.length : 0;
+          enrichmentWarning = `월검색 보강 ${requested}개 요청 · 정확 매칭 ${matched}개`;
+        } else {
+          enrichmentWarning = typeof payload?.error === "string" ? `월검색 보강 경고: ${payload.error}` : "월검색 보강 응답 없음";
+        }
+      } catch (error) {
+        enrichmentWarning = `월검색 보강 경고: ${error instanceof Error ? error.message : String(error)}`;
+      }
+
+      finalCandidates.sort((a, b) => b.qualityScore - a.qualityScore || (b.totalSearch ?? -1) - (a.totalSearch ?? -1));
+      const finalWarnings = [...warnings, enrichmentWarning].filter(Boolean).slice(0, 12);
       setProgress({
         active: false,
         done: chunks.length,
         total: chunks.length,
-        scored: merged.length,
-        message: `AI 점수화 완료 · ${merged.length}/${discovery.candidates.length}개`,
+        scored: finalCandidates.length,
+        message: `AI 점수화·월검색 보강 완료 · ${finalCandidates.length}/${discovery.candidates.length}개`,
         error: "",
       });
       window.setTimeout(() => {
@@ -362,12 +399,13 @@ export default function KeywordElonScoreFetchBridge() {
       return new Response(JSON.stringify({
         ok: true,
         action: "score_keywords",
-        candidates: merged,
-        scoringWarnings: warnings,
+        candidates: finalCandidates,
+        scoringWarnings: finalWarnings,
         scoringChunkCount: chunks.length,
         scoringSuccessfulChunks: chunks.length,
         clientChunked: true,
         adaptiveSplit: true,
+        demandEnriched: true,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -396,7 +434,7 @@ export default function KeywordElonScoreFetchBridge() {
           </div>
         </div>
       ) : null}
-      <div className="mt-2 text-xs text-slate-600">12개 묶음이 느리면 6개 → 3개로 자동 축소합니다.</div>
+      <div className="mt-2 text-xs text-slate-600">12개 묶음이 느리면 6개 → 3개로 자동 축소하고, 마지막에 월검색 미측정 후보를 보강합니다.</div>
       {progress.error ? <div className="mt-2 text-xs">STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개합니다.</div> : null}
     </div>
   );
