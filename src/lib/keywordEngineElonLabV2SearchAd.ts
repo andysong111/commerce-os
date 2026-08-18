@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   compactKeywordElonKey,
   normalizeKeywordElonText,
+  uniqueKeywordElonTexts,
   type KeywordElonSearchAdStat,
 } from "@/lib/keywordEngineElonLabV2";
 
@@ -13,6 +14,7 @@ const RATE_LIMIT_BACKOFF_MS = 6_500;
 const INITIAL_SEED_LIMIT = 6;
 const DEMAND_EXPANSION_SEED_LIMIT = 3;
 const DEMAND_EXPANSION_MIN_SEARCH = 50;
+const DEMAND_ENRICH_LIMIT = 8;
 
 function env() {
   const apiKey = normalizeKeywordElonText(process.env.NAVER_SEARCHAD_API_KEY);
@@ -247,5 +249,56 @@ export async function discoverKeywordElonSearchAd(seeds: string[]) {
     warnings: [...new Set(warnings)].slice(0, 12),
     expansionSeeds,
     explorationDepth: expansionSeeds.length ? 2 : 1,
+  };
+}
+
+export async function enrichKeywordElonSearchAdDemand(
+  keywords: string[],
+  existingRows: KeywordElonSearchAdStat[],
+) {
+  const credentials = env();
+  const map = new Map<string, KeywordElonSearchAdStat>();
+  for (const row of existingRows) mergeStat(map, row);
+  if (!credentials.configured) {
+    return {
+      rows: [...map.values()],
+      warnings: ["SEARCHAD_DEMAND_ENRICH_NOT_CONFIGURED"],
+      requested: [] as string[],
+      exactMatched: [] as string[],
+    };
+  }
+
+  const existingKeys = new Set(
+    [...map.values()]
+      .filter((row) => row.totalSearch !== null && row.totalSearch !== undefined)
+      .map((row) => compactKeywordElonKey(row.keyword)),
+  );
+  const targets = uniqueKeywordElonTexts(keywords, 80)
+    .filter((keyword) => {
+      const key = compactKeywordElonKey(keyword);
+      return key.length >= 2 && key.length <= 24 && !existingKeys.has(key);
+    })
+    .slice(0, DEMAND_ENRICH_LIMIT);
+
+  const warnings: string[] = [];
+  const exactMatched: string[] = [];
+  for (let index = 0; index < targets.length; index += 1) {
+    if (index > 0) await sleep(REQUEST_INTERVAL_MS);
+    const target = targets[index];
+    const targetKey = compactKeywordElonKey(target);
+    const result = await fetchSeedWithRateLimitRecovery(target);
+    if (!result.ok && result.warning) warnings.push(result.warning);
+    for (const row of result.rows) mergeStat(map, row);
+    if (result.rows.some((row) => compactKeywordElonKey(row.keyword) === targetKey && row.totalSearch !== null)) {
+      exactMatched.push(target);
+    }
+    if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) break;
+  }
+
+  return {
+    rows: [...map.values()].sort((a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1)),
+    warnings: [...new Set(warnings)].slice(0, 12),
+    requested: targets,
+    exactMatched,
   };
 }
