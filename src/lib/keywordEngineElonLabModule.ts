@@ -5,7 +5,7 @@ export const keywordEngineElonLabModule: CommerceModule = {
   title: "키워드엔진 일론머스크식 분해개선작업",
   navigationLabel: "키워드엔진 일론머스크식 분해개선작업",
   description:
-    "1688 중국 원본에서 상품 정체성을 확정한 뒤 Market Bridge Seed·네이버 쇼핑 실제 상품명·SearchAd를 연결해 한국 시장어휘를 넓게 발굴하고, 안전 Gate 이후 월검색수요 중심으로 재탐색·점수화해 추천 상품명까지 만드는 2단계 실험실입니다.",
+    "1688 중국 원본 링크에서 상품 정체성을 확정한 뒤 Market Bridge Seed·네이버 쇼핑 실제 상품명·SearchAd를 연결해 한국 시장어휘를 넓게 발굴하고, 안전 Gate 이후 월검색수요 중심으로 재탐색·점수화해 추천 상품명까지 만드는 2단계 실험실입니다.",
   status: "available",
   route: "/keyword-engine-elon-lab",
   category: "판매 콘텐츠 자동화",
