@@ -9,8 +9,10 @@ const server = await readFile("src/lib/keywordEngineElonLabV2Server.ts", "utf8")
 const searchAd = await readFile("src/lib/keywordEngineElonLabV2SearchAd.ts", "utf8");
 const discovery = await readFile("src/lib/keywordEngineElonLabV2Discovery.ts", "utf8");
 const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
+const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
+const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
 const collector1688Path = "public/keyword-lab-collector/content-1688.js";
 const collectorOpsPath = "public/keyword-lab-collector/content-ops.js";
 const collector1688 = await readFile(collector1688Path, "utf8");
@@ -91,27 +93,34 @@ test("identity analysis explicitly forbids seller model names", () => {
   assert.match(server, /1688 중국 원본 상품명·옵션·보조텍스트만 근거/);
 });
 
-test("SearchAd keyword tool calls are paced, recover once from 429, and redact API keys", () => {
-  assert.match(searchAd, /REQUEST_INTERVAL_MS = 1_200/);
+test("SearchAd calls are paced, recover from 429, and expand top demand seeds at depth two", () => {
+  assert.match(searchAd, /REQUEST_INTERVAL_MS = 1_800/);
   assert.match(searchAd, /RATE_LIMIT_BACKOFF_MS = 6_500/);
+  assert.match(searchAd, /DEMAND_EXPANSION_SEED_LIMIT = 3/);
+  assert.match(searchAd, /DEMAND_EXPANSION_MIN_SEARCH = 50/);
+  assert.match(searchAd, /chooseDemandExpansionSeeds/);
   assert.match(searchAd, /fetchSeedWithRateLimitRecovery/);
-  assert.match(searchAd, /for \(let index = 0; index < normalizedSeeds\.length; index \+= 1\)/);
-  assert.doesNotMatch(searchAd, /Promise\.all\(normalizedSeeds\.map\(fetchSeed/);
+  assert.match(searchAd, /expansionSeeds/);
+  assert.match(searchAd, /explorationDepth: expansionSeeds\.length \? 2 : 1/);
   assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
   assert.match(searchAd, /\[REDACTED\]/);
 });
 
-test("candidate discovery fails open when AI expansion times out", () => {
+test("candidate discovery fails open and tags second-depth demand exploration", () => {
   assert.match(route, /discoverKeywordElonCandidatesResilient/);
   assert.match(discovery, /AI_DISCOVERY_TIMEOUT_MS = 70_000/);
   assert.match(discovery, /Promise\.allSettled/);
   assert.match(discovery, /AI_DISCOVERY_TIMEOUT/);
   assert.match(discovery, /SearchAd\/Seed 후보로 계속 진행/);
   assert.match(discovery, /\.\.\.seeds, \.\.\.ai\.keywords, \.\.\.relatedKeywords/);
+  assert.match(discovery, /searchad_demand_depth2/);
+  assert.match(discovery, /DEMAND_DEPTH2_USED/);
+  assert.match(discovery, /demandExpansionSeeds/);
+  assert.match(discovery, /demandExplorationDepth/);
   assert.match(discovery, /DISCOVERY_LOW_RECALL/);
 });
 
-test("AI scoring uses small low-output chunks while preserving quality weighting", () => {
+test("AI scoring uses small low-output chunks and applies demand-first safety gate", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /OPENAI_TIMEOUT_MS = 42_000/);
@@ -126,9 +135,15 @@ test("AI scoring uses small low-output chunks while preserving quality weighting
   assert.match(scoring, /AI_SCORE_EMPTY_OUTPUT/);
   assert.match(scoring, /AI_SCORE_HTTP_/);
   assert.match(scoring, /AI_SCORE_ALL_CHUNKS_FAILED/);
-  assert.match(scoring, /successfulChunks === 0/);
   assert.match(scoring, /calculateKeywordElonQuality/);
-  assert.match(scoring, /dataConfidence/);
+  assert.match(scoring, /calculated\.safetyReason/);
+  assert.match(scoring, /Number\(b\.safetyPass\) - Number\(a\.safetyPass\)/);
+  assert.match(domain, /KEYWORD_ELON_V2_RELEVANCE_GATE = 80/);
+  assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
+  assert.match(domain, /demandScore \* 0\.55/);
+  assert.match(domain, /qualityScore = safetyPass \? opportunityScore : 0/);
+  assert.match(demandSummary, /월검색량 TOP/);
+  assert.match(demandSummary, /상품 정확성 TOP/);
 });
 
 test("route and STEP 2 UI expose exact failure stage and message", () => {
