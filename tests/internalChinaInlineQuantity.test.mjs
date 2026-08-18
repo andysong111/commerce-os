@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const bridge = await readFile(
+const workspace = await readFile(
   new URL(
-    "../src/components/china-order-manager/InternalChinaDraftInlineQuantityBridge.tsx",
+    "../src/components/china-order-manager/InternalChinaPurchaseDraftWorkspaceV2.tsx",
     import.meta.url,
   ),
   "utf8",
@@ -21,22 +21,22 @@ const quantityRoute = await readFile(
   "utf8",
 );
 
-test("China draft quantity can be changed directly inside each order table row", () => {
-  assert.match(bridge, /findQuantityTargets/);
-  assert.match(bridge, /label === "수량"/);
-  assert.match(bridge, /createPortal/);
-  assert.match(bridge, /aria-label=\{`\$\{barcode\} 주문수량`\}/);
-  assert.match(bridge, /saving \? "저장" : "변경"/);
+test("China draft quantity controls are rendered natively in every order row", () => {
+  assert.match(workspace, /function NativeQuantityControl/);
+  assert.match(workspace, /data-native-draft-quantity=\{barcode\}/);
+  assert.match(workspace, /aria-label=\{`\$\{barcode\} 주문수량`\}/);
+  assert.match(workspace, /saving \? "저장" : "변경"/);
+  assert.match(workspace, /<NativeQuantityControl/);
+  assert.match(workspace, /수량 · 즉시저장/);
+  assert.doesNotMatch(workspace, /createPortal/);
+  assert.doesNotMatch(workspace, /findQuantityTargets/);
 });
 
-test("inline quantity change uses a lightweight quantity-only save path", () => {
-  assert.match(bridge, /\/quantity`/);
-  assert.match(bridge, /targetQuantity/);
-  assert.match(bridge, /internal-china-quantity-saved/);
-  assert.doesNotMatch(bridge, /saveCurrentDraftInputs/);
-  assert.doesNotMatch(bridge, /nativeSaveButton/);
-  assert.doesNotMatch(bridge, /router\.refresh\(\)/);
-  assert.doesNotMatch(bridge, /window\.location\.reload/);
+test("native quantity change uses the lightweight quantity-only save path", () => {
+  assert.match(workspace, /\/quantity`/);
+  assert.match(workspace, /targetQuantity/);
+  assert.match(workspace, /applySavedQuantity/);
+  assert.doesNotMatch(workspace, /window\.location\.reload/);
 
   const postRoute = quantityRoute.slice(
     quantityRoute.indexOf("export async function POST"),
@@ -46,8 +46,9 @@ test("inline quantity change uses a lightweight quantity-only save path", () => 
   assert.doesNotMatch(postRoute, /applyInternalChinaQuantityOverrides/);
 });
 
-test("draft page removes the separate top quantity editor and mounts inline controls", () => {
-  assert.match(page, /InternalChinaDraftInlineQuantityBridge/);
+test("draft page no longer mounts the DOM quantity bridge", () => {
+  assert.doesNotMatch(page, /InternalChinaDraftInlineQuantityBridge/);
   assert.doesNotMatch(page, /InternalChinaDraftQuantityEditor/);
-  assert.match(page, /각 행의 수량 칸에서 직접 변경/);
+  assert.match(page, /모든 B-code 행의 수량 칸에서 직접 변경/);
+  assert.match(page, /표 자체에 포함/);
 });
