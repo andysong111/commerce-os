@@ -11,7 +11,7 @@ import type {
 const number = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const cny = new Intl.NumberFormat("ko-KR", {
   minimumFractionDigits: 0,
-  maximumFractionDigits: 4,
+  maximumFractionDigits: 2,
 });
 
 const TABLE_COLUMNS = [
@@ -35,6 +35,10 @@ const TABLE_WIDTH = TABLE_COLUMNS.reduce((sum, column) => sum + column.width, 0)
 function decimal(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function cnyCent(value: unknown) {
+  return Math.round(decimal(value) * 100) / 100;
 }
 
 function lineKey(line: InternalChinaPurchaseDraftLine) {
@@ -521,7 +525,7 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
             <span className="text-xs font-black tracking-[0.12em] text-blue-700">OPS CENTER NATIVE · BIDIRECTIONAL</span>
             <h2 className="mt-1 text-xl font-black text-slate-950">실제 1688 주문 준비</h2>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              링크·중국옵션·단가는 이 표에서 바로 입력하고 `발주초안 저장`으로 양방향 반영합니다. 수량은 각 B-code 행에서 즉시 저장합니다. 동일 1688 상품페이지에서 주문한 여러 SKU는 자동 합배송 묶기로 운임을 한 번만 입력할 수 있습니다.
+              링크·중국옵션·단가는 이 표에서 바로 입력하고 `발주초안 저장`으로 양방향 반영합니다. 위안단가·중국내 운임은 0.01 CNY 단위로 입력하며, 옵션이 없는 상품은 중국옵션의 `단품` 버튼으로 바로 지정할 수 있습니다.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-2">
@@ -605,8 +609,11 @@ export function InternalChinaPurchaseDraftWorkspaceV2({
                       <span className="mt-2 inline-flex rounded-md bg-blue-50 px-2 py-1 font-bold text-blue-800">옵션 · {line.saleOption || "-"}</span>
                     </td>
                     <td className="px-2 py-2" style={stickyCellStyle(1, freezeThrough)}>
-                      <Input value={line.chinaOption} disabled={!editable} required={!line.chinaOption.trim()} placeholder="1688 실제 중국옵션명" onChange={(value) => updateLine(line.barcode, { chinaOption: value })} />
-                      <span className="mt-1 block text-[10px] font-bold text-indigo-700">저장 시 해당 B-code로 상품출시·상품마스터에 역저장</span>
+                      <div className="flex items-center gap-1.5">
+                        <Input value={line.chinaOption} disabled={!editable} required={!line.chinaOption.trim()} placeholder="1688 실제 중국옵션명" onChange={(value) => updateLine(line.barcode, { chinaOption: value })} />
+                        <button type="button" disabled={!editable} onClick={() => updateLine(line.barcode, { chinaOption: "단품" })} className={`shrink-0 rounded-lg border px-2.5 py-2 text-[11px] font-black disabled:opacity-40 ${line.chinaOption.trim() === "단품" ? "border-blue-600 bg-blue-700 text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}>단품</button>
+                      </div>
+                      <span className="mt-1 block text-[10px] font-bold text-indigo-700">옵션 없음은 `단품` · 저장 시 해당 B-code로 상품출시·상품마스터에 역저장</span>
                     </td>
                     <td className="px-2 py-2" style={stickyCellStyle(2, freezeThrough)}>
                       <div className="flex items-center gap-2">
@@ -728,5 +735,5 @@ function Input({ value, onChange, disabled = false, required = false, placeholde
 }
 
 function NumberInput({ value, onChange, disabled = false, required = false, showZero = false }: { value: number; onChange: (value: number) => void; disabled?: boolean; required?: boolean; showZero?: boolean }) {
-  return <input type="number" min="0" step="0.0001" value={showZero ? value : value || ""} disabled={disabled} onChange={(event) => onChange(decimal(event.target.value))} className={`w-28 rounded-lg border px-3 py-2 text-right text-xs font-bold outline-none disabled:bg-slate-100 ${required ? "border-amber-400 bg-amber-50 focus:border-amber-600" : "border-slate-300 bg-white focus:border-blue-500"}`} />;
+  return <input type="number" min="0" step="0.01" inputMode="decimal" value={showZero ? value : value || ""} disabled={disabled} onChange={(event) => onChange(cnyCent(event.target.value))} className={`w-28 rounded-lg border px-3 py-2 text-right text-xs font-bold outline-none disabled:bg-slate-100 ${required ? "border-amber-400 bg-amber-50 focus:border-amber-600" : "border-slate-300 bg-white focus:border-blue-500"}`} />;
 }
