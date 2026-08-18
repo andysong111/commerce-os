@@ -10,8 +10,9 @@ import {
   type KeywordElonSearchAdStat,
 } from "@/lib/keywordEngineElonLabV2";
 
-const SCORE_CLIENT_CHUNK_SIZE = 20;
-const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v1";
+const SCORE_CLIENT_CHUNK_SIZE = 12;
+const SCORE_MIN_ADAPTIVE_CHUNK_SIZE = 3;
+const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v2";
 
 type BridgeProgress = {
   active: boolean;
@@ -29,10 +30,15 @@ type CachedChunk = {
 };
 
 type ScoreCache = {
-  version: 1;
+  version: 2;
   fingerprint: string;
   updatedAt: string;
   chunks: Record<string, CachedChunk>;
+};
+
+type ScoreResponse = {
+  candidates: KeywordElonCandidate[];
+  warnings: string[];
 };
 
 function sleep(ms: number) {
@@ -77,6 +83,7 @@ function cacheKey(body: Record<string, unknown>, discovery: KeywordElonDiscovery
     offerId: source.offerId ?? "",
     coreProduct: identity.coreProduct ?? "",
     identityAnchor: identity.identityAnchor ?? "",
+    chunkSize: SCORE_CLIENT_CHUNK_SIZE,
     candidates: discovery.candidates,
   }));
   return { fingerprint, key: `${SCORE_CACHE_PREFIX}:${fingerprint}` };
@@ -87,10 +94,10 @@ function loadCache(key: string, fingerprint: string): ScoreCache {
     const raw = window.localStorage.getItem(key);
     if (!raw) throw new Error("empty");
     const parsed = JSON.parse(raw) as ScoreCache;
-    if (parsed.version !== 1 || parsed.fingerprint !== fingerprint || !parsed.chunks) throw new Error("stale");
+    if (parsed.version !== 2 || parsed.fingerprint !== fingerprint || !parsed.chunks) throw new Error("stale");
     return parsed;
   } catch {
-    return { version: 1, fingerprint, updatedAt: new Date().toISOString(), chunks: {} };
+    return { version: 2, fingerprint, updatedAt: new Date().toISOString(), chunks: {} };
   }
 }
 
@@ -143,6 +150,12 @@ function errorResponse(message: string, status = 500) {
   });
 }
 
+function shouldAdaptiveSplit(status: number, detail: string, chunkLength: number) {
+  if (chunkLength <= SCORE_MIN_ADAPTIVE_CHUNK_SIZE) return false;
+  if (status === 504) return true;
+  return /AI_SCORE_TIMEOUT|AI_SCORE_INCOMPLETE|AI_SCORE_ALL_CHUNKS_FAILED|FUNCTION_INVOCATION_TIMEOUT|operation was aborted|응답하지 않았습니다/i.test(detail);
+}
+
 export default function KeywordElonScoreFetchBridge() {
   const [progress, setProgress] = useState<BridgeProgress>({
     active: false,
@@ -180,9 +193,95 @@ export default function KeywordElonScoreFetchBridge() {
 
       if (action !== "score_keywords") return nativeFetch(input, init);
       const discovery = discoveryFrom(body?.discovery);
-      if (!body || !discovery || discovery.candidates.length <= SCORE_CLIENT_CHUNK_SIZE) {
+      if (!body || !discovery || discovery.candidates.length <= SCORE_MIN_ADAPTIVE_CHUNK_SIZE) {
         return nativeFetch(input, init);
       }
+
+      const scoreAdaptive = async (chunk: string[], label: string): Promise<ScoreResponse> => {
+        const chunkDiscovery = filterDiscovery(discovery, chunk);
+        const chunkBody = { ...body, discovery: chunkDiscovery };
+        setProgress((previous) => ({
+          ...previous,
+          message: `AI 점수화 ${label} · ${chunk.length}개 처리 중`,
+        }));
+
+        let response: Response;
+        try {
+          response = await nativeFetch(input, {
+            ...init,
+            body: JSON.stringify(chunkBody),
+          });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "네트워크 요청 실패";
+          if (shouldAdaptiveSplit(0, detail, chunk.length)) {
+            const middle = Math.ceil(chunk.length / 2);
+            const left = chunk.slice(0, middle);
+            const right = chunk.slice(middle);
+            setProgress((previous) => ({
+              ...previous,
+              message: `응답 지연 감지 · ${chunk.length}개를 ${left.length}+${right.length}개로 자동 축소`,
+            }));
+            const leftResult = await scoreAdaptive(left, `${label}-A`);
+            const rightResult = await scoreAdaptive(right, `${label}-B`);
+            return {
+              candidates: [...leftResult.candidates, ...rightResult.candidates],
+              warnings: [...leftResult.warnings, ...rightResult.warnings],
+            };
+          }
+          throw new Error(`[score_keywords_chunk ${label}] ${detail}`);
+        }
+
+        const raw = await response.text();
+        let payload: Record<string, unknown> | null = null;
+        try {
+          payload = raw ? JSON.parse(raw) as Record<string, unknown> : null;
+        } catch {
+          const detail = `HTTP ${response.status} · JSON이 아닌 응답: ${raw.slice(0, 220)}`;
+          if (shouldAdaptiveSplit(response.status, detail, chunk.length)) {
+            const middle = Math.ceil(chunk.length / 2);
+            const left = chunk.slice(0, middle);
+            const right = chunk.slice(middle);
+            setProgress((previous) => ({
+              ...previous,
+              message: `서버 시간초과 감지 · ${chunk.length}개를 ${left.length}+${right.length}개로 자동 축소`,
+            }));
+            const leftResult = await scoreAdaptive(left, `${label}-A`);
+            const rightResult = await scoreAdaptive(right, `${label}-B`);
+            return {
+              candidates: [...leftResult.candidates, ...rightResult.candidates],
+              warnings: [...leftResult.warnings, ...rightResult.warnings],
+            };
+          }
+          throw new Error(`[score_keywords_chunk ${label}] ${detail}`);
+        }
+
+        if (!response.ok || payload?.ok !== true || !Array.isArray(payload.candidates)) {
+          const detail = typeof payload?.error === "string" ? payload.error : `HTTP ${response.status}`;
+          if (shouldAdaptiveSplit(response.status, detail, chunk.length)) {
+            const middle = Math.ceil(chunk.length / 2);
+            const left = chunk.slice(0, middle);
+            const right = chunk.slice(middle);
+            setProgress((previous) => ({
+              ...previous,
+              message: `AI 지연 감지 · ${chunk.length}개를 ${left.length}+${right.length}개로 자동 축소`,
+            }));
+            const leftResult = await scoreAdaptive(left, `${label}-A`);
+            const rightResult = await scoreAdaptive(right, `${label}-B`);
+            return {
+              candidates: [...leftResult.candidates, ...rightResult.candidates],
+              warnings: [...leftResult.warnings, ...rightResult.warnings],
+            };
+          }
+          throw new Error(`[score_keywords_chunk ${label}] ${detail}`);
+        }
+
+        return {
+          candidates: payload.candidates as KeywordElonCandidate[],
+          warnings: Array.isArray(payload.scoringWarnings)
+            ? payload.scoringWarnings.filter((value): value is string => typeof value === "string")
+            : [],
+        };
+      };
 
       const { fingerprint, key } = cacheKey(body, discovery);
       const cache = loadCache(key, fingerprint);
@@ -197,7 +296,7 @@ export default function KeywordElonScoreFetchBridge() {
         done: Object.keys(cache.chunks).length,
         total: chunks.length,
         scored: scoredCount,
-        message: "AI 품질점수를 작은 요청으로 나눠 실행합니다.",
+        message: "AI 품질점수를 12개 단위로 나눠 실행합니다.",
         error: "",
       });
 
@@ -215,51 +314,34 @@ export default function KeywordElonScoreFetchBridge() {
           continue;
         }
 
-        const chunkDiscovery = filterDiscovery(discovery, chunk);
-        const chunkBody = { ...body, discovery: chunkDiscovery };
-        setProgress((previous) => ({
-          ...previous,
-          message: `AI 점수화 ${index + 1}/${chunks.length} · ${chunk.length}개 처리 중`,
-        }));
-
-        const response = await nativeFetch(input, {
-          ...init,
-          body: JSON.stringify(chunkBody),
-        });
-        const raw = await response.text();
-        let payload: Record<string, unknown> | null = null;
         try {
-          payload = raw ? JSON.parse(raw) as Record<string, unknown> : null;
-        } catch {
-          const message = `[score_keywords_chunk ${index + 1}/${chunks.length}] HTTP ${response.status} · JSON이 아닌 응답: ${raw.slice(0, 220)}`;
-          setProgress((previous) => ({ ...previous, active: false, error: message, message: "분할 점수화가 중단됐습니다. 다시 실행하면 완료 지점부터 재개합니다." }));
-          return errorResponse(message, response.status || 500);
+          const result = await scoreAdaptive(chunk, `${index + 1}/${chunks.length}`);
+          cache.chunks[String(index)] = {
+            keys: chunkKeys,
+            candidates: result.candidates,
+            warnings: result.warnings,
+          };
+          saveCache(key, cache);
+          scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
+          setProgress({
+            active: true,
+            done: index + 1,
+            total: chunks.length,
+            scored: scoredCount,
+            message: `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`,
+            error: "",
+          });
+          await sleep(200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : `점수화 ${index + 1}/${chunks.length} 실패`;
+          setProgress((previous) => ({
+            ...previous,
+            active: false,
+            error: message,
+            message: "분할 점수화가 중단됐습니다. STEP 2를 다시 누르면 완료 지점부터 재개합니다.",
+          }));
+          return errorResponse(message, 500);
         }
-        if (!response.ok || payload?.ok !== true || !Array.isArray(payload.candidates)) {
-          const detail = typeof payload?.error === "string" ? payload.error : `HTTP ${response.status}`;
-          const message = `[score_keywords_chunk ${index + 1}/${chunks.length}] ${detail}`;
-          setProgress((previous) => ({ ...previous, active: false, error: message, message: "분할 점수화가 중단됐습니다. 다시 실행하면 완료 지점부터 재개합니다." }));
-          return errorResponse(message, response.status || 500);
-        }
-
-        cache.chunks[String(index)] = {
-          keys: chunkKeys,
-          candidates: payload.candidates as KeywordElonCandidate[],
-          warnings: Array.isArray(payload.scoringWarnings)
-            ? payload.scoringWarnings.filter((value): value is string => typeof value === "string")
-            : [],
-        };
-        saveCache(key, cache);
-        scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
-        setProgress({
-          active: true,
-          done: index + 1,
-          total: chunks.length,
-          scored: scoredCount,
-          message: `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`,
-          error: "",
-        });
-        await sleep(250);
       }
 
       const merged = chunks.flatMap((_, index) => cache.chunks[String(index)]?.candidates ?? []);
@@ -285,6 +367,7 @@ export default function KeywordElonScoreFetchBridge() {
         scoringChunkCount: chunks.length,
         scoringSuccessfulChunks: chunks.length,
         clientChunked: true,
+        adaptiveSplit: true,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -299,13 +382,13 @@ export default function KeywordElonScoreFetchBridge() {
 
   if (!progress.active && !progress.message && !progress.error) return null;
   return (
-    <div className={`fixed bottom-5 left-5 z-[9999] w-[360px] max-w-[calc(100vw-2.5rem)] rounded-2xl border p-4 shadow-xl ${progress.error ? "border-rose-300 bg-rose-50 text-rose-950" : "border-violet-200 bg-white text-slate-900"}`}>
-      <div className="text-xs font-black uppercase tracking-[0.12em]">Keyword Lab · 분할 점수화</div>
+    <div className={`fixed bottom-5 left-5 z-[9999] w-[380px] max-w-[calc(100vw-2.5rem)] rounded-2xl border p-4 shadow-xl ${progress.error ? "border-rose-300 bg-rose-50 text-rose-950" : "border-violet-200 bg-white text-slate-900"}`}>
+      <div className="text-xs font-black uppercase tracking-[0.12em]">Keyword Lab · 적응형 분할 점수화</div>
       <div className="mt-2 text-sm font-bold">{progress.error || progress.message}</div>
       {progress.total > 0 ? (
         <div className="mt-3">
           <div className="mb-1 flex justify-between text-xs font-bold">
-            <span>{progress.done}/{progress.total} 묶음</span>
+            <span>{progress.done}/{progress.total} 기본 묶음</span>
             <span>{progress.scored}개 저장</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-200">
@@ -313,6 +396,7 @@ export default function KeywordElonScoreFetchBridge() {
           </div>
         </div>
       ) : null}
+      <div className="mt-2 text-xs text-slate-600">12개 묶음이 느리면 6개 → 3개로 자동 축소합니다.</div>
       {progress.error ? <div className="mt-2 text-xs">STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개합니다.</div> : null}
     </div>
   );
