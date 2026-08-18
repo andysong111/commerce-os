@@ -216,6 +216,8 @@ export async function discoverKeywordElonCandidatesResilient(
           warnings: [
             `SEARCHAD_DISCOVERY_FAILED: ${searchAdSettled.reason instanceof Error ? searchAdSettled.reason.message : String(searchAdSettled.reason)}`,
           ],
+          expansionSeeds: [] as string[],
+          explorationDepth: 1,
         };
 
   const relatedKeywords = searchAd.rows.map((row) => row.keyword);
@@ -229,15 +231,24 @@ export async function discoverKeywordElonCandidatesResilient(
     if (!key) return;
     sourceTagsByKeyword[key] = [...new Set([...(sourceTagsByKeyword[key] ?? []), tag])];
   };
+  const demandExpansionKeys = new Set(searchAd.expansionSeeds.map(compactKeywordElonKey));
   for (const seed of identity.primarySeeds) addTag(seed, "primary_seed");
   for (const seed of identity.conditionalSeeds) addTag(seed, "conditional_seed");
   for (const keyword of ai.keywords) addTag(keyword, "ai_identity_expansion");
   for (const row of searchAd.rows) {
     addTag(row.keyword, "searchad_related");
+    if (row.sourceSeeds.some((seed) => demandExpansionKeys.has(compactKeywordElonKey(seed)))) {
+      addTag(row.keyword, "searchad_demand_depth2");
+    }
     for (const seed of row.sourceSeeds) addTag(row.keyword, `related:${seed}`);
   }
 
   const warnings = [...searchAd.warnings, ai.warning].filter(Boolean);
+  if (searchAd.expansionSeeds.length) {
+    warnings.push(
+      `DEMAND_DEPTH2_USED: 월검색량 상위 관련어 ${searchAd.expansionSeeds.length}개를 2차 Seed로 재탐색 (${searchAd.expansionSeeds.join(", ")})`,
+    );
+  }
   if (candidates.length < 10) {
     warnings.push(`DISCOVERY_LOW_RECALL: 후보 ${candidates.length}개 · 최소 목표 10개 미만`);
   }
@@ -250,6 +261,9 @@ export async function discoverKeywordElonCandidatesResilient(
     searchAdWarnings: warnings,
     aiGeneratedCount: ai.keywords.length,
     relatedKeywordCount: relatedKeywords.length,
+    demandExpansionSeeds: searchAd.expansionSeeds,
+    demandExpansionSeedCount: searchAd.expansionSeeds.length,
+    demandExplorationDepth: searchAd.explorationDepth,
     model: ai.model,
   };
 }
