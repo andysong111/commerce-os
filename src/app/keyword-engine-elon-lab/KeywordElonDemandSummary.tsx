@@ -10,6 +10,8 @@ import {
   type KeywordElonLabSession,
 } from "@/lib/keywordEngineElonLabV2";
 
+const DEMAND_FIRST_CACHE_RESET_MARKER = "keywordElon.demandFirstV3.cacheReset";
+
 function readSession() {
   try {
     const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY);
@@ -45,6 +47,16 @@ export default function KeywordElonDemandSummary() {
   const [session, setSession] = useState<KeywordElonLabSession | null>(null);
 
   useEffect(() => {
+    if (window.localStorage.getItem(DEMAND_FIRST_CACHE_RESET_MARKER) !== "1") {
+      const staleKeys: string[] = [];
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith("keywordElon.scoreBridge.v2:")) staleKeys.push(key);
+      }
+      for (const key of staleKeys) window.localStorage.removeItem(key);
+      window.localStorage.setItem(DEMAND_FIRST_CACHE_RESET_MARKER, "1");
+    }
+
     let last = "";
     const sync = () => {
       const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY) || "";
