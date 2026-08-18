@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 
 export type InlineQuantityLine = {
   barcode: string;
@@ -12,8 +11,8 @@ export type InlineQuantityLine = {
 type QuantityResponse = {
   ok?: boolean;
   message?: string;
-  draft?: {
-    lines?: Array<{ barcode?: string; quantity?: number }>;
+  saved?: {
+    targetQuantity?: number;
   };
 };
 
@@ -24,41 +23,6 @@ type TargetCell = {
 
 function normalizeText(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
-}
-
-function nativeSaveButton() {
-  if (typeof document === "undefined") return null;
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
-  return (
-    buttons.find((button) => {
-      const label = normalizeText(button.textContent);
-      return label === "발주초안 저장" || label === "양방향 저장 중...";
-    }) ?? null
-  );
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function saveCurrentDraftInputs() {
-  const target = nativeSaveButton();
-  if (!target) return;
-
-  const startedLabel = normalizeText(target.textContent);
-  if (!target.disabled && startedLabel !== "양방향 저장 중...") {
-    target.click();
-    await sleep(60);
-  }
-
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 20_000) {
-    const current = nativeSaveButton();
-    const label = normalizeText(current?.textContent);
-    if (current && !current.disabled && label !== "양방향 저장 중...") return;
-    await sleep(120);
-  }
-  throw new Error("입력값 자동 저장이 오래 걸리고 있습니다. 우측 `입력값 저장`을 한 번 누른 뒤 다시 시도하세요.");
 }
 
 function findQuantityTargets() {
@@ -104,14 +68,16 @@ function InlineQuantityControl({
   status: "DRAFT" | "ORDERED";
   barcode: string;
   quantity: number;
-  onSaved: (message: string) => void;
+  onSaved: (barcode: string, quantity: number, message: string) => void;
 }) {
+  const [committedQuantity, setCommittedQuantity] = useState(quantity);
   const [value, setValue] = useState(String(quantity));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   const targetQuantity = Math.round(Number(value));
-  const changed = Number.isFinite(targetQuantity) && targetQuantity !== quantity;
+  const changed =
+    Number.isFinite(targetQuantity) && targetQuantity !== committedQuantity;
 
   async function save() {
     if (status !== "DRAFT" || saving) return;
@@ -125,12 +91,8 @@ function InlineQuantityControl({
     }
 
     setSaving(true);
-    setMessage("입력값 저장 중");
+    setMessage("저장 중");
     try {
-      // Quantity changes refresh the server-backed Draft. Save any link/option/price
-      // edits that are still only in the React table state first, so one click is safe.
-      await saveCurrentDraftInputs();
-      setMessage("수량 반영 중");
       const response = await fetch(
         `/api/china-order-manager/drafts/${encodeURIComponent(draftId)}/quantity`,
         {
@@ -145,11 +107,17 @@ function InlineQuantityControl({
       if (!response.ok || !body.ok) {
         throw new Error(body.message || "수량 변경 저장에 실패했습니다.");
       }
-      const savedQuantity =
-        body.draft?.lines?.find((line) => line.barcode === barcode)?.quantity ?? targetQuantity;
+      const savedQuantity = Math.round(
+        Number(body.saved?.targetQuantity ?? targetQuantity),
+      );
+      setCommittedQuantity(savedQuantity);
       setValue(String(savedQuantity));
       setMessage("저장됨");
-      onSaved(body.message || `${barcode} 수량을 변경했습니다.`);
+      onSaved(
+        barcode,
+        savedQuantity,
+        body.message || `${barcode} 수량을 ${savedQuantity.toLocaleString("ko-KR")}개로 저장했습니다.`,
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "저장 실패");
     } finally {
@@ -215,7 +183,6 @@ export function InternalChinaDraftInlineQuantityBridge({
   status: "DRAFT" | "ORDERED";
   lines: InlineQuantityLine[];
 }) {
-  const router = useRouter();
   const [targets, setTargets] = useState<TargetCell[]>([]);
   const [notice, setNotice] = useState("");
 
@@ -241,11 +208,13 @@ export function InternalChinaDraftInlineQuantityBridge({
     [lines],
   );
 
-  function saved(message: string) {
+  function saved(barcode: string, quantity: number, message: string) {
     setNotice(message);
-    // Re-render server totals/budget without a full location reload; Next.js refresh
-    // preserves the operator's current scroll position.
-    router.refresh();
+    window.dispatchEvent(
+      new CustomEvent("internal-china-quantity-saved", {
+        detail: { barcode, quantity, message },
+      }),
+    );
   }
 
   return (
@@ -255,7 +224,7 @@ export function InternalChinaDraftInlineQuantityBridge({
         if (!line) return null;
         return createPortal(
           <InlineQuantityControl
-            key={`${target.barcode}:${line.quantity}`}
+            key={target.barcode}
             draftId={draftId}
             status={status}
             barcode={target.barcode}
@@ -263,7 +232,7 @@ export function InternalChinaDraftInlineQuantityBridge({
             onSaved={saved}
           />,
           target.cell,
-          `inline-qty-${target.barcode}-${line.quantity}`,
+          `inline-qty-${target.barcode}`,
         );
       })}
       {notice ? (

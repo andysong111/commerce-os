@@ -13,6 +13,13 @@ const page = await readFile(
   new URL("../src/app/china-order-manager/drafts/[draftId]/page.tsx", import.meta.url),
   "utf8",
 );
+const quantityRoute = await readFile(
+  new URL(
+    "../src/app/api/china-order-manager/drafts/[draftId]/quantity/route.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("China draft quantity can be changed directly inside each order table row", () => {
   assert.match(bridge, /findQuantityTargets/);
@@ -22,12 +29,21 @@ test("China draft quantity can be changed directly inside each order table row",
   assert.match(bridge, /saving \? "저장" : "변경"/);
 });
 
-test("inline quantity change preserves current order-entry work and refreshes totals without full reload", () => {
-  assert.match(bridge, /saveCurrentDraftInputs/);
+test("inline quantity change uses a lightweight quantity-only save path", () => {
   assert.match(bridge, /\/quantity`/);
   assert.match(bridge, /targetQuantity/);
-  assert.match(bridge, /router\.refresh\(\)/);
+  assert.match(bridge, /internal-china-quantity-saved/);
+  assert.doesNotMatch(bridge, /saveCurrentDraftInputs/);
+  assert.doesNotMatch(bridge, /nativeSaveButton/);
+  assert.doesNotMatch(bridge, /router\.refresh\(\)/);
   assert.doesNotMatch(bridge, /window\.location\.reload/);
+
+  const postRoute = quantityRoute.slice(
+    quantityRoute.indexOf("export async function POST"),
+  );
+  assert.match(postRoute, /saveInternalChinaQuantityOverride/);
+  assert.doesNotMatch(postRoute, /loadInternalChinaQuantityOverrides/);
+  assert.doesNotMatch(postRoute, /applyInternalChinaQuantityOverrides/);
 });
 
 test("draft page removes the separate top quantity editor and mounts inline controls", () => {
