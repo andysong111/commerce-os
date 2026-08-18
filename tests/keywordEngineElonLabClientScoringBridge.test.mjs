@@ -5,8 +5,9 @@ import test from "node:test";
 const bridge = await readFile("src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx", "utf8");
 const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
 
-test("Keyword Lab scores 500 candidates through browser-side 20-item requests", () => {
-  assert.match(bridge, /SCORE_CLIENT_CHUNK_SIZE = 20/);
+test("Keyword Lab scores candidates through browser-side 12-item requests", () => {
+  assert.match(bridge, /SCORE_CLIENT_CHUNK_SIZE = 12/);
+  assert.match(bridge, /SCORE_MIN_ADAPTIVE_CHUNK_SIZE = 3/);
   assert.match(bridge, /action !== "score_keywords"/);
   assert.match(bridge, /for \(let index = 0; index < chunks\.length; index \+= 1\)/);
   assert.match(bridge, /filterDiscovery/);
@@ -14,8 +15,19 @@ test("Keyword Lab scores 500 candidates through browser-side 20-item requests", 
   assert.doesNotMatch(bridge, /Promise\.all\(chunks/);
 });
 
+test("Keyword Lab adaptively splits slow scoring chunks", () => {
+  assert.match(bridge, /shouldAdaptiveSplit/);
+  assert.match(bridge, /AI_SCORE_TIMEOUT/);
+  assert.match(bridge, /AI_SCORE_INCOMPLETE/);
+  assert.match(bridge, /FUNCTION_INVOCATION_TIMEOUT/);
+  assert.match(bridge, /const middle = Math\.ceil\(chunk\.length \/ 2\)/);
+  assert.match(bridge, /scoreAdaptive\(left/);
+  assert.match(bridge, /scoreAdaptive\(right/);
+  assert.match(bridge, /12개 묶음이 느리면 6개 → 3개로 자동 축소/);
+});
+
 test("Keyword Lab persists completed scoring chunks and resumes without rediscovering", () => {
-  assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\.scoreBridge\.v1"/);
+  assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\.scoreBridge\.v2"/);
   assert.match(bridge, /window\.localStorage\.setItem\(key/);
   assert.match(bridge, /sessionDiscoveryForResume/);
   assert.match(bridge, /stage2Status !== "error"/);
