@@ -34,7 +34,7 @@ jobs:
           src/app/api/fast-purchase/drafts/route.ts
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           src/app/fast-purchase-mvp/page.tsx
-          src/components/china-order-manager/InternalChinaDraftInlineQuantityBridge.tsx
+          src/components/china-order-manager/InternalChinaPurchaseDraftWorkspaceV2.tsx
           src/components/china-order-manager/InternalChinaManualDraftLineAdder.tsx
           src/app/china-order-manager/drafts/[draftId]/page.tsx
           tests/fastPurchaseInternalDraft.test.mjs
