@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import type { KeywordElonCandidate, KeywordElonDiscovery, KeywordElonIdentity, KeywordElonSourceDraft } from "@/lib/keywordEngineElonLabV2";
+import { keywordElonApiHubConfigured } from "@/lib/keywordEngineElonLabV2ApiHub";
 import { enrichKeywordElonDemand } from "@/lib/keywordEngineElonLabV2DemandEnrichment";
 import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
@@ -10,9 +11,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 500;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 function sourceFrom(value: unknown): KeywordElonSourceDraft {
   if (!isRecord(value)) throw new Error("source 입력이 없습니다.");
@@ -33,24 +32,17 @@ function identityFrom(value: unknown): KeywordElonIdentity {
     confidence: Math.max(0, Math.min(1, Number(value.confidence) || 0)), reasoning: text(value.reasoning), model: text(value.model),
   };
 }
-function discoveryFrom(value: unknown): KeywordElonDiscovery {
-  if (!isRecord(value)) throw new Error("discovery 입력이 없습니다.");
-  return value as unknown as KeywordElonDiscovery;
-}
-function candidatesFrom(value: unknown): KeywordElonCandidate[] {
-  if (!Array.isArray(value)) throw new Error("candidates 입력이 없습니다.");
-  return value.filter(isRecord) as unknown as KeywordElonCandidate[];
-}
+function discoveryFrom(value: unknown): KeywordElonDiscovery { if (!isRecord(value)) throw new Error("discovery 입력이 없습니다."); return value as unknown as KeywordElonDiscovery; }
+function candidatesFrom(value: unknown): KeywordElonCandidate[] { if (!Array.isArray(value)) throw new Error("candidates 입력이 없습니다."); return value.filter(isRecord) as unknown as KeywordElonCandidate[]; }
 function readiness() {
   return {
     openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
-    naverShoppingConfigured: Boolean(process.env.NAVER_SEARCH_CLIENT_ID?.trim() && process.env.NAVER_SEARCH_CLIENT_SECRET?.trim()),
+    apiHubConfigured: keywordElonApiHubConfigured(),
   };
 }
 
-export async function GET() { return NextResponse.json({ ok: true, version: 4, ...readiness() }); }
-
+export async function GET() { return NextResponse.json({ ok: true, version: 5, ...readiness() }); }
 export async function POST(request: NextRequest) {
   let action = "request";
   try {
@@ -61,9 +53,7 @@ export async function POST(request: NextRequest) {
       const url = text(body.url); if (!url) throw new Error("1688 링크를 입력해 주세요.");
       return NextResponse.json({ ok: true, action, source: await collectKeywordElon1688Source(url) });
     }
-    if (action === "analyze_identity") {
-      return NextResponse.json({ ok: true, action, identity: await analyzeKeywordElonIdentity(sourceFrom(body.source)) });
-    }
+    if (action === "analyze_identity") return NextResponse.json({ ok: true, action, identity: await analyzeKeywordElonIdentity(sourceFrom(body.source)) });
     if (action === "discover_keywords") {
       const source = sourceFrom(body.source); const identity = identityFrom(body.identity);
       return NextResponse.json({ ok: true, action, discovery: await discoverKeywordElonCandidatesResilient(source, identity) });
@@ -73,10 +63,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, action, ...result });
     }
     if (action === "enrich_demand") {
-      const result = await enrichKeywordElonDemand({
-        candidates: candidatesFrom(body.candidates),
-        discovery: discoveryFrom(body.discovery),
-      });
+      const result = await enrichKeywordElonDemand({ candidates: candidatesFrom(body.candidates), discovery: discoveryFrom(body.discovery) });
       return NextResponse.json({ ok: true, action, ...result });
     }
     if (action === "generate_title") {
@@ -88,9 +75,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "키워드 실험실 처리 실패";
     console.error("[keyword-engine-elon-lab]", action, message);
-    return NextResponse.json(
-      { ok: false, errorStage: action, error: `[${action}] ${message}` },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, errorStage: action, error: `[${action}] ${message}` }, { status: 500 });
   }
 }

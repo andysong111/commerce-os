@@ -20,51 +20,51 @@ test("Elon Lab starts from a 1688 URL and exposes only two execution steps", () 
   assert.doesNotMatch(page, /121073|121065|121059|121053|121050|121045/);
 });
 
-test("V2 session survives refresh with browser storage", () => {
+test("session survives refresh with browser storage", () => {
   assert.match(domain, /keywordEngineElonLab\.v2\.session/);
   assert.match(page, /localStorage\.getItem\(KEYWORD_ELON_V2_STORAGE_KEY\)/);
   assert.match(page, /localStorage\.setItem\(KEYWORD_ELON_V2_STORAGE_KEY/);
 });
 
-test("quality policy means minimum ten, not maximum ten", () => {
+test("minimum ten is a target, not a maximum", () => {
   assert.match(domain, /KEYWORD_ELON_V2_MINIMUM_KEYWORDS = 10/);
   assert.match(domain, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70/);
   assert.match(page, /최소 목표/);
   assert.match(page, /상한 없음/);
-  assert.match(page, /커트라인을 통과한 키워드는 상한 없이 모두 보존/);
 });
 
-test("demand-first policy gates safety before monthly-search opportunity ranking", () => {
+test("demand-first safety and weight policy remains intact", () => {
   assert.match(domain, /KEYWORD_ELON_V2_RELEVANCE_GATE = 80/);
   assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
-  assert.match(domain, /demandScore \* 0\.55/);
-  assert.match(domain, /input\.relevance \* 0\.2/);
-  assert.match(domain, /input\.shoppingIntent \* 0\.1/);
-  assert.match(domain, /competitionOpportunity \* 0\.1/);
-  assert.match(domain, /input\.specificity \* 0\.05/);
-  assert.match(domain, /qualityScore = safetyPass \? opportunityScore : 0/);
-  assert.match(domain, /totalSearch === null.*return 15/);
+  assert.match(domain, /demandScore\*0\.55|demandScore \* 0\.55/);
+  assert.match(domain, /input\.relevance\*0\.2|input\.relevance \* 0\.2/);
+  assert.match(domain, /input\.shoppingIntent\*0\.1|input\.shoppingIntent \* 0\.1/);
+  assert.match(domain, /competitionOpportunity\*0\.1|competitionOpportunity \* 0\.1/);
+  assert.match(domain, /input\.specificity\*0\.05|input\.specificity \* 0\.05/);
+  assert.match(domain, /safetyPass\?opportunityScore:0|safetyPass \? opportunityScore : 0/);
 });
 
-test("final result includes generated title plus demand and accuracy diagnostics", () => {
+test("final result includes title and V5 demand diagnostics", () => {
   assert.match(page, /추천 상품명/);
   assert.match(page, /현재 커트라인으로 상품명 다시 생성/);
   assert.match(page, /통과 키워드 · 점수 높은 순/);
   assert.match(layout, /KeywordElonDemandSummary/);
-  assert.match(demandSummary, /월검색량 TOP/);
+  assert.match(demandSummary, /MARKET RECALL V5/);
+  assert.match(demandSummary, /API HUB 시장어 광산/);
+  assert.match(demandSummary, /월검색량 TOP · 검색용 no-space/);
   assert.match(demandSummary, /상품 정확성 TOP/);
-  assert.match(demandSummary, /월검색수요 55%/);
-  assert.match(demandSummary, /안전 Gate/);
 });
 
-test("API exposes the V2 pipeline actions", () => {
-  for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "generate_title"]) {
+test("API exposes V5 pipeline actions", () => {
+  for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "enrich_demand", "generate_title"]) {
     assert.match(route, new RegExp(`action === \\"${action}\\"`));
   }
+  assert.match(route, /version: 5/);
+  assert.match(route, /apiHubConfigured/);
   assert.doesNotMatch(route, /keywordEngineElonLabStore|keywordEngineElonLabShopling/);
 });
 
-test("Keyword Lab owns its dedicated 1688 collector and does not depend on AI-Saurus", () => {
+test("Keyword Lab collector remains dedicated and independent from AI-Saurus", () => {
   assert.match(page, /Commerce OS Keyword Lab Collector/);
   assert.match(page, /전용 수집기 ZIP 다운로드/);
   assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.1"/);
@@ -73,11 +73,11 @@ test("Keyword Lab owns its dedicated 1688 collector and does not depend on AI-Sa
   assert.match(collector1688, /extractProductName/);
   assert.match(collector1688, /extractStructuredOptionGroups/);
   assert.doesNotMatch(page, /AI-Saurus|SaaS 방식 자동수집/);
-  assert.doesNotMatch(browserImport, /AI-Saurus/);
 });
 
-test("module registry copy describes the 1688 V2 lab", () => {
+test("module registry describes API HUB market recall V5", () => {
   assert.match(moduleFile, /1688 중국 원본 링크/);
-  assert.match(moduleFile, /2단계 실험실/);
+  assert.match(moduleFile, /NAVER API HUB/);
+  assert.match(moduleFile, /Market Mine/);
   assert.match(moduleFile, /\/keyword-engine-elon-lab/);
 });

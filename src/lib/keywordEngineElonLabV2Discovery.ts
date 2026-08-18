@@ -92,7 +92,7 @@ async function discoverAiCandidates(
                   "당신은 한국 쇼핑 검색어 후보 발굴기다.",
                   "최종 키워드를 고르는 단계가 아니라 후보 recall을 넓히는 단계다.",
                   "중국어 직역형 장문보다 한국 소비자가 실제 시장에서 쓰는 짧은 상품명·속칭·욕구형 표현을 우선한다.",
-                  "입력에 Market Bridge Seed와 네이버 쇼핑 제목에서 관찰된 시장어가 있으면 반드시 적극 활용한다.",
+                  "입력에 Market Bridge Seed와 NAVER API HUB Search에서 반복 관찰된 시장어가 있으면 적극 활용한다.",
                   "상품과 다른 물건, 브랜드 발명, 근거 없는 성별·효능·재질·규격은 금지한다.",
                   "같은 의미의 긴 조합만 반복하지 말고 대표어·별칭·문제/욕구어·형태어를 폭넓게 섞는다.",
                   "한국 소비자가 실제 검색창에 입력할 법한 1~3어절의 짧은 명사구를 우선한다.",
@@ -116,7 +116,7 @@ async function discoverAiCandidates(
                     primarySeeds: identity.primarySeeds,
                     conditionalSeeds: identity.conditionalSeeds,
                     marketBridgeSeeds: market.bridgeSeeds,
-                    observedNaverShoppingTerms: market.marketTerms.slice(0, 50),
+                    observedApiHubMarketTerms: market.marketTerms.slice(0, 60),
                   },
                   null,
                   2,
@@ -128,7 +128,7 @@ async function discoverAiCandidates(
         text: {
           format: {
             type: "json_schema",
-            name: "keyword_elon_candidate_pool_v4_market_recall",
+            name: "keyword_elon_candidate_pool_v5_api_hub_market_recall",
             strict: true,
             schema: generationSchema(),
           },
@@ -177,7 +177,7 @@ async function discoverAiCandidates(
       model,
       warning:
         name === "AbortError"
-          ? `AI_DISCOVERY_TIMEOUT: ${AI_DISCOVERY_TIMEOUT_MS / 1000}초 내 응답 없음 · 시장/ SearchAd 후보로 계속 진행`
+          ? `AI_DISCOVERY_TIMEOUT: ${AI_DISCOVERY_TIMEOUT_MS / 1000}초 내 응답 없음 · API HUB/SearchAd 후보로 계속 진행`
           : `AI_DISCOVERY_FAILED: ${message}`,
     };
   } finally {
@@ -191,8 +191,9 @@ function fallbackMarket(identity: KeywordElonIdentity, warning: string): Keyword
     bridgeSeeds,
     marketTerms: [],
     searchSeeds: bridgeSeeds,
-    shoppingTitleCount: 0,
-    shoppingConfigured: false,
+    apiHubQueries: [],
+    apiHubDocumentCount: 0,
+    apiHubConfigured: false,
     warnings: [warning],
     model: openAiModel(),
   };
@@ -205,7 +206,7 @@ function shortAiSearchSeeds(keywords: string[]) {
       return length >= 2 && length <= 12;
     })
     .sort((a, b) => compactKeywordElonKey(a).length - compactKeywordElonKey(b).length)
-    .slice(0, 8);
+    .slice(0, 10);
 }
 
 export async function discoverKeywordElonCandidatesResilient(
@@ -240,7 +241,7 @@ export async function discoverKeywordElonCandidatesResilient(
     ...shortAiSearchSeeds(ai.keywords),
     ...market.bridgeSeeds,
     ...seeds,
-  ], 20);
+  ], 30);
 
   const searchAdSettled = await Promise.allSettled([discoverKeywordElonSearchAd(searchAdSeeds)]);
   const searchAd = searchAdSettled[0].status === "fulfilled"
@@ -260,7 +261,6 @@ export async function discoverKeywordElonCandidatesResilient(
       };
 
   const relatedKeywords = searchAd.rows.map((row) => row.keyword);
-  // Prefer real market/SearchAd forms before AI descriptive forms so no-space market spelling wins duplicate resolution.
   const candidates = uniqueKeywordElonTexts(
     [
       ...relatedKeywords,
@@ -281,7 +281,7 @@ export async function discoverKeywordElonCandidatesResilient(
   for (const seed of identity.primarySeeds) addTag(seed, "primary_seed");
   for (const seed of identity.conditionalSeeds) addTag(seed, "conditional_seed");
   for (const seed of market.bridgeSeeds) addTag(seed, "market_bridge_seed");
-  for (const term of market.marketTerms) addTag(term, "naver_shopping_market_term");
+  for (const term of market.marketTerms) addTag(term, "api_hub_market_term");
   for (const keyword of ai.keywords) addTag(keyword, "ai_identity_expansion");
   for (const row of searchAd.rows) {
     addTag(row.keyword, "searchad_related");
@@ -295,7 +295,7 @@ export async function discoverKeywordElonCandidatesResilient(
     ...market.warnings,
     ...searchAd.warnings,
     ai.warning,
-    `MARKET_RECALL_SUMMARY: Bridge ${market.bridgeSeeds.length}개 · 네이버쇼핑 시장어 ${market.marketTerms.length}개 · 상품명 ${market.shoppingTitleCount}건 · SearchAd Seed ${searchAdSeeds.slice(0, 6).join(", ")}`,
+    `MARKET_RECALL_V5_SUMMARY: Bridge ${market.bridgeSeeds.length}개 · API HUB 시장어 ${market.marketTerms.length}개 · 문서 ${market.apiHubDocumentCount}건 · SearchAd Seed ${searchAdSeeds.slice(0, 10).join(", ")}`,
   ].filter(Boolean);
   if (searchAd.expansionSeeds.length) {
     warnings.push(
@@ -311,12 +311,18 @@ export async function discoverKeywordElonCandidatesResilient(
     sourceTagsByKeyword,
     searchAdStats: searchAd.rows,
     searchAdConfigured: searchAd.configured,
-    searchAdWarnings: [...new Set(warnings)].slice(0, 20),
+    searchAdWarnings: [...new Set(warnings)].slice(0, 24),
     aiGeneratedCount: ai.keywords.length,
     relatedKeywordCount: relatedKeywords.length,
     demandExpansionSeeds: searchAd.expansionSeeds,
     demandExpansionSeedCount: searchAd.expansionSeeds.length,
     demandExplorationDepth: searchAd.explorationDepth,
+    marketBridgeSeeds: market.bridgeSeeds,
+    marketTerms: market.marketTerms,
+    apiHubConfigured: market.apiHubConfigured,
+    apiHubQueries: market.apiHubQueries,
+    apiHubDocumentCount: market.apiHubDocumentCount,
+    marketRecallVersion: "v5",
     model: ai.model || market.model,
   };
 }

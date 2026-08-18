@@ -11,6 +11,15 @@ function statMap(rows: KeywordElonSearchAdStat[]) {
   return new Map(rows.map((row) => [compactKeywordElonKey(row.keyword), row] as const));
 }
 
+function sourcePriority(row: KeywordElonCandidate) {
+  const tags = new Set(row.sourceTags ?? []);
+  if (tags.has("api_hub_market_term")) return 5;
+  if (tags.has("searchad_related") || tags.has("searchad_demand_depth2")) return 4;
+  if (tags.has("market_bridge_seed")) return 3;
+  if (tags.has("primary_seed") || tags.has("conditional_seed")) return 2;
+  return 1;
+}
+
 function recalculateCandidate(row: KeywordElonCandidate, stats: Map<string, KeywordElonSearchAdStat>) {
   const stat = stats.get(compactKeywordElonKey(row.keyword));
   const calculated = calculateKeywordElonQuality({
@@ -25,6 +34,7 @@ function recalculateCandidate(row: KeywordElonCandidate, stats: Map<string, Keyw
   const demandLabel = totalSearch === null ? "월검색 미측정" : `월검색 ${totalSearch.toLocaleString()}`;
   return {
     ...row,
+    searchKeyword: row.searchKeyword || compactKeywordElonKey(row.keyword),
     totalSearch,
     pcSearch: stat?.pcSearch ?? row.pcSearch ?? null,
     mobileSearch: stat?.mobileSearch ?? row.mobileSearch ?? null,
@@ -43,11 +53,13 @@ export async function enrichKeywordElonDemand(input: {
     .filter((row) => row.safetyPass && row.totalSearch === null)
     .sort(
       (a, b) =>
+        sourcePriority(b) - sourcePriority(a) ||
+        compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length ||
         b.relevance - a.relevance ||
         b.shoppingIntent - a.shoppingIntent ||
         b.specificity - a.specificity,
     )
-    .map((row) => row.keyword);
+    .map((row) => row.searchKeyword || compactKeywordElonKey(row.keyword));
 
   const enrichment = await enrichKeywordElonSearchAdDemand(targets, input.discovery.searchAdStats);
   const stats = statMap(enrichment.rows);
@@ -66,8 +78,8 @@ export async function enrichKeywordElonDemand(input: {
     searchAdWarnings: [
       ...input.discovery.searchAdWarnings,
       ...enrichment.warnings,
-      `DEMAND_ENRICH_SUMMARY: 안전Gate 통과 후 월검색 미측정 후보 ${enrichment.requested.length}개 재조회 · 정확히 매칭 ${enrichment.exactMatched.length}개`,
-    ].filter(Boolean).slice(0, 24),
+      `DEMAND_ENRICH_V5_SUMMARY: 안전Gate 통과 후 API HUB/시장어 우선 월검색 미측정 후보 ${enrichment.requested.length}개 재조회 · 정확히 매칭 ${enrichment.exactMatched.length}개`,
+    ].filter(Boolean).slice(0, 28),
   };
 
   return {
