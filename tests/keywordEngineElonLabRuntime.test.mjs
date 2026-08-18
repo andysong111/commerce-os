@@ -111,18 +111,23 @@ test("candidate discovery fails open when AI expansion times out", () => {
   assert.match(discovery, /DISCOVERY_LOW_RECALL/);
 });
 
-test("AI scoring uses smaller chunks, diagnostics, partial preservation, and enough function time", () => {
+test("AI scoring uses small low-output chunks while preserving quality weighting", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
-  assert.match(scoring, /OPENAI_TIMEOUT_MS = 50_000/);
-  assert.match(scoring, /SCORE_CHUNK_SIZE = 20/);
-  assert.match(scoring, /SCORE_CONCURRENCY = 2/);
+  assert.match(scoring, /OPENAI_TIMEOUT_MS = 42_000/);
+  assert.match(scoring, /SCORE_CHUNK_SIZE = 12/);
+  assert.match(scoring, /SCORE_CONCURRENCY = 1/);
+  assert.match(scoring, /max_output_tokens: 2_600/);
+  assert.match(scoring, /keyword_elon_semantic_scores_v5/);
+  assert.match(scoring, /scoreRationale/);
+  assert.doesNotMatch(scoring, /required: \[[\s\S]*"rationale"/);
   assert.match(scoring, /AI_SCORE_TIMEOUT/);
   assert.match(scoring, /AI_SCORE_INCOMPLETE/);
   assert.match(scoring, /AI_SCORE_EMPTY_OUTPUT/);
   assert.match(scoring, /AI_SCORE_HTTP_/);
   assert.match(scoring, /AI_SCORE_ALL_CHUNKS_FAILED/);
   assert.match(scoring, /successfulChunks === 0/);
+  assert.match(scoring, /calculateKeywordElonQuality/);
   assert.match(scoring, /dataConfidence/);
 });
 
