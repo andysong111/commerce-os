@@ -41,6 +41,8 @@ jobs:
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts
           src/lib/keywordEngineElonLabV2SearchAd.ts
+          src/lib/keywordEngineElonLabV2Discovery.ts
+          src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonLabV2Server.ts
       - name: Test keyword lab V2 contract
         run: >-
