@@ -8,8 +8,11 @@ import {
 const BASE_URL = "https://api.searchad.naver.com";
 const KEYWORDSTOOL_URI = "/keywordstool";
 const REQUEST_TIMEOUT_MS = 12_000;
-const REQUEST_INTERVAL_MS = 1_200;
+const REQUEST_INTERVAL_MS = 1_800;
 const RATE_LIMIT_BACKOFF_MS = 6_500;
+const INITIAL_SEED_LIMIT = 6;
+const DEMAND_EXPANSION_SEED_LIMIT = 3;
+const DEMAND_EXPANSION_MIN_SEARCH = 50;
 
 function env() {
   const apiKey = normalizeKeywordElonText(process.env.NAVER_SEARCHAD_API_KEY);
@@ -180,6 +183,24 @@ function mergeStat(
   map.set(key, { ...(newDemand > existingDemand ? row : existing), sourceSeeds });
 }
 
+function chooseDemandExpansionSeeds(
+  rows: KeywordElonSearchAdStat[],
+  initialSeeds: string[],
+) {
+  const initialKeys = new Set(initialSeeds.map(compactKeywordElonKey));
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const row of [...rows].sort((a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1))) {
+    if ((row.totalSearch ?? 0) < DEMAND_EXPANSION_MIN_SEARCH) continue;
+    const key = compactKeywordElonKey(row.keyword);
+    if (!key || initialKeys.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(row.keyword);
+    if (result.length >= DEMAND_EXPANSION_SEED_LIMIT) break;
+  }
+  return result;
+}
+
 export async function discoverKeywordElonSearchAd(seeds: string[]) {
   const credentials = env();
   if (!credentials.configured) {
@@ -187,24 +208,44 @@ export async function discoverKeywordElonSearchAd(seeds: string[]) {
       configured: false,
       rows: [] as KeywordElonSearchAdStat[],
       warnings: ["NAVER SearchAd 자격증명이 없어 검색량·경쟁 데이터는 이번 실행에서 제외됩니다."],
+      expansionSeeds: [] as string[],
+      explorationDepth: 1,
     };
   }
 
-  const normalizedSeeds = [...new Set(seeds.map(normalizeKeywordElonText).filter(Boolean))].slice(0, 8);
+  const normalizedSeeds = [...new Set(seeds.map(normalizeKeywordElonText).filter(Boolean))].slice(0, INITIAL_SEED_LIMIT);
   const map = new Map<string, KeywordElonSearchAdStat>();
   const warnings: string[] = [];
+  let callCount = 0;
+  let rateLimitStop = false;
 
-  for (let index = 0; index < normalizedSeeds.length; index += 1) {
-    if (index > 0) await sleep(REQUEST_INTERVAL_MS);
-    const result = await fetchSeedWithRateLimitRecovery(normalizedSeeds[index]);
+  const fetchPaced = async (seed: string) => {
+    if (callCount > 0) await sleep(REQUEST_INTERVAL_MS);
+    callCount += 1;
+    const result = await fetchSeedWithRateLimitRecovery(seed);
     if (!result.ok && result.warning) warnings.push(result.warning);
     for (const row of result.rows) mergeStat(map, row);
-    if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) break;
+    if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) rateLimitStop = true;
+    return result;
+  };
+
+  for (const seed of normalizedSeeds) {
+    await fetchPaced(seed);
+    if (rateLimitStop) break;
+  }
+
+  const depthOneRows = [...map.values()];
+  const expansionSeeds = rateLimitStop ? [] : chooseDemandExpansionSeeds(depthOneRows, normalizedSeeds);
+  for (const seed of expansionSeeds) {
+    await fetchPaced(seed);
+    if (rateLimitStop) break;
   }
 
   return {
     configured: true,
     rows: [...map.values()].sort((a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1)),
     warnings: [...new Set(warnings)].slice(0, 12),
+    expansionSeeds,
+    explorationDepth: expansionSeeds.length ? 2 : 1,
   };
 }
