@@ -6,6 +6,7 @@ import {
   type KeywordElonSearchAdStat,
 } from "@/lib/keywordEngineElonLabV2";
 import { enrichKeywordElonSearchAdDemand } from "@/lib/keywordEngineElonLabV2SearchAd";
+import { enrichKeywordElonSearchTrend } from "@/lib/keywordEngineElonLabV2Trend";
 
 function statMap(rows: KeywordElonSearchAdStat[]) {
   return new Map(rows.map((row) => [compactKeywordElonKey(row.keyword), row] as const));
@@ -13,7 +14,8 @@ function statMap(rows: KeywordElonSearchAdStat[]) {
 
 function sourcePriority(row: KeywordElonCandidate) {
   const tags = new Set(row.sourceTags ?? []);
-  if (tags.has("api_hub_market_term")) return 5;
+  if (tags.has("api_hub_evidence_term") || tags.has("api_hub_market_term")) return 6;
+  if ([...tags].some((tag) => tag.startsWith("api_hub_kin") || tag.startsWith("api_hub_cafe"))) return 5;
   if (tags.has("searchad_related") || tags.has("searchad_demand_depth2")) return 4;
   if (tags.has("market_bridge_seed")) return 3;
   if (tags.has("primary_seed") || tags.has("conditional_seed")) return 2;
@@ -21,7 +23,8 @@ function sourcePriority(row: KeywordElonCandidate) {
 }
 
 function recalculateCandidate(row: KeywordElonCandidate, stats: Map<string, KeywordElonSearchAdStat>) {
-  const stat = stats.get(compactKeywordElonKey(row.keyword));
+  const key = compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword);
+  const stat = stats.get(key);
   const calculated = calculateKeywordElonQuality({
     relevance: row.relevance,
     shoppingIntent: row.shoppingIntent,
@@ -34,7 +37,9 @@ function recalculateCandidate(row: KeywordElonCandidate, stats: Map<string, Keyw
   const demandLabel = totalSearch === null ? "월검색 미측정" : `월검색 ${totalSearch.toLocaleString()}`;
   return {
     ...row,
-    searchKeyword: row.searchKeyword || compactKeywordElonKey(row.keyword),
+    keyword: key,
+    searchKey: key,
+    searchKeyword: key,
     totalSearch,
     pcSearch: stat?.pcSearch ?? row.pcSearch ?? null,
     mobileSearch: stat?.mobileSearch ?? row.mobileSearch ?? null,
@@ -54,16 +59,16 @@ export async function enrichKeywordElonDemand(input: {
     .sort(
       (a, b) =>
         sourcePriority(b) - sourcePriority(a) ||
-        compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length ||
+        compactKeywordElonKey(a.searchKeyword || a.searchKey || a.keyword).length - compactKeywordElonKey(b.searchKeyword || b.searchKey || b.keyword).length ||
         b.relevance - a.relevance ||
         b.shoppingIntent - a.shoppingIntent ||
         b.specificity - a.specificity,
     )
-    .map((row) => row.searchKeyword || compactKeywordElonKey(row.keyword));
+    .map((row) => compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword));
 
   const enrichment = await enrichKeywordElonSearchAdDemand(targets, input.discovery.searchAdStats);
   const stats = statMap(enrichment.rows);
-  const candidates = input.candidates
+  let candidates = input.candidates
     .map((row) => recalculateCandidate(row, stats))
     .sort(
       (a, b) =>
@@ -72,14 +77,25 @@ export async function enrichKeywordElonDemand(input: {
         (b.totalSearch ?? -1) - (a.totalSearch ?? -1),
     );
 
+  const trend = await enrichKeywordElonSearchTrend(candidates);
+  const trendMap = new Map(trend.signals.map((signal) => [compactKeywordElonKey(signal.keyword), signal] as const));
+  candidates = candidates.map((row) => {
+    const signal = trendMap.get(compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword));
+    return signal ? { ...row, trendScore: signal.score, trendMomentum: signal.momentum } : row;
+  });
+
   const discovery: KeywordElonDiscovery = {
     ...input.discovery,
     searchAdStats: enrichment.rows,
+    trendConfigured: trend.configured,
+    trendSignals: trend.signals,
+    trendWarnings: trend.warnings,
     searchAdWarnings: [
       ...input.discovery.searchAdWarnings,
       ...enrichment.warnings,
-      `DEMAND_ENRICH_V5_SUMMARY: 안전Gate 통과 후 API HUB/시장어 우선 월검색 미측정 후보 ${enrichment.requested.length}개 재조회 · 정확히 매칭 ${enrichment.exactMatched.length}개`,
-    ].filter(Boolean).slice(0, 28),
+      ...trend.warnings,
+      `DEMAND_ENRICH_V6_SUMMARY: 안전Gate 통과 후 증거어 우선 월검색 미측정 후보 ${enrichment.requested.length}개 재조회 · 정확히 매칭 ${enrichment.exactMatched.length}개 · Search Trend ${trend.signals.length}/${trend.requested.length}개`,
+    ].filter(Boolean).slice(0, 32),
   };
 
   return {
@@ -87,6 +103,6 @@ export async function enrichKeywordElonDemand(input: {
     discovery,
     requestedKeywords: enrichment.requested,
     exactMatchedKeywords: enrichment.exactMatched,
-    warnings: enrichment.warnings,
+    warnings: [...enrichment.warnings, ...trend.warnings],
   };
 }
