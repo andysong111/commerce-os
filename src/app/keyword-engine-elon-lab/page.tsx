@@ -13,6 +13,7 @@ import {
   KEYWORD_ELON_V2_DEFAULT_CUTOFF,
   KEYWORD_ELON_V2_MINIMUM_KEYWORDS,
   KEYWORD_ELON_V2_STORAGE_KEY,
+  compactKeywordElonKey,
   emptyKeywordElonSession,
   keywordElonUtf8Bytes,
   validate1688Url,
@@ -23,6 +24,10 @@ import {
   type KeywordElonSourceDraft,
   type KeywordElonTitleResult,
 } from "@/lib/keywordEngineElonLabV2";
+import {
+  mergeKeywordElonCandidates,
+  mergeKeywordElonDiscovery,
+} from "@/lib/keywordEngineElonLabV2Merge";
 
 type Readiness = { openAiConfigured: boolean; searchAdConfigured: boolean };
 type ApiRecord = Record<string, unknown> & { ok?: boolean; error?: unknown; errorStage?: unknown };
@@ -89,6 +94,7 @@ function loadLocalSession() {
       ...emptyKeywordElonSession(),
       ...parsed,
       cutoff: Number.isFinite(Number(parsed.cutoff)) ? Number(parsed.cutoff) : KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+      stage2Round: Number.isFinite(Number(parsed.stage2Round)) ? Math.max(0, Number(parsed.stage2Round)) : 0,
     } as KeywordElonLabSession;
   } catch {
     return emptyKeywordElonSession();
@@ -105,6 +111,7 @@ function withNewSource(previous: KeywordElonLabSession, source: KeywordElonSourc
     scoredCandidates: [],
     titleResult: null,
     stage2Status: "idle",
+    stage2Round: 0,
     lastMessage: message,
     updatedAt: new Date().toISOString(),
   };
@@ -282,6 +289,7 @@ export default function KeywordEngineElonLabPage() {
         scoredCandidates: [],
         titleResult: null,
         stage2Status: "idle",
+        stage2Round: 0,
         lastMessage: "STEP 1 분석 완료. 상품 정체성과 Seed를 검수한 뒤 통과시켜 주세요.",
         updatedAt: new Date().toISOString(),
       }));
@@ -297,11 +305,15 @@ export default function KeywordEngineElonLabPage() {
     const source = session.source;
     const identity = session.identity;
     const cutoff = session.cutoff;
+    const round = (session.stage2Round ?? 0) + 1;
+    const baseDiscovery = session.discovery;
+    const baseCandidates = session.scoredCandidates;
+    const previousKeys = new Set(baseCandidates.map((row) => compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword)));
     setBusy("stage2");
     setSession((previous) => ({
       ...previous,
       stage2Status: "discovering",
-      lastMessage: "STEP 2 · 후보를 넓게 수집하고 있습니다…",
+      lastMessage: `STEP 2 round ${round} · 기존 결과를 보존한 채 추가 후보를 수집하고 있습니다…`,
     }));
     try {
       const discovered = await requestLab<ApiRecord & { discovery: KeywordElonDiscovery }>({
@@ -309,13 +321,13 @@ export default function KeywordEngineElonLabPage() {
         source,
         identity,
       });
+      const newCandidateCount = discovered.discovery.candidates.filter(
+        (keyword) => !previousKeys.has(compactKeywordElonKey(keyword)),
+      ).length;
       setSession((previous) => ({
         ...previous,
-        discovery: discovered.discovery,
-        scoredCandidates: [],
-        titleResult: null,
         stage2Status: "scoring",
-        lastMessage: `후보 ${discovered.discovery.candidates.length}개 수집 · AI 품질점수 계산 중…`,
+        lastMessage: `STEP 2 round ${round} · 신규 후보 ${newCandidateCount}개 확인 · 점수화 중…`,
       }));
 
       const scored = await requestLab<
@@ -334,31 +346,38 @@ export default function KeywordEngineElonLabPage() {
       const scoreWarning = Array.isArray(scored.scoringWarnings) && scored.scoringWarnings.length
         ? ` · 일부 점수화 경고: ${scored.scoringWarnings[0]}`
         : "";
+      const mergedCandidates = mergeKeywordElonCandidates(baseCandidates, scored.candidates);
+      const mergedDiscovery = mergeKeywordElonDiscovery(baseDiscovery, discovered.discovery);
+      const newlyPassed = mergedCandidates.filter(
+        (row) => row.qualityScore >= cutoff && !previousKeys.has(compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword)),
+      ).length;
       setSession((previous) => ({
         ...previous,
-        scoredCandidates: scored.candidates,
+        discovery: mergedDiscovery,
+        scoredCandidates: mergedCandidates,
         stage2Status: "title",
-        lastMessage: `키워드 ${scored.candidates.length}개 점수화 완료${scoreWarning} · 상품명 조립 중…`,
+        lastMessage: `STEP 2 round ${round} · 누적 ${mergedCandidates.length}개 점수화 완료 · 신규 통과 ${newlyPassed}개${scoreWarning} · 상품명 조립 중…`,
       }));
 
       const titled = await requestLab<ApiRecord & { titleResult: KeywordElonTitleResult }>({
         action: "generate_title",
         source,
         identity,
-        candidates: scored.candidates,
+        candidates: mergedCandidates,
         cutoff,
       });
-      const passed = scored.candidates.filter((row) => row.qualityScore >= cutoff).length;
+      const passed = mergedCandidates.filter((row) => row.qualityScore >= cutoff).length;
       setSession((previous) => ({
         ...previous,
-        discovery: discovered.discovery,
-        scoredCandidates: scored.candidates,
+        discovery: mergedDiscovery,
+        scoredCandidates: mergedCandidates,
         titleResult: titled.titleResult,
         stage2Status: "done",
+        stage2Round: round,
         lastMessage:
           passed >= KEYWORD_ELON_V2_MINIMUM_KEYWORDS
-            ? `STEP 2 완료 · ${cutoff}점 이상 ${passed}개 통과`
-            : `STEP 2 완료 · ${cutoff}점 이상 ${passed}개. 최소 10개에 못 미쳐 추가 발굴이 필요합니다.`,
+            ? `STEP 2 round ${round} 완료 · 신규 후보 ${newCandidateCount}개 · 누적 후보 ${mergedCandidates.length}개 · ${cutoff}점 이상 ${passed}개 통과`
+            : `STEP 2 round ${round} 완료 · 신규 후보 ${newCandidateCount}개 · 누적 후보 ${mergedCandidates.length}개 · ${cutoff}점 이상 ${passed}개. 추가 round 또는 STEP 3 확장이 필요합니다.`,
         updatedAt: new Date().toISOString(),
       }));
     } catch (error) {
@@ -366,7 +385,7 @@ export default function KeywordEngineElonLabPage() {
       setSession((previous) => ({
         ...previous,
         stage2Status: "error",
-        lastMessage: message,
+        lastMessage: `STEP 2 round ${round} 실패 · ${message}`,
         updatedAt: new Date().toISOString(),
       }));
     } finally {
@@ -558,9 +577,12 @@ export default function KeywordEngineElonLabPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="rounded-full bg-violet-600 px-3 py-1 text-xs font-black text-white">STEP 2</span>
-            <div><h2 className="text-xl font-black">키워드 대량 발굴 → 품질점수 → 커트라인</h2><p className="text-sm text-slate-500">최소 목표는 10개이며, 커트라인을 통과한 키워드는 상한 없이 모두 보존합니다.</p></div>
+            <div><h2 className="text-xl font-black">키워드 대량 발굴 → 품질점수 → 커트라인</h2><p className="text-sm text-slate-500">Round를 반복할수록 기존 결과를 버리지 않고 신규 후보만 누적합니다.</p></div>
           </div>
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${session.stage2Status === "error" ? "bg-rose-100 text-rose-800" : "bg-slate-100"}`}>{statusLabel}</span>
+          <div className="flex flex-wrap gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs font-bold ${session.stage2Status === "error" ? "bg-rose-100 text-rose-800" : "bg-slate-100"}`}>{statusLabel}</span>
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-800">완료 round {session.stage2Round ?? 0}</span>
+          </div>
         </div>
 
         {!stage2Ready ? (
@@ -568,12 +590,12 @@ export default function KeywordEngineElonLabPage() {
         ) : (
           <div className="mt-5 flex flex-wrap items-center gap-4">
             <button disabled={busy !== ""} onClick={runStage2} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40">
-              {busy === "stage2" ? `STEP 2 실행 중 · ${statusLabel}` : session.stage2Status === "done" ? "STEP 2 · 추가 발굴 다시 실행" : "STEP 2 · 키워드 대량 발굴"}
+              {busy === "stage2" ? `STEP 2 round ${(session.stage2Round ?? 0) + 1} 실행 중 · ${statusLabel}` : session.stage2Round > 0 ? `STEP 2 · 추가발굴 round ${session.stage2Round + 1}` : "STEP 2 · 키워드 대량 발굴 round 1"}
             </button>
             <label className="flex items-center gap-3 text-sm font-bold">품질 커트라인
               <input type="number" min={0} max={100} step={1} value={session.cutoff} onChange={(event) => changeCutoff(Number(event.target.value))} className="w-20 rounded-lg border px-3 py-2" />점
             </label>
-            <span className="text-sm text-slate-500">최소 목표 {KEYWORD_ELON_V2_MINIMUM_KEYWORDS}개 · 상한 없음</span>
+            <span className="text-sm text-slate-500">기존 결과 누적 · 최소 목표 {KEYWORD_ELON_V2_MINIMUM_KEYWORDS}개 · 상한 없음</span>
           </div>
         )}
 
@@ -595,9 +617,9 @@ export default function KeywordEngineElonLabPage() {
 
         {session.discovery ? (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="rounded-xl bg-slate-50 p-4"><div className="text-xs font-bold text-slate-500">전체 후보</div><div className="mt-1 text-2xl font-black">{session.discovery.candidates.length}</div></div>
+            <div className="rounded-xl bg-slate-50 p-4"><div className="text-xs font-bold text-slate-500">누적 후보</div><div className="mt-1 text-2xl font-black">{session.discovery.candidates.length}</div></div>
             <div className="rounded-xl bg-emerald-50 p-4"><div className="text-xs font-bold text-emerald-700">커트 통과</div><div className="mt-1 text-2xl font-black text-emerald-800">{passing.length}</div></div>
-            <div className="rounded-xl bg-blue-50 p-4"><div className="text-xs font-bold text-blue-700">AI 확장</div><div className="mt-1 text-2xl font-black">{session.discovery.aiGeneratedCount}</div></div>
+            <div className="rounded-xl bg-blue-50 p-4"><div className="text-xs font-bold text-blue-700">AI 확장 누적</div><div className="mt-1 text-2xl font-black">{session.discovery.aiGeneratedCount}</div></div>
             <div className="rounded-xl bg-violet-50 p-4"><div className="text-xs font-bold text-violet-700">SearchAd 연관어</div><div className="mt-1 text-2xl font-black">{session.discovery.relatedKeywordCount}</div></div>
             <div className="rounded-xl bg-amber-50 p-4"><div className="text-xs font-bold text-amber-700">수요 데이터</div><div className="mt-1 text-sm font-black">{session.discovery.searchAdConfigured ? "연결" : "없음"}</div></div>
           </div>
@@ -641,7 +663,7 @@ export default function KeywordEngineElonLabPage() {
             <div><div className="text-xs font-black tracking-[0.16em] text-slate-500">FINAL RESULT</div><h2 className="mt-1 text-2xl font-black">상품명 + 품질 통과 키워드 전체</h2></div>
             <span className={`rounded-full px-4 py-2 text-sm font-black ${minimumMet ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>{minimumMet ? `PASS · ${passing.length}개` : `추가 발굴 필요 · ${passing.length}/${KEYWORD_ELON_V2_MINIMUM_KEYWORDS}`}</span>
           </div>
-          {!minimumMet ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">커트라인 미만 키워드를 억지로 채우지 않습니다. STEP 2를 다시 실행해 후보를 추가 발굴하거나 품질 커트라인을 조정하세요.</div> : null}
+          {!minimumMet ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">커트라인 미만 키워드를 억지로 채우지 않습니다. STEP 2 추가 round 또는 STEP 3 확장을 실행하세요.</div> : null}
           <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1.5fr]">
             <div className="rounded-2xl bg-slate-900 p-5 text-white">
               <div className="text-xs font-bold text-slate-300">추천 상품명</div>
