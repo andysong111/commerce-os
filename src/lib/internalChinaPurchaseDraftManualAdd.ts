@@ -12,7 +12,9 @@ const SOURCE_SYSTEM = "fast-purchase-mvp";
 const MANUAL_SOURCE = "ops-center-internal-china-order-manual-add";
 const BARCODE = /^[A-Z]{3}\d+-\d+$/;
 const MANUAL_QUANTITY_MAX = 9_999;
-const RESULT_LIMIT = 30;
+const RESULT_LIMIT_PER_TERM = 30;
+const RESULT_LIMIT_MAX = 200;
+const SEARCH_TERM_LIMIT = 50;
 
 export type InternalChinaManualDraftCandidate = {
   barcode: string;
@@ -39,6 +41,21 @@ function integer(value: unknown) {
 
 function joinedLabels(values: unknown[]) {
   return [...new Set(values.map(text).filter(Boolean))].join(" / ");
+}
+
+export function parseManualDraftSearchTerms(value: unknown) {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const raw of text(value).split(/[,;\n\r]+/)) {
+    const term = text(raw);
+    if (term.length < 2) continue;
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+    if (terms.length >= SEARCH_TERM_LIMIT) break;
+  }
+  return terms;
 }
 
 function normalizeRequestId(value: unknown) {
@@ -97,12 +114,32 @@ function candidateScore(
   return 100;
 }
 
+function bestSearchMatch(
+  candidate: Pick<
+    InternalChinaManualDraftCandidate,
+    "barcode" | "modelNo" | "productName" | "optionName"
+  >,
+  terms: string[],
+) {
+  let termIndex = Number.POSITIVE_INFINITY;
+  let score = 100;
+  for (let index = 0; index < terms.length; index += 1) {
+    const currentScore = candidateScore(candidate, terms[index]);
+    if (currentScore >= 100) continue;
+    if (index < termIndex || (index === termIndex && currentScore < score)) {
+      termIndex = index;
+      score = currentScore;
+    }
+  }
+  return { termIndex, score };
+}
+
 export async function searchInternalChinaManualDraftCandidates(
   draftIdInput: unknown,
   queryInput: unknown,
 ): Promise<InternalChinaManualDraftCandidate[]> {
-  const query = text(queryInput);
-  if (query.length < 2) return [];
+  const terms = parseManualDraftSearchTerms(queryInput);
+  if (!terms.length) return [];
 
   const [draft, planning, ledger, tracker] = await Promise.all([
     loadInternalChinaPurchaseDraft(draftIdInput),
@@ -132,11 +169,17 @@ export async function searchInternalChinaManualDraftCandidates(
     );
   }
 
-  const candidates = new Map<string, InternalChinaManualDraftCandidate>();
+  const matched: Array<{
+    candidate: InternalChinaManualDraftCandidate;
+    termIndex: number;
+    score: number;
+  }> = [];
+  const seenBarcodes = new Set<string>();
+
   for (const product of planning.products) {
     if (product.skuActive === false) continue;
     const barcode = normalizeBarcode(product.barcode);
-    if (!BARCODE.test(barcode) || candidates.has(barcode)) continue;
+    if (!BARCODE.test(barcode) || seenBarcodes.has(barcode)) continue;
     const current = currentDraftByBarcode.get(barcode);
     const trackerRow = tracker.byBarcode.get(barcode);
     const candidate: InternalChinaManualDraftCandidate = {
@@ -149,18 +192,27 @@ export async function searchInternalChinaManualDraftCandidates(
       currentDraftQuantity: current?.quantity ?? 0,
       otherOpenQuantity: otherOpenByBarcode.get(barcode) ?? 0,
     };
-    if (candidateScore(candidate, query) >= 100) continue;
-    candidates.set(barcode, candidate);
+    const match = bestSearchMatch(candidate, terms);
+    if (!Number.isFinite(match.termIndex) || match.score >= 100) continue;
+    seenBarcodes.add(barcode);
+    matched.push({ candidate, ...match });
   }
 
-  return [...candidates.values()]
+  const resultLimit = Math.min(
+    RESULT_LIMIT_MAX,
+    Math.max(RESULT_LIMIT_PER_TERM, terms.length * RESULT_LIMIT_PER_TERM),
+  );
+
+  return matched
     .sort(
       (left, right) =>
-        candidateScore(left, query) - candidateScore(right, query) ||
-        left.modelNo.localeCompare(right.modelNo) ||
-        left.barcode.localeCompare(right.barcode),
+        left.termIndex - right.termIndex ||
+        left.score - right.score ||
+        left.candidate.modelNo.localeCompare(right.candidate.modelNo) ||
+        left.candidate.barcode.localeCompare(right.candidate.barcode),
     )
-    .slice(0, RESULT_LIMIT);
+    .slice(0, resultLimit)
+    .map((row) => row.candidate);
 }
 
 export async function addInternalChinaManualDraftLine(input: {
