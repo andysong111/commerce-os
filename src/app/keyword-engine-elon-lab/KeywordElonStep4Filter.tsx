@@ -29,7 +29,6 @@ type Step4Meta = KeywordElonStep4FilterResult & {
   updatedAt: string;
 };
 type ExtendedSession = KeywordElonLabSession & { step3?: Step3Meta; step4?: Step4Meta };
-type Readiness = { kiprisConfigured: boolean };
 
 const CATEGORY_LABEL: Record<KeywordElonStep4RiskCategory, string> = {
   trademark: "등록상표",
@@ -44,14 +43,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-async function requestLab<T extends ApiRecord>(
-  body?: Record<string, unknown>,
-  method: "GET" | "POST" = "POST",
-) {
+async function requestLab<T extends ApiRecord>(body: Record<string, unknown>) {
   const response = await fetch("/api/keyword-engine-elon-lab", {
-    method,
-    headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
-    body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
   const raw = await response.text();
@@ -157,18 +153,6 @@ function RemovedRow({ decision }: { decision: KeywordElonStep4Decision }) {
       <div className="mt-2 space-y-1 text-xs leading-5 text-slate-600">
         {decision.reasons.map((reason) => <div key={reason}>· {reason}</div>)}
       </div>
-      {decision.trademarkMatches.length ? (
-        <div className="mt-3 rounded-lg bg-rose-50 p-3 text-xs leading-5 text-rose-950">
-          {decision.trademarkMatches.slice(0, 5).map((match, index) => (
-            <div key={`${match.applicationNumber}-${match.registrationNumber}-${index}`}>
-              {match.trademarkName}
-              {match.registrationNumber ? ` · 등록 ${match.registrationNumber}` : ""}
-              {match.applicationNumber ? ` · 출원 ${match.applicationNumber}` : ""}
-              {match.status ? ` · ${match.status}` : ""}
-            </div>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -180,7 +164,6 @@ export default function KeywordElonStep4Filter() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [readiness, setReadiness] = useState<Readiness | null>(null);
 
   useEffect(() => {
     const customTermsTimer = window.setTimeout(() => {
@@ -204,20 +187,6 @@ export default function KeywordElonStep4Filter() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    requestLab<ApiRecord & Readiness>(undefined, "GET")
-      .then((result) => {
-        if (!cancelled) setReadiness({ kiprisConfigured: Boolean(result.kiprisConfigured) });
-      })
-      .catch(() => {
-        if (!cancelled) setReadiness(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const inputCandidates = useMemo(
     () => (session?.scoredCandidates ?? [])
       .filter((row) => row.safetyPass && row.qualityScore >= (session?.cutoff ?? 70))
@@ -234,13 +203,7 @@ export default function KeywordElonStep4Filter() {
     [inputCandidates, session?.cutoff, session?.step3?.round, customBlockedTerms],
   );
   const currentResult = session?.step4?.status === "done" ? session.step4 : null;
-  const resultStale = Boolean(
-    currentResult
-    && (
-      currentResult.inputFingerprint !== fingerprint
-      || (readiness !== null && currentResult.kiprisConfigured !== readiness.kiprisConfigured)
-    ),
-  );
+  const resultStale = Boolean(currentResult && currentResult.inputFingerprint !== fingerprint);
   const candidateByKey = useMemo(
     () => new Map(inputCandidates.map((row) => [compactKeywordElonKey(candidateKeyword(row)), row] as const)),
     [inputCandidates],
@@ -294,7 +257,7 @@ export default function KeywordElonStep4Filter() {
         removedKeys: [],
         decisions: [],
         aiConfigured: false,
-        kiprisConfigured: Boolean(readiness?.kiprisConfigured),
+        kiprisConfigured: false,
         kiprisCheckedCount: 0,
         kiprisMatchedCount: 0,
         warnings: [],
@@ -380,14 +343,12 @@ export default function KeywordElonStep4Filter() {
             <div className="text-xs font-black uppercase tracking-[0.16em] text-rose-700">STEP 4 · PROHIBITED KEYWORD GATE</div>
             <h2 className="mt-1 text-2xl font-black">최종 재료에서 위험·금지키워드 제거</h2>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              STEP 3까지 살아남은 키워드만 대상으로 등록상표, 의료기기, 임산부, 유아용품, 성인용품 위험어와 사용자 금지어를 제거한 뒤 상품명을 다시 조립합니다.
+              STEP 3까지 살아남은 키워드에서 의료기기, 임산부, 유아용품, 성인용품 위험어와 사용자가 직접 추가한 금지어를 제거한 뒤 상품명을 다시 조립합니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">입력 {inputCandidates.length}개</span>
-            <span className={`rounded-full px-3 py-1 ${readiness?.kiprisConfigured ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}>
-              KIPRIS {readiness?.kiprisConfigured ? "연결" : "인증키 필요"}
-            </span>
+            <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-700">KIPRIS 상표권 · 보류</span>
             <span className="rounded-full bg-rose-100 px-3 py-1 text-rose-800">기본 위험영역 4종</span>
             <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">사용자 금지어 {customBlockedTerms.length}개</span>
           </div>
@@ -423,8 +384,7 @@ export default function KeywordElonStep4Filter() {
         </div>
 
         <div className="mt-5 rounded-xl bg-white p-4 text-xs leading-6 text-slate-600">
-          자동 차단은 위험회피용 보수 필터입니다. KIPRIS는 등록상표명 완전일치만 자동 제거하며, 유사상표·상품류·권리범위에 대한 최종 법률판단을 대체하지 않습니다.
-          {!readiness?.kiprisConfigured ? " · 현재 KIPRIS 인증키가 없어 상표권 검사는 실행되지 않고 나머지 위험영역과 사용자 금지어만 검사합니다." : ""}
+          현재 자동 차단 대상은 의료기기·치료/진단, 임산부·임신/출산, 유아·영아/아동용품, 성인용품·성적 용도와 사용자 금지어입니다. KIPRIS 상표권 API 연결은 이번 버전에서 보류하며 호출하지 않습니다.
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -443,16 +403,15 @@ export default function KeywordElonStep4Filter() {
           <div className="mt-6 space-y-5">
             {resultStale ? (
               <div className="rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 text-sm font-black text-amber-950">
-                STEP 3 결과, 커트라인, 사용자 금지어 또는 KIPRIS 연결상태가 바뀌었습니다. 아래 결과는 이전 검사이며 STEP 4 재실행이 필요합니다.
+                STEP 3 결과, 커트라인 또는 사용자 금지어가 바뀌었습니다. 아래 결과는 이전 검사이며 STEP 4 재실행이 필요합니다.
               </div>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-slate-500">검사 재료</div><div className="mt-1 text-2xl font-black">{currentResult.inputCount}</div></div>
               <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-rose-600">자동 제거</div><div className="mt-1 text-2xl font-black text-rose-700">{currentResult.removedCount}</div></div>
               <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-emerald-600">최종 재료</div><div className="mt-1 text-2xl font-black text-emerald-700">{currentResult.allowedCount}</div></div>
-              <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-slate-500">KIPRIS 검사</div><div className="mt-1 text-2xl font-black">{currentResult.kiprisCheckedCount}</div></div>
-              <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-slate-500">등록상표 일치</div><div className="mt-1 text-2xl font-black">{currentResult.kiprisMatchedCount}</div></div>
+              <div className="rounded-xl bg-white p-4"><div className="text-xs font-bold text-violet-600">사용자 금지어</div><div className="mt-1 text-2xl font-black text-violet-700">{customBlockedTerms.length}</div></div>
             </div>
 
             {currentResult.titleResult ? (
