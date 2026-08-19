@@ -1,15 +1,16 @@
 import {
   compactKeywordElonKey,
   normalizeKeywordElonText,
-  uniqueKeywordElonTexts,
+  uniqueKeywordElonCanonical,
   type KeywordElonIdentity,
+  type KeywordElonMarketEvidence,
   type KeywordElonSourceDraft,
 } from "@/lib/keywordEngineElonLabV2";
 import { mineKeywordElonApiHubMarket } from "@/lib/keywordEngineElonLabV2ApiHub";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = "gpt-5-mini";
-const BRIDGE_TIMEOUT_MS = 32_000;
+const BRIDGE_TIMEOUT_MS = 28_000;
 
 type OpenAiPayload = {
   status?: unknown;
@@ -22,9 +23,11 @@ type OpenAiPayload = {
 export type KeywordElonMarketRecall = {
   bridgeSeeds: string[];
   marketTerms: string[];
+  evidenceTerms: KeywordElonMarketEvidence[];
   searchSeeds: string[];
   apiHubQueries: string[];
   apiHubDocumentCount: number;
+  apiHubActiveSources: string[];
   apiHubConfigured: boolean;
   warnings: string[];
   model: string;
@@ -44,26 +47,22 @@ function outputText(payload: OpenAiPayload) {
   if (direct) return direct;
   for (const item of payload.output ?? []) {
     for (const content of item.content ?? []) {
-      if (content.type === "output_text" && normalizeKeywordElonText(content.text)) {
-        return normalizeKeywordElonText(content.text);
-      }
+      if (content.type === "output_text" && normalizeKeywordElonText(content.text)) return normalizeKeywordElonText(content.text);
     }
   }
   return "";
 }
 
 function bridgeSchema() {
+  const list = { type: "array", minItems: 0, maxItems: 5, items: { type: "string", minLength: 2, maxLength: 24 } };
   return {
     type: "object",
     additionalProperties: false,
-    required: ["bridgeSeeds"],
+    required: ["productNames", "aliases", "needTerms"],
     properties: {
-      bridgeSeeds: {
-        type: "array",
-        minItems: 8,
-        maxItems: 20,
-        items: { type: "string", minLength: 2, maxLength: 24 },
-      },
+      productNames: list,
+      aliases: list,
+      needTerms: list,
     },
   };
 }
@@ -73,7 +72,7 @@ async function generateBridgeSeeds(source: KeywordElonSourceDraft, identity: Key
   const model = openAiModel();
   if (!apiKey) {
     return {
-      seeds: uniqueKeywordElonTexts([identity.coreProduct, ...identity.primarySeeds], 10),
+      seeds: uniqueKeywordElonCanonical([identity.coreProduct, ...identity.primarySeeds], 10),
       model,
       warning: "MARKET_BRIDGE_AI_NOT_CONFIGURED",
     };
@@ -88,20 +87,20 @@ async function generateBridgeSeeds(source: KeywordElonSourceDraft, identity: Key
       body: JSON.stringify({
         model,
         store: false,
-        max_output_tokens: 1_900,
+        max_output_tokens: 1_200,
         input: [
           {
             role: "system",
             content: [{
               type: "input_text",
               text: [
-                "당신은 한국 이커머스 시장어를 찾기 위한 Market Bridge Seed 생성기다.",
-                "1688 직역형 설명을 반복하지 말고 한국 소비자가 실제 검색창에서 짧게 쓸 법한 시장 언어로 건너가는 것이 목적이다.",
-                "1~3어절의 짧은 표현을 우선한다. 대표 상품명, 통용 별칭/속칭, 문제·욕구형 표현, 기능·형태의 짧은 시장명을 폭넓게 제안한다.",
-                "긴 설명문, 색상·규격·옵션코드, 광고문구는 제외한다.",
-                "브랜드·효능·재질·성별을 원본 근거 없이 발명하지 않는다.",
-                "같은 어근의 장문 조합을 반복하지 말고 서로 다른 시장 언어 축을 8~16개 정도 확보한다.",
-                "후속 단계에서 NAVER API HUB Search와 SearchAd가 실제 사용 흔적과 검색량을 검증하므로 recall을 우선한다.",
+                "당신은 한국 이커머스 Market Bridge 생성기다.",
+                "시장 키워드를 대량 발명하는 역할이 아니라 실제 시장 데이터 광산에 넣을 첫 삽만 만든다.",
+                "대표 상품명 최대 5개, 한국에서 통용될 수 있는 별칭/속칭 최대 5개, 소비자의 문제·욕구 표현 최대 5개만 반환한다.",
+                "각 표현은 1~3어절의 짧은 검색어여야 하며 제조사식 긴 설명문을 금지한다.",
+                "색상·규격·옵션코드·광고문구·브랜드·근거 없는 효능은 제외한다.",
+                "중국 원본과 상품 정체성에서 벗어난 다른 상품을 만들지 않는다.",
+                "후속 지식iN·카페·블로그 Evidence Miner가 실제 사용 증거를 검증하므로 다양성은 확보하되 최대 15개를 넘지 않는다.",
               ].join("\n"),
             }],
           },
@@ -126,7 +125,7 @@ async function generateBridgeSeeds(source: KeywordElonSourceDraft, identity: Key
         text: {
           format: {
             type: "json_schema",
-            name: "keyword_elon_market_bridge_v2",
+            name: "keyword_elon_market_bridge_v6",
             strict: true,
             schema: bridgeSchema(),
           },
@@ -137,63 +136,37 @@ async function generateBridgeSeeds(source: KeywordElonSourceDraft, identity: Key
     });
     const raw = await response.text();
     let payload: OpenAiPayload = {};
-    try {
-      payload = JSON.parse(raw) as OpenAiPayload;
-    } catch {
-      return { seeds: [] as string[], model, warning: "MARKET_BRIDGE_INVALID_JSON" };
-    }
-    if (!response.ok) {
-      return {
-        seeds: [] as string[],
-        model,
-        warning: `MARKET_BRIDGE_HTTP_${response.status}: ${normalizeKeywordElonText(payload.error?.message) || "OpenAI 요청 실패"}`,
-      };
-    }
-    if (normalizeKeywordElonText(payload.status) === "incomplete") {
-      return {
-        seeds: [] as string[],
-        model,
-        warning: `MARKET_BRIDGE_INCOMPLETE: ${normalizeKeywordElonText(payload.incomplete_details?.reason) || "unknown"}`,
-      };
-    }
+    try { payload = JSON.parse(raw) as OpenAiPayload; } catch { return { seeds: [] as string[], model, warning: "MARKET_BRIDGE_INVALID_JSON" }; }
+    if (!response.ok) return { seeds: [] as string[], model, warning: `MARKET_BRIDGE_HTTP_${response.status}: ${normalizeKeywordElonText(payload.error?.message) || "OpenAI 요청 실패"}` };
+    if (normalizeKeywordElonText(payload.status) === "incomplete") return { seeds: uniqueKeywordElonCanonical([identity.coreProduct, ...identity.primarySeeds], 10), model, warning: `MARKET_BRIDGE_INCOMPLETE: ${normalizeKeywordElonText(payload.incomplete_details?.reason) || "unknown"} · 기존 Seed로 계속 진행` };
     const text = outputText(payload);
-    if (!text) return { seeds: [] as string[], model, warning: "MARKET_BRIDGE_EMPTY_OUTPUT" };
+    if (!text) return { seeds: uniqueKeywordElonCanonical([identity.coreProduct, ...identity.primarySeeds], 10), model, warning: "MARKET_BRIDGE_EMPTY_OUTPUT" };
     let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return { seeds: [] as string[], model, warning: "MARKET_BRIDGE_OUTPUT_PARSE_FAILED" };
-    }
-    const seeds = uniqueKeywordElonTexts(
-      Array.isArray(parsed.bridgeSeeds) ? (parsed.bridgeSeeds as unknown[]) : [],
-      20,
-    ).filter((value) => {
-      const length = compactKeywordElonKey(value).length;
-      return length >= 2 && length <= 16;
-    });
+    try { parsed = JSON.parse(text) as Record<string, unknown>; } catch { return { seeds: uniqueKeywordElonCanonical([identity.coreProduct, ...identity.primarySeeds], 10), model, warning: "MARKET_BRIDGE_OUTPUT_PARSE_FAILED" }; }
+    const arrays = [parsed.productNames, parsed.aliases, parsed.needTerms].flatMap((value) => Array.isArray(value) ? value : []);
+    const seeds = uniqueKeywordElonCanonical(arrays, 15).filter((value) => value.length >= 2 && value.length <= 16);
     return { seeds, model, warning: "" };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Market Bridge 실패";
     const warning = error instanceof Error && error.name === "AbortError"
-      ? `MARKET_BRIDGE_TIMEOUT: ${BRIDGE_TIMEOUT_MS / 1000}초 내 응답 없음`
-      : `MARKET_BRIDGE_FAILED: ${message}`;
-    return { seeds: [] as string[], model, warning };
+      ? `MARKET_BRIDGE_TIMEOUT: ${BRIDGE_TIMEOUT_MS / 1000}초 내 응답 없음 · 기존 Seed로 계속 진행`
+      : `MARKET_BRIDGE_FAILED: ${error instanceof Error ? error.message : String(error)}`;
+    return { seeds: uniqueKeywordElonCanonical([identity.coreProduct, ...identity.primarySeeds], 10), model, warning };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function chooseSearchSeeds(identity: KeywordElonIdentity, bridgeSeeds: string[], marketTerms: string[]) {
-  const shortMarket = marketTerms.filter((term) => {
-    const length = compactKeywordElonKey(term).length;
-    return length >= 2 && length <= 12;
-  }).slice(0, 24);
-  return uniqueKeywordElonTexts([
-    ...shortMarket,
+function chooseSearchSeeds(identity: KeywordElonIdentity, bridgeSeeds: string[], evidenceTerms: KeywordElonMarketEvidence[]) {
+  const evidence = [...evidenceTerms]
+    .sort((a, b) => b.score - a.score || a.term.length - b.term.length)
+    .map((row) => row.term)
+    .filter((term) => term.length >= 2 && term.length <= 12);
+  return uniqueKeywordElonCanonical([
+    ...evidence,
     ...bridgeSeeds,
     identity.coreProduct,
     ...identity.primarySeeds,
-  ], 30).filter((value) => compactKeywordElonKey(value).length <= 16);
+  ], 30).filter((value) => value.length <= 16);
 }
 
 export async function buildKeywordElonMarketRecall(
@@ -201,22 +174,25 @@ export async function buildKeywordElonMarketRecall(
   identity: KeywordElonIdentity,
 ): Promise<KeywordElonMarketRecall> {
   const bridge = await generateBridgeSeeds(source, identity);
-  const bridgeSeeds = uniqueKeywordElonTexts([
+  const bridgeSeeds = uniqueKeywordElonCanonical([
     ...bridge.seeds,
     identity.coreProduct,
     ...identity.primarySeeds,
-  ], 20);
+  ], 18);
   const apiHub = await mineKeywordElonApiHubMarket(identity, bridgeSeeds);
-  const marketTerms = apiHub.terms.map((row) => row.term);
+  const evidenceTerms = apiHub.terms;
+  const marketTerms = evidenceTerms.map((row) => row.term);
   const warnings = [bridge.warning, ...apiHub.warnings].filter(Boolean);
   return {
     bridgeSeeds,
     marketTerms,
-    searchSeeds: chooseSearchSeeds(identity, bridgeSeeds, marketTerms),
+    evidenceTerms,
+    searchSeeds: chooseSearchSeeds(identity, bridgeSeeds, evidenceTerms),
     apiHubQueries: apiHub.queries,
     apiHubDocumentCount: apiHub.documents.length,
+    apiHubActiveSources: apiHub.activeSources,
     apiHubConfigured: apiHub.configured,
-    warnings: [...new Set(warnings)].slice(0, 16),
+    warnings: [...new Set(warnings)].slice(0, 24),
     model: bridge.model,
   };
 }

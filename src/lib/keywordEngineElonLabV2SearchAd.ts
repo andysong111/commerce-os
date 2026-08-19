@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import {
   compactKeywordElonKey,
   normalizeKeywordElonText,
-  uniqueKeywordElonTexts,
+  uniqueKeywordElonCanonical,
   type KeywordElonSearchAdStat,
 } from "@/lib/keywordEngineElonLabV2";
 
@@ -34,24 +34,17 @@ function numberOrNull(value: unknown) {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
-function totalCount(pc: number | null, mobile: number | null) {
-  return pc === null && mobile === null ? null : (pc ?? 0) + (mobile ?? 0);
-}
+function totalCount(pc: number | null, mobile: number | null) { return pc === null && mobile === null ? null : (pc ?? 0) + (mobile ?? 0); }
 function safeErrorBody(raw: string, status: number) {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return JSON.stringify({
-      status,
-      type: normalizeKeywordElonText(parsed.type),
-      title: normalizeKeywordElonText(parsed.title),
-      detail: normalizeKeywordElonText(parsed.detail),
-    });
+    return JSON.stringify({ status, type: normalizeKeywordElonText(parsed.type), title: normalizeKeywordElonText(parsed.title), detail: normalizeKeywordElonText(parsed.detail) });
   } catch {
     return raw.replace(/"?apikey"?\s*:\s*"[^"]+"/gi, '"apikey":"[REDACTED]"').replace(/\s+/g, " ").slice(0, 180);
   }
 }
 function parseRow(item: Record<string, unknown>, sourceSeed: string): KeywordElonSearchAdStat | null {
-  const relKeyword = normalizeKeywordElonText(item.relKeyword);
+  const relKeyword = compactKeywordElonKey(item.relKeyword);
   if (!relKeyword) return null;
   const pcSearch = numberOrNull(item.monthlyPcQcCnt);
   const mobileSearch = numberOrNull(item.monthlyMobileQcCnt);
@@ -67,7 +60,7 @@ function parseRow(item: Record<string, unknown>, sourceSeed: string): KeywordElo
     monthlyAveMobileClicks: numberOrNull(item.monthlyAveMobileClkCnt),
     monthlyAvePcCtr: numberOrNull(item.monthlyAvePcCtr),
     monthlyAveMobileCtr: numberOrNull(item.monthlyAveMobileCtr),
-    sourceSeeds: [sourceSeed],
+    sourceSeeds: [compactKeywordElonKey(sourceSeed)],
   };
 }
 
@@ -86,9 +79,7 @@ async function fetchSeedOnce(seed: string): Promise<FetchSeedResult> {
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const hint = compactKeywordElonKey(seed);
-    const response = await fetch(`${BASE_URL}${KEYWORDSTOOL_URI}?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`, {
-      headers, signal: controller.signal, cache: "no-store",
-    });
+    const response = await fetch(`${BASE_URL}${KEYWORDSTOOL_URI}?hintKeywords=${encodeURIComponent(hint)}&showDetail=1`, { headers, signal: controller.signal, cache: "no-store" });
     const raw = await response.text();
     if (!response.ok) return { ok: false, rows: [], warning: `SEARCHAD_HTTP_${response.status}:${safeErrorBody(raw, response.status)}`, rateLimited: response.status === 429 };
     let payload: unknown;
@@ -96,7 +87,7 @@ async function fetchSeedOnce(seed: string): Promise<FetchSeedResult> {
     const keywordList = payload && typeof payload === "object" && Array.isArray((payload as { keywordList?: unknown[] }).keywordList)
       ? (payload as { keywordList: unknown[] }).keywordList : [];
     const rows = keywordList.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
-      .map((item) => parseRow(item, seed)).filter((item): item is KeywordElonSearchAdStat => Boolean(item));
+      .map((item) => parseRow(item, hint)).filter((item): item is KeywordElonSearchAdStat => Boolean(item));
     return { ok: true, rows, warning: "", rateLimited: false };
   } catch (error) {
     return { ok: false, rows: [], warning: error instanceof Error ? error.message : "SEARCHAD_REQUEST_FAILED", rateLimited: false };
@@ -114,11 +105,11 @@ function mergeStat(map: Map<string, KeywordElonSearchAdStat>, row: KeywordElonSe
   const key = compactKeywordElonKey(row.keyword);
   if (!key) return;
   const existing = map.get(key);
-  if (!existing) { map.set(key, row); return; }
-  const sourceSeeds = [...new Set([...existing.sourceSeeds, ...row.sourceSeeds])];
+  if (!existing) { map.set(key, { ...row, keyword: key, relKeyword: key }); return; }
+  const sourceSeeds = [...new Set([...existing.sourceSeeds, ...row.sourceSeeds].map(compactKeywordElonKey).filter(Boolean))];
   const existingDemand = existing.totalSearch ?? -1;
   const newDemand = row.totalSearch ?? -1;
-  map.set(key, { ...(newDemand > existingDemand ? row : existing), sourceSeeds });
+  map.set(key, { ...(newDemand > existingDemand ? row : existing), keyword: key, relKeyword: key, sourceSeeds });
 }
 function chooseDemandExpansionSeeds(rows: KeywordElonSearchAdStat[], initialSeeds: string[]) {
   const initialKeys = new Set(initialSeeds.map(compactKeywordElonKey));
@@ -128,7 +119,7 @@ function chooseDemandExpansionSeeds(rows: KeywordElonSearchAdStat[], initialSeed
     if ((row.totalSearch ?? 0) < DEMAND_EXPANSION_MIN_SEARCH) continue;
     const key = compactKeywordElonKey(row.keyword);
     if (!key || initialKeys.has(key) || seen.has(key)) continue;
-    seen.add(key); result.push(row.keyword);
+    seen.add(key); result.push(key);
     if (result.length >= DEMAND_EXPANSION_SEED_LIMIT) break;
   }
   return result;
@@ -137,7 +128,7 @@ function chooseDemandExpansionSeeds(rows: KeywordElonSearchAdStat[], initialSeed
 export async function discoverKeywordElonSearchAd(seeds: string[]) {
   const credentials = env();
   if (!credentials.configured) return { configured: false, rows: [] as KeywordElonSearchAdStat[], warnings: ["NAVER SearchAd 자격증명이 없어 검색량·경쟁 데이터는 이번 실행에서 제외됩니다."], expansionSeeds: [] as string[], explorationDepth: 1 };
-  const normalizedSeeds = [...new Set(seeds.map(normalizeKeywordElonText).filter(Boolean))].slice(0, INITIAL_SEED_LIMIT);
+  const normalizedSeeds = uniqueKeywordElonCanonical(seeds, INITIAL_SEED_LIMIT);
   const map = new Map<string, KeywordElonSearchAdStat>();
   const warnings: string[] = [];
   let callCount = 0;
@@ -149,7 +140,6 @@ export async function discoverKeywordElonSearchAd(seeds: string[]) {
     if (!result.ok && result.warning) warnings.push(result.warning);
     for (const row of result.rows) mergeStat(map, row);
     if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) rateLimitStop = true;
-    return result;
   };
   for (const seed of normalizedSeeds) { await fetchPaced(seed); if (rateLimitStop) break; }
   const depthOneRows = [...map.values()];
@@ -170,20 +160,16 @@ export async function enrichKeywordElonSearchAdDemand(keywords: string[], existi
   for (const row of existingRows) mergeStat(map, row);
   if (!credentials.configured) return { rows: [...map.values()], warnings: ["SEARCHAD_DEMAND_ENRICH_NOT_CONFIGURED"], requested: [] as string[], exactMatched: [] as string[] };
   const existingKeys = new Set([...map.values()].filter((row) => row.totalSearch !== null && row.totalSearch !== undefined).map((row) => compactKeywordElonKey(row.keyword)));
-  const targets = uniqueKeywordElonTexts(keywords, 120).filter((keyword) => {
-    const key = compactKeywordElonKey(keyword);
-    return key.length >= 2 && key.length <= 20 && !existingKeys.has(key);
-  }).slice(0, DEMAND_ENRICH_LIMIT);
+  const targets = uniqueKeywordElonCanonical(keywords, 120).filter((keyword) => keyword.length >= 2 && keyword.length <= 20 && !existingKeys.has(keyword)).slice(0, DEMAND_ENRICH_LIMIT);
   const warnings: string[] = [];
   const exactMatched: string[] = [];
   for (let index = 0; index < targets.length; index += 1) {
     if (index > 0) await sleep(REQUEST_INTERVAL_MS);
     const target = targets[index];
-    const targetKey = compactKeywordElonKey(target);
     const result = await fetchSeedWithRateLimitRecovery(target);
     if (!result.ok && result.warning) warnings.push(result.warning);
     for (const row of result.rows) mergeStat(map, row);
-    if (result.rows.some((row) => compactKeywordElonKey(row.keyword) === targetKey && row.totalSearch !== null)) exactMatched.push(target);
+    if (result.rows.some((row) => compactKeywordElonKey(row.keyword) === target && row.totalSearch !== null)) exactMatched.push(target);
     if (result.warning.startsWith("SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED")) break;
   }
   return {

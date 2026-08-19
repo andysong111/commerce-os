@@ -11,6 +11,7 @@ const apiHub = await readFile("src/lib/keywordEngineElonLabV2ApiHub.ts", "utf8")
 const discovery = await readFile("src/lib/keywordEngineElonLabV2Discovery.ts", "utf8");
 const marketRecall = await readFile("src/lib/keywordEngineElonLabV2MarketRecall.ts", "utf8");
 const demandEnrichment = await readFile("src/lib/keywordEngineElonLabV2DemandEnrichment.ts", "utf8");
+const trend = await readFile("src/lib/keywordEngineElonLabV2Trend.ts", "utf8");
 const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
 const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
@@ -53,81 +54,96 @@ test("identity analysis still uses only 1688 source truth", () => {
   assert.match(server, /1688 중국 원본 상품명·옵션·보조텍스트만 근거/);
 });
 
-test("NAVER API HUB is the V5 market-language mine", () => {
+test("NAVER API HUB V6 is an evidence market mine", () => {
   assert.match(apiHub, /NAVER_API_HUB_CLIENT_ID/);
   assert.match(apiHub, /NAVER_API_HUB_CLIENT_SECRET/);
   assert.match(apiHub, /X-NCP-APIGW-API-KEY-ID/);
   assert.match(apiHub, /X-NCP-APIGW-API-KEY/);
-  assert.match(apiHub, /\/search\/v1\/blog/);
+  assert.match(apiHub, /\/search\/v1\/kin/);
   assert.match(apiHub, /\/search\/v1\/cafearticle/);
+  assert.match(apiHub, /\/search\/v1\/blog/);
   assert.match(apiHub, /\/search\/v1\/webkr/);
-  assert.match(apiHub, /rankTerms/);
-  assert.match(apiHub, /sourceCount/);
-  assert.match(apiHub, /documentCount/);
+  assert.match(apiHub, /Evidence Miner/);
+  assert.match(apiHub, /evidenceIds/);
+  assert.match(apiHub, /extractEvidenceTerms/);
+  assert.match(apiHub, /activeSources/);
+  assert.match(apiHub, /PERMISSION_REQUIRED/);
   assert.doesNotMatch(marketRecall, /openapi\.naver\.com\/v1\/search\/shop\.json/);
-  assert.doesNotMatch(marketRecall, /NAVER_SEARCH_CLIENT_ID|NAVER_SEARCH_CLIENT_SECRET/);
 });
 
-test("Market Bridge is generic and feeds API HUB before SearchAd", () => {
-  assert.match(marketRecall, /Market Bridge Seed 생성기/);
-  assert.doesNotMatch(marketRecall, /코집게·코교정기·코높이기·콧대높이기·코뽕/);
-  assert.match(marketRecall, /mineKeywordElonApiHubMarket/);
-  assert.match(marketRecall, /apiHubDocumentCount/);
-  assert.match(discovery, /observedApiHubMarketTerms/);
-  assert.match(discovery, /api_hub_market_term/);
-  assert.match(discovery, /MARKET_RECALL_V5_SUMMARY/);
+test("Market Bridge is capped and evidence terms feed SearchAd first", () => {
+  assert.match(marketRecall, /대표 상품명 최대 5개/);
+  assert.match(marketRecall, /통용될 수 있는 별칭\/속칭 최대 5개/);
+  assert.match(marketRecall, /문제·욕구 표현 최대 5개/);
+  assert.match(marketRecall, /uniqueKeywordElonCanonical/);
+  assert.match(marketRecall, /evidenceTerms/);
+  assert.match(discovery, /market\.marketTerms/);
+  assert.match(discovery, /api_hub_evidence_term/);
+  assert.match(discovery, /MARKET_RECALL_V6_SUMMARY/);
   assert.match(discovery, /discoverKeywordElonSearchAd\(searchAdSeeds\)/);
-  assert.match(discovery, /marketRecallVersion: "v5"/);
+  assert.match(discovery, /marketRecallVersion: "v6"/);
+  assert.match(discovery, /maxItems: 24/);
+  assert.doesNotMatch(discovery, /35~60개/);
 });
 
-test("SearchAd expands more market seeds while preserving rate-limit protection", () => {
+test("SearchAd is canonical demand measurement with rate-limit protection", () => {
   assert.match(searchAd, /REQUEST_INTERVAL_MS = 1_800/);
   assert.match(searchAd, /RATE_LIMIT_BACKOFF_MS = 6_500/);
   assert.match(searchAd, /INITIAL_SEED_LIMIT = 10/);
   assert.match(searchAd, /DEMAND_EXPANSION_SEED_LIMIT = 4/);
   assert.match(searchAd, /DEMAND_EXPANSION_MIN_SEARCH = 20/);
   assert.match(searchAd, /DEMAND_ENRICH_LIMIT = 12/);
+  assert.match(searchAd, /uniqueKeywordElonCanonical/);
+  assert.match(searchAd, /relKeyword = compactKeywordElonKey/);
   assert.match(searchAd, /fetchSeedWithRateLimitRecovery/);
-  assert.match(searchAd, /enrichKeywordElonSearchAdDemand/);
   assert.match(searchAd, /SEARCHAD_RATE_LIMIT_COOLDOWN_REQUIRED/);
   assert.match(searchAd, /\[REDACTED\]/);
 });
 
-test("demand enrichment prefers short API HUB and market terms", () => {
+test("demand enrichment prefers evidence terms and adds Search Trend", () => {
   assert.match(route, /action === "enrich_demand"/);
-  assert.match(demandEnrichment, /api_hub_market_term/);
+  assert.match(demandEnrichment, /api_hub_evidence_term/);
   assert.match(demandEnrichment, /market_bridge_seed/);
   assert.match(demandEnrichment, /sourcePriority/);
-  assert.match(demandEnrichment, /compactKeywordElonKey\(a\.keyword\)\.length/);
-  assert.match(demandEnrichment, /DEMAND_ENRICH_V5_SUMMARY/);
+  assert.match(demandEnrichment, /DEMAND_ENRICH_V6_SUMMARY/);
+  assert.match(demandEnrichment, /enrichKeywordElonSearchTrend/);
+  assert.match(trend, /\/search-trend\/v1\/search/);
+  assert.match(trend, /keywordGroups/);
+  assert.match(trend, /SEARCH_TREND_PERMISSION_REQUIRED/);
+  assert.match(trend, /TREND_KEYWORD_LIMIT = 5/);
 });
 
-test("AI scoring remains adaptive demand-first and canonical search keys are available", () => {
+test("AI scoring remains adaptive demand-first and canonical search keys are enforced", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /OPENAI_TIMEOUT_MS = 42_000/);
   assert.match(scoring, /SCORE_CHUNK_SIZE = 12/);
   assert.match(scoring, /calculateKeywordElonQuality/);
+  assert.match(scoring, /uniqueKeywordElonCanonical/);
+  assert.match(scoring, /searchKeyword: key/);
   assert.match(domain, /KEYWORD_ELON_V2_RELEVANCE_GATE = 80/);
   assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
   assert.match(domain, /demandScore\*0\.55|demandScore \* 0\.55/);
-  assert.match(domain, /keywordElonSearchKeyword/);
-  assert.match(domain, /searchKeyword\?: string/);
+  assert.match(domain, /uniqueKeywordElonCanonical/);
+  assert.match(domain, /trendScore\?: number/);
 });
 
-test("V5 diagnostic UI exposes API HUB market mine and no-space demand TOP", () => {
-  assert.match(demandSummary, /MARKET RECALL V5/);
-  assert.match(demandSummary, /API HUB 시장어 광산/);
-  assert.match(demandSummary, /API HUB 반복 시장어/);
-  assert.match(demandSummary, /apiHubDocumentCount/);
-  assert.match(demandSummary, /NAVER_API_HUB_CLIENT_ID/);
-  assert.match(demandSummary, /월검색량 TOP · 검색용 no-space/);
+test("V6 diagnostic UI exposes evidence mine, permissions, trend and canonical keywords", () => {
+  assert.match(demandSummary, /MARKET RECALL V6/);
+  assert.match(demandSummary, /Evidence Market Mine/);
+  assert.match(demandSummary, /API HUB Evidence 시장어/);
+  assert.match(demandSummary, /apiHubActiveSources/);
+  assert.match(demandSummary, /PERMISSION_REQUIRED/);
+  assert.match(demandSummary, /Search Trend/);
+  assert.match(demandSummary, /월검색량 TOP · canonical no-space/);
   assert.match(demandSummary, /row\.searchKeyword \|\| row\.searchKey/);
 });
 
-test("route exposes API HUB readiness and errors remain diagnosable", () => {
+test("route exposes V6 readiness and errors remain diagnosable", () => {
   assert.match(route, /apiHubConfigured/);
-  assert.match(route, /version: 5/);
+  assert.match(route, /searchTrendConfigured/);
+  assert.match(route, /version: 6/);
+  assert.match(route, /marketRecall: "evidence-first"/);
   assert.match(route, /errorStage/);
   assert.match(page, /STEP 2 실행 오류 · 상세 진단/);
   assert.match(page, /서버가 JSON이 아닌 응답을 반환했습니다/);
