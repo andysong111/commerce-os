@@ -7,6 +7,10 @@ import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonL
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
 import { expandKeywordElonFromPassing } from "@/lib/keywordEngineElonLabV2Step3";
+import {
+  filterKeywordElonProhibitedKeywords,
+  keywordElonKiprisConfigured,
+} from "@/lib/keywordEngineElonLabV2Step4";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,11 +48,13 @@ function readiness() {
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
     apiHubConfigured: keywordElonApiHubConfigured(),
     searchTrendConfigured: keywordElonApiHubConfigured(),
+    kiprisConfigured: keywordElonKiprisConfigured(),
     step3ExpansionAvailable: true,
+    step4FilterAvailable: true,
   };
 }
 
-export async function GET() { return NextResponse.json({ ok: true, version: 6, marketRecall: "evidence-first", ...readiness() }); }
+export async function GET() { return NextResponse.json({ ok: true, version: 7, marketRecall: "evidence-first", ...readiness() }); }
 export async function POST(request: NextRequest) {
   let action = "request";
   try {
@@ -81,6 +87,14 @@ export async function POST(request: NextRequest) {
     if (action === "enrich_demand") {
       const result = await enrichKeywordElonDemand({ candidates: candidatesFrom(body.candidates), discovery: discoveryFrom(body.discovery) });
       return NextResponse.json({ ok: true, action, ...result });
+    }
+    if (action === "filter_prohibited_keywords") {
+      const result = await filterKeywordElonProhibitedKeywords({
+        identity: identityFrom(body.identity),
+        candidates: candidatesFrom(body.candidates),
+        customBlockedTerms: textArray(body.customBlockedTerms, 120),
+      });
+      return NextResponse.json({ ok: true, action, result });
     }
     if (action === "generate_title") {
       const cutoff = Math.max(0, Math.min(100, Number(body.cutoff) || 70));
