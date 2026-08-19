@@ -30,7 +30,7 @@ test("internal China draft starts from the existing fast-purchase RESERVED ledge
   assert.match(engine, /FAST_PURCHASE_RESERVED/);
 });
 
-test("B-code metadata is reused from Product Master tracker and live Shopling model names", () => {
+test("B-code metadata is reused from tracker, Product Master, and live Shopling fallback", () => {
   assert.match(engine, /loadProductPlanningSnapshot/);
   assert.match(engine, /loadProductLaunchPurchaseMetadataByBarcode/);
   assert.match(engine, /loadShoplingCurrentModelSnapshot/);
@@ -38,6 +38,33 @@ test("B-code metadata is reused from Product Master tracker and live Shopling mo
   assert.match(engine, /trackerUsable\?\.chinaOption/);
   assert.match(engine, /trackerUsable\?\.supplierLink/);
   assert.match(engine, /live\?\.modelName/);
+});
+
+test("internal China draft prefers canonical identity over legacy Shopling labels", () => {
+  const identityBlock =
+    engine.match(/const trackerUsable =[^;]+;[\s\S]*?saleOption:/)?.[0] ?? "";
+
+  const trackerModelNo = identityBlock.indexOf("trackerUsable?.modelNumber");
+  const profileModelNo = identityBlock.indexOf("profile?.modelNo");
+  const liveModelNo = identityBlock.indexOf("live?.modelNo");
+  assert.ok(trackerModelNo >= 0 && profileModelNo >= 0 && liveModelNo >= 0);
+  assert.ok(
+    trackerModelNo < profileModelNo && profileModelNo < liveModelNo,
+    "tracker and Product Master model numbers must win over Shopling fallback",
+  );
+
+  const trackerProductName = identityBlock.indexOf("trackerUsable?.productName");
+  const profileProductName = identityBlock.indexOf("profile?.productName");
+  const liveModelName = identityBlock.indexOf("live?.modelName");
+  assert.ok(
+    trackerProductName >= 0 && profileProductName >= 0 && liveModelName >= 0,
+  );
+  assert.ok(
+    trackerProductName < profileProductName && profileProductName < liveModelName,
+    "tracker and Product Master names must win over Shopling fallback",
+  );
+  assert.match(identityBlock, /productName: modelName/);
+  assert.doesNotMatch(identityBlock, /modelName: live\?\.modelName/);
 });
 
 test("product launch metadata uses the model product-level fixed first China link for every B-code", () => {
