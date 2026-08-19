@@ -54,7 +54,7 @@ function readiness() {
   };
 }
 
-export async function GET() { return NextResponse.json({ ok: true, version: 7, marketRecall: "evidence-first", ...readiness() }); }
+export async function GET() { return NextResponse.json({ ok: true, version: 6, marketRecall: "evidence-first", ...readiness() }); }
 export async function POST(request: NextRequest) {
   let action = "request";
   try {
