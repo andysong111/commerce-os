@@ -5,6 +5,7 @@ import {
   buildProductMasterSnapshotFromTrackerState,
   inferUnitsPerOrder,
 } from "../src/lib/productMasterSync.ts";
+import { buildCanonicalProductMasterSnapshot } from "../src/lib/productMasterCanonicalSync.ts";
 
 test("converts launch tracker products, SKU barcodes and Shopling mappings", () => {
   const result = buildProductMasterSnapshotFromTrackerState({
@@ -77,6 +78,50 @@ test("does not mistake dimensions for bundle quantities", () => {
   assert.equal(inferUnitsPerOrder("단품"), 1);
 });
 
+test("allows explicitly approved shared physical B-codes and blocks unapproved conflicts", () => {
+  const items = [
+    {
+      id: "item-a",
+      modelNumber: "AAA001",
+      productName: "과거 판매명 A",
+      orderOptions: [
+        { id: "option-a", barcode: "BAA1-1", saleOption: "랜덤" },
+      ],
+    },
+    {
+      id: "item-b",
+      modelNumber: "AAA002",
+      productName: "과거 판매명 B",
+      orderOptions: [
+        { id: "option-b", barcode: "BAA1-1", saleOption: "현재 실물" },
+      ],
+    },
+  ];
+
+  assert.throws(
+    () => buildCanonicalProductMasterSnapshot({ items }),
+    /TRACKER_BARCODE_CONFLICT:BAA1-1/,
+  );
+
+  const result = buildCanonicalProductMasterSnapshot({
+    skuIdentityPolicy: {
+      sharedBarcodes: {
+        "BAA1-1": {
+          identity: "approved-physical-sku-1",
+          classification: "A",
+        },
+      },
+    },
+    items,
+  });
+
+  assert.equal(result.payload.skus.length, 1);
+  assert.equal(
+    result.payload.skus[0].sourceSkuKey,
+    "shared-physical:approved-physical-sku-1",
+  );
+});
+
 test("exposes a guarded canonical sync control and redirects the legacy page", async () => {
   const [endpoint, canonical, button, page, legacy] = await Promise.all([
     readFile(
@@ -108,6 +153,7 @@ test("exposes a guarded canonical sync control and redirects the legacy page", a
   assert.match(endpoint, /readProductLaunchState/);
   assert.match(endpoint, /pushCanonicalProductMasterSnapshotFromTrackerState/);
   assert.match(canonical, /sourceSkuKey/);
+  assert.match(canonical, /sharedBarcodes/);
   assert.match(canonical, /sku-source:/);
   assert.match(canonical, /api\/integrations\/canonical-snapshot/);
   assert.match(canonical, /TRACKER_BARCODE_CONFLICT/);
