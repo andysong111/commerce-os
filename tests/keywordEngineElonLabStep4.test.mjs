@@ -39,10 +39,20 @@ test("STEP 4 has deterministic and AI-assisted risk categories", () => {
   assert.match(filter, /decision\.searchKey\.includes\(term\)/);
 });
 
+test("STEP 4 semantic review processes every candidate in bounded batches", () => {
+  assert.match(filter, /const AI_RISK_BATCH_SIZE = 60/);
+  assert.match(filter, /index < keywords\.length; index \+= AI_RISK_BATCH_SIZE/);
+  assert.match(filter, /keywords\.slice\(index, index \+ AI_RISK_BATCH_SIZE\)/);
+  assert.match(filter, /MISSING_DECISIONS/);
+  assert.match(filter, /입력된 모든 키워드에 대해 정확히 한 개의 decision/);
+});
+
 test("KIPRIS integration is optional, server-only, exact, and fail-open", () => {
   assert.match(filter, /KIPRISPLUS_ACCESS_KEY/);
   assert.match(filter, /KIPRIS_ACCESS_KEY/);
   assert.match(filter, /KIPRISPLUS_TRADEMARK_ENDPOINT/);
+  assert.match(filter, /trademarkInfoSearchService\/getWordSearch/);
+  assert.match(filter, /searchString/);
   assert.match(filter, /accessKey/);
   assert.match(filter, /compactKeywordElonKey\(trademarkName\) === keywordKey/);
   assert.match(filter, /clearlyInactiveTrademark/);
