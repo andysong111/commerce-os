@@ -122,11 +122,15 @@ export async function loadMonthlyDraftDisplayMetadata(barcodes: string[]) {
     byBarcode[code] = {
       barcode: code,
       modelNo:
-        live?.modelNo ||
-        normalizedModelNo(trackerRow?.modelNumber) ||
+        normalizedModelNo(trackerUsable?.modelNumber) ||
         normalizedModelNo(profile?.modelNo) ||
+        normalizedModelNo(live?.modelNo) ||
         "",
-      modelName: live?.modelName || "",
+      modelName:
+        text(trackerUsable?.productName) ||
+        text(profile?.productName) ||
+        text(live?.modelName) ||
+        "",
       saleOption:
         text(trackerUsable?.saleOption) || text(profile?.optionName) || "",
     };
