@@ -39,10 +39,11 @@ function readiness() {
     openAiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
     apiHubConfigured: keywordElonApiHubConfigured(),
+    searchTrendConfigured: keywordElonApiHubConfigured(),
   };
 }
 
-export async function GET() { return NextResponse.json({ ok: true, version: 5, ...readiness() }); }
+export async function GET() { return NextResponse.json({ ok: true, version: 6, marketRecall: "evidence-first", ...readiness() }); }
 export async function POST(request: NextRequest) {
   let action = "request";
   try {
