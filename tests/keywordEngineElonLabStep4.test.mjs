@@ -17,17 +17,18 @@ test("STEP 4 is mounted only after STEP 3 final material summary", () => {
   assert.match(component, /row\.safetyPass && row\.qualityScore >=/);
 });
 
-test("STEP 4 route exposes readiness and prohibited-keyword action", () => {
+test("STEP 4 route exposes prohibited-keyword action while KIPRIS is paused", () => {
   assert.match(route, /filterKeywordElonProhibitedKeywords/);
-  assert.match(route, /keywordElonKiprisConfigured/);
   assert.match(route, /step4FilterAvailable: true/);
-  assert.match(route, /kiprisConfigured: keywordElonKiprisConfigured\(\)/);
+  assert.match(route, /kiprisConfigured: false/);
+  assert.match(route, /oneClickToStep4Available: true/);
   assert.match(route, /action === "filter_prohibited_keywords"/);
   assert.match(route, /customBlockedTerms: textArray\(body\.customBlockedTerms, 120\)/);
+  assert.doesNotMatch(route, /keywordElonKiprisConfigured/);
 });
 
 test("STEP 4 has deterministic and AI-assisted risk categories", () => {
-  for (const category of ["medical_device", "pregnancy", "baby", "adult", "custom", "trademark"]) {
+  for (const category of ["medical_device", "pregnancy", "baby", "adult", "custom"]) {
     assert.match(filter, new RegExp(`\\"${category}\\"`));
   }
   for (const marker of ["의료기기", "임산부", "신생아", "성인용품"]) {
@@ -47,19 +48,14 @@ test("STEP 4 semantic review processes every candidate in bounded batches", () =
   assert.match(filter, /입력된 모든 키워드에 대해 정확히 한 개의 decision/);
 });
 
-test("KIPRIS integration is optional, server-only, exact, and fail-open", () => {
-  assert.match(filter, /KIPRISPLUS_ACCESS_KEY/);
-  assert.match(filter, /KIPRIS_ACCESS_KEY/);
-  assert.match(filter, /KIPRISPLUS_TRADEMARK_ENDPOINT/);
-  assert.match(filter, /trademarkInfoSearchService\/getWordSearch/);
-  assert.match(filter, /searchString/);
-  assert.match(filter, /"title", "trademarkName"/);
-  assert.match(filter, /accessKey/);
-  assert.match(filter, /compactKeywordElonKey\(trademarkName\) === keywordKey/);
-  assert.match(filter, /clearlyInactiveTrademark/);
-  assert.match(filter, /KIPRIS_NOT_CONFIGURED/);
-  assert.match(filter, /KIPRIS_CHECK_LIMIT/);
-  assert.doesNotMatch(component, /KIPRISPLUS_ACCESS_KEY|KIPRIS_ACCESS_KEY/);
+test("KIPRIS is explicitly paused and never called in the current STEP 4", () => {
+  assert.match(filter, /export function keywordElonKiprisConfigured\(\) \{\s*return false;/);
+  assert.match(filter, /kiprisConfigured: false/);
+  assert.match(filter, /kiprisCheckedCount: 0/);
+  assert.match(filter, /kiprisMatchedCount: 0/);
+  assert.doesNotMatch(filter, /KIPRISPLUS_ACCESS_KEY|KIPRIS_ACCESS_KEY|trademarkInfoSearchService\/getWordSearch|fetchKipris|checkKiprisTrademark/);
+  assert.match(component, /KIPRIS 상표권 · 보류/);
+  assert.match(component, /KIPRIS 상표권 API 연결은 이번 버전에서 보류하며 호출하지 않습니다/);
 });
 
 test("user blocked keywords persist and filtered candidates regenerate the title", () => {
