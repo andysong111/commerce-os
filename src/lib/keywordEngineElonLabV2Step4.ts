@@ -379,7 +379,7 @@ function parseKiprisMatches(xml: string, keyword: string) {
 
   for (const block of itemBlocks) {
     const trademarkName = xmlField(block, [
-      "trademarkName", "trademarkNameName", "markName", "titleName", "trademarkNameKor", "trademarkNameEng",
+      "title", "trademarkName", "trademarkNameName", "markName", "titleName", "trademarkNameKor", "trademarkNameEng",
     ]);
     const applicationNumber = xmlField(block, ["applicationNumber", "applicationNo", "appNumber"]);
     const registrationNumber = xmlField(block, [
