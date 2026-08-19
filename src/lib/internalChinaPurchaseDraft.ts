@@ -329,15 +329,19 @@ async function buildBaseDraft(
       const live = liveByBarcode.get(barcode);
       const trackerUsable = trackerRow && !trackerRow.conflict ? trackerRow : null;
       const modelNo =
-        live?.modelNo ||
-        normalizedModelNo(trackerRow?.modelNumber, "") ||
-        normalizedModelNo(profile?.modelNo, barcode);
+        normalizedModelNo(trackerUsable?.modelNumber, "") ||
+        normalizedModelNo(profile?.modelNo, "") ||
+        normalizedModelNo(live?.modelNo, barcode);
+      const modelName =
+        text(trackerUsable?.productName) ||
+        text(profile?.productName) ||
+        text(live?.modelName) ||
+        barcode;
       return {
         barcode,
         modelNo,
-        modelName: live?.modelName || "",
-        productName:
-          text(profile?.productName) || text(trackerRow?.productName) || barcode,
+        modelName,
+        productName: modelName,
         saleOption:
           text(trackerUsable?.saleOption) || text(profile?.optionName) || "",
         chinaOption: text(trackerUsable?.chinaOption),
