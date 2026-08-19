@@ -44,22 +44,23 @@ test("demand-first safety and weight policy remains intact", () => {
   assert.match(domain, /safetyPass\?opportunityScore:0|safetyPass \? opportunityScore : 0/);
 });
 
-test("final result includes title and V5 demand diagnostics", () => {
+test("final result includes title and V6 evidence diagnostics", () => {
   assert.match(page, /추천 상품명/);
   assert.match(page, /현재 커트라인으로 상품명 다시 생성/);
   assert.match(page, /통과 키워드 · 점수 높은 순/);
   assert.match(layout, /KeywordElonDemandSummary/);
-  assert.match(demandSummary, /MARKET RECALL V5/);
-  assert.match(demandSummary, /API HUB 시장어 광산/);
-  assert.match(demandSummary, /월검색량 TOP · 검색용 no-space/);
+  assert.match(demandSummary, /MARKET RECALL V6/);
+  assert.match(demandSummary, /Evidence Market Mine/);
+  assert.match(demandSummary, /월검색량 TOP · canonical no-space/);
   assert.match(demandSummary, /상품 정확성 TOP/);
 });
 
-test("API exposes V5 pipeline actions", () => {
+test("API exposes V6 pipeline actions", () => {
   for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "enrich_demand", "generate_title"]) {
     assert.match(route, new RegExp(`action === \\"${action}\\"`));
   }
-  assert.match(route, /version: 5/);
+  assert.match(route, /version: 6/);
+  assert.match(route, /marketRecall: "evidence-first"/);
   assert.match(route, /apiHubConfigured/);
   assert.doesNotMatch(route, /keywordEngineElonLabStore|keywordEngineElonLabShopling/);
 });
@@ -75,9 +76,10 @@ test("Keyword Lab collector remains dedicated and independent from AI-Saurus", (
   assert.doesNotMatch(page, /AI-Saurus|SaaS 방식 자동수집/);
 });
 
-test("module registry describes API HUB market recall V5", () => {
+test("module registry describes evidence-first Market Recall V6", () => {
   assert.match(moduleFile, /1688 중국 원본 링크/);
-  assert.match(moduleFile, /NAVER API HUB/);
-  assert.match(moduleFile, /Market Mine/);
+  assert.match(moduleFile, /지식iN·카페·블로그·웹문서/);
+  assert.match(moduleFile, /Evidence Market Mine/);
+  assert.match(moduleFile, /Search Trend/);
   assert.match(moduleFile, /\/keyword-engine-elon-lab/);
 });
