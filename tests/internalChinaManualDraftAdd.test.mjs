@@ -48,6 +48,16 @@ test("manual addition search also uses product-launch model names and sale optio
   assert.match(helper, /joinedLabels/);
 });
 
+test("manual addition search supports comma-separated model, product and B-code terms", () => {
+  assert.match(helper, /parseManualDraftSearchTerms/);
+  assert.match(helper, /split\(\/\[,;\\n\\r\]\+\//);
+  assert.match(helper, /bestSearchMatch/);
+  assert.match(helper, /termIndex/);
+  assert.match(helper, /RESULT_LIMIT_MAX = 200/);
+  assert.match(component, /여러 개는 콤마로 구분/);
+  assert.match(component, /aaa288, aaa131, BAF1-1/);
+});
+
 test("manual addition API is same-origin only and exposes search plus add", () => {
   assert.match(route, /isSameOriginOpsRequest/);
   assert.match(route, /export async function GET/);
