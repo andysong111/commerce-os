@@ -1,0 +1,162 @@
+name: Product Launch Restore Legacy Completed Stages 20260819
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/product-launch-restore-legacy-completed-stages-20260819.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  restore-stages:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://commerce-os-ops-center.vercel.app
+      TARGET_COUNT: "284"
+    steps:
+      - name: Read exact legacy stock-sheet batch
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            "$BASE_URL/api/product-launch-tracker/optimized?mode=export" \
+            -o /tmp/export-before.json
+          cat /tmp/export-before.json | head -c 1000
+          echo
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/export-before.json', 'utf8'));
+          if (body.ok !== true || body.stateExists !== true || !body.state) {
+            throw new Error(body.message || 'product launch export unavailable');
+          }
+          const items = Array.isArray(body.state.items) ? body.state.items : [];
+          const targets = items.filter((item) =>
+            item?.workBatch === '등록완료건' &&
+            item?.source?.import === 'stock-sheet-backfill-20260812'
+          );
+          const ids = targets.map((item) => String(item?.id || '').trim()).filter(Boolean);
+          const expected = Number(process.env.TARGET_COUNT);
+          if (targets.length !== expected || ids.length !== expected || new Set(ids).size !== expected) {
+            throw new Error(`target mismatch targets=${targets.length} ids=${ids.length} unique=${new Set(ids).size} expected=${expected}`);
+          }
+          const before = {
+            targetCount: targets.length,
+            detailDone: targets.filter((item) => item?.stages?.detailPage?.status === '완료').length,
+            marketDone: targets.filter((item) => item?.stages?.marketRegistration?.status === '완료').length,
+          };
+          console.log(JSON.stringify(before));
+          fs.writeFileSync('/tmp/target-ids.json', JSON.stringify(ids));
+          NODE
+
+      - name: Restore detail-page completion
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const ids = JSON.parse(fs.readFileSync('/tmp/target-ids.json', 'utf8'));
+          fs.writeFileSync('/tmp/detail-patch.json', JSON.stringify({
+            operation: 'bulk_stage',
+            itemIds: ids,
+            stageKey: 'detailPage',
+            status: '완료',
+            reason: '',
+            updatedBy: '승준',
+          }));
+          NODE
+          curl --fail-with-body -sS -X PATCH \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/detail-patch.json \
+            "$BASE_URL/api/product-launch-tracker/optimized" \
+            -o /tmp/detail-response.json
+          cat /tmp/detail-response.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/detail-response.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'detail-page restore failed');
+          NODE
+
+      - name: Restore market-registration completion
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('fs');
+          const ids = JSON.parse(fs.readFileSync('/tmp/target-ids.json', 'utf8'));
+          fs.writeFileSync('/tmp/market-patch.json', JSON.stringify({
+            operation: 'bulk_stage',
+            itemIds: ids,
+            stageKey: 'marketRegistration',
+            status: '완료',
+            reason: '',
+            updatedBy: '승준',
+          }));
+          NODE
+          curl --fail-with-body -sS -X PATCH \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/market-patch.json \
+            "$BASE_URL/api/product-launch-tracker/optimized" \
+            -o /tmp/market-response.json
+          cat /tmp/market-response.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/market-response.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'market-registration restore failed');
+          NODE
+
+      - name: Verify canonical state and list snapshot
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            "$BASE_URL/api/product-launch-tracker/optimized?mode=export" \
+            -o /tmp/export-after.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/export-after.json', 'utf8'));
+          if (body.ok !== true || body.stateExists !== true || !body.state) {
+            throw new Error(body.message || 'verification export unavailable');
+          }
+          const expected = Number(process.env.TARGET_COUNT);
+          const items = Array.isArray(body.state.items) ? body.state.items : [];
+          const targets = items.filter((item) =>
+            item?.workBatch === '등록완료건' &&
+            item?.source?.import === 'stock-sheet-backfill-20260812'
+          );
+          const canonicalDetail = targets.filter((item) => item?.stages?.detailPage?.status === '완료').length;
+          const canonicalMarket = targets.filter((item) => item?.stages?.marketRegistration?.status === '완료').length;
+          if (targets.length !== expected || canonicalDetail !== expected || canonicalMarket !== expected) {
+            throw new Error(`canonical verify failed targets=${targets.length} detail=${canonicalDetail} market=${canonicalMarket}`);
+          }
+          const summaries = Array.isArray(body.state?.productLaunchListSnapshot?.summaries)
+            ? body.state.productLaunchListSnapshot.summaries
+            : [];
+          const targetIds = new Set(targets.map((item) => String(item.id)));
+          const targetSummaries = summaries.filter((summary) => targetIds.has(String(summary?.id || '')));
+          const snapshotDetail = targetSummaries.filter((summary) => summary?.stages?.detailPage?.status === '완료').length;
+          const snapshotMarket = targetSummaries.filter((summary) => summary?.stages?.marketRegistration?.status === '완료').length;
+          if (targetSummaries.length !== expected || snapshotDetail !== expected || snapshotMarket !== expected) {
+            throw new Error(`snapshot verify failed targets=${targetSummaries.length} detail=${snapshotDetail} market=${snapshotMarket}`);
+          }
+          console.log(JSON.stringify({
+            targetCount: expected,
+            canonicalDetail,
+            canonicalMarket,
+            snapshotDetail,
+            snapshotMarket,
+          }));
+          NODE
