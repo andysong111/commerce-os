@@ -48,7 +48,9 @@ function findStep2Button() {
 }
 
 export default function KeywordElonInterruptedRunRecovery() {
-  const [session, setSession] = useState<RecoverySession | null>(null);
+  const [session, setSession] = useState<RecoverySession | null>(() =>
+    typeof window === "undefined" ? null : readSession(),
+  );
 
   useEffect(() => {
     const initial = readSession();
@@ -71,7 +73,6 @@ export default function KeywordElonInterruptedRunRecovery() {
       }
     }
 
-    setSession(initial);
     const sync = () => setSession(readSession());
     const timer = window.setInterval(sync, 700);
     const listener = () => sync();
