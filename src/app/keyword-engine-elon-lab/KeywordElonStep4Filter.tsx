@@ -183,7 +183,9 @@ export default function KeywordElonStep4Filter() {
   const [readiness, setReadiness] = useState<Readiness | null>(null);
 
   useEffect(() => {
-    setCustomBlockedTerms(readCustomBlockedTerms());
+    const customTermsTimer = window.setTimeout(() => {
+      setCustomBlockedTerms(readCustomBlockedTerms());
+    }, 0);
     let last = "";
     const sync = () => {
       const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY) || "";
@@ -196,6 +198,7 @@ export default function KeywordElonStep4Filter() {
     const listener = () => sync();
     window.addEventListener("keyword-elon-session-updated", listener);
     return () => {
+      window.clearTimeout(customTermsTimer);
       window.clearInterval(timer);
       window.removeEventListener("keyword-elon-session-updated", listener);
     };
@@ -336,7 +339,7 @@ export default function KeywordElonStep4Filter() {
           titleResult,
           lastMessage: filtered.result.allowedCount
             ? `STEP 4 완료 · ${filtered.result.removedCount}개 제거 · 최종 재료 ${filtered.result.allowedCount}개`
-            : `STEP 4 완료 · 최종 사용 가능한 키워드가 없어 수동 검토가 필요합니다.`,
+            : "STEP 4 완료 · 최종 사용 가능한 키워드가 없어 수동 검토가 필요합니다.",
           updatedAt: new Date().toISOString(),
         },
         lastMessage: filtered.result.allowedCount
