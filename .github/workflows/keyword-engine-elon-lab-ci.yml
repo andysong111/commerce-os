@@ -14,6 +14,7 @@ on:
       - "tests/keywordEngineElonLabClientScoringBridge.test.mjs"
       - "tests/keywordEngineElonLabStep3.test.mjs"
       - "tests/keywordEngineElonLabStep4.test.mjs"
+      - "tests/keywordEngineElonLabRoundsAndAuto.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
@@ -39,6 +40,7 @@ jobs:
           src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
           src/app/keyword-engine-elon-lab/layout.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
           src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
@@ -57,6 +59,7 @@ jobs:
           src/lib/keywordEngineElonLabV2Server.ts
           src/lib/keywordEngineElonLabV2Step3.ts
           src/lib/keywordEngineElonLabV2Step4.ts
+          src/lib/keywordEngineElonLabV2Merge.ts
       - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
@@ -65,6 +68,7 @@ jobs:
           tests/keywordEngineElonLabClientScoringBridge.test.mjs
           tests/keywordEngineElonLabStep3.test.mjs
           tests/keywordEngineElonLabStep4.test.mjs
+          tests/keywordEngineElonLabRoundsAndAuto.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
       - name: Build
         run: npm run build
