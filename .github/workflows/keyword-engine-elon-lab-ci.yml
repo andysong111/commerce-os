@@ -12,6 +12,7 @@ on:
       - "tests/keywordEngineElonLab.test.mjs"
       - "tests/keywordEngineElonLabRuntime.test.mjs"
       - "tests/keywordEngineElonLabClientScoringBridge.test.mjs"
+      - "tests/keywordEngineElonLabStep3.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -38,6 +39,7 @@ jobs:
           src/app/keyword-engine-elon-lab/layout.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts
@@ -49,12 +51,14 @@ jobs:
           src/lib/keywordEngineElonLabV2Trend.ts
           src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonLabV2Server.ts
+          src/lib/keywordEngineElonLabV2Step3.ts
       - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
           tests/keywordEngineElonLab.test.mjs
           tests/keywordEngineElonLabRuntime.test.mjs
           tests/keywordEngineElonLabClientScoringBridge.test.mjs
+          tests/keywordEngineElonLabStep3.test.mjs
       - name: Build
         run: npm run build
         env:

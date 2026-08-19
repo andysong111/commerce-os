@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "utf8");
+const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
+const component = await readFile("src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx", "utf8");
+const expansion = await readFile("src/lib/keywordEngineElonLabV2Step3.ts", "utf8");
+const enrichment = await readFile("src/lib/keywordEngineElonLabV2DemandEnrichment.ts", "utf8");
+
+test("STEP 3 expands only from STEP 2 passing keywords", () => {
+  assert.match(component, /row\.safetyPass && row\.qualityScore >=/);
+  assert.match(component, /uniqueKeywordElonCanonical/);
+  assert.match(component, /Seed 최대 8개/);
+  assert.match(component, /action: "expand_from_passing"/);
+  assert.match(component, /existingDiscovery: session\.discovery/);
+  assert.match(component, /existingCandidates: session\.scoredCandidates/);
+});
+
+test("STEP 3 uses evidence and SearchAd while excluding existing candidates", () => {
+  assert.match(expansion, /mineKeywordElonApiHubMarket/);
+  assert.match(expansion, /discoverKeywordElonSearchAd/);
+  assert.match(expansion, /STEP3_CANDIDATE_LIMIT = 300/);
+  assert.match(expansion, /existingKeys/);
+  assert.match(expansion, /!blocked\.has/);
+  assert.match(expansion, /step3_api_hub_evidence/);
+  assert.match(expansion, /step3_searchad_related/);
+  assert.match(expansion, /STEP3_EXPANSION_SUMMARY/);
+});
+
+test("STEP 3 scores new candidates, merges them, and regenerates the title", () => {
+  assert.match(component, /action: "score_keywords"/);
+  assert.match(component, /mergeCandidates/);
+  assert.match(component, /mergeDiscovery/);
+  assert.match(component, /newlyPassed/);
+  assert.match(component, /action: "generate_title"/);
+  assert.match(component, /window\.location\.reload/);
+  assert.match(component, /전체 통과/);
+});
+
+test("STEP 3 route and layout are connected", () => {
+  assert.match(route, /expandKeywordElonFromPassing/);
+  assert.match(route, /action === "expand_from_passing"/);
+  assert.match(route, /step3ExpansionAvailable: true/);
+  assert.match(layout, /KeywordElonStep3Expansion/);
+  assert.match(layout, /<KeywordElonStep3Expansion \/>/);
+});
+
+test("STEP 3 evidence terms receive demand-enrichment priority", () => {
+  assert.match(enrichment, /step3_api_hub_evidence/);
+  assert.match(enrichment, /step3_searchad_related/);
+  assert.match(enrichment, /return 8/);
+  assert.match(enrichment, /return 7/);
+});
