@@ -7,10 +7,7 @@ import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonL
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
 import { expandKeywordElonFromPassing } from "@/lib/keywordEngineElonLabV2Step3";
-import {
-  filterKeywordElonProhibitedKeywords,
-  keywordElonKiprisConfigured,
-} from "@/lib/keywordEngineElonLabV2Step4";
+import { filterKeywordElonProhibitedKeywords } from "@/lib/keywordEngineElonLabV2Step4";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,9 +45,10 @@ function readiness() {
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
     apiHubConfigured: keywordElonApiHubConfigured(),
     searchTrendConfigured: keywordElonApiHubConfigured(),
-    kiprisConfigured: keywordElonKiprisConfigured(),
+    kiprisConfigured: false,
     step3ExpansionAvailable: true,
     step4FilterAvailable: true,
+    oneClickToStep4Available: true,
   };
 }
 
