@@ -53,6 +53,7 @@ test("KIPRIS integration is optional, server-only, exact, and fail-open", () => 
   assert.match(filter, /KIPRISPLUS_TRADEMARK_ENDPOINT/);
   assert.match(filter, /trademarkInfoSearchService\/getWordSearch/);
   assert.match(filter, /searchString/);
+  assert.match(filter, /"title", "trademarkName"/);
   assert.match(filter, /accessKey/);
   assert.match(filter, /compactKeywordElonKey\(trademarkName\) === keywordKey/);
   assert.match(filter, /clearlyInactiveTrademark/);
