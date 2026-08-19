@@ -11,9 +11,10 @@ const OPENAI_TIMEOUT_MS = 35_000;
 const KIPRIS_TIMEOUT_MS = 10_000;
 const KIPRIS_BATCH_SIZE = 4;
 const KIPRIS_CHECK_LIMIT = 30;
+const AI_RISK_CHECK_LIMIT = 60;
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_KIPRIS_TRADEMARK_ENDPOINT =
-  "https://plus.kipris.or.kr/openapi/rest/trademarkInfoSearchService/trademarkNameMatch";
+  "https://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getWordSearch";
 
 export type KeywordElonStep4RiskCategory =
   | "trademark"
@@ -167,10 +168,10 @@ const CATEGORY_REASON: Record<Exclude<KeywordElonStep4RiskCategory, "trademark" 
 
 function openAiModel() {
   return (
-    normalizeKeywordElonText(process.env.OPENAI_KEYWORD_ELON_MODEL) ||
-    normalizeKeywordElonText(process.env.OPENAI_KEYWORD_IDENTITY_MODEL) ||
-    normalizeKeywordElonText(process.env.OPENAI_MODEL) ||
-    DEFAULT_MODEL
+    normalizeKeywordElonText(process.env.OPENAI_KEYWORD_ELON_MODEL)
+    || normalizeKeywordElonText(process.env.OPENAI_KEYWORD_IDENTITY_MODEL)
+    || normalizeKeywordElonText(process.env.OPENAI_MODEL)
+    || DEFAULT_MODEL
   );
 }
 
@@ -196,7 +197,7 @@ function aiRiskSchema() {
       decisions: {
         type: "array",
         minItems: 0,
-        maxItems: 60,
+        maxItems: AI_RISK_CHECK_LIMIT,
         items: {
           type: "object",
           additionalProperties: false,
@@ -232,6 +233,7 @@ async function classifySemanticRisks(
     };
   }
 
+  const targets = keywords.slice(0, AI_RISK_CHECK_LIMIT);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
   try {
@@ -265,7 +267,7 @@ async function classifySemanticRisks(
                 productIdentity: identity.koreanProductIdentity,
                 coreProduct: identity.coreProduct,
                 identityAnchor: identity.identityAnchor,
-                keywords,
+                keywords: targets,
               }),
             }],
           },
@@ -341,7 +343,11 @@ async function classifySemanticRisks(
         reason: normalizeKeywordElonText(row.reason).slice(0, 180),
       });
     }
-    return { decisions, warning: "", configured: true };
+    return {
+      decisions,
+      warning: keywords.length > AI_RISK_CHECK_LIMIT ? `STEP4_AI_CHECK_LIMIT:${AI_RISK_CHECK_LIMIT}` : "",
+      configured: true,
+    };
   } catch (error) {
     const warning = error instanceof Error && error.name === "AbortError"
       ? "STEP4_AI_TIMEOUT"
@@ -352,10 +358,20 @@ async function classifySemanticRisks(
   }
 }
 
+function decodePossibleEncodedKey(value: string) {
+  if (!value.includes("%")) return value;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function kiprisSettings() {
-  const accessKey = normalizeKeywordElonText(
+  const rawAccessKey = normalizeKeywordElonText(
     process.env.KIPRISPLUS_ACCESS_KEY || process.env.KIPRIS_ACCESS_KEY,
   );
+  const accessKey = decodePossibleEncodedKey(rawAccessKey);
   const endpoint = normalizeKeywordElonText(process.env.KIPRISPLUS_TRADEMARK_ENDPOINT)
     || DEFAULT_KIPRIS_TRADEMARK_ENDPOINT;
   return { accessKey, endpoint, configured: Boolean(accessKey) };
@@ -389,18 +405,22 @@ function clearlyInactiveTrademark(status: string) {
   return /(거절|취하|포기|무효|소멸|취소|말소|실효|abandon|reject|expire|cancel|invalid)/i.test(status);
 }
 
+function clearlyRegisteredTrademark(status: string, registrationNumber: string) {
+  if (registrationNumber) return true;
+  return /(등록|존속|유효|registered|active)/i.test(status);
+}
+
 function parseKiprisMatches(xml: string, keyword: string) {
   const itemBlocks = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map((match) => match[1]);
-  const blocks = itemBlocks.length ? itemBlocks : [xml];
   const keywordKey = compactKeywordElonKey(keyword);
   const matches: KeywordElonStep4TrademarkMatch[] = [];
 
-  for (const block of blocks) {
+  for (const block of itemBlocks) {
     const trademarkName = xmlField(block, [
       "trademarkName",
       "trademarkNameName",
       "markName",
-      "title",
+      "titleName",
       "trademarkNameKor",
       "trademarkNameEng",
     ]);
@@ -412,21 +432,17 @@ function parseKiprisMatches(xml: string, keyword: string) {
       "regNumber",
     ]);
     const status = xmlField(block, [
+      "applicationStatus",
       "registerStatus",
       "registrationStatus",
       "registrationStatusName",
-      "applicationStatus",
       "legalStatus",
+      "lastvalue",
     ]);
-    const exact = trademarkName ? compactKeywordElonKey(trademarkName) === keywordKey : Boolean(registrationNumber);
-    const registered = Boolean(registrationNumber) || /(등록|존속|유효|active|registered)/i.test(status);
+    const exact = Boolean(trademarkName) && compactKeywordElonKey(trademarkName) === keywordKey;
+    const registered = clearlyRegisteredTrademark(status, registrationNumber);
     if (!exact || !registered || clearlyInactiveTrademark(status)) continue;
-    matches.push({
-      trademarkName: trademarkName || keyword,
-      applicationNumber,
-      registrationNumber,
-      status,
-    });
+    matches.push({ trademarkName, applicationNumber, registrationNumber, status });
   }
 
   const seen = new Set<string>();
@@ -438,18 +454,29 @@ function parseKiprisMatches(xml: string, keyword: string) {
   });
 }
 
+function kiprisResultWarning(xml: string) {
+  const resultCode = xmlField(xml, ["resultCode", "returnReasonCode", "errorCode"]);
+  const resultMessage = xmlField(xml, ["resultMsg", "returnAuthMsg", "errorMessage"]);
+  if (!resultCode || resultCode === "00" || resultCode === "20") return "";
+  return `KIPRIS_RESULT_${resultCode}:${resultMessage || "unknown"}`;
+}
+
 async function checkKiprisTrademark(keyword: string): Promise<KiprisCheck> {
   const settings = kiprisSettings();
-  if (!settings.configured) return { keyword, checked: false, matches: [], warning: "KIPRIS_NOT_CONFIGURED" };
+  if (!settings.configured) {
+    return { keyword, checked: false, matches: [], warning: "KIPRIS_NOT_CONFIGURED" };
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), KIPRIS_TIMEOUT_MS);
   try {
     const url = new URL(settings.endpoint);
-    url.searchParams.set("trademarkName", keyword);
+    url.searchParams.set("ServiceKey", settings.accessKey);
+    url.searchParams.set("searchString", keyword);
     url.searchParams.set("pageNo", "1");
     url.searchParams.set("numOfRows", "30");
-    url.searchParams.set("accessKey", settings.accessKey);
+    url.searchParams.set("descSort", "true");
+    url.searchParams.set("sortSpec", "AD");
     const response = await fetch(url, {
       headers: { Accept: "application/xml,text/xml;q=0.9,*/*;q=0.5" },
       signal: controller.signal,
@@ -464,13 +491,9 @@ async function checkKiprisTrademark(keyword: string): Promise<KiprisCheck> {
         warning: `KIPRIS_HTTP_${response.status}:${normalizeKeywordElonText(xml).slice(0, 160)}`,
       };
     }
-    if (/(faultstring|returnReasonCode|errorCode)/i.test(xml) && !/<item\b/i.test(xml)) {
-      return {
-        keyword,
-        checked: false,
-        matches: [],
-        warning: `KIPRIS_API_ERROR:${normalizeKeywordElonText(xml).slice(0, 180)}`,
-      };
+    const resultWarning = kiprisResultWarning(xml);
+    if (resultWarning) {
+      return { keyword, checked: false, matches: [], warning: resultWarning };
     }
     return { keyword, checked: true, matches: parseKiprisMatches(xml, keyword), warning: "" };
   } catch (error) {
@@ -570,8 +593,9 @@ export async function filterKeywordElonProhibitedKeywords(input: {
   }
 
   const kiprisConfigured = keywordElonKiprisConfigured();
-  const kiprisTargets = decisions
-    .filter((decision) => !decision.blocked && decision.searchKey.length >= 2 && !/^\d+$/.test(decision.searchKey))
+  const eligibleForKipris = decisions
+    .filter((decision) => !decision.blocked && decision.searchKey.length >= 2 && !/^\d+$/.test(decision.searchKey));
+  const kiprisTargets = eligibleForKipris
     .slice(0, KIPRIS_CHECK_LIMIT)
     .map((decision) => decision.keyword);
   const kiprisResults = kiprisConfigured ? await checkKiprisBatch(kiprisTargets) : [];
@@ -593,7 +617,7 @@ export async function filterKeywordElonProhibitedKeywords(input: {
     kiprisConfigured ? "" : "KIPRIS_NOT_CONFIGURED",
     ...kiprisResults.map((result) => result.warning),
   ].filter(Boolean);
-  if (kiprisConfigured && kiprisTargets.length < decisions.filter((decision) => !decision.blocked).length) {
+  if (kiprisConfigured && kiprisTargets.length < eligibleForKipris.length) {
     warnings.push(`KIPRIS_CHECK_LIMIT:${KIPRIS_CHECK_LIMIT}`);
   }
 
