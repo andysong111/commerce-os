@@ -7,14 +7,15 @@ const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf
 const component = await readFile("src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx", "utf8");
 const expansion = await readFile("src/lib/keywordEngineElonLabV2Step3.ts", "utf8");
 const enrichment = await readFile("src/lib/keywordEngineElonLabV2DemandEnrichment.ts", "utf8");
+const merge = await readFile("src/lib/keywordEngineElonLabV2Merge.ts", "utf8");
 
-test("STEP 3 expands only from STEP 2 passing keywords", () => {
+test("STEP 3 expands only from passing keywords and preserves prior material", () => {
   assert.match(component, /row\.safetyPass && row\.qualityScore >=/);
   assert.match(component, /uniqueKeywordElonCanonical/);
   assert.match(component, /Seed 최대 8개/);
   assert.match(component, /action: "expand_from_passing"/);
-  assert.match(component, /existingDiscovery: session\.discovery/);
-  assert.match(component, /existingCandidates: session\.scoredCandidates/);
+  assert.match(component, /existingDiscovery: base\.discovery/);
+  assert.match(component, /existingCandidates: base\.scoredCandidates/);
 });
 
 test("STEP 3 uses evidence and SearchAd while excluding existing candidates", () => {
@@ -28,14 +29,25 @@ test("STEP 3 uses evidence and SearchAd while excluding existing candidates", ()
   assert.match(expansion, /STEP3_EXPANSION_SUMMARY/);
 });
 
-test("STEP 3 scores new candidates, merges them, and regenerates the title", () => {
+test("STEP 3 merges every round and regenerates title only at the target round", () => {
   assert.match(component, /action: "score_keywords"/);
-  assert.match(component, /mergeCandidates/);
-  assert.match(component, /mergeDiscovery/);
+  assert.match(component, /mergeKeywordElonCandidates/);
+  assert.match(component, /mergeKeywordElonDiscovery/);
   assert.match(component, /newlyPassed/);
+  assert.match(component, /if \(makeTitle\)/);
   assert.match(component, /action: "generate_title"/);
   assert.match(component, /window\.location\.reload/);
-  assert.match(component, /전체 통과/);
+  assert.match(component, /누적 전체 통과/);
+  assert.match(merge, /uniqueKeywordElonCanonical\(\[\.\.\.base\.candidates, \.\.\.added\.candidates\], 900\)/);
+});
+
+test("one STEP 3 click automatically reaches round 3 and later clicks add one round", () => {
+  assert.match(component, /const targetRound = currentRound < 3 \? 3 : currentRound \+ 1/);
+  assert.match(component, /round <= targetRound/);
+  assert.match(component, /round === targetRound/);
+  assert.match(component, /첫 실행은 round 1→2→3을 한 번에 자동 진행합니다/);
+  assert.match(component, /기본 자동 round 3/);
+  assert.match(component, /STEP 3 · 추가발굴 round/);
 });
 
 test("STEP 3 route and layout are connected", () => {
