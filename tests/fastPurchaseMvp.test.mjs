@@ -75,21 +75,60 @@ test("last-known fallback keeps all current 42 candidates as manual triage mater
   assert.ok(resilient.includes("operationalCoverageCount: rows.length"));
 });
 
-test("fast purchase uses live Shopling model_nm instead of product title as model name", () => {
+test("fast purchase prefers canonical tracker and Product Master identity over legacy Shopling labels", () => {
   assert.ok(engine.includes("loadShoplingCurrentModelSnapshot"));
   assert.ok(engine.includes("row.modelNames"));
   assert.ok(engine.includes('modelNames.join(" / ")'));
-  assert.ok(engine.includes("modelName: liveShopling?.modelName || null"));
-  assert.doesNotMatch(engine, /modelName:\s*tracker\?\.productName/);
-  assert.doesNotMatch(engine, /modelName:\s*tracker\?\.productName\s*\|\|\s*fallbackProductName/);
+  assert.equal(
+    (engine.match(/const trackerUsable = tracker && !tracker\.conflict \? tracker : null;/g) ?? [])
+      .length,
+    2,
+  );
+
+  const modelNoBlocks = [...engine.matchAll(/modelNo:\s*([\s\S]*?)\n\s*modelName:/g)]
+    .map((match) => match[1])
+    .filter((block) => block.includes("trackerUsable?.modelNumber"));
+  assert.equal(modelNoBlocks.length, 2);
+  for (const block of modelNoBlocks) {
+    const tracker = block.indexOf("trackerUsable?.modelNumber");
+    const profile = block.indexOf("profile?.modelNo");
+    const live = block.indexOf("liveShopling?.modelNo");
+    assert.ok(tracker >= 0 && profile >= 0 && live >= 0);
+    assert.ok(
+      tracker < profile && profile < live,
+      "tracker and Product Master model numbers must win over Shopling fallback",
+    );
+  }
+
+  const nameBlocks = [...engine.matchAll(/const canonicalProductName =([\s\S]*?);/g)].map(
+    (match) => match[1],
+  );
+  assert.equal(nameBlocks.length, 2);
+  for (const block of nameBlocks) {
+    const tracker = block.indexOf("trackerUsable?.productName");
+    const profile = block.indexOf("profile?.productName");
+    const live = block.indexOf("liveShopling?.modelName");
+    assert.ok(tracker >= 0 && profile >= 0 && live >= 0);
+    assert.ok(
+      tracker < profile && profile < live,
+      "tracker and Product Master names must win over Shopling fallback",
+    );
+  }
+
+  assert.equal((engine.match(/modelName: canonicalProductName/g) ?? []).length, 2);
+  assert.equal((engine.match(/productName: canonicalProductName/g) ?? []).length, 2);
   assert.ok(shoplingIdentity.includes('"model_nm"'));
 });
 
-test("fast purchase keeps live exact model number first and tracker option as fallback metadata", () => {
-  assert.ok(engine.includes("liveShopling?.modelNo || tracker?.modelNumber"));
-  assert.ok(engine.includes("tracker?.saleOption"));
+test("fast purchase keeps Shopling identity as a non-blocking final fallback only", () => {
+  assert.ok(engine.includes("trackerUsable?.saleOption"));
   assert.ok(trackerMetadata.includes("modelNumber: string"));
   assert.ok(trackerMetadata.includes("saleOption: string"));
+  assert.doesNotMatch(
+    engine,
+    /liveShopling\?\.modelNo\s*\|\|\s*tracker\?\.modelNumber/,
+  );
+  assert.doesNotMatch(engine, /modelName:\s*liveShopling\?\.modelName/);
 });
 
 test("display-only Shopling identity failure never blocks purchase judgment", () => {
