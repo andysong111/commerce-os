@@ -4,6 +4,7 @@ import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonInterruptedRunRecovery from "./KeywordElonInterruptedRunRecovery";
 import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
+import KeywordElonStep4Filter from "./KeywordElonStep4Filter";
 
 export default function KeywordEngineElonLabLayout({ children }: { children: ReactNode }) {
   return (
@@ -13,6 +14,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       <KeywordElonInterruptedRunRecovery />
       <KeywordElonStep3Expansion />
       <KeywordElonDemandSummary />
+      <KeywordElonStep4Filter />
     </>
   );
 }
