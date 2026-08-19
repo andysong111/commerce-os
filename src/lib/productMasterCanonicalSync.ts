@@ -61,9 +61,27 @@ function trackerOptions(item: R): R[] {
   ];
 }
 
+function sharedBarcodeIdentityMap(state: R) {
+  const policy = object(state.skuIdentityPolicy);
+  const sharedBarcodes = object(policy.sharedBarcodes);
+  const result = new Map<string, string>();
+
+  for (const [rawBarcode, rawConfig] of Object.entries(sharedBarcodes)) {
+    const barcode = normalized(rawBarcode);
+    if (!barcode) continue;
+    const config = object(rawConfig);
+    const identity =
+      text(config.identity) || text(rawConfig) || `approved-shared-barcode:${barcode}`;
+    result.set(barcode, identity);
+  }
+
+  return result;
+}
+
 export function buildCanonicalProductMasterSnapshot(input: unknown) {
   const built = buildProductMasterSnapshotFromTrackerState(input);
   const state = object(input);
+  const sharedBarcodeIdentities = sharedBarcodeIdentityMap(state);
   const identityByBarcode = new Map<
     string,
     { sourceSkuKey: string; skuId: string }
@@ -82,7 +100,10 @@ export function buildCanonicalProductMasterSnapshot(input: unknown) {
       const optionId =
         text(option.id) ||
         fallbackOptionIdentity(option.saleOption || option.optionName, index);
-      const sourceSkuKey = `${itemId}:${optionId}`;
+      const approvedSharedIdentity = sharedBarcodeIdentities.get(barcode);
+      const sourceSkuKey = approvedSharedIdentity
+        ? `shared-physical:${approvedSharedIdentity}`
+        : `${itemId}:${optionId}`;
       const existing = identityByBarcode.get(barcode);
       if (existing && existing.sourceSkuKey !== sourceSkuKey) {
         throw new Error(
