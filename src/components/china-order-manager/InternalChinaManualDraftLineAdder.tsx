@@ -71,8 +71,12 @@ export function InternalChinaManualDraftLineAdder({
   async function search(event?: FormEvent) {
     event?.preventDefault();
     const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setNotice("B-code·모델번호·상품명·옵션명을 2글자 이상 입력하세요.");
+    const terms = trimmed
+      .split(/[,;\n\r]+/)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 2);
+    if (!terms.length) {
+      setNotice("검색어를 2글자 이상 입력하세요. 여러 개는 콤마로 구분할 수 있습니다.");
       return;
     }
     setSearching(true);
@@ -322,7 +326,7 @@ export function InternalChinaManualDraftLineAdder({
           </span>
           <h2 className="mt-1 text-xl font-black text-slate-950">주문품목 추가</h2>
           <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-700">
-            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 현재 Draft에 없는 활성 B-code를 검색해 이 월간 Draft 한 건에 추가합니다. 여러 옵션은 체크박스로 선택해 한 번에 반영할 수 있습니다. 이미 들어온 B-code는 아래 실제 주문표의 수량 칸에서 바로 총수량을 변경합니다.
+            예산이 남거나 같은 모델의 다른 색상·옵션을 실제로 더 주문할 때 사용합니다. 현재 Draft에 없는 활성 B-code를 검색해 이 월간 Draft 한 건에 추가합니다. 모델명·모델번호·B-code를 여러 개 찾을 때는 콤마로 구분해 한 번에 검색할 수 있습니다. 여러 옵션은 체크박스로 선택해 한 번에 반영할 수 있습니다. 이미 들어온 B-code는 아래 실제 주문표의 수량 칸에서 바로 총수량을 변경합니다.
           </p>
         </div>
         <span className="rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-black text-amber-800">
@@ -340,7 +344,7 @@ export function InternalChinaManualDraftLineAdder({
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="B-code / 모델번호 / 상품명 / 옵션명 검색 · 예: 토끼브로치, BBA2-2, aaa092"
+              placeholder="여러 개는 콤마로 구분 · 예: aaa288, aaa131, BAF1-1, 허리스트레칭"
               className="min-w-0 flex-1 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-amber-500"
             />
             <button
