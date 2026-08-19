@@ -13,6 +13,7 @@ on:
       - "tests/keywordEngineElonLabRuntime.test.mjs"
       - "tests/keywordEngineElonLabClientScoringBridge.test.mjs"
       - "tests/keywordEngineElonLabStep3.test.mjs"
+      - "tests/keywordEngineElonLabRecovery.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -37,6 +38,7 @@ jobs:
           src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
           src/app/keyword-engine-elon-lab/layout.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
@@ -59,6 +61,7 @@ jobs:
           tests/keywordEngineElonLabRuntime.test.mjs
           tests/keywordEngineElonLabClientScoringBridge.test.mjs
           tests/keywordEngineElonLabStep3.test.mjs
+          tests/keywordEngineElonLabRecovery.test.mjs
       - name: Build
         run: npm run build
         env:
