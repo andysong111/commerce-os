@@ -14,10 +14,12 @@ function statMap(rows: KeywordElonSearchAdStat[]) {
 
 function sourcePriority(row: KeywordElonCandidate) {
   const tags = new Set(row.sourceTags ?? []);
+  if (tags.has("step3_api_hub_evidence")) return 8;
+  if (tags.has("step3_searchad_related")) return 7;
   if (tags.has("api_hub_evidence_term") || tags.has("api_hub_market_term")) return 6;
   if ([...tags].some((tag) => tag.startsWith("api_hub_kin") || tag.startsWith("api_hub_cafe"))) return 5;
   if (tags.has("searchad_related") || tags.has("searchad_demand_depth2")) return 4;
-  if (tags.has("market_bridge_seed")) return 3;
+  if (tags.has("market_bridge_seed") || tags.has("step3_pass_seed")) return 3;
   if (tags.has("primary_seed") || tags.has("conditional_seed")) return 2;
   return 1;
 }
