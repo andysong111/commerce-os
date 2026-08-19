@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   hasUsableDetailPageMaterials,
   isDetailPageStageCompleted,
+  isLegacyCompletedStockSheetItem,
   shouldResetDetailPageStage,
 } from "../src/lib/productLaunchDetailPageStatus.ts";
 import {
@@ -41,6 +42,22 @@ test("detail-page complete state is invalid when HTML and main image materials a
   assert.equal(isDetailPageStageCompleted(missing), true);
   assert.equal(hasUsableDetailPageMaterials(missing), false);
   assert.equal(shouldResetDetailPageStage(missing), true);
+
+  const legacyCompleted = launchItem({
+    workBatch: "등록완료건",
+    source: { import: "stock-sheet-backfill-20260812" },
+  });
+  assert.equal(isLegacyCompletedStockSheetItem(legacyCompleted), true);
+  assert.equal(shouldResetDetailPageStage(legacyCompleted), false);
+  assert.equal(
+    shouldResetDetailPageStage(
+      launchItem({
+        workBatch: "등록완료건",
+        source: { import: "different-import" },
+      }),
+    ),
+    true,
+  );
 
   const complete = launchItem({
     detailPageAsset: {

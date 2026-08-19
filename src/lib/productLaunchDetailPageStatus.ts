@@ -1,5 +1,8 @@
 type UnknownRecord = Record<string, unknown>;
 
+const LEGACY_COMPLETED_SOURCE_IMPORT = "stock-sheet-backfill-20260812";
+const LEGACY_COMPLETED_WORK_BATCH = "등록완료건";
+
 export function isDetailPageStageCompleted(value: unknown) {
   const item = record(value);
   const stages = record(item.stages);
@@ -13,8 +16,21 @@ export function hasUsableDetailPageMaterials(value: unknown) {
   return Boolean(text(asset.html) && text(asset.mainImageUrl));
 }
 
+export function isLegacyCompletedStockSheetItem(value: unknown) {
+  const item = record(value);
+  const source = record(item.source);
+  return (
+    text(item.workBatch) === LEGACY_COMPLETED_WORK_BATCH &&
+    text(source.import) === LEGACY_COMPLETED_SOURCE_IMPORT
+  );
+}
+
 export function shouldResetDetailPageStage(value: unknown) {
-  return isDetailPageStageCompleted(value) && !hasUsableDetailPageMaterials(value);
+  return (
+    isDetailPageStageCompleted(value) &&
+    !isLegacyCompletedStockSheetItem(value) &&
+    !hasUsableDetailPageMaterials(value)
+  );
 }
 
 function record(value: unknown): UnknownRecord {
