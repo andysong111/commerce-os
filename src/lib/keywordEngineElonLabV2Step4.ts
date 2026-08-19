@@ -8,10 +8,10 @@ import {
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 35_000;
+const AI_RISK_BATCH_SIZE = 60;
 const KIPRIS_TIMEOUT_MS = 10_000;
 const KIPRIS_BATCH_SIZE = 4;
 const KIPRIS_CHECK_LIMIT = 30;
-const AI_RISK_CHECK_LIMIT = 60;
 const DEFAULT_MODEL = "gpt-5-mini";
 const DEFAULT_KIPRIS_TRADEMARK_ENDPOINT =
   "https://plus.kipris.or.kr/kipo-api/kipi/trademarkInfoSearchService/getWordSearch";
@@ -80,82 +80,20 @@ type KiprisCheck = {
 
 const BUILTIN_RISK_TERMS: Record<Exclude<KeywordElonStep4RiskCategory, "trademark" | "custom">, string[]> = {
   medical_device: [
-    "의료기기",
-    "의료용",
-    "치료용",
-    "치료기",
-    "치료",
-    "진단기",
-    "진단",
-    "처방",
-    "수술용",
-    "재활",
-    "통증완화",
-    "혈압",
-    "혈당",
-    "산소포화도",
-    "심전도",
-    "체온계",
-    "보청기",
-    "환자용",
-    "교정치료",
-    "교정기",
-    "비염치료",
-    "코골이치료",
-    "질병",
-    "완치",
-    "치유",
+    "의료기기", "의료용", "치료용", "치료기", "치료", "진단기", "진단", "처방", "수술용", "재활",
+    "통증완화", "혈압", "혈당", "산소포화도", "심전도", "체온계", "보청기", "환자용", "교정치료",
+    "교정기", "비염치료", "코골이치료", "질병", "완치", "치유",
   ],
   pregnancy: [
-    "임산부",
-    "임부",
-    "임신",
-    "산모",
-    "출산",
-    "산후",
-    "태교",
-    "수유",
-    "모유",
-    "배란",
-    "난임",
-    "태아",
-    "만삭",
+    "임산부", "임부", "임신", "산모", "출산", "산후", "태교", "수유", "모유", "배란", "난임", "태아", "만삭",
   ],
   baby: [
-    "유아용품",
-    "아기용품",
-    "육아용품",
-    "신생아",
-    "영아",
-    "유아",
-    "아기",
-    "베이비",
-    "키즈",
-    "어린이용",
-    "아동용",
-    "젖병",
-    "쪽쪽이",
+    "유아용품", "아기용품", "육아용품", "신생아", "영아", "유아", "아기", "베이비", "키즈", "어린이용",
+    "아동용", "젖병", "쪽쪽이",
   ],
   adult: [
-    "성인용품",
-    "성인장난감",
-    "19금",
-    "섹스토이",
-    "자위",
-    "오나홀",
-    "딜도",
-    "바이브레이터",
-    "애널",
-    "러브젤",
-    "최음",
-    "콘돔",
-    "발기",
-    "사정",
-    "성기",
-    "음경",
-    "질세정",
-    "bdsm",
-    "sm용품",
+    "성인용품", "성인장난감", "19금", "섹스토이", "자위", "오나홀", "딜도", "바이브레이터", "애널",
+    "러브젤", "최음", "콘돔", "발기", "사정", "성기", "음경", "질세정", "bdsm", "sm용품",
   ],
 };
 
@@ -197,7 +135,7 @@ function aiRiskSchema() {
       decisions: {
         type: "array",
         minItems: 0,
-        maxItems: AI_RISK_CHECK_LIMIT,
+        maxItems: AI_RISK_BATCH_SIZE,
         items: {
           type: "object",
           additionalProperties: false,
@@ -220,20 +158,41 @@ function aiRiskSchema() {
   };
 }
 
-async function classifySemanticRisks(
+function parseAiRiskDecisions(value: unknown) {
+  if (!value || typeof value !== "object") return [] as AiRiskDecision[];
+  const parsed = value as { decisions?: unknown[] };
+  const allowedCategories = new Set<KeywordElonStep4RiskCategory>([
+    "medical_device", "pregnancy", "baby", "adult",
+  ]);
+  const decisions: AiRiskDecision[] = [];
+  for (const rawDecision of parsed.decisions ?? []) {
+    if (!rawDecision || typeof rawDecision !== "object") continue;
+    const row = rawDecision as Record<string, unknown>;
+    const keyword = normalizeKeywordElonText(row.keyword);
+    if (!compactKeywordElonKey(keyword)) continue;
+    const confidence = Math.max(0, Math.min(1, Number(row.confidence) || 0));
+    const categories = Array.isArray(row.categories)
+      ? row.categories
+        .map((category) => normalizeKeywordElonText(category) as KeywordElonStep4RiskCategory)
+        .filter((category) => allowedCategories.has(category))
+      : [];
+    decisions.push({
+      keyword,
+      blocked: Boolean(row.blocked) && confidence >= 0.82 && categories.length > 0,
+      categories: [...new Set(categories)],
+      confidence,
+      reason: normalizeKeywordElonText(row.reason).slice(0, 180),
+    });
+  }
+  return decisions;
+}
+
+async function classifySemanticRiskBatch(
   identity: KeywordElonIdentity,
   keywords: string[],
-): Promise<{ decisions: AiRiskDecision[]; warning: string; configured: boolean }> {
-  const apiKey = normalizeKeywordElonText(process.env.OPENAI_API_KEY);
-  if (!apiKey || !keywords.length) {
-    return {
-      decisions: [],
-      warning: apiKey ? "" : "STEP4_AI_NOT_CONFIGURED",
-      configured: Boolean(apiKey),
-    };
-  }
-
-  const targets = keywords.slice(0, AI_RISK_CHECK_LIMIT);
+  apiKey: string,
+  batchNumber: number,
+): Promise<{ decisions: AiRiskDecision[]; warning: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
   try {
@@ -256,6 +215,7 @@ async function classifySemanticRisks(
                 "상표권은 여기서 판단하지 않는다. KIPRIS가 별도로 검사한다.",
                 "애매하면 blocked=false로 두고, 직접적이고 명확한 경우만 confidence 0.82 이상으로 차단한다.",
                 "원본에 없는 위험 용도를 새로 상상하지 않는다.",
+                "입력된 모든 키워드에 대해 정확히 한 개의 decision을 반환한다.",
               ].join("\n"),
             }],
           },
@@ -264,10 +224,11 @@ async function classifySemanticRisks(
             content: [{
               type: "input_text",
               text: JSON.stringify({
+                batchNumber,
                 productIdentity: identity.koreanProductIdentity,
                 coreProduct: identity.coreProduct,
                 identityAnchor: identity.identityAnchor,
-                keywords: targets,
+                keywords,
               }),
             }],
           },
@@ -290,72 +251,73 @@ async function classifySemanticRisks(
     try {
       payload = JSON.parse(raw) as OpenAiPayload;
     } catch {
-      return { decisions: [], warning: "STEP4_AI_INVALID_JSON", configured: true };
+      return { decisions: [], warning: `STEP4_AI_BATCH_${batchNumber}_INVALID_JSON` };
     }
     if (!response.ok) {
       return {
         decisions: [],
-        warning: `STEP4_AI_HTTP_${response.status}:${normalizeKeywordElonText(payload.error?.message)}`,
-        configured: true,
+        warning: `STEP4_AI_BATCH_${batchNumber}_HTTP_${response.status}:${normalizeKeywordElonText(payload.error?.message)}`,
       };
     }
     if (normalizeKeywordElonText(payload.status) === "incomplete") {
       return {
         decisions: [],
-        warning: `STEP4_AI_INCOMPLETE:${normalizeKeywordElonText(payload.incomplete_details?.reason) || "unknown"}`,
-        configured: true,
+        warning: `STEP4_AI_BATCH_${batchNumber}_INCOMPLETE:${normalizeKeywordElonText(payload.incomplete_details?.reason) || "unknown"}`,
       };
     }
 
-    const text = outputText(payload);
-    if (!text) return { decisions: [], warning: "STEP4_AI_EMPTY", configured: true };
-    let parsed: { decisions?: unknown[] } = {};
+    const responseText = outputText(payload);
+    if (!responseText) return { decisions: [], warning: `STEP4_AI_BATCH_${batchNumber}_EMPTY` };
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(text) as typeof parsed;
+      parsed = JSON.parse(responseText) as unknown;
     } catch {
-      return { decisions: [], warning: "STEP4_AI_PARSE_FAILED", configured: true };
+      return { decisions: [], warning: `STEP4_AI_BATCH_${batchNumber}_PARSE_FAILED` };
     }
-
-    const allowedCategories = new Set<KeywordElonStep4RiskCategory>([
-      "medical_device",
-      "pregnancy",
-      "baby",
-      "adult",
-    ]);
-    const decisions: AiRiskDecision[] = [];
-    for (const rawDecision of parsed.decisions ?? []) {
-      if (!rawDecision || typeof rawDecision !== "object") continue;
-      const row = rawDecision as Record<string, unknown>;
-      const keyword = normalizeKeywordElonText(row.keyword);
-      const searchKey = compactKeywordElonKey(keyword);
-      if (!searchKey) continue;
-      const confidence = Math.max(0, Math.min(1, Number(row.confidence) || 0));
-      const categories = Array.isArray(row.categories)
-        ? row.categories
-          .map((value) => normalizeKeywordElonText(value) as KeywordElonStep4RiskCategory)
-          .filter((value) => allowedCategories.has(value))
-        : [];
-      decisions.push({
-        keyword,
-        blocked: Boolean(row.blocked) && confidence >= 0.82 && categories.length > 0,
-        categories: [...new Set(categories)],
-        confidence,
-        reason: normalizeKeywordElonText(row.reason).slice(0, 180),
-      });
-    }
+    const decisions = parseAiRiskDecisions(parsed);
+    const returnedKeys = new Set(decisions.map((decision) => compactKeywordElonKey(decision.keyword)));
+    const missingCount = keywords.filter((keyword) => !returnedKeys.has(compactKeywordElonKey(keyword))).length;
     return {
       decisions,
-      warning: keywords.length > AI_RISK_CHECK_LIMIT ? `STEP4_AI_CHECK_LIMIT:${AI_RISK_CHECK_LIMIT}` : "",
-      configured: true,
+      warning: missingCount ? `STEP4_AI_BATCH_${batchNumber}_MISSING_DECISIONS:${missingCount}` : "",
     };
   } catch (error) {
     const warning = error instanceof Error && error.name === "AbortError"
-      ? "STEP4_AI_TIMEOUT"
-      : `STEP4_AI_FAILED:${error instanceof Error ? error.message : String(error)}`;
-    return { decisions: [], warning, configured: true };
+      ? `STEP4_AI_BATCH_${batchNumber}_TIMEOUT`
+      : `STEP4_AI_BATCH_${batchNumber}_FAILED:${error instanceof Error ? error.message : String(error)}`;
+    return { decisions: [], warning };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function classifySemanticRisks(
+  identity: KeywordElonIdentity,
+  keywords: string[],
+): Promise<{ decisions: AiRiskDecision[]; warning: string; configured: boolean }> {
+  const apiKey = normalizeKeywordElonText(process.env.OPENAI_API_KEY);
+  if (!apiKey || !keywords.length) {
+    return {
+      decisions: [],
+      warning: apiKey ? "" : "STEP4_AI_NOT_CONFIGURED",
+      configured: Boolean(apiKey),
+    };
+  }
+
+  const decisions: AiRiskDecision[] = [];
+  const warnings: string[] = [];
+  for (let index = 0; index < keywords.length; index += AI_RISK_BATCH_SIZE) {
+    const batchNumber = Math.floor(index / AI_RISK_BATCH_SIZE) + 1;
+    const batch = keywords.slice(index, index + AI_RISK_BATCH_SIZE);
+    const result = await classifySemanticRiskBatch(identity, batch, apiKey, batchNumber);
+    decisions.push(...result.decisions);
+    if (result.warning) warnings.push(result.warning);
+  }
+  return {
+    decisions,
+    warning: [...new Set(warnings)].join(" | "),
+    configured: true,
+  };
 }
 
 function decodePossibleEncodedKey(value: string) {
@@ -417,27 +379,14 @@ function parseKiprisMatches(xml: string, keyword: string) {
 
   for (const block of itemBlocks) {
     const trademarkName = xmlField(block, [
-      "trademarkName",
-      "trademarkNameName",
-      "markName",
-      "titleName",
-      "trademarkNameKor",
-      "trademarkNameEng",
+      "trademarkName", "trademarkNameName", "markName", "titleName", "trademarkNameKor", "trademarkNameEng",
     ]);
     const applicationNumber = xmlField(block, ["applicationNumber", "applicationNo", "appNumber"]);
     const registrationNumber = xmlField(block, [
-      "registrationNumber",
-      "registerNumber",
-      "registrationNo",
-      "regNumber",
+      "registrationNumber", "registerNumber", "registrationNo", "regNumber",
     ]);
     const status = xmlField(block, [
-      "applicationStatus",
-      "registerStatus",
-      "registrationStatus",
-      "registrationStatusName",
-      "legalStatus",
-      "lastvalue",
+      "applicationStatus", "registerStatus", "registrationStatus", "registrationStatusName", "legalStatus", "lastvalue",
     ]);
     const exact = Boolean(trademarkName) && compactKeywordElonKey(trademarkName) === keywordKey;
     const registered = clearlyRegisteredTrademark(status, registrationNumber);
@@ -492,9 +441,7 @@ async function checkKiprisTrademark(keyword: string): Promise<KiprisCheck> {
       };
     }
     const resultWarning = kiprisResultWarning(xml);
-    if (resultWarning) {
-      return { keyword, checked: false, matches: [], warning: resultWarning };
-    }
+    if (resultWarning) return { keyword, checked: false, matches: [], warning: resultWarning };
     return { keyword, checked: true, matches: parseKiprisMatches(xml, keyword), warning: "" };
   } catch (error) {
     const warning = error instanceof Error && error.name === "AbortError"
