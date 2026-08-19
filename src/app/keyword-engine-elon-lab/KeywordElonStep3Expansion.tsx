@@ -255,7 +255,7 @@ export default function KeywordElonStep3Expansion() {
   if (!session || session.stage2Status !== "done" || !session.identity || !session.discovery) return null;
 
   async function runStep3() {
-    if (!session.identity || !session.discovery || !seeds.length || busy) return;
+    if (!session || !session.identity || !session.discovery || !seeds.length || busy) return;
     const source = session.source;
     const identity = session.identity;
     const cutoff = session.cutoff;
