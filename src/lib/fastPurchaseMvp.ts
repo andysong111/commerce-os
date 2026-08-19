@@ -234,14 +234,27 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
   const diagnosticRows = diagnostics.rows.map((row): FastPurchaseMvpRow => {
     const key = barcode(row.barcode);
     const tracker = trackerMetadata.byBarcode.get(key);
+    const trackerUsable = tracker && !tracker.conflict ? tracker : null;
     const profile = planningByBarcode.get(key);
     const liveShopling = liveShoplingByBarcode.get(key);
+    const canonicalProductName =
+      text(trackerUsable?.productName) ||
+      text(profile?.productName) ||
+      text(row.productName) ||
+      text(liveShopling?.modelName) ||
+      key;
     const common = baseCommon({
       barcode: key,
-      modelNo: liveShopling?.modelNo || tracker?.modelNumber || row.modelNo,
-      modelName: liveShopling?.modelName || null,
-      optionName: tracker?.saleOption || text(profile?.optionName) || null,
-      productName: row.productName,
+      modelNo:
+        text(trackerUsable?.modelNumber) ||
+        text(profile?.modelNo) ||
+        text(row.modelNo) ||
+        text(liveShopling?.modelNo) ||
+        null,
+      modelName: canonicalProductName,
+      optionName:
+        text(trackerUsable?.saleOption) || text(profile?.optionName) || null,
+      productName: canonicalProductName,
       inventoryBandLow: row.diagnosticLowQuantity,
       inventoryBandHigh: row.diagnosticHighQuantity,
       lowScenarioRecommendedQuantity: row.lowRecommendedQuantity,
@@ -371,17 +384,29 @@ export async function loadFastPurchaseMvp(): Promise<FastPurchaseMvpReport> {
     .map((purchase) => {
       const key = barcode(purchase.barcode);
       const tracker = trackerMetadata.byBarcode.get(key);
+      const trackerUsable = tracker && !tracker.conflict ? tracker : null;
       const profile = planningByBarcode.get(key);
       const liveShopling = liveShoplingByBarcode.get(key);
       const fallbackProductName = text(purchase.name) || key;
+      const canonicalProductName =
+        text(trackerUsable?.productName) ||
+        text(profile?.productName) ||
+        fallbackProductName ||
+        text(liveShopling?.modelName) ||
+        key;
       return {
         ...baseCommon({
           barcode: key,
           modelNo:
-            liveShopling?.modelNo || tracker?.modelNumber || text(purchase.modelNo) || null,
-          modelName: liveShopling?.modelName || null,
-          optionName: tracker?.saleOption || text(profile?.optionName) || null,
-          productName: fallbackProductName,
+            text(trackerUsable?.modelNumber) ||
+            text(profile?.modelNo) ||
+            text(purchase.modelNo) ||
+            text(liveShopling?.modelNo) ||
+            null,
+          modelName: canonicalProductName,
+          optionName:
+            text(trackerUsable?.saleOption) || text(profile?.optionName) || null,
+          productName: canonicalProductName,
         }),
         action: "DEMAND_ONLY_REVIEW" as const,
         actionLabel: "수요만 수동검토",
