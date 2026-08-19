@@ -6,6 +6,7 @@ import { enrichKeywordElonDemand } from "@/lib/keywordEngineElonLabV2DemandEnric
 import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import { analyzeKeywordElonIdentity, collectKeywordElon1688Source, generateKeywordElonTitle } from "@/lib/keywordEngineElonLabV2Server";
+import { expandKeywordElonFromPassing } from "@/lib/keywordEngineElonLabV2Step3";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,18 +14,21 @@ export const maxDuration = 500;
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function text(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+function textArray(value: unknown, limit = 20) {
+  return Array.isArray(value) ? value.map(text).filter(Boolean).slice(0, limit) : [];
+}
 function sourceFrom(value: unknown): KeywordElonSourceDraft {
   if (!isRecord(value)) throw new Error("source 입력이 없습니다.");
   return {
     url: text(value.url), offerId: text(value.offerId),
     autoStatus: value.autoStatus === "success" || value.autoStatus === "partial" || value.autoStatus === "failed" ? value.autoStatus : "idle",
     chineseTitle: text(value.chineseTitle), optionText: text(value.optionText), supportingText: text(value.supportingText),
-    warnings: Array.isArray(value.warnings) ? value.warnings.map(text).filter(Boolean).slice(0, 20) : [], collectedAt: text(value.collectedAt),
+    warnings: textArray(value.warnings, 20), collectedAt: text(value.collectedAt),
   };
 }
 function identityFrom(value: unknown): KeywordElonIdentity {
   if (!isRecord(value)) throw new Error("identity 입력이 없습니다.");
-  const strings = (key: string) => Array.isArray(value[key]) ? (value[key] as unknown[]).map(text).filter(Boolean).slice(0, 20) : [];
+  const strings = (key: string) => textArray(value[key], 20);
   return {
     koreanProductIdentity: text(value.koreanProductIdentity), coreProduct: text(value.coreProduct), identityAnchor: text(value.identityAnchor),
     primarySeeds: strings("primarySeeds"), conditionalSeeds: strings("conditionalSeeds"), functionModifiers: strings("functionModifiers"),
@@ -40,6 +44,7 @@ function readiness() {
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
     apiHubConfigured: keywordElonApiHubConfigured(),
     searchTrendConfigured: keywordElonApiHubConfigured(),
+    step3ExpansionAvailable: true,
   };
 }
 
@@ -58,6 +63,16 @@ export async function POST(request: NextRequest) {
     if (action === "discover_keywords") {
       const source = sourceFrom(body.source); const identity = identityFrom(body.identity);
       return NextResponse.json({ ok: true, action, discovery: await discoverKeywordElonCandidatesResilient(source, identity) });
+    }
+    if (action === "expand_from_passing") {
+      const result = await expandKeywordElonFromPassing({
+        identity: identityFrom(body.identity),
+        seedKeywords: textArray(body.seedKeywords, 12),
+        existingDiscovery: discoveryFrom(body.existingDiscovery),
+        existingCandidates: candidatesFrom(body.existingCandidates),
+        round: Math.max(1, Math.floor(Number(body.round) || 1)),
+      });
+      return NextResponse.json({ ok: true, action, ...result });
     }
     if (action === "score_keywords") {
       const result = await scoreKeywordElonCandidatesBatched({ source: sourceFrom(body.source), identity: identityFrom(body.identity), discovery: discoveryFrom(body.discovery) });
