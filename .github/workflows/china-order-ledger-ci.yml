@@ -6,6 +6,7 @@ on:
       - "src/lib/chinaOrderLedger.ts"
       - "src/lib/internalChinaPurchaseDraft.ts"
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
+      - "src/lib/internalChinaReceipt.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
       - "src/lib/monthlyPurchaseDraftConsolidation.ts"
       - "src/lib/monthlyPurchaseDraftDisplayMetadata.ts"
@@ -18,6 +19,7 @@ on:
       - "tests/chinaOrderLedger.test.mjs"
       - "tests/internalChinaPurchaseDraftMvp.test.mjs"
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
+      - "tests/internalChinaReceipt.test.mjs"
       - "tests/monthlyPurchasePolicy.test.mjs"
       - "tests/monthlyPurchaseDraftConsolidation.test.mjs"
       - ".github/workflows/china-order-ledger-ci.yml"
@@ -47,6 +49,7 @@ jobs:
           src/lib/chinaOrderLedger.ts
           src/lib/internalChinaPurchaseDraft.ts
           src/lib/internalChinaPurchaseBudgetAudit.ts
+          src/lib/internalChinaReceipt.ts
           src/lib/monthlyPurchasePolicy.ts
           src/lib/monthlyPurchaseDraftConsolidation.ts
           src/lib/monthlyPurchaseDraftDisplayMetadata.ts
@@ -54,15 +57,19 @@ jobs:
           src/app/api/china-order-ledger/events/route.ts
           "src/app/api/china-order-manager/drafts/[draftId]/route.ts"
           src/app/api/china-order-manager/monthly-finalize/route.ts
+          src/app/api/china-order-manager/receipts/route.ts
+          src/app/china-order-manager/layout.tsx
           src/app/china-order-manager/page.tsx
           "src/app/china-order-manager/drafts/[draftId]/page.tsx"
           src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx
           src/components/china-order-manager/InternalChinaPurchaseBudgetAudit.tsx
+          src/components/china-order-manager/InternalChinaReceiptPanel.tsx
           src/components/china-order-manager/MonthlyDraftConsolidation.tsx
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
+          tests/internalChinaReceipt.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Run China order ledger and monthly budget tests
@@ -71,6 +78,7 @@ jobs:
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
+          tests/internalChinaReceipt.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Build Ops Center
