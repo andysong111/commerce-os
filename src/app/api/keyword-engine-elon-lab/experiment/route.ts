@@ -54,12 +54,14 @@ function buildConfig(searchParams: URLSearchParams): KeywordElonThresholdExperim
   };
 }
 
-function previewOnly() {
-  return process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV !== "production";
+function experimentRuntimeAllowed() {
+  return process.env.VERCEL_ENV === "preview"
+    || process.env.NODE_ENV !== "production"
+    || process.env.KEYWORD_THRESHOLD_EXPERIMENT_LOCAL_RUN === "1";
 }
 
 export async function GET(request: NextRequest) {
-  if (!previewOnly()) {
+  if (!experimentRuntimeAllowed()) {
     return NextResponse.json(
       { ok: false, error: "EXPERIMENT_PREVIEW_ONLY" },
       { status: 404 },
