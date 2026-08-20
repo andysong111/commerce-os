@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import KeywordElonAutoRunResumeBridge from "./KeywordElonAutoRunResumeBridge";
 import KeywordElonAutoRunToStep4 from "./KeywordElonAutoRunToStep4";
 import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonInterruptedRunRecovery from "./KeywordElonInterruptedRunRecovery";
@@ -11,6 +12,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
   return (
     <>
       <KeywordElonScoreFetchBridge />
+      <KeywordElonAutoRunResumeBridge />
       <KeywordElonAutoRunToStep4 />
       {children}
       <KeywordElonInterruptedRunRecovery />
