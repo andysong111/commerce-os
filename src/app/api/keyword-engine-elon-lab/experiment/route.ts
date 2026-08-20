@@ -27,7 +27,8 @@ function numberList(raw: string | null, fallback: number[], limit = 4) {
     .map((value) => Number(value.trim()))
     .filter(Number.isFinite)
     .map(clampScore);
-  return [...new Set(parsed)].slice(0, limit).sort((a, b) => a - b);
+  const normalized = [...new Set(parsed)].slice(0, limit).sort((a, b) => a - b);
+  return normalized.length ? normalized : fallback;
 }
 
 function integerParam(raw: string | null, fallback: number, min: number, max: number) {
