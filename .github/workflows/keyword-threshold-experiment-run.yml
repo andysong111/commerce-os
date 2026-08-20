@@ -1,9 +1,7 @@
 name: Keyword Threshold Experiment Runner
 
 on:
-  push:
-    branches:
-      - experiment/keyword-threshold-batch
+  pull_request:
     paths:
       - "experiments/keyword-threshold-run-request.json"
 
