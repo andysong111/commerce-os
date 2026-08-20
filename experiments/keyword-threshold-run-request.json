@@ -1,0 +1,11 @@
+{
+  "requestId": "smoke-plan-v1",
+  "mode": "plan",
+  "sample": "nose-tape-step1-v1",
+  "step2": [60, 65, 70],
+  "demand": [55, 60, 65],
+  "accuracy": [85, 90, 95],
+  "rounds": 3,
+  "concurrency": 2,
+  "blocked": []
+}
