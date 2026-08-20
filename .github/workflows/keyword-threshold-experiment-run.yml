@@ -15,8 +15,24 @@ permissions:
 
 jobs:
   run-experiment:
+    name: run-experiment-shard-${{ matrix.shard }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - shard: 1
+            samples: '["nose-tape-step1-v1","shoehorn-step1-v1"]'
+          - shard: 2
+            samples: '["sponge-brush-step1-v1","adjustable-thimble-step1-v1"]'
+          - shard: 3
+            samples: '["open-top-sunhat-step1-v1","pimple-extractor-step1-v1"]'
+          - shard: 4
+            samples: '["mens-hiking-shoes-step1-v1","drawer-desk-step1-v1"]'
+          - shard: 5
+            samples: '["drawer-module-step1-v1","egg-piercer-step1-v1"]'
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       NAVER_SEARCHAD_API_KEY: ${{ secrets.NAVER_SEARCHAD_API_KEY }}
@@ -30,6 +46,8 @@ jobs:
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
       PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
       PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+      EXPERIMENT_SAMPLES_JSON: ${{ matrix.samples }}
+      EXPERIMENT_SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +78,7 @@ jobs:
       - name: Build experiment app
         run: npm run build
 
-      - name: Run all STEP1-fixed threshold matrices
+      - name: Run STEP1-fixed threshold matrix shard
         shell: bash
         run: |
           mkdir -p experiment-results
@@ -96,7 +114,7 @@ jobs:
           request_path = Path("experiments/keyword-threshold-run-request.json")
           output_dir = Path("experiment-results")
           request = json.loads(request_path.read_text(encoding="utf-8"))
-          samples = request.get("samples") or [request.get("sample", "nose-tape-step1-v1")]
+          samples = json.loads(os.environ["EXPERIMENT_SAMPLES_JSON"])
           cooldown = max(0, int(request.get("cooldownSeconds", 20)))
 
           def csv(name, fallback):
@@ -117,6 +135,7 @@ jobs:
 
           summary = {
               "requestId": request.get("requestId", "unnamed"),
+              "shard": int(os.environ.get("EXPERIMENT_SHARD", "0")),
               "requestedSamples": samples,
               "thresholds": {
                   "step2": request.get("step2", []),
@@ -135,7 +154,7 @@ jobs:
               filename = output_dir / f"{sample}.json"
               print(f"RUN {index + 1}/{len(samples)} {sample}", flush=True)
               try:
-                  with urllib.request.urlopen(url, timeout=1800) as response:
+                  with urllib.request.urlopen(url, timeout=4200) as response:
                       raw = response.read()
                       filename.write_bytes(raw)
                       payload = json.loads(raw)
@@ -180,7 +199,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: keyword-threshold-broad-10-sample-matrix-v1
+          name: keyword-threshold-broad-10-sample-matrix-v1-shard-${{ matrix.shard }}
           path: experiment-results/
           if-no-files-found: error
           retention-days: 14
