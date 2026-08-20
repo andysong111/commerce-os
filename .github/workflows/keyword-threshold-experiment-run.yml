@@ -1,0 +1,128 @@
+name: Keyword Threshold Experiment Runner
+
+on:
+  push:
+    branches:
+      - experiment/keyword-threshold-batch
+    paths:
+      - "experiments/keyword-threshold-run-request.json"
+
+permissions:
+  contents: read
+
+env:
+  PREVIEW_BASE_URL: https://commerce-os-ops-center-git-experiment-keyword-a6e265-a2bsangsa.vercel.app
+
+jobs:
+  run-experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build experiment URL
+        id: request
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+
+          with open("experiments/keyword-threshold-run-request.json", "r", encoding="utf-8") as handle:
+              request = json.load(handle)
+
+          def csv(name, fallback):
+              values = request.get(name, fallback)
+              return ",".join(str(value) for value in values)
+
+          mode = str(request.get("mode", "plan"))
+          sample = str(request.get("sample", "nose-tape-step1-v1"))
+          params = {
+              "sample": sample,
+              "step2": csv("step2", [60, 65, 70]),
+              "demand": csv("demand", [55, 60, 65]),
+              "accuracy": csv("accuracy", [85, 90, 95]),
+              "rounds": str(request.get("rounds", 3)),
+              "concurrency": str(request.get("concurrency", 2)),
+          }
+          blocked = request.get("blocked", [])
+          if blocked:
+              params["blocked"] = ",".join(str(value) for value in blocked)
+          query = urllib.parse.urlencode(params)
+          plan_url = f"{os.environ['PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{query}"
+          run_params = dict(params)
+          run_params.update({"mode": "run", "confirm": "RUN_THRESHOLD_EXPERIMENT"})
+          run_url = f"{os.environ['PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{urllib.parse.urlencode(run_params)}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"mode={mode}\n")
+              output.write(f"request_id={request.get('requestId', 'unnamed')}\n")
+              output.write(f"plan_url={plan_url}\n")
+              output.write(f"run_url={run_url}\n")
+          PY
+
+      - name: Wait for matching Vercel Preview
+        shell: bash
+        env:
+          MODE: ${{ steps.request.outputs.mode }}
+          PLAN_URL: ${{ steps.request.outputs.plan_url }}
+        run: |
+          ready=0
+          for attempt in $(seq 1 90); do
+            status=$(curl -L -sS -o plan.json -w "%{http_code}" --max-time 20 "$PLAN_URL" || true)
+            if [ "$status" = "200" ]; then
+              if [ "$MODE" != "run" ]; then
+                ready=1
+                break
+              fi
+              source_ready=$(python - <<'PY'
+          import json
+          try:
+              with open("plan.json", "r", encoding="utf-8") as handle:
+                  payload = json.load(handle)
+              print("1" if payload.get("plan", {}).get("sourceReady") is True else "0")
+          except Exception:
+              print("0")
+          PY
+              )
+              if [ "$source_ready" = "1" ]; then
+                ready=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Preview did not become ready for this request."
+            cat plan.json || true
+            exit 1
+          fi
+          cat plan.json
+
+      - name: Run threshold matrix
+        if: steps.request.outputs.mode == 'run'
+        shell: bash
+        env:
+          RUN_URL: ${{ steps.request.outputs.run_url }}
+        run: |
+          status=$(curl -L -sS -o experiment-result.json -w "%{http_code}" --max-time 560 "$RUN_URL" || true)
+          echo "HTTP $status"
+          if [ "$status" != "200" ]; then
+            cat experiment-result.json || true
+            exit 1
+          fi
+          python -m json.tool experiment-result.json > /dev/null
+
+      - name: Save plan as result
+        if: steps.request.outputs.mode != 'run'
+        shell: bash
+        run: cp plan.json experiment-result.json
+
+      - name: Upload experiment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyword-threshold-${{ steps.request.outputs.request_id }}
+          path: experiment-result.json
+          if-no-files-found: error
+          retention-days: 14
