@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
     sampleId: fixture.id,
     sampleLabel: fixture.label,
     sourceReady,
+    sourceMode: fixture.sourceMode,
     config,
     combinationCount: config.step2Cutoffs.length
       * config.demandQualityThresholds.length
@@ -98,13 +99,14 @@ export async function GET(request: NextRequest) {
       fixture: {
         id: fixture.id,
         label: fixture.label,
+        sourceMode: fixture.sourceMode,
         identity: fixture.identity,
         source: fixture.source,
         notes: fixture.notes,
       },
       runInstruction: sourceReady
         ? `mode=run&confirm=${RUN_CONFIRMATION} 를 추가하면 실제 실험을 시작합니다.`
-        : "실제 실행 전에 fixture에 중국 상품명과 중국 옵션 원문이 필요합니다.",
+        : "fixture의 STEP 1 고정 입력을 다시 확인해야 합니다.",
     });
   }
 
@@ -113,8 +115,7 @@ export async function GET(request: NextRequest) {
       ok: false,
       error: "EXPERIMENT_SOURCE_INCOMPLETE",
       plan,
-      needs: ["중국 상품명 원문", "중국 옵션 원문"],
-      message: "STEP 1은 고정됐지만 STEP 2 Market Bridge와 AI 점수화가 원본 중국 상품명/옵션을 함께 사용하므로, 표준화 실험 전에 두 원문을 fixture에 채워야 합니다.",
+      message: "실험 fixture에 상품 정체성·Primary Seed·실험용 source 정보가 부족합니다.",
     }, { status: 422 });
   }
 
@@ -138,6 +139,7 @@ export async function GET(request: NextRequest) {
     mode: "run",
     sampleId: fixture.id,
     sampleLabel: fixture.label,
+    sourceMode: fixture.sourceMode,
     result,
   });
 }
