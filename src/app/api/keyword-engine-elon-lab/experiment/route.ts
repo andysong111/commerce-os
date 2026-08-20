@@ -24,7 +24,9 @@ function numberList(raw: string | null, fallback: number[], limit = 4) {
   if (!raw?.trim()) return fallback;
   const parsed = raw
     .split(",")
-    .map((value) => Number(value.trim()))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map(Number)
     .filter(Number.isFinite)
     .map(clampScore);
   const normalized = [...new Set(parsed)].slice(0, limit).sort((a, b) => a - b);
@@ -32,6 +34,7 @@ function numberList(raw: string | null, fallback: number[], limit = 4) {
 }
 
 function integerParam(raw: string | null, fallback: number, min: number, max: number) {
+  if (!raw?.trim()) return fallback;
   const numeric = Number(raw);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(min, Math.min(max, Math.round(numeric)));
