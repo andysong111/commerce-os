@@ -1,0 +1,103 @@
+name: Product Launch Stock Sheet Detail Assets Backfill 20260820
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/product-launch-stock-sheet-detail-assets-backfill-20260820.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apply-backfill:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: https://commerce-os-ops-center.vercel.app
+      ENDPOINT: /api/product-launch-tracker/migrations/stock-sheet-detail-assets-backfill-20260820
+    steps:
+      - name: Wait for production route
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            code=$(curl -sS -o /tmp/route.json -w '%{http_code}' \
+              -H "Origin: $BASE_URL" \
+              -H "Referer: $BASE_URL/product-launch-tracker" \
+              -H "Sec-Fetch-Site: same-origin" \
+              -H "Accept: application/json" \
+              "$BASE_URL$ENDPOINT" || true)
+            echo "attempt=$i http=$code"
+            cat /tmp/route.json 2>/dev/null | head -c 1200 || true
+            echo
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 15
+          done
+          echo "production route did not become ready" >&2
+          exit 1
+
+      - name: Verify dry run
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            "$BASE_URL$ENDPOINT" -o /tmp/dry-run.json
+          cat /tmp/dry-run.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/dry-run.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'dry run failed');
+          if (body.alreadyApplied === true) process.exit(0);
+          if (body.dryRun !== true || !body.report) throw new Error('dry run report missing');
+          if (!Number.isFinite(Number(body.report.plannedItemCount))) throw new Error('planned item count missing');
+          console.log(JSON.stringify({
+            pendingBefore: body.report.pendingItemCountBefore,
+            planned: body.report.plannedItemCount,
+            skipped: body.report.skippedItemCount,
+          }));
+          NODE
+
+      - name: Apply backfill
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            "$BASE_URL$ENDPOINT?apply=1" -o /tmp/apply.json
+          cat /tmp/apply.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/apply.json', 'utf8'));
+          if (body.ok !== true) throw new Error(body.message || 'apply failed');
+          if (body.applied !== true && body.alreadyApplied !== true && body.noChanges !== true) {
+            throw new Error('backfill did not apply');
+          }
+          console.log(JSON.stringify({
+            applied: body.applied,
+            alreadyApplied: body.alreadyApplied,
+            changed: body.report?.changedItemCount ?? body.report?.plannedItemCount ?? 0,
+            normalizedSync: body.normalizedSync ?? null,
+          }));
+          NODE
+
+      - name: Verify migration marker
+        run: |
+          set -euo pipefail
+          curl --fail-with-body -sS \
+            -H "Origin: $BASE_URL" \
+            -H "Referer: $BASE_URL/product-launch-tracker" \
+            -H "Sec-Fetch-Site: same-origin" \
+            -H "Accept: application/json" \
+            "$BASE_URL$ENDPOINT" -o /tmp/verify.json
+          cat /tmp/verify.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/verify.json', 'utf8'));
+          if (body.ok !== true || body.alreadyApplied !== true) {
+            throw new Error(body.message || 'migration marker verification failed');
+          }
+          NODE
