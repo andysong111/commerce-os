@@ -1,11 +1,23 @@
 {
-  "requestId": "nose-tape-matrix-v1",
+  "requestId": "broad-10-sample-matrix-v1",
   "mode": "run",
-  "sample": "nose-tape-step1-v1",
-  "step2": [60, 65, 70],
-  "demand": [55, 60, 65],
-  "accuracy": [85, 90, 95],
+  "samples": [
+    "nose-tape-step1-v1",
+    "shoehorn-step1-v1",
+    "sponge-brush-step1-v1",
+    "adjustable-thimble-step1-v1",
+    "open-top-sunhat-step1-v1",
+    "pimple-extractor-step1-v1",
+    "mens-hiking-shoes-step1-v1",
+    "drawer-desk-step1-v1",
+    "drawer-module-step1-v1",
+    "egg-piercer-step1-v1"
+  ],
+  "step2": [55, 60, 65, 70],
+  "demand": [50, 55, 60, 65],
+  "accuracy": [80, 85, 90, 95],
   "rounds": 3,
   "concurrency": 2,
+  "cooldownSeconds": 20,
   "blocked": []
 }
