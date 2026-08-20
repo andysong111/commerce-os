@@ -4,6 +4,9 @@ import type {
 import {
   InMemoryFreightBarcodeHistoryStorage,
 } from "./freightBarcodeHistoryStore.ts";
+import {
+  createSupabaseFreightBarcodeHistoryStorage,
+} from "./freightBarcodeHistorySupabaseStore.ts";
 import type {
   FreightBarcodeHistoryRecord,
 } from "../types/freightBarcodeRequest.ts";
@@ -22,8 +25,8 @@ export interface UpdateFreightBarcodeHistoryRecordInput {
  * Server-side storage contract for Freight Barcode PDF history.
  *
  * Implementations must return detached records so callers cannot mutate stored
- * state. The asynchronous contract allows a persistent adapter to be added
- * later without changing API route handlers or UI contracts.
+ * state. The asynchronous contract lets production use durable storage while
+ * local/test environments can keep the lightweight in-memory adapter.
  */
 export interface FreightBarcodeHistoryStorageAdapter {
   create(
@@ -40,6 +43,7 @@ export interface FreightBarcodeHistoryStorageAdapter {
 
 const globalStorage = globalThis as typeof globalThis & {
   __commerceOsFreightBarcodeHistoryStorage?: FreightBarcodeHistoryStorageAdapter;
+  __commerceOsFreightBarcodeSupabaseHistoryStorage?: FreightBarcodeHistoryStorageAdapter;
 };
 
 function getMemoryStorage(): FreightBarcodeHistoryStorageAdapter {
@@ -48,22 +52,29 @@ function getMemoryStorage(): FreightBarcodeHistoryStorageAdapter {
   return globalStorage.__commerceOsFreightBarcodeHistoryStorage;
 }
 
+function getSupabaseStorage(): FreightBarcodeHistoryStorageAdapter | undefined {
+  if (globalStorage.__commerceOsFreightBarcodeSupabaseHistoryStorage) {
+    return globalStorage.__commerceOsFreightBarcodeSupabaseHistoryStorage;
+  }
+
+  const storage = createSupabaseFreightBarcodeHistoryStorage();
+  if (!storage) return undefined;
+  globalStorage.__commerceOsFreightBarcodeSupabaseHistoryStorage = storage;
+  return storage;
+}
+
 /**
- * Returns the configured server-side history storage adapter.
- *
- * Memory is currently the only supported mode. Unknown values deliberately
- * fall back to memory so a deployment configuration mistake does not disable
- * the existing temporary history feature. A persistent adapter can be selected
- * here later without changing route handlers.
+ * Production defaults to Supabase whenever the existing Ops Center Supabase
+ * credentials are available. Explicit `memory` keeps local/test workflows
+ * isolated, and missing credentials safely fall back to memory.
  */
 export function getFreightBarcodeHistoryStorage(): FreightBarcodeHistoryStorageAdapter {
   const mode = process.env.FREIGHT_BARCODE_HISTORY_STORAGE?.trim().toLowerCase();
 
-  switch (mode) {
-    case undefined:
-    case "":
-    case "memory":
-    default:
-      return getMemoryStorage();
+  if (mode === "memory") return getMemoryStorage();
+  if (mode === undefined || mode === "" || mode === "supabase") {
+    return getSupabaseStorage() ?? getMemoryStorage();
   }
+
+  return getMemoryStorage();
 }
