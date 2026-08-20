@@ -1,4 +1,5 @@
 import { Suspense, type ReactNode } from "react";
+import { FreightBarcodePrintEnhancer } from "@/components/FreightBarcodePrintEnhancer";
 import { OpsAiHelpDesk } from "@/components/OpsAiHelpDesk";
 import { OpsCategoryUpdateCancelControl } from "@/components/OpsCategoryUpdateCancelControl";
 import { OpsLocalCategoryStatusBridge } from "@/components/OpsLocalCategoryStatusBridge";
@@ -25,7 +26,10 @@ export async function AppShell({ children }: { children: ReactNode }) {
         />
       </Suspense>
       <OpsRetryPrefill />
-      <OpsAiHelpDesk />
+      <div className="print:hidden">
+        <OpsAiHelpDesk />
+      </div>
+      <FreightBarcodePrintEnhancer />
       {loginDisabled || user ? (
         <>
           <OpsLocalCategoryStatusBridge />
