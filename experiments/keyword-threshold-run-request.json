@@ -1,6 +1,6 @@
 {
-  "requestId": "smoke-plan-v3",
-  "mode": "plan",
+  "requestId": "nose-tape-matrix-v1",
+  "mode": "run",
   "sample": "nose-tape-step1-v1",
   "step2": [60, 65, 70],
   "demand": [55, 60, 65],
