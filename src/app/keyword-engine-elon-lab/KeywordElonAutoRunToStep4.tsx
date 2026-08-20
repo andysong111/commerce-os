@@ -10,6 +10,7 @@ import {
 import {
   KEYWORD_ELON_V2_STORAGE_KEY,
   compactKeywordElonKey,
+  parse1688OfferId,
   uniqueKeywordElonCanonical,
   validate1688Url,
   type KeywordElonCandidate,
@@ -114,6 +115,19 @@ function writeMarker(marker: AutoRunMarker) {
   window.localStorage.setItem(AUTO_RUN_KEY, JSON.stringify(marker));
 }
 
+function same1688Offer(markerUrl: string, session: ExtendedSession) {
+  const markerOfferId = parse1688OfferId(markerUrl);
+  const sessionOfferId = session.source.offerId || parse1688OfferId(session.source.url);
+  if (markerOfferId && sessionOfferId) return markerOfferId === sessionOfferId;
+  try {
+    const marker = new URL(markerUrl);
+    const source = new URL(session.source.url);
+    return marker.hostname === source.hostname && marker.pathname === source.pathname;
+  } catch {
+    return false;
+  }
+}
+
 function readCustomBlockedTerms() {
   try {
     const raw = window.localStorage.getItem(CUSTOM_BLOCKED_STORAGE_KEY);
@@ -196,15 +210,16 @@ export default function KeywordElonAutoRunToStep4() {
       if (!marker || marker.status !== "armed") return;
       const session = readSession();
       if (!session) return;
-      const sameUrl = compactKeywordElonKey(session.source.url) === compactKeywordElonKey(marker.url);
+      const sameOffer = same1688Offer(marker.url, session);
       const sourceReady = Boolean(session.source.chineseTitle.trim() || session.source.optionText.trim());
-      if (!sameUrl || !sourceReady) return;
+      if (!sameOffer || !sourceReady) return;
       runningRef.current = true;
       writeMarker({ ...marker, status: "running", message: "수집 완료 · STEP 1 자동분석 시작" });
+      setProgress("1688 수집 완료 · STEP 1부터 STEP 4까지 자동 실행을 시작합니다.");
       void runPipeline(session, marker).finally(() => {
         runningRef.current = false;
       });
-    }, 700);
+    }, 400);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
