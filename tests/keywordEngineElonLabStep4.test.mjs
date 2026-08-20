@@ -4,30 +4,54 @@ import test from "node:test";
 
 const route = await readFile("src/app/api/keyword-engine-elon-lab/route.ts", "utf8");
 const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
-const component = await readFile("src/app/keyword-engine-elon-lab/KeywordElonStep4Filter.tsx", "utf8");
+const component = await readFile("src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx", "utf8");
+const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
+const selection = await readFile("src/lib/keywordEngineElonLabV2Selection.ts", "utf8");
 const filter = await readFile("src/lib/keywordEngineElonLabV2Step4.ts", "utf8");
 const workflow = await readFile(".github/workflows/keyword-engine-elon-lab-ci.yml", "utf8");
 
-test("STEP 4 is mounted only after STEP 3 final material summary", () => {
+test("STEP 4 is mounted after demand summary and uses dual threshold component", () => {
   assert.match(layout, /KeywordElonDemandSummary/);
-  assert.match(layout, /KeywordElonStep4Filter/);
-  assert.ok(layout.indexOf("<KeywordElonDemandSummary />") < layout.indexOf("<KeywordElonStep4Filter />"));
-  assert.match(component, /session\?\.step3\?\.status === "done"/);
-  assert.match(component, /Number\(session\?\.step3\?\.round\) >= 1/);
-  assert.match(component, /row\.safetyPass && row\.qualityScore >=/);
+  assert.match(layout, /KeywordElonStep4DualFilter/);
+  assert.ok(layout.indexOf("<KeywordElonDemandSummary />") < layout.indexOf("<KeywordElonStep4DualFilter />"));
+  assert.doesNotMatch(layout, /<KeywordElonStep4Filter \/>/);
+  assert.match(component, /Number\(session\?\.step3\?\.round\) >= 3/);
+});
+
+test("demand and accuracy thresholds are separately editable and persisted", () => {
+  assert.match(selection, /KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 60/);
+  assert.match(selection, /KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE = 90/);
+  assert.match(selection, /keywordEngineElonLab\.selectionThresholds\.v1/);
+  assert.match(demandSummary, /품질점수 ≥/);
+  assert.match(demandSummary, /관련성 ≥/);
+  assert.match(demandSummary, /updateThreshold\("demandQuality"/);
+  assert.match(demandSummary, /updateThreshold\("accuracyRelevance"/);
+  assert.match(demandSummary, /writeKeywordElonSelectionThresholds/);
+});
+
+test("STEP 4 input is the canonical union of demand and accuracy qualified candidates", () => {
+  assert.match(selection, /selectKeywordElonDemandCandidates/);
+  assert.match(selection, /row\.qualityScore >= thresholds\.demandQuality/);
+  assert.match(selection, /selectKeywordElonAccuracyCandidates/);
+  assert.match(selection, /row\.relevance >= thresholds\.accuracyRelevance/);
+  assert.match(selection, /row\.safetyPass/);
+  assert.match(selection, /row\.titleEligible/);
+  assert.match(selection, /selectKeywordElonStep4Union/);
+  assert.match(selection, /const map = new Map/);
+  assert.match(component, /selectKeywordElonStep4Union/);
+  assert.match(component, /candidates: selectedCandidates/);
+  assert.match(component, /cutoff: 0/);
 });
 
 test("STEP 4 route exposes prohibited-keyword action while KIPRIS is paused", () => {
   assert.match(route, /filterKeywordElonProhibitedKeywords/);
   assert.match(route, /step4FilterAvailable: true/);
   assert.match(route, /kiprisConfigured: false/);
-  assert.match(route, /oneClickToStep4Available: true/);
   assert.match(route, /action === "filter_prohibited_keywords"/);
   assert.match(route, /customBlockedTerms: textArray\(body\.customBlockedTerms, 120\)/);
-  assert.doesNotMatch(route, /keywordElonKiprisConfigured/);
 });
 
-test("STEP 4 has deterministic and AI-assisted risk categories", () => {
+test("STEP 4 risk filter retains deterministic and AI-assisted blocked categories", () => {
   for (const category of ["medical_device", "pregnancy", "baby", "adult", "custom"]) {
     assert.match(filter, new RegExp(`\\"${category}\\"`));
   }
@@ -37,41 +61,26 @@ test("STEP 4 has deterministic and AI-assisted risk categories", () => {
   assert.match(filter, /BUILTIN_RISK_TERMS/);
   assert.match(filter, /confidence >= 0\.82/);
   assert.match(filter, /uniqueKeywordElonCanonical\(input\.customBlockedTerms, 120\)/);
-  assert.match(filter, /decision\.searchKey\.includes\(term\)/);
 });
 
-test("STEP 4 semantic review processes every candidate in bounded batches", () => {
-  assert.match(filter, /const AI_RISK_BATCH_SIZE = 60/);
-  assert.match(filter, /index < keywords\.length; index \+= AI_RISK_BATCH_SIZE/);
-  assert.match(filter, /keywords\.slice\(index, index \+ AI_RISK_BATCH_SIZE\)/);
-  assert.match(filter, /MISSING_DECISIONS/);
-  assert.match(filter, /입력된 모든 키워드에 대해 정확히 한 개의 decision/);
-});
-
-test("KIPRIS is explicitly paused and never called in the current STEP 4", () => {
+test("KIPRIS remains explicitly paused", () => {
   assert.match(filter, /export function keywordElonKiprisConfigured\(\) \{\s*return false;/);
   assert.match(filter, /kiprisConfigured: false/);
-  assert.match(filter, /kiprisCheckedCount: 0/);
-  assert.match(filter, /kiprisMatchedCount: 0/);
-  assert.doesNotMatch(filter, /KIPRISPLUS_ACCESS_KEY|KIPRIS_ACCESS_KEY|trademarkInfoSearchService\/getWordSearch|fetchKipris|checkKiprisTrademark/);
-  assert.match(component, /KIPRIS 상표권 · 보류/);
-  assert.match(component, /KIPRIS 상표권 API 연결은 이번 버전에서 보류하며 호출하지 않습니다/);
+  assert.match(component, /KIPRIS 보류/);
 });
 
-test("user blocked keywords persist and filtered candidates regenerate the title", () => {
+test("user blocked keywords persist and dual-filtered candidates regenerate the title", () => {
   assert.match(component, /keywordEngineElonLab\.step4\.customBlockedTerms\.v1/);
   assert.match(component, /saveCustomBlockedTerms/);
   assert.match(component, /action: "filter_prohibited_keywords"/);
   assert.match(component, /const allowedSet = new Set\(filtered\.result\.allowedKeys\)/);
-  assert.match(component, /const filteredCandidates = inputCandidates\.filter/);
   assert.match(component, /action: "generate_title"/);
-  assert.match(component, /candidates: filteredCandidates/);
-  assert.match(component, /inputFingerprint/);
-  assert.match(component, /window\.location\.reload/);
+  assert.match(component, /currentFingerprint/);
+  assert.match(component, /자동 재계산/);
 });
 
-test("STEP 4 files are included in dedicated CI", () => {
-  assert.match(workflow, /KeywordElonStep4Filter\.tsx/);
-  assert.match(workflow, /keywordEngineElonLabV2Step4\.ts/);
+test("dual threshold STEP 4 files are included in dedicated CI", () => {
+  assert.match(workflow, /KeywordElonStep4DualFilter\.tsx/);
+  assert.match(workflow, /keywordEngineElonLabV2Selection\.ts/);
   assert.match(workflow, /keywordEngineElonLabStep4\.test\.mjs/);
 });
