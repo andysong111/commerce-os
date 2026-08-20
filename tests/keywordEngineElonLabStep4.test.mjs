@@ -41,6 +41,8 @@ test("STEP 4 input is the canonical union of demand and accuracy qualified candi
   assert.match(component, /selectKeywordElonStep4Union/);
   assert.match(component, /candidates: selectedCandidates/);
   assert.match(component, /cutoff: 0/);
+  assert.match(route, /Number\.isFinite\(rawCutoff\) \? rawCutoff : 70/);
+  assert.doesNotMatch(route, /Number\(body\.cutoff\) \|\| 70/);
 });
 
 test("STEP 4 route exposes prohibited-keyword action while KIPRIS is paused", () => {
