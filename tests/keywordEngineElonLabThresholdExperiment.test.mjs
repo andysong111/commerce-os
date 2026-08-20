@@ -31,15 +31,19 @@ test("experiment evaluates demand and accuracy thresholds independently then app
   assert.match(runner, /STEP5_OBSERVED_LIMIT = 30/);
 });
 
-test("first fixed fixture preserves the approved STEP1 identity but blocks real run until raw Chinese source exists", () => {
+test("first fixed fixture preserves approved STEP1 identity and can derive experiment source without raw Chinese text", () => {
   assert.match(fixtures, /nose-tape-step1-v1/);
   assert.match(fixtures, /코 성형 테이프\(코 모양 보정 패치\)/);
   assert.match(fixtures, /confidence: 0\.88/);
-  assert.match(fixtures, /chineseTitle: ""/);
-  assert.match(fixtures, /optionText: ""/);
+  assert.match(fixtures, /sourceMode: "step1-derived"/);
+  assert.match(fixtures, /EXPERIMENT_SOURCE_DERIVED_FROM_APPROVED_STEP1/);
+  assert.match(fixtures, /chineseTitle: noseTapeIdentity\.koreanProductIdentity/);
+  assert.match(fixtures, /optionText: \[/);
+  assert.match(fixtures, /keywordElonExperimentFixtureSourceReady/);
+  assert.match(route, /sourceMode: fixture\.sourceMode/);
   assert.match(route, /EXPERIMENT_SOURCE_INCOMPLETE/);
-  assert.match(route, /중국 상품명 원문/);
-  assert.match(route, /중국 옵션 원문/);
+  assert.doesNotMatch(route, /중국 상품명 원문/);
+  assert.doesNotMatch(route, /중국 옵션 원문/);
 });
 
 test("dedicated keyword lab CI includes the experiment route, runner and contract test", () => {
