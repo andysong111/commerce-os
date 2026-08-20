@@ -95,7 +95,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, action, result });
     }
     if (action === "generate_title") {
-      const cutoff = Math.max(0, Math.min(100, Number(body.cutoff) || 70));
+      const rawCutoff = Number(body.cutoff);
+      const cutoff = Math.max(0, Math.min(100, Number.isFinite(rawCutoff) ? rawCutoff : 70));
       const titleResult = await generateKeywordElonTitle({ source: sourceFrom(body.source), identity: identityFrom(body.identity), candidates: candidatesFrom(body.candidates), cutoff });
       return NextResponse.json({ ok: true, action, titleResult });
     }
