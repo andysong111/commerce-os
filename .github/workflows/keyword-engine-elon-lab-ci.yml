@@ -17,6 +17,7 @@ on:
       - "tests/keywordEngineElonLabRoundsAndAuto.test.mjs"
       - "tests/keywordEngineElonLabOneClickResume.test.mjs"
       - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
+      - "tests/keywordEngineElonLabThresholdExperiment.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
@@ -40,6 +41,7 @@ jobs:
           npx eslint
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
+          src/app/api/keyword-engine-elon-lab/experiment/route.ts
           src/app/keyword-engine-elon-lab/page.tsx
           src/app/keyword-engine-elon-lab/layout.tsx
           src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
@@ -66,6 +68,8 @@ jobs:
           src/lib/keywordEngineElonLabV2Step4.ts
           src/lib/keywordEngineElonLabV2Merge.ts
           src/lib/keywordEngineElonLabV2Selection.ts
+          src/lib/keywordEngineElonLabExperimentFixtures.ts
+          src/lib/keywordEngineElonLabThresholdExperiment.ts
       - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
@@ -77,6 +81,7 @@ jobs:
           tests/keywordEngineElonLabRoundsAndAuto.test.mjs
           tests/keywordEngineElonLabOneClickResume.test.mjs
           tests/keywordEngineElonLabDiversitySupplement.test.mjs
+          tests/keywordEngineElonLabThresholdExperiment.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
       - name: Build
         run: npm run build
