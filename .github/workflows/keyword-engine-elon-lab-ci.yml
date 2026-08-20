@@ -50,6 +50,7 @@ jobs:
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep4Filter.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabV2.ts
@@ -64,6 +65,7 @@ jobs:
           src/lib/keywordEngineElonLabV2Step3.ts
           src/lib/keywordEngineElonLabV2Step4.ts
           src/lib/keywordEngineElonLabV2Merge.ts
+          src/lib/keywordEngineElonLabV2Selection.ts
       - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
