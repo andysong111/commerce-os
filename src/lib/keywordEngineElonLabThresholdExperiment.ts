@@ -285,7 +285,8 @@ async function riskFilterBranch(input: {
   customBlockedTerms: string[];
 }) {
   const broadUnion = selectKeywordElonStep4Union(input.branch.candidates, input.broadThresholds);
-  const allDiversity = buildObservedDiversityCandidates(input.branch.candidates, new Set<string>());
+  const broadUnionKeys = new Set(broadUnion.map(candidateKey));
+  const allDiversity = buildObservedDiversityCandidates(input.branch.candidates, broadUnionKeys);
   const riskInput = uniqueRowsPreserveOrder([...broadUnion, ...allDiversity]);
   if (!riskInput.length) {
     return {
