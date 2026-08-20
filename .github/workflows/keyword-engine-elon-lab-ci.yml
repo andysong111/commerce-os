@@ -16,6 +16,7 @@ on:
       - "tests/keywordEngineElonLabStep4.test.mjs"
       - "tests/keywordEngineElonLabRoundsAndAuto.test.mjs"
       - "tests/keywordEngineElonLabOneClickResume.test.mjs"
+      - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
@@ -43,6 +44,7 @@ jobs:
           src/app/keyword-engine-elon-lab/layout.tsx
           src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
           src/app/keyword-engine-elon-lab/KeywordElonAutoRunResumeBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonDiversitySupplement.tsx
           src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
@@ -72,6 +74,7 @@ jobs:
           tests/keywordEngineElonLabStep4.test.mjs
           tests/keywordEngineElonLabRoundsAndAuto.test.mjs
           tests/keywordEngineElonLabOneClickResume.test.mjs
+          tests/keywordEngineElonLabDiversitySupplement.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
       - name: Build
         run: npm run build
