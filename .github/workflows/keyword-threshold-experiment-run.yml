@@ -4,123 +4,183 @@ on:
   pull_request:
     paths:
       - "experiments/keyword-threshold-run-request.json"
+      - "src/lib/keywordEngineElonLabExperimentFixtures.ts"
+      - "src/lib/keywordEngineElonLabThresholdExperiment.ts"
+      - "src/app/api/keyword-engine-elon-lab/experiment/route.ts"
+      - ".github/workflows/keyword-threshold-experiment-run.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  PREVIEW_BASE_URL: https://commerce-os-ops-center-git-experiment-keyword-a6e265-a2bsangsa.vercel.app
-
 jobs:
   run-experiment:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      NAVER_SEARCHAD_API_KEY: ${{ secrets.NAVER_SEARCHAD_API_KEY }}
+      NAVER_SEARCHAD_SECRET_KEY: ${{ secrets.NAVER_SEARCHAD_SECRET_KEY }}
+      NAVER_SEARCHAD_CUSTOMER_ID: ${{ secrets.NAVER_SEARCHAD_CUSTOMER_ID }}
+      NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
+      NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
+      OPENAI_KEYWORD_ELON_MODEL: ${{ secrets.OPENAI_KEYWORD_ELON_MODEL }}
+      KEYWORD_THRESHOLD_EXPERIMENT_LOCAL_RUN: "1"
+      NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+      PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+      PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build experiment URL
-        id: request
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check experiment credentials without exposing values
         shell: bash
         run: |
+          missing=0
+          for name in OPENAI_API_KEY NAVER_SEARCHAD_API_KEY NAVER_SEARCHAD_SECRET_KEY NAVER_SEARCHAD_CUSTOMER_ID NAVER_API_HUB_CLIENT_ID NAVER_API_HUB_CLIENT_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "$name=missing"
+              missing=1
+            else
+              echo "$name=configured"
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo "Required keyword-engine credentials are not all configured as GitHub Actions secrets."
+            exit 2
+          fi
+
+      - name: Build experiment app
+        run: npm run build
+
+      - name: Run all STEP1-fixed threshold matrices
+        shell: bash
+        run: |
+          mkdir -p experiment-results
+          npm start -- -p 3001 > experiment-results/next-server.log 2>&1 &
+          server_pid=$!
+          cleanup() { kill "$server_pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            status=$(curl -sS -o /tmp/plan.json -w "%{http_code}" --max-time 10 \
+              "http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?sample=nose-tape-step1-v1" || true)
+            if [ "$status" = "200" ]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Local experiment server did not become ready."
+            cat experiment-results/next-server.log || true
+            exit 1
+          fi
+
           python - <<'PY'
           import json
           import os
+          import time
           import urllib.parse
+          import urllib.request
+          from pathlib import Path
 
-          with open("experiments/keyword-threshold-run-request.json", "r", encoding="utf-8") as handle:
-              request = json.load(handle)
+          request_path = Path("experiments/keyword-threshold-run-request.json")
+          output_dir = Path("experiment-results")
+          request = json.loads(request_path.read_text(encoding="utf-8"))
+          samples = request.get("samples") or [request.get("sample", "nose-tape-step1-v1")]
+          cooldown = max(0, int(request.get("cooldownSeconds", 20)))
 
           def csv(name, fallback):
-              values = request.get(name, fallback)
-              return ",".join(str(value) for value in values)
+              return ",".join(str(value) for value in request.get(name, fallback))
 
-          mode = str(request.get("mode", "plan"))
-          sample = str(request.get("sample", "nose-tape-step1-v1"))
-          params = {
-              "sample": sample,
+          common = {
               "step2": csv("step2", [60, 65, 70]),
               "demand": csv("demand", [55, 60, 65]),
               "accuracy": csv("accuracy", [85, 90, 95]),
               "rounds": str(request.get("rounds", 3)),
               "concurrency": str(request.get("concurrency", 2)),
+              "mode": "run",
+              "confirm": "RUN_THRESHOLD_EXPERIMENT",
           }
           blocked = request.get("blocked", [])
           if blocked:
-              params["blocked"] = ",".join(str(value) for value in blocked)
-          query = urllib.parse.urlencode(params)
-          plan_url = f"{os.environ['PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{query}"
-          run_params = dict(params)
-          run_params.update({"mode": "run", "confirm": "RUN_THRESHOLD_EXPERIMENT"})
-          run_url = f"{os.environ['PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{urllib.parse.urlencode(run_params)}"
+              common["blocked"] = ",".join(str(value) for value in blocked)
 
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"mode={mode}\n")
-              output.write(f"request_id={request.get('requestId', 'unnamed')}\n")
-              output.write(f"plan_url={plan_url}\n")
-              output.write(f"run_url={run_url}\n")
+          summary = {
+              "requestId": request.get("requestId", "unnamed"),
+              "requestedSamples": samples,
+              "thresholds": {
+                  "step2": request.get("step2", []),
+                  "demand": request.get("demand", []),
+                  "accuracy": request.get("accuracy", []),
+                  "rounds": request.get("rounds", 3),
+              },
+              "runs": [],
+          }
+
+          for index, sample in enumerate(samples):
+              params = dict(common)
+              params["sample"] = sample
+              url = "http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?" + urllib.parse.urlencode(params)
+              started = time.time()
+              filename = output_dir / f"{sample}.json"
+              print(f"RUN {index + 1}/{len(samples)} {sample}", flush=True)
+              try:
+                  with urllib.request.urlopen(url, timeout=1800) as response:
+                      raw = response.read()
+                      filename.write_bytes(raw)
+                      payload = json.loads(raw)
+                      ok = bool(payload.get("ok"))
+                      summary["runs"].append({
+                          "sample": sample,
+                          "ok": ok,
+                          "seconds": round(time.time() - started, 1),
+                          "file": filename.name,
+                      })
+                      if not ok:
+                          print(f"FAILED_PAYLOAD {sample}", flush=True)
+              except Exception as exc:
+                  error_payload = {
+                      "ok": False,
+                      "sampleId": sample,
+                      "error": type(exc).__name__,
+                      "message": str(exc),
+                  }
+                  filename.write_text(json.dumps(error_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                  summary["runs"].append({
+                      "sample": sample,
+                      "ok": False,
+                      "seconds": round(time.time() - started, 1),
+                      "file": filename.name,
+                      "error": str(exc),
+                  })
+                  print(f"ERROR {sample}: {exc}", flush=True)
+
+              if index + 1 < len(samples) and cooldown:
+                  print(f"COOLDOWN {cooldown}s", flush=True)
+                  time.sleep(cooldown)
+
+          (output_dir / "summary.json").write_text(
+              json.dumps(summary, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
           PY
 
-      - name: Wait for matching Vercel Preview
-        shell: bash
-        env:
-          MODE: ${{ steps.request.outputs.mode }}
-          PLAN_URL: ${{ steps.request.outputs.plan_url }}
-        run: |
-          ready=0
-          for attempt in $(seq 1 90); do
-            status=$(curl -L -sS -o plan.json -w "%{http_code}" --max-time 20 "$PLAN_URL" || true)
-            if [ "$status" = "200" ]; then
-              if [ "$MODE" != "run" ]; then
-                ready=1
-                break
-              fi
-              source_ready=$(python - <<'PY'
-          import json
-          try:
-              with open("plan.json", "r", encoding="utf-8") as handle:
-                  payload = json.load(handle)
-              print("1" if payload.get("plan", {}).get("sourceReady") is True else "0")
-          except Exception:
-              print("0")
-          PY
-              )
-              if [ "$source_ready" = "1" ]; then
-                ready=1
-                break
-              fi
-            fi
-            sleep 5
-          done
-          if [ "$ready" != "1" ]; then
-            echo "Preview did not become ready for this request."
-            cat plan.json || true
-            exit 1
-          fi
-          cat plan.json
-
-      - name: Run threshold matrix
-        if: steps.request.outputs.mode == 'run'
-        shell: bash
-        env:
-          RUN_URL: ${{ steps.request.outputs.run_url }}
-        run: |
-          status=$(curl -L -sS -o experiment-result.json -w "%{http_code}" --max-time 560 "$RUN_URL" || true)
-          echo "HTTP $status"
-          if [ "$status" != "200" ]; then
-            cat experiment-result.json || true
-            exit 1
-          fi
-          python -m json.tool experiment-result.json > /dev/null
-
-      - name: Save plan as result
-        if: steps.request.outputs.mode != 'run'
-        shell: bash
-        run: cp plan.json experiment-result.json
-
-      - name: Upload experiment artifact
+      - name: Upload experiment results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: keyword-threshold-${{ steps.request.outputs.request_id }}
-          path: experiment-result.json
+          name: keyword-threshold-broad-10-sample-matrix-v1
+          path: experiment-results/
           if-no-files-found: error
           retention-days: 14
