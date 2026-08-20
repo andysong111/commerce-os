@@ -35,6 +35,9 @@ test("one-click runner starts from a 1688 URL and resumes after browser collecti
   assert.match(auto, /keywordEngineElonLab\.autoRunToStep4\.v1/);
   assert.match(auto, /validate1688Url/);
   assert.match(auto, /buildKeywordElonBrowserImportUrl/);
+  assert.match(auto, /parse1688OfferId/);
+  assert.match(auto, /same1688Offer/);
+  assert.match(auto, /markerOfferId === sessionOfferId/);
   assert.match(auto, /status: "armed"/);
   assert.match(auto, /status !== "armed"/);
   assert.match(auto, /sourceReady/);
