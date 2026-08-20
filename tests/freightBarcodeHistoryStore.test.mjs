@@ -93,16 +93,32 @@ test("deletes a server history record", async () => {
   assert.equal(await storage.delete(created.id), false);
 });
 
-test("default provider returns the process-local memory adapter", () => {
-  const first = getFreightBarcodeHistoryStorage();
-  const second = getFreightBarcodeHistoryStorage();
+test("default provider returns the process-local memory adapter without Supabase credentials", () => {
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalSecret = process.env.SUPABASE_SECRET_KEY;
+  const originalServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.SUPABASE_SECRET_KEY;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  assert.ok(first instanceof InMemoryFreightBarcodeHistoryStorage);
-  assert.equal(second, first);
+  try {
+    const first = getFreightBarcodeHistoryStorage();
+    const second = getFreightBarcodeHistoryStorage();
+
+    assert.ok(first instanceof InMemoryFreightBarcodeHistoryStorage);
+    assert.equal(second, first);
+  } finally {
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalSecret === undefined) delete process.env.SUPABASE_SECRET_KEY;
+    else process.env.SUPABASE_SECRET_KEY = originalSecret;
+    if (originalServiceRole === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRole;
+  }
 });
 
 test("unsupported storage modes safely fall back to memory", () => {
-  process.env.FREIGHT_BARCODE_HISTORY_STORAGE = "supabase";
+  process.env.FREIGHT_BARCODE_HISTORY_STORAGE = "unsupported";
 
   assert.ok(
     getFreightBarcodeHistoryStorage() instanceof InMemoryFreightBarcodeHistoryStorage,
