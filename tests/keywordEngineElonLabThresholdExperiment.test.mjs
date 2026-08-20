@@ -14,6 +14,13 @@ test("threshold experiment is preview-only and requires explicit confirmation", 
   assert.match(route, /mode=run/);
 });
 
+test("threshold defaults survive omitted or blank query values", () => {
+  assert.match(route, /if \(!raw\?\.trim\(\)\) return fallback/);
+  assert.match(route, /\.map\(\(value\) => value\.trim\(\)\)\s*\.filter\(Boolean\)\s*\.map\(Number\)/s);
+  assert.match(route, /step3Rounds: integerParam\(searchParams\.get\("rounds"\), 3, 1, 3\)/);
+  assert.match(route, /branchConcurrency: integerParam\(searchParams\.get\("concurrency"\), 2, 1, 3\)/);
+});
+
 test("experiment reuses STEP2 discovery and only branches STEP3 by cutoff", () => {
   assert.match(runner, /const baseDiscovery = await discoverKeywordElonCandidatesResilient/);
   assert.match(runner, /const baseScored = await scoreKeywordElonCandidatesBatched/);
@@ -29,6 +36,12 @@ test("experiment evaluates demand and accuracy thresholds independently then app
   assert.match(runner, /filterKeywordElonProhibitedKeywords/);
   assert.match(runner, /step5ObservedKeywords/);
   assert.match(runner, /STEP5_OBSERVED_LIMIT = 30/);
+});
+
+test("shared STEP4 risk pool covers broad core plus the diversity candidates outside that core", () => {
+  assert.match(runner, /const broadUnionKeys = new Set\(broadUnion\.map\(candidateKey\)\)/);
+  assert.match(runner, /buildObservedDiversityCandidates\(input\.branch\.candidates, broadUnionKeys\)/);
+  assert.match(runner, /uniqueRowsPreserveOrder\(\[\.\.\.broadUnion, \.\.\.allDiversity\]\)/);
 });
 
 test("first fixed fixture preserves approved STEP1 identity and can derive experiment source without raw Chinese text", () => {
