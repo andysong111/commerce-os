@@ -5,6 +5,7 @@ import test from "node:test";
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
 const auto = await readFile("src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx", "utf8");
+const collapsible = await readFile("src/app/keyword-engine-elon-lab/KeywordElonCollapsibleSection.tsx", "utf8");
 const core = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const merge = await readFile("src/lib/keywordEngineElonLabV2Merge.ts", "utf8");
 const workflow = await readFile(".github/workflows/keyword-engine-elon-lab-ci.yml", "utf8");
@@ -44,7 +45,7 @@ test("one-click runner starts from a 1688 URL and resumes after browser collecti
   assert.match(auto, /status: "armed"/);
   assert.match(auto, /status !== "armed"/);
   assert.match(auto, /sourceReady/);
-  assert.match(auto, /링크 → STEP 4 일괄 실행/);
+  assert.match(auto, /FINAL RESULT 받기/);
   assert.match(layout, /KeywordElonAutoRunToStep4/);
   assert.match(layout, /<KeywordElonAutoRunToStep4 \/>/);
 });
@@ -67,8 +68,29 @@ test("one-click pipeline performs STEP 1, STEP 2 round 1, STEP 3 rounds 1-3, STE
   assert.match(auto, /일괄 실행 완료 · 표준값 60 \/ 65 \/ 90/);
 });
 
+test("FINAL RESULT stays in the top cockpit after STEP 4 without forcing a page reload", () => {
+  assert.match(auto, /const \[resultSession, setResultSession\]/);
+  assert.match(auto, /setResultSession\(current\)/);
+  assert.match(auto, /FINAL RESULT 생성 완료/);
+  assert.match(auto, /navigator\.clipboard\.writeText/);
+  assert.match(auto, /STEP 5 자동 실행 안 함/);
+  assert.doesNotMatch(auto, /window\.location\.reload/);
+});
+
+test("long diagnostic content is collapsed by default and STEP 5 remains manual", () => {
+  assert.match(layout, /KeywordElonCollapsibleSection/);
+  assert.match(layout, /STEP 1~4 세부내용/);
+  assert.match(layout, /STEP 5 · 다양성 보조/);
+  assert.match(layout, /수동 실행/);
+  assert.match(collapsible, /<details/);
+  assert.match(collapsible, /펼쳐보기/);
+  assert.match(collapsible, /숨기기/);
+  assert.doesNotMatch(collapsible, /<details[^>]*\sopen(?:=|\s|>)/);
+});
+
 test("new cumulative and one-click files are covered by dedicated CI", () => {
   assert.match(workflow, /KeywordElonAutoRunToStep4\.tsx/);
+  assert.match(workflow, /KeywordElonCollapsibleSection\.tsx/);
   assert.match(workflow, /keywordEngineElonLabV2Merge\.ts/);
   assert.match(workflow, /keywordEngineElonLabRoundsAndAuto\.test\.mjs/);
 });
