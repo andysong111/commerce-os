@@ -46,9 +46,12 @@ function buildConfig(searchParams: URLSearchParams): KeywordElonThresholdExperim
     demandQualityThresholds: numberList(searchParams.get("demand"), [55, 60, 65], 4),
     accuracyRelevanceThresholds: numberList(searchParams.get("accuracy"), [85, 90, 95], 4),
     step3Rounds: integerParam(searchParams.get("rounds"), 3, 1, 3),
-    branchConcurrency: integerParam(searchParams.get("concurrency"), 2, 1, 3),
+    branchConcurrency: integerParam(searchParams.get("concurrency"), 1, 1, 1),
     customBlockedTerms: uniqueKeywordElonCanonical(
-      (searchParams.get("blocked") ?? "").split(",").map((value) => value.trim()).filter(Boolean),
+      (searchParams.get("blocked") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
       120,
     ),
   };
@@ -68,7 +71,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const sampleId = request.nextUrl.searchParams.get("sample")?.trim() || "nose-tape-step1-v1";
+  const sampleId = request.nextUrl.searchParams.get("sample")?.trim()
+    || "nose-tape-step1-v1";
   const fixture = getKeywordElonExperimentFixture(sampleId);
   if (!fixture) {
     return NextResponse.json(
@@ -89,10 +93,11 @@ export async function GET(request: NextRequest) {
       * config.demandQualityThresholds.length
       * config.accuracyRelevanceThresholds.length,
     costControl: {
-      step2DiscoveryAndScoring: "샘플당 1회 공유",
-      step3: "STEP 2 cutoff별 branch만 실제 재실행",
-      step4: "각 branch의 broad pool을 1회 검사 후 모든 최종 기준 조합에 재사용",
-      step5: "실제 수집 후보 기반 observed 보조풀만 비교 · 추가 생성 버튼은 실험 표준화에서 제외",
+      step2DiscoveryAndScoring: "샘플당 1회 공유 · 실험용 균형 후보 상한 적용",
+      step3: "STEP 2 cutoff branch는 직렬 실행 · 의미점수 캐시를 branch 간 재사용",
+      step4: "금지어 판단 캐시를 branch 간 재사용",
+      step5: "실제 수집 후보 기반 observed 보조풀만 비교",
+      reliability: "AI 응답 누락·출력한도·타임아웃은 분할 재시도하며 90% 미만 점수화는 실패 처리",
     },
   };
 
@@ -133,18 +138,36 @@ export async function GET(request: NextRequest) {
     }, { status: 400 });
   }
 
-  const result = await runKeywordElonThresholdExperiment({
-    source: fixture.source,
-    identity: fixture.identity,
-    config,
-  });
+  try {
+    const result = await runKeywordElonThresholdExperiment({
+      source: fixture.source,
+      identity: fixture.identity,
+      config,
+      signal: request.signal,
+    });
 
-  return NextResponse.json({
-    ok: true,
-    mode: "run",
-    sampleId: fixture.id,
-    sampleLabel: fixture.label,
-    sourceMode: fixture.sourceMode,
-    result,
-  });
+    return NextResponse.json({
+      ok: true,
+      mode: "run",
+      sampleId: fixture.id,
+      sampleLabel: fixture.label,
+      sourceMode: fixture.sourceMode,
+      result,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[keyword-threshold-experiment] run-failed", {
+      sampleId: fixture.id,
+      message,
+    });
+    return NextResponse.json({
+      ok: false,
+      mode: "run",
+      error: "EXPERIMENT_RUN_FAILED",
+      sampleId: fixture.id,
+      sampleLabel: fixture.label,
+      message,
+      plan,
+    }, { status: 422 });
+  }
 }
