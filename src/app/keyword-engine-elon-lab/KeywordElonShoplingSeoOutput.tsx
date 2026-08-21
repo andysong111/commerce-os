@@ -10,11 +10,20 @@ import {
   PRODUCT_GROUP_MARKET_REGISTRY,
 } from "@/lib/productGroupMarketRegistry";
 import {
-  buildKeywordElonSeoPackage,
-  type KeywordElonSeoPackage,
-} from "@/lib/keywordEngineElonLabSeoOutput";
+  buildKeywordElonSeoModelPackage,
+  type KeywordElonSeoModelNameSource,
+  type KeywordElonSeoModelPackage,
+} from "@/lib/keywordEngineElonLabSeoModelOutput";
 
 const CUSTOM_BLOCKED_STORAGE_KEY = "keywordEngineElonLab.step4.customBlockedTerms.v1";
+
+const MODEL_SOURCE_LABEL: Record<KeywordElonSeoModelNameSource, string> = {
+  core_product: "STEP 1 핵심 상품명",
+  step4_plus_core: "STEP 4 구체어 + 핵심 상품명",
+  identity_compact: "1688 상품 정체성 압축",
+  step4_specific: "STEP 4 구체어 보강",
+  fallback: "보수적 fallback",
+};
 
 type Step4Decision = {
   keyword?: string;
@@ -52,7 +61,7 @@ function readCustomBlockedTerms() {
   }
 }
 
-function buildOutput(session: ExtendedSession | null, customTerms: string[]): KeywordElonSeoPackage | null {
+function buildOutput(session: ExtendedSession | null, customTerms: string[]): KeywordElonSeoModelPackage | null {
   if (!session?.identity || session.step4?.status !== "done") return null;
   const allowedKeys = Array.isArray(session.step4.allowedKeys) ? session.step4.allowedKeys : [];
   if (!allowedKeys.length) return null;
@@ -60,7 +69,7 @@ function buildOutput(session: ExtendedSession | null, customTerms: string[]): Ke
     .filter((row) => row.blocked === true)
     .map((row) => row.key || row.keyword || "")
     .filter(Boolean);
-  return buildKeywordElonSeoPackage(
+  return buildKeywordElonSeoModelPackage(
     {
       identity: session.identity,
       candidates: session.scoredCandidates,
@@ -139,6 +148,10 @@ export default function KeywordElonShoplingSeoOutput() {
     await navigator.clipboard.writeText(JSON.stringify({
       sourceUrl: session?.source.url ?? "",
       offerId: session?.source.offerId ?? "",
+      modelName: readyOutput.modelName,
+      modelNameSource: readyOutput.modelNameSource,
+      modelNameByteLength: readyOutput.modelNameByteLength,
+      modelNameCoverageCount: readyOutput.modelNameCoverageCount,
       commonSearchLine: readyOutput.commonSearchLine,
       commonSearchKeywords: readyOutput.commonSearchKeywords,
       searchKeywordDetails: readyOutput.searchKeywordDetails,
@@ -155,9 +168,9 @@ export default function KeywordElonShoplingSeoOutput() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.16em] text-cyan-700">SEO OUTPUT · PREVIEW ONLY</div>
-            <h2 className="mt-1 text-2xl font-black">쇼핑몰별 상품명 + 공통 검색어 10개</h2>
+            <h2 className="mt-1 text-2xl font-black">링크 기반 모델명 + 쇼핑몰별 상품명 + 공통 검색어 10개</h2>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              STEP 4 최종 통과 재료만 사용합니다. 검색어는 띄어쓰기 없이 콤마로 구분하고, 쇼핑몰별 상품명은 도매·소매 시장 성격에 맞춰 최대 50bytes로 구성합니다.
+              1688 링크의 상품 정체성에서 모델명을 먼저 결정하고, 모든 쇼핑몰별 상품명에 모델명을 정확히 한 번 포함합니다. 상품명은 최대 50bytes이며 검색어는 STEP 4 최종 재료로만 구성합니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -165,15 +178,32 @@ export default function KeywordElonShoplingSeoOutput() {
             <span className={`rounded-full px-3 py-1 ${readyOutput.status === "ready" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
               검색어 {readyOutput.commonSearchKeywords.length}/10
             </span>
+            <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-800">모델명 포함 {readyOutput.modelNameCoverageCount}/{readyOutput.mallTitles.length}</span>
             <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">STEP 4 원본 {readyOutput.marketDerivedKeywordCount}개</span>
             <span className="rounded-full bg-fuchsia-100 px-3 py-1 text-fuchsia-800">2개 재료 조합 {readyOutput.generatedFallbackKeywordCount}개</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">외부 재료 {readyOutput.externalMaterialCount}개</span>
             <span className="rounded-full bg-cyan-100 px-3 py-1 text-cyan-900">제목 최대 {readyOutput.titleByteLimit}bytes</span>
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
-          공통 상품명·모델명은 변경하지 않습니다. SEO OUTPUT은 ‘도매·대량·납품’과 원산지·제조·포장성 노이즈를 사용하지 않으며 Shopling·상품출시진행관리·마켓에는 아무것도 쓰지 않습니다.
+        <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-xs font-black uppercase tracking-[0.14em] text-indigo-700">LINK-DERIVED MODEL NAME</div>
+              <div className="mt-2 text-2xl font-black text-slate-950">{readyOutput.modelName}</div>
+              <p className="mt-2 text-sm text-slate-600">
+                1688 상품 정체성에서 결정한 공통 상품 앵커입니다. 쇼핑몰별 제목은 이 모델명에 도매·소매 SEO 검색어를 1~2개만 결합합니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs font-black">
+              <span className="rounded-full bg-white px-3 py-1 text-indigo-800 ring-1 ring-indigo-200">{MODEL_SOURCE_LABEL[readyOutput.modelNameSource]}</span>
+              <span className="rounded-full bg-white px-3 py-1 text-indigo-800 ring-1 ring-indigo-200">{readyOutput.modelNameByteLength}bytes</span>
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">29개 제목 필수 포함</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
+          기존 상품출시 공통 상품명·모델명은 변경하지 않습니다. 여기의 링크 기반 모델명은 SEO OUTPUT 미리보기용이며, ‘도매·대량·납품’과 원산지·제조·포장성 노이즈를 사용하지 않습니다. Shopling·상품출시진행관리·마켓에는 아무것도 쓰지 않습니다.
         </div>
 
         {readyOutput.warnings.length ? (
@@ -188,7 +218,7 @@ export default function KeywordElonShoplingSeoOutput() {
             <div>
               <h3 className="text-lg font-black">공통 검색어 · 정확히 10개</h3>
               <p className="mt-1 text-xs text-slate-500">
-                STEP 4 원본을 우선 사용하고 부족분만 최종 재료 2개 조합으로 채웁니다. 외부 단어·Identity 설명·스펙 문장은 추가하지 않습니다.
+                STEP 4 원본을 우선 사용하고 부족분만 최종 재료 2개 조합으로 채웁니다. 링크 기반 모델명은 검색어 10개를 억지로 채우는 재료로 사용하지 않습니다.
               </p>
             </div>
             <button type="button" onClick={() => void copyKeywords()} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-black text-white">
@@ -216,7 +246,7 @@ export default function KeywordElonShoplingSeoOutput() {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-black">쇼핑몰별 상품명</h3>
-            <p className="mt-1 text-xs text-slate-500">확정 검색어 10개만 제목 재료로 사용합니다. 29개를 억지로 모두 다르게 만들지 않고 상품그룹별 고품질 변형을 안정적으로 배분합니다.</p>
+            <p className="mt-1 text-xs text-slate-500">모든 제목은 링크 기반 모델명 1회 + 확정 검색어 0~2개로 구성합니다. 29개를 억지로 모두 다르게 만들지 않고 상품그룹별 고품질 변형을 안정적으로 배분합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void copyTitles()} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black">상품명 표 복사</button>
@@ -236,6 +266,7 @@ export default function KeywordElonShoplingSeoOutput() {
                     <div className="mt-1 text-xs font-medium text-slate-500">{strategy?.description}</div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs text-indigo-800">모델명 필수</span>
                     <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs text-cyan-800">제목 변형 {variantCount}/{strategy?.variantLimit ?? variantCount}</span>
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">펼쳐보기</span>
                   </div>
@@ -258,7 +289,8 @@ export default function KeywordElonShoplingSeoOutput() {
                           <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{row.mallKey}</td>
                           <td className="px-4 py-3">
                             <div className="font-bold text-slate-900">{row.title}</div>
-                            <div className="mt-1 text-[11px] text-slate-400">사용 재료: {row.usedMaterials.join(" / ")}</div>
+                            <div className="mt-1 text-[11px] text-indigo-600">모델명: {row.modelName}</div>
+                            <div className="mt-1 text-[11px] text-slate-400">SEO 키워드: {row.keywordMaterials.length ? row.keywordMaterials.join(" / ") : "추가 없음"}</div>
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-xs font-bold text-slate-600">{row.strategyLabel} · 변형 {row.variantIndex}</td>
                           <td className={`whitespace-nowrap px-4 py-3 text-right font-black tabular-nums ${row.byteLength <= readyOutput.titleByteLimit ? "text-emerald-700" : "text-rose-700"}`}>{row.byteLength}</td>
@@ -273,7 +305,7 @@ export default function KeywordElonShoplingSeoOutput() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <span>고유 상품명 {readyOutput.uniqueTitleCount}/{readyOutput.mallTitles.length}개 · 최대 변형 정책 13개 · 제목 단어는 검색어 10개 안에서만 사용</span>
+          <span>링크 기반 모델명 포함 {readyOutput.modelNameCoverageCount}/{readyOutput.mallTitles.length}개 · 고유 상품명 {readyOutput.uniqueTitleCount}/{readyOutput.mallTitles.length}개 · 최대 변형 정책 13개</span>
           {message ? <span className="font-bold text-blue-800">{message}</span> : null}
         </div>
       </div>
