@@ -58,7 +58,7 @@ test("one-click pipeline performs STEP 1, STEP 2 round 1, STEP 3 rounds 1-3, STE
   assert.match(auto, /keywordEngineElonLab\.step4\.customBlockedTerms\.v1/);
   assert.match(auto, /action: "filter_prohibited_keywords"/);
   assert.match(auto, /action: "generate_title"/);
-  assert.match(auto, /일괄 실행 완료 · STEP 4까지 완료/);
+  assert.match(auto, /일괄 실행 완료 · 표준값 60 \/ 65 \/ 90/);
 });
 
 test("new cumulative and one-click files are covered by dedicated CI", () => {
