@@ -132,7 +132,7 @@ export async function classifyShoplingBranches(
   options: AiOptions = {},
 ): Promise<ShoplingBranchPlan[]> {
   if (!inputs.length || !branchOptions.length) return [];
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey) return [];
   const model = text(
     options.model ??
@@ -237,7 +237,7 @@ export async function repairShoplingRecommendationWithinBranches(
   branches: string[],
   options: AiOptions = {},
 ): Promise<ProductCategoryRecommendation | null> {
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey || !branches.length) return null;
   const model = text(
     options.model ??

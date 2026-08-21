@@ -294,7 +294,7 @@ export async function validateShoplingRecommendationWithNaver(
     timeoutMs?: number;
   } = {},
 ): Promise<NaverCategoryValidation | null> {
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey) return null;
 
   const model = text(

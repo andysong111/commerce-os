@@ -394,7 +394,7 @@ export async function generateProductLaunchAiTitleTerms(
   } = {},
 ) {
   const input = parseProductLaunchAiTitleTermInput(inputValue);
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.PRODUCT_TITLE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey) {
     throw new Error(
       "OPENAI_API_KEY가 설정되지 않아 AI 상품명 생성어를 만들 수 없습니다.",
