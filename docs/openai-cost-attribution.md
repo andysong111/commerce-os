@@ -1,40 +1,72 @@
 # OpenAI cost attribution
 
-Commerce OS server-side OpenAI calls are separated into cost lanes so usage can be traced by OpenAI project/API key instead of being mixed under one generic key.
+Commerce OS production OpenAI usage is isolated first by deployed service and, inside OPS Center, by functional API key. This is the canonical key map for cost attribution and rotation.
 
-## Cost lanes
+## Canonical OpenAI projects
 
-| Cost lane | Vercel environment variable | Main use |
+| OpenAI project | Production service | Vercel project |
 | --- | --- | --- |
-| Keyword Engine | `KEYWORD_ENGINE_OPENAI_API_KEY` | Keyword identity, discovery, scoring, market recall, STEP 4 AI checks |
-| Category AI | `SHOPLING_CATEGORY_OPENAI_API_KEY` | Shopling category catalog/recommendation/accuracy/repair, including product-launch AI category flow |
-| Product Title AI | `PRODUCT_TITLE_OPENAI_API_KEY` | AI title-term generation |
-| Ops AI Help | `OPS_AI_HELP_OPENAI_API_KEY` | OPS Center read-only AI help desk |
+| `commerce-os-ops-center` | Commerce OS OPS Center | `commerce-os-ops-center` |
+| `commerce-os-detail-page-studio` | Internal detail-page engine | `commerce-os-detail-page-studio` |
+| `ai-saurus-production` | AI-Saurus customer SaaS | `commerce-os-detail-page-saas` |
+| `commerce-os-sourcing-engine` | Commerce OS sourcing engine / semantic mapping | `commerce-os-sourcing-engine` |
 
-The product-launch AI category route delegates to the Shopling category engine, so it belongs to the same Category AI cost lane instead of pretending to be a separate OpenAI caller.
+`commerce-os-development-test` is not part of the canonical setup and may be deleted.
 
-`OPENAI_API_KEY` remains a temporary fallback so production does not break while dedicated keys are being added. Do not put actual key values in GitHub.
+The Vercel project `commerce-os-detail-page-studio-pzxe` is not canonical. Do not add a new production OpenAI key to it. The canonical Studio project is `commerce-os-detail-page-studio`.
 
-## Recommended OpenAI projects
+## OPS Center cost lanes
 
-Create one OpenAI Platform project and one project API key per actual cost lane:
+All four service accounts live inside the single `commerce-os-ops-center` OpenAI project. Project-level Usage shows total OPS spend and API-key-level Usage separates the functional lanes.
 
-- `commerce-os-keyword-engine`
-- `commerce-os-category-ai`
-- `commerce-os-product-title`
-- `commerce-os-ops-ai-help`
+| Cost lane | OpenAI service account | Vercel environment variable | Main use |
+| --- | --- | --- | --- |
+| Keyword Engine | `ops-keyword-engine` | `KEYWORD_ENGINE_OPENAI_API_KEY` | Keyword identity, discovery, scoring, market recall, STEP 4 checks |
+| Category AI | `ops-category-ai` | `SHOPLING_CATEGORY_OPENAI_API_KEY` | Shopling category catalog/recommendation/accuracy/repair and product-launch AI category flow |
+| Product Title AI | `ops-product-title-ai` | `PRODUCT_TITLE_OPENAI_API_KEY` | AI title-term generation |
+| Ops AI Help | `ops-ai-help` | `OPS_AI_HELP_OPENAI_API_KEY` | OPS Center read-only AI help desk |
 
-Use the matching project key in the Vercel environment variable above. Set a monthly budget/alert per OpenAI project. That makes the OpenAI Usage dashboard useful for cost attribution instead of showing one blended Commerce OS total.
+The product-launch AI category route delegates to the Shopling category engine and therefore belongs to Category AI rather than a separate cost lane.
 
-## Migration order
+## Other production runtimes
 
-1. Merge this change while keeping the existing `OPENAI_API_KEY` fallback.
-2. Create the four OpenAI projects/API keys.
-3. Add each dedicated environment variable to the Commerce OS Vercel project for Production (and Preview if needed).
-4. Redeploy.
-5. Run one controlled request in each lane and confirm usage appears in the intended OpenAI project/API key.
-6. After all lanes are confirmed, remove the generic `OPENAI_API_KEY` value from the Commerce OS Vercel project so future unclassified calls fail loudly instead of hiding in shared spend.
+| OpenAI project | Service account | Vercel environment variable |
+| --- | --- | --- |
+| `commerce-os-detail-page-studio` | `studio-runtime` | `OPENAI_API_KEY` |
+| `ai-saurus-production` | `ai-saurus-runtime` | `OPENAI_API_KEY` |
+| `commerce-os-sourcing-engine` | `sourcing-runtime` | `OPENAI_API_KEY` |
+
+AI-Saurus `OPENAI_ADMIN_KEY` is a separate organization-cost reconciliation credential. It is not the runtime generation key and must not be replaced with `ai-saurus-runtime`.
+
+## Vercel environment scope
+
+Production service-account keys are configured for **Production only** by default. Preview and Development stay unchecked unless a dedicated non-production key is intentionally created later.
+
+Do not reuse a Production runtime key in Preview or Development. That would mix test traffic into production spend and enlarge the cost-bearing surface.
+
+## Production key verification
+
+OPS Center has two permanent verification layers:
+
+1. `scripts/check-openai-cost-attribution.mjs` fails CI if a direct OpenAI caller is not assigned to a registered cost lane.
+2. `scripts/verify-openai-production-keys.mjs` runs before a Vercel Production build and authenticates all four dedicated OPS keys. A missing or invalid dedicated key prevents a new Production deployment from replacing the current working deployment.
+
+The owner-only `/openai-key-health` page and `/api/openai-key-health` route can also verify the four OPS keys without exposing key values.
+
+Studio, AI-Saurus and Sourcing use equivalent Production build gates for their runtime `OPENAI_API_KEY`. These gates must not print key values or raw provider responses containing secrets.
+
+## Rotation / cleanup order
+
+1. Create the replacement service-account key inside the correct canonical OpenAI project.
+2. Replace only the matching Vercel Production environment variable.
+3. Redeploy Production.
+4. Require the Production key gate and Vercel deployment to succeed.
+5. Only then remove the legacy Vercel key or revoke the old OpenAI key.
+6. Delete duplicate/noncanonical deployments before revoking any key they may still reference.
+7. Keep `OPENAI_ADMIN_KEY` separate from AI-Saurus runtime rotation.
+
+OPS Center still supports `OPENAI_API_KEY` as a temporary code fallback during this migration. Once the four dedicated Production variables have been verified and the generic Vercel `OPENAI_API_KEY` value is removed, the fallback is inert. Future Production builds still require all four dedicated variables.
 
 ## Rule for future AI features
 
-Any new direct call to `api.openai.com` must be assigned to a dedicated cost lane before merge. `scripts/check-openai-cost-attribution.mjs` scans all direct OpenAI call sites, and the existing repository `CI` runs that guard automatically on pull requests.
+Any new direct call to `api.openai.com` must be assigned to an explicit cost lane before merge. Do not commit actual API key values to GitHub. New production services should receive their own OpenAI project or explicitly documented service account so Usage remains attributable.
