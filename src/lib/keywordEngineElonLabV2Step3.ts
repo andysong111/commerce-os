@@ -9,11 +9,12 @@ import {
 import { mineKeywordElonApiHubMarket } from "@/lib/keywordEngineElonLabV2ApiHub";
 import { discoverKeywordElonSearchAd } from "@/lib/keywordEngineElonLabV2SearchAd";
 
+const EXPERIMENT_MODE = process.env.KEYWORD_THRESHOLD_EXPERIMENT_LOCAL_RUN === "1";
 const STEP3_SEED_LIMIT = 8;
-const STEP3_CANDIDATE_LIMIT = 300;
-const STEP3_API_HUB_TERM_LIMIT = 90;
-const STEP3_SEARCHAD_GLOBAL_LIMIT = 220;
-const STEP3_SEARCHAD_PER_SEED_LIMIT = 60;
+const STEP3_CANDIDATE_LIMIT = EXPERIMENT_MODE ? 140 : 300;
+const STEP3_API_HUB_TERM_LIMIT = EXPERIMENT_MODE ? 60 : 90;
+const STEP3_SEARCHAD_GLOBAL_LIMIT = EXPERIMENT_MODE ? 120 : 220;
+const STEP3_SEARCHAD_PER_SEED_LIMIT = EXPERIMENT_MODE ? 35 : 60;
 const STEP3_MIN_MONTHLY_SEARCH = 10;
 
 function mergeStat(
@@ -58,11 +59,11 @@ function chooseSearchAdRows(
     const key = compactKeywordElonKey(row.keyword);
     const demand = row.totalSearch ?? 0;
     return Boolean(
-      key &&
-      key.length >= 2 &&
-      key.length <= 18 &&
-      !blocked.has(key) &&
-      demand >= STEP3_MIN_MONTHLY_SEARCH,
+      key
+      && key.length >= 2
+      && key.length <= 18
+      && !blocked.has(key)
+      && demand >= STEP3_MIN_MONTHLY_SEARCH,
     );
   });
 
@@ -70,9 +71,8 @@ function chooseSearchAdRows(
     const related = usable
       .filter((row) => (row.sourceSeeds ?? []).some((seed) => compactKeywordElonKey(seed) === seedKey))
       .sort(
-        (a, b) =>
-          (b.totalSearch ?? -1) - (a.totalSearch ?? -1) ||
-          compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
+        (a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1)
+          || compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
       )
       .slice(0, STEP3_SEARCHAD_PER_SEED_LIMIT);
     for (const row of related) mergeStat(byKey, row);
@@ -80,19 +80,18 @@ function chooseSearchAdRows(
 
   const global = [...usable]
     .sort(
-      (a, b) =>
-        new Set(b.sourceSeeds.map(compactKeywordElonKey)).size - new Set(a.sourceSeeds.map(compactKeywordElonKey)).size ||
-        (b.totalSearch ?? -1) - (a.totalSearch ?? -1) ||
-        compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
+      (a, b) => new Set(b.sourceSeeds.map(compactKeywordElonKey)).size
+          - new Set(a.sourceSeeds.map(compactKeywordElonKey)).size
+        || (b.totalSearch ?? -1) - (a.totalSearch ?? -1)
+        || compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
     )
     .slice(0, STEP3_SEARCHAD_GLOBAL_LIMIT);
   for (const row of global) mergeStat(byKey, row);
 
   return [...byKey.values()]
     .sort(
-      (a, b) =>
-        (b.totalSearch ?? -1) - (a.totalSearch ?? -1) ||
-        compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
+      (a, b) => (b.totalSearch ?? -1) - (a.totalSearch ?? -1)
+        || compactKeywordElonKey(a.keyword).length - compactKeywordElonKey(b.keyword).length,
     )
     .slice(0, STEP3_SEARCHAD_GLOBAL_LIMIT);
 }
@@ -113,7 +112,9 @@ function candidateTags(
   for (const term of evidenceTerms) add(term, "step3_api_hub_evidence");
   for (const row of searchAdRows) {
     add(row.keyword, "step3_searchad_related");
-    for (const seed of row.sourceSeeds ?? []) add(row.keyword, `step3_related:${compactKeywordElonKey(seed)}`);
+    for (const seed of row.sourceSeeds ?? []) {
+      add(row.keyword, `step3_related:${compactKeywordElonKey(seed)}`);
+    }
   }
   return tags;
 }
@@ -144,14 +145,18 @@ export async function expandKeywordElonFromPassing(input: {
         documents: [],
         terms: [],
         activeSources: [],
-        warnings: [`STEP3_API_HUB_FAILED:${apiHubSettled.reason instanceof Error ? apiHubSettled.reason.message : String(apiHubSettled.reason)}`],
+        warnings: [
+          `STEP3_API_HUB_FAILED:${apiHubSettled.reason instanceof Error ? apiHubSettled.reason.message : String(apiHubSettled.reason)}`,
+        ],
       };
   const searchAd = searchAdSettled.status === "fulfilled"
     ? searchAdSettled.value
     : {
         configured: false,
         rows: [] as KeywordElonSearchAdStat[],
-        warnings: [`STEP3_SEARCHAD_FAILED:${searchAdSettled.reason instanceof Error ? searchAdSettled.reason.message : String(searchAdSettled.reason)}`],
+        warnings: [
+          `STEP3_SEARCHAD_FAILED:${searchAdSettled.reason instanceof Error ? searchAdSettled.reason.message : String(searchAdSettled.reason)}`,
+        ],
         expansionSeeds: [] as string[],
         explorationDepth: 1,
       };
