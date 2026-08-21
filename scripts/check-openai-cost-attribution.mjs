@@ -5,7 +5,6 @@ import { join } from "node:path";
 const laneRules = [
   [/keywordEngineElonLab|api\/keyword-engine-elon-lab\//, "KEYWORD_ENGINE_OPENAI_API_KEY"],
   [/shoplingCategory/, "SHOPLING_CATEGORY_OPENAI_API_KEY"],
-  [/api\/product-launch-tracker\/ai-category\//, "PRODUCT_CATEGORY_OPENAI_API_KEY"],
   [/productLaunchAiTitleTerms|api\/product-launch-ai-title-terms\//, "PRODUCT_TITLE_OPENAI_API_KEY"],
   [/opsAiHelp|api\/ops-ai-help\//, "OPS_AI_HELP_OPENAI_API_KEY"],
 ];
