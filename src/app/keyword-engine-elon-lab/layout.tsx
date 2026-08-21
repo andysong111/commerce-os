@@ -8,6 +8,7 @@ import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonDiversitySupplement from "./KeywordElonDiversitySupplement";
 import KeywordElonInterruptedRunRecovery from "./KeywordElonInterruptedRunRecovery";
 import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
+import KeywordElonShoplingSeoOutput from "./KeywordElonShoplingSeoOutput";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
 import KeywordElonStep4DualFilter from "./KeywordElonStep4DualFilter";
 
@@ -18,6 +19,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       <KeywordElonScoreFetchBridge />
       <KeywordElonAutoRunResumeBridge />
       <KeywordElonAutoRunToStep4 />
+      <KeywordElonShoplingSeoOutput />
 
       <KeywordElonCollapsibleSection
         title="STEP 1~4 세부내용"
@@ -32,7 +34,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
 
       <KeywordElonCollapsibleSection
         title="STEP 5 · 다양성 보조"
-        description="STEP 5는 원클릭 실행에서 제외합니다. FINAL RESULT를 확인한 뒤 부족할 때만 펼쳐서 직접 실행합니다."
+        description="STEP 5는 원클릭 실행에서 제외합니다. FINAL RESULT와 SEO OUTPUT을 확인한 뒤 부족할 때만 펼쳐서 직접 실행합니다."
         badge="수동 실행"
       >
         <KeywordElonDiversitySupplement />
