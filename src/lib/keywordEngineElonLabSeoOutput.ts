@@ -1,5 +1,6 @@
 export const KEYWORD_ELON_SEO_SEARCH_LIMIT = 10;
 export const KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT = 50;
+export const KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT = 36;
 export const KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT = 30;
 export const KEYWORD_ELON_SEO_FORBIDDEN_TERMS = ["도매", "대량", "납품"] as const;
 export const KEYWORD_ELON_SEO_NOISE_TERMS = [
@@ -38,6 +39,7 @@ export type KeywordElonSeoCandidate = {
   specificity?: number;
   qualityScore?: number;
   totalSearch?: number | null;
+  titleEligible?: boolean;
 };
 
 export type KeywordElonSeoMarket = {
@@ -70,12 +72,19 @@ export type KeywordElonSeoSearchKeyword = {
   totalSearch: number | null;
 };
 
+export type KeywordElonSeoModelNameSource =
+  | "core_product"
+  | "identity_compact"
+  | "step4_specific"
+  | "fallback";
+
 export type KeywordElonSeoGroupStrategy = {
   productGroup: string;
   label: string;
   description: string;
   variantLimit: number;
   maxTerms: number;
+  modelPosition: "first" | "after_lead";
 };
 
 export type KeywordElonSeoMallTitle = {
@@ -86,13 +95,19 @@ export type KeywordElonSeoMallTitle = {
   accountIdLabel: string;
   title: string;
   byteLength: number;
+  modelName: string;
   usedMaterials: string[];
+  keywordMaterials: string[];
   strategyLabel: string;
   variantIndex: number;
 };
 
 export type KeywordElonSeoPackage = {
   status: "ready" | "needs_more_keywords";
+  modelName: string;
+  modelNameSource: KeywordElonSeoModelNameSource;
+  modelNameByteLength: number;
+  modelNameCoverageCount: number;
   commonSearchKeywords: string[];
   commonSearchLine: string;
   searchKeywordDetails: KeywordElonSeoSearchKeyword[];
@@ -122,6 +137,11 @@ type KeywordRole = "anchor" | "exact" | "form" | "modifier" | "generic";
 type GroupStrategyInternal = KeywordElonSeoGroupStrategy & {
   rank: (keyword: KeywordElonSeoSearchKeyword, input: KeywordElonSeoPackageInput) => number;
 };
+type TitleBuild = {
+  title: string;
+  usedMaterials: string[];
+  keywordMaterials: string[];
+};
 
 const FORM_ONLY_TERMS = new Set([
   "테이프",
@@ -141,6 +161,15 @@ const FORM_ONLY_TERMS = new Set([
   "수납장",
   "거치대",
   "보관함",
+  "모자",
+  "캡",
+  "운동화",
+  "신발",
+  "골무",
+  "압출기",
+  "천공기",
+  "주걱",
+  "헤라",
 ]);
 
 const MODIFIER_ONLY_TERMS = new Set([
@@ -157,6 +186,43 @@ const MODIFIER_ONLY_TERMS = new Set([
   "콧대",
   "콧등",
 ]);
+
+const GENERIC_MODEL_NAMES = new Set([
+  "상품",
+  "제품",
+  "용품",
+  "도구",
+  "세트",
+  ...FORM_ONLY_TERMS,
+]);
+
+const MODEL_NOUN_SUFFIXES = [
+  "청소브러시",
+  "청소브러쉬",
+  "신발주걱",
+  "서랍형수납함",
+  "여드름압출기",
+  "계란천공기",
+  "등산화",
+  "운동화",
+  "수납함",
+  "수납장",
+  "정리함",
+  "신발주걱",
+  "썬캡",
+  "챙모자",
+  "압출기",
+  "천공기",
+  "브러시",
+  "브러쉬",
+  "스티커",
+  "테이프",
+  "패치",
+  "골무",
+  "모자",
+  "주걱",
+  "헤라",
+];
 
 function normalizedText(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -208,6 +274,71 @@ function safeSearchTerm(value: unknown, blockedKeys: string[]) {
     || keywordElonSeoUtf8Bytes(key) > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT
   ) return "";
   return key;
+}
+
+function cleanHumanPhrase(value: unknown) {
+  return normalizedText(value)
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[\u3400-\u9fff]+/g, " ")
+    .replace(/[·•:;,|/\\]+/g, " ")
+    .replace(/[_~`^=*#@!?]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function fitWords(value: unknown, maxBytes: number) {
+  const words = cleanHumanPhrase(value).split(/\s+/).filter(Boolean);
+  const selected: string[] = [];
+  for (const word of words) {
+    const next = [...selected, word].join(" ");
+    if (keywordElonSeoUtf8Bytes(next) > maxBytes) break;
+    selected.push(word);
+  }
+  return selected.join(" ");
+}
+
+function fitIdentityAroundCore(value: unknown, coreKey: string, maxBytes: number) {
+  const words = cleanHumanPhrase(value).split(/\s+/).filter(Boolean);
+  if (!words.length) return "";
+  const coreIndex = words.findIndex((word) => {
+    const key = keywordElonSeoCanonical(word);
+    return key === coreKey || key.includes(coreKey) || coreKey.includes(key);
+  });
+  if (coreIndex < 0) return fitWords(words.join(" "), maxBytes);
+
+  const selected = [words[coreIndex]];
+  for (let index = coreIndex - 1; index >= 0; index -= 1) {
+    const next = [words[index], ...selected].join(" ");
+    if (keywordElonSeoUtf8Bytes(next) > maxBytes) break;
+    selected.unshift(words[index]);
+  }
+  for (let index = coreIndex + 1; index < words.length; index += 1) {
+    const next = [...selected, words[index]].join(" ");
+    if (keywordElonSeoUtf8Bytes(next) > maxBytes) break;
+    selected.push(words[index]);
+  }
+  return selected.join(" ");
+}
+
+function humanizeModelKeyword(value: unknown, coreProduct: unknown) {
+  const raw = cleanHumanPhrase(value);
+  const key = keywordElonSeoCanonical(raw);
+  const core = cleanHumanPhrase(coreProduct);
+  const coreKey = keywordElonSeoCanonical(core);
+  if (!key) return "";
+
+  if (coreKey && key !== coreKey && key.endsWith(coreKey)) {
+    const prefix = key.slice(0, -coreKey.length);
+    if (prefix.length >= 2) return `${prefix} ${core}`.trim();
+  }
+  for (const suffix of MODEL_NOUN_SUFFIXES) {
+    const suffixKey = keywordElonSeoCanonical(suffix);
+    if (key !== suffixKey && key.endsWith(suffixKey)) {
+      const prefix = key.slice(0, -suffixKey.length);
+      if (prefix.length >= 2) return `${prefix} ${suffix}`.trim();
+    }
+  }
+  return raw;
 }
 
 function demandScore(totalSearch: number | null | undefined) {
@@ -399,13 +530,72 @@ function genericPenalty(keyword: KeywordElonSeoSearchKeyword, input: KeywordElon
   return ["form", "modifier", "generic"].includes(keywordRole(keyword, input)) ? 35 : 0;
 }
 
+function isSpecificModelName(value: unknown) {
+  const key = keywordElonSeoCanonical(value);
+  return key.length >= 4 && !GENERIC_MODEL_NAMES.has(key);
+}
+
+function resolveModelName(
+  input: KeywordElonSeoPackageInput,
+  allowedRows: KeywordElonSeoCandidate[],
+  blockedKeys: string[],
+): { modelName: string; source: KeywordElonSeoModelNameSource } {
+  const core = cleanHumanPhrase(input.identity.coreProduct);
+  const coreKey = keywordElonSeoCanonical(core);
+  const fittedCore = fitWords(core, KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT);
+  if (fittedCore && isSpecificModelName(fittedCore) && !blocked(fittedCore, blockedKeys)) {
+    return { modelName: fittedCore, source: "core_product" };
+  }
+
+  const identityCandidates = [
+    input.identity.koreanProductIdentity,
+    input.identity.identityAnchor,
+  ];
+  for (const candidate of identityCandidates) {
+    const fitted = fitIdentityAroundCore(candidate, coreKey, KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT);
+    if (fitted && isSpecificModelName(fitted) && !blocked(fitted, blockedKeys)) {
+      return { modelName: fitted, source: "identity_compact" };
+    }
+  }
+
+  const ranked = [...allowedRows]
+    .filter((row) => !blocked(candidateText(row), blockedKeys))
+    .sort((left, right) => {
+      const leftMetric = candidateMetrics(left);
+      const rightMetric = candidateMetrics(right);
+      const leftScore = leftMetric.relevance * 0.45 + leftMetric.specificity * 0.35 + leftMetric.qualityScore * 0.20;
+      const rightScore = rightMetric.relevance * 0.45 + rightMetric.specificity * 0.35 + rightMetric.qualityScore * 0.20;
+      return rightScore - leftScore;
+    });
+  for (const row of ranked) {
+    const candidate = humanizeModelKeyword(candidateText(row), core);
+    const fitted = fitWords(candidate, KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT);
+    const key = keywordElonSeoCanonical(fitted);
+    const hasProductNoun = Boolean(
+      coreKey && (key.includes(coreKey) || coreKey.includes(key))
+      || MODEL_NOUN_SUFFIXES.some((suffix) => key.endsWith(keywordElonSeoCanonical(suffix))),
+    );
+    if (fitted && hasProductNoun && isSpecificModelName(fitted) && !blocked(fitted, blockedKeys)) {
+      return { modelName: fitted, source: "step4_specific" };
+    }
+  }
+
+  const fallback = fittedCore
+    || fitWords(input.identity.koreanProductIdentity, KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT)
+    || fitWords(input.identity.identityAnchor, KEYWORD_ELON_SEO_MODEL_NAME_BYTE_LIMIT)
+    || humanizeModelKeyword(candidateText(ranked[0] ?? {}), core)
+    || "상품명 확인 필요";
+  return { modelName: fallback, source: "fallback" };
+}
+
 const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   도매1: {
     productGroup: "도매1",
     label: "대표 정확형",
-    description: "상품 관련성·구체성을 가장 우선하고 수요가 검증된 정확 키워드를 보조로 배치합니다.",
+    description: "자동 모델명을 앞에 고정하고 상품 관련성·구체성이 가장 높은 검색어를 보조로 배치합니다.",
     variantLimit: 2,
-    maxTerms: 3,
+    maxTerms: 2,
+    modelPosition: "first",
     rank: (keyword, input) => (
       keyword.relevance * 0.45
       + keyword.specificity * 0.30
@@ -417,9 +607,10 @@ const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   도매2: {
     productGroup: "도매2",
     label: "기능·문제해결형",
-    description: "구체 기능과 문제 해결 검색어를 앞세워 도매1의 대표 정확형과 검색 의도를 분리합니다.",
+    description: "구체 기능 검색어를 먼저 배치하고 자동 모델명을 바로 뒤에 넣어 상품 정체성을 고정합니다.",
     variantLimit: 2,
-    maxTerms: 3,
+    maxTerms: 2,
+    modelPosition: "after_lead",
     rank: (keyword, input) => (
       keyword.relevance * 0.40
       + keyword.specificity * 0.35
@@ -432,9 +623,10 @@ const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   도매3: {
     productGroup: "도매3",
     label: "세부 용도·형태형",
-    description: "구체성이 높은 세부 용도·부위·형태 조합을 우선해 다른 도매 그룹과 롱테일을 분담합니다.",
+    description: "세부 부위·용도·형태 검색어와 자동 모델명을 결합해 다른 도매 그룹의 롱테일을 보완합니다.",
     variantLimit: 2,
-    maxTerms: 3,
+    maxTerms: 2,
+    modelPosition: "after_lead",
     rank: (keyword, input) => (
       keyword.specificity * 0.42
       + keyword.relevance * 0.35
@@ -446,9 +638,10 @@ const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   도매4: {
     productGroup: "도매4",
     label: "초간결 정확형",
-    description: "가장 정확한 검색어 1~2개만 사용해 짧고 빠르게 식별되는 제목을 만듭니다.",
+    description: "자동 모델명을 중심으로 가장 정확한 검색어 하나만 더해 짧고 빠르게 식별되는 제목을 만듭니다.",
     variantLimit: 1,
-    maxTerms: 2,
+    maxTerms: 1,
+    modelPosition: "first",
     rank: (keyword, input) => (
       keyword.relevance * 0.50
       + keyword.specificity * 0.35
@@ -459,9 +652,10 @@ const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   소매1: {
     productGroup: "소매1",
     label: "검색량·발견형",
-    description: "상품 관련성을 지키면서 월검색 수요와 쇼핑 의도가 높은 키워드를 앞쪽에 배치합니다.",
+    description: "월검색 수요와 쇼핑의도가 높은 구체 검색어를 앞에 두고 자동 모델명으로 상품 정체성을 명확히 합니다.",
     variantLimit: 4,
-    maxTerms: 3,
+    maxTerms: 2,
+    modelPosition: "after_lead",
     rank: (keyword, input) => (
       keyword.demandScore * 0.35
       + keyword.relevance * 0.35
@@ -474,9 +668,10 @@ const STRATEGY_CONFIGS: Record<string, GroupStrategyInternal> = {
   소매2: {
     productGroup: "소매2",
     label: "롱테일·정확형",
-    description: "소매1보다 검색량 비중을 낮추고 관련성 높은 긴 검색 조합으로 세부 수요를 담당합니다.",
+    description: "관련성과 구체성이 높은 긴 검색 조합을 앞에 두고 자동 모델명을 결합해 세부 수요를 담당합니다.",
     variantLimit: 2,
-    maxTerms: 3,
+    maxTerms: 2,
+    modelPosition: "after_lead",
     rank: (keyword, input) => (
       keyword.relevance * 0.40
       + keyword.specificity * 0.25
@@ -503,41 +698,53 @@ export const KEYWORD_ELON_SEO_GROUP_STRATEGIES: KeywordElonSeoGroupStrategy[] = 
     description: strategy.description,
     variantLimit: strategy.variantLimit,
     maxTerms: strategy.maxTerms,
+    modelPosition: strategy.modelPosition,
   };
 });
 
 function overlaps(left: string, right: string) {
   const leftKey = keywordElonSeoCanonical(left);
   const rightKey = keywordElonSeoCanonical(right);
-  return leftKey === rightKey || leftKey.includes(rightKey) || rightKey.includes(leftKey);
+  if (leftKey === rightKey || leftKey.includes(rightKey) || rightKey.includes(leftKey)) return true;
+  return [...FORM_ONLY_TERMS].some((term) => (
+    term.length >= 2 && leftKey.includes(term) && rightKey.includes(term)
+  ));
+}
+
+function composeTitle(
+  modelName: string,
+  keywords: KeywordElonSeoSearchKeyword[],
+  modelPosition: "first" | "after_lead",
+) {
+  const keywordTexts = keywords.map((row) => row.keyword);
+  if (modelPosition === "after_lead" && keywordTexts.length) {
+    return [keywordTexts[0], modelName, ...keywordTexts.slice(1)].join(" ");
+  }
+  return [modelName, ...keywordTexts].join(" ");
 }
 
 function fitTitle(
   ordered: KeywordElonSeoSearchKeyword[],
   input: KeywordElonSeoPackageInput,
-  maxTerms: number,
-) {
+  modelName: string,
+  strategy: GroupStrategyInternal,
+): TitleBuild {
   const selected: KeywordElonSeoSearchKeyword[] = [];
   for (const keyword of ordered) {
+    if (overlaps(modelName, keyword.keyword)) continue;
     if (selected.some((current) => overlaps(current.keyword, keyword.keyword))) continue;
     if (!selected.length && ["form", "modifier", "generic"].includes(keywordRole(keyword, input))) continue;
-    const next = [...selected.map((row) => row.keyword), keyword.keyword].join(" ");
+    const next = composeTitle(modelName, [...selected, keyword], strategy.modelPosition);
     if (keywordElonSeoUtf8Bytes(next) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) continue;
     selected.push(keyword);
-    if (selected.length >= maxTerms) break;
+    if (selected.length >= strategy.maxTerms) break;
   }
 
-  if (!selected.length) {
-    const fallback = ordered.find((keyword) => (
-      !["form", "modifier", "generic"].includes(keywordRole(keyword, input))
-      && keywordElonSeoUtf8Bytes(keyword.keyword) <= KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
-    ));
-    if (fallback) selected.push(fallback);
-  }
-
+  const title = composeTitle(modelName, selected, strategy.modelPosition);
   return {
-    title: selected.map((keyword) => keyword.keyword).join(" "),
-    usedMaterials: selected.map((keyword) => keyword.keyword),
+    title,
+    usedMaterials: [modelName, ...selected.map((keyword) => keyword.keyword)],
+    keywordMaterials: selected.map((keyword) => keyword.keyword),
   };
 }
 
@@ -545,23 +752,29 @@ function buildGroupVariants(
   strategy: GroupStrategyInternal,
   keywords: KeywordElonSeoSearchKeyword[],
   input: KeywordElonSeoPackageInput,
+  modelName: string,
 ) {
   const ranked = [...keywords].sort((left, right) => (
     strategy.rank(right, input) - strategy.rank(left, input)
     || right.score - left.score
     || right.keyword.length - left.keyword.length
   ));
-  const leads = ranked.filter((keyword) => !["form", "modifier", "generic"].includes(keywordRole(keyword, input)));
-  const leadPool = leads.length ? leads : ranked;
-  const variants: ReturnType<typeof fitTitle>[] = [];
+  const leads = ranked.filter((keyword) => (
+    !overlaps(modelName, keyword.keyword)
+    && !["form", "modifier", "generic"].includes(keywordRole(keyword, input))
+  ));
+  const leadPool = leads.length ? leads : ranked.filter((keyword) => !overlaps(modelName, keyword.keyword));
+  const variants: TitleBuild[] = [];
   const seen = new Set<string>();
 
   for (let variantIndex = 0; variantIndex < strategy.variantLimit; variantIndex += 1) {
     for (let attempt = 0; attempt < Math.max(1, leadPool.length); attempt += 1) {
       const lead = leadPool[(variantIndex + attempt) % Math.max(1, leadPool.length)];
-      if (!lead) continue;
       const pivot = (variantIndex * 2 + attempt) % Math.max(1, ranked.length);
-      const result = fitTitle([lead, ...ranked.slice(pivot), ...ranked.slice(0, pivot)], input, strategy.maxTerms);
+      const order = lead
+        ? [lead, ...ranked.slice(pivot), ...ranked.slice(0, pivot)]
+        : [...ranked.slice(pivot), ...ranked.slice(0, pivot)];
+      const result = fitTitle(order, input, modelName, strategy);
       const key = keywordElonSeoCanonical(result.title);
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -570,7 +783,13 @@ function buildGroupVariants(
     }
   }
 
-  if (!variants.length) variants.push(fitTitle(ranked, input, strategy.maxTerms));
+  if (!variants.length) {
+    variants.push({
+      title: modelName,
+      usedMaterials: [modelName],
+      keywordMaterials: [],
+    });
+  }
   return variants;
 }
 
@@ -605,20 +824,29 @@ export function buildKeywordElonSeoPackage(
   const commonSearchKeywords = search.details.map((row) => row.keyword);
   const marketDerivedKeywordCount = search.details.filter((row) => row.origin === "step4").length;
   const generatedFallbackKeywordCount = search.details.filter((row) => row.origin === "step4_pair").length;
+  const model = resolveModelName(input, allowedRows, blockedKeys);
 
-  const variantsByGroup = new Map<string, ReturnType<typeof buildGroupVariants>>();
+  const variantsByGroup = new Map<string, TitleBuild[]>();
   for (const group of Object.keys(STRATEGY_CONFIGS)) {
-    variantsByGroup.set(group, buildGroupVariants(STRATEGY_CONFIGS[group], search.details, input));
+    variantsByGroup.set(
+      group,
+      buildGroupVariants(STRATEGY_CONFIGS[group], search.details, input, model.modelName),
+    );
   }
 
   const groupIndexes = new Map<string, number>();
   const mallTitles = markets.map((market) => {
     const strategy = STRATEGY_CONFIGS[market.productGroup] ?? STRATEGY_CONFIGS["소매1"];
-    const variants = variantsByGroup.get(market.productGroup) ?? buildGroupVariants(strategy, search.details, input);
+    const variants = variantsByGroup.get(market.productGroup)
+      ?? buildGroupVariants(strategy, search.details, input, model.modelName);
     const groupIndex = groupIndexes.get(market.productGroup) ?? 0;
     groupIndexes.set(market.productGroup, groupIndex + 1);
     const variantIndex = groupIndex % Math.max(1, variants.length);
-    const selected = variants[variantIndex] ?? { title: "", usedMaterials: [] };
+    const selected = variants[variantIndex] ?? {
+      title: model.modelName,
+      usedMaterials: [model.modelName],
+      keywordMaterials: [],
+    };
     return {
       productGroup: market.productGroup,
       groupSuffix: market.groupSuffix,
@@ -627,12 +855,18 @@ export function buildKeywordElonSeoPackage(
       accountIdLabel: market.accountIdLabel,
       title: selected.title,
       byteLength: keywordElonSeoUtf8Bytes(selected.title),
+      modelName: model.modelName,
       usedMaterials: selected.usedMaterials,
+      keywordMaterials: selected.keywordMaterials,
       strategyLabel: strategy.label,
       variantIndex: variantIndex + 1,
     };
   });
 
+  const modelKey = keywordElonSeoCanonical(model.modelName);
+  const modelNameCoverageCount = mallTitles.filter((row) => (
+    modelKey && keywordElonSeoCanonical(row.title).includes(modelKey)
+  )).length;
   const warnings: string[] = [];
   if (filteredNoiseMaterialCount > 0) {
     warnings.push(`STEP 4 재료 중 원산지·제조·포장성 노이즈 ${filteredNoiseMaterialCount}개를 SEO OUTPUT에서 제외했습니다.`);
@@ -647,6 +881,12 @@ export function buildKeywordElonSeoPackage(
       `최종 재료만으로 검색어가 ${commonSearchKeywords.length}/${KEYWORD_ELON_SEO_SEARCH_LIMIT}개입니다. STEP 5에서 안전 키워드를 추가한 뒤 다시 확인하세요.`,
     );
   }
+  if (model.source === "fallback") {
+    warnings.push("자동 모델명이 보수적 fallback으로 결정되었습니다. 상품 정체성 세부내용을 확인하세요.");
+  }
+  if (modelNameCoverageCount !== mallTitles.length) {
+    warnings.push(`자동 모델명 포함 검증이 ${modelNameCoverageCount}/${mallTitles.length}개입니다.`);
+  }
   if (mallTitles.some((row) => !row.title || row.byteLength > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT)) {
     warnings.push("일부 쇼핑몰별 상품명이 비어 있거나 50bytes를 초과해 검토가 필요합니다.");
   }
@@ -655,11 +895,16 @@ export function buildKeywordElonSeoPackage(
   const ready = (
     commonSearchKeywords.length === KEYWORD_ELON_SEO_SEARCH_LIMIT
     && mallTitles.length === markets.length
+    && modelNameCoverageCount === markets.length
     && mallTitles.every((row) => row.title && row.byteLength <= KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT)
   );
 
   return {
     status: ready ? "ready" : "needs_more_keywords",
+    modelName: model.modelName,
+    modelNameSource: model.source,
+    modelNameByteLength: keywordElonSeoUtf8Bytes(model.modelName),
+    modelNameCoverageCount,
     commonSearchKeywords,
     commonSearchLine: commonSearchKeywords.join(","),
     searchKeywordDetails: search.details,
