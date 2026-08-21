@@ -37,11 +37,11 @@ const classified = [];
 for (const file of await walk("src")) {
   const source = readFileSync(file, "utf8");
   if (!source.includes("api.openai.com")) continue;
+  const normalized = file.replaceAll("\\", "/");
   if (source.includes("process.env.OPENAI_API_KEY")) {
     failures.push(`${normalized}: legacy generic OPENAI_API_KEY fallback is forbidden in direct OpenAI callers`);
     continue;
   }
-  const normalized = file.replaceAll("\\", "/");
 
   const multiLaneRule = multiLaneRules.find(([pattern]) => pattern.test(normalized));
   if (multiLaneRule) {
