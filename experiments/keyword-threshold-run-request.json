@@ -1,5 +1,5 @@
 {
-  "requestId": "broad-10-sample-matrix-v1",
+  "requestId": "broad-10-sample-matrix-v2",
   "mode": "run",
   "samples": [
     "nose-tape-step1-v1",
@@ -17,7 +17,6 @@
   "demand": [50, 55, 60, 65],
   "accuracy": [80, 85, 90, 95],
   "rounds": 3,
-  "concurrency": 2,
-  "cooldownSeconds": 20,
+  "concurrency": 1,
   "blocked": []
 }
