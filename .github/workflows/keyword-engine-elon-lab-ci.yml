@@ -44,6 +44,7 @@ jobs:
           src/app/keyword-engine-elon-lab/layout.tsx
           src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
           src/app/keyword-engine-elon-lab/KeywordElonAutoRunResumeBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonCollectorPresenceBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonCollapsibleSection.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDiversitySupplement.tsx
           src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
