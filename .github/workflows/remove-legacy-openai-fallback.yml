@@ -108,7 +108,19 @@ jobs:
       - name: Verify attribution guard
         run: node scripts/check-openai-cost-attribution.mjs
       - name: Test
-        run: npm test
+        shell: bash
+        run: |
+          set +e
+          npm test > /tmp/ops-test.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "=== concise regression failure ==="
+            grep -nE -B 8 -A 18 'not ok|AssertionError|ERR_ASSERTION|ERR_TEST_FAILURE|expected|actual|OPENAI_API_KEY|fallback' /tmp/ops-test.log | tail -220 || tail -220 /tmp/ops-test.log
+            exit "$status"
+          fi
+          echo "=== regression tests passed ==="
+          tail -40 /tmp/ops-test.log
       - name: Lint
         run: npm run lint
       - name: Build
