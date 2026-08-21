@@ -58,6 +58,7 @@ jobs:
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabSeoOutput.ts
+          src/lib/keywordEngineElonLabSeoModelOutput.ts
           src/lib/keywordEngineElonLabV2.ts
           src/lib/keywordEngineElonLabV2ApiHub.ts
           src/lib/keywordEngineElonLabV2SearchAd.ts
