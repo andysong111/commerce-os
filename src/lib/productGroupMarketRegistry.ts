@@ -11,25 +11,21 @@ export type ProductGroupMarketAccount = {
 const wholesale = "도매" as const;
 const retail = "소매" as const;
 
+// 상품업로드 자동 확장 원장.
+// Shopling 카테고리 제공으로 시스템화 가능한 몰만 포함하며,
+// 카테고리를 수동 입력해야 하는 몰은 의도적으로 상품그룹 자동 확장에서 제외한다.
 export const PRODUCT_GROUP_MARKET_REGISTRY: ProductGroupMarketAccount[] = [
   ["도매1","a",wholesale,"카페24(1.9)","종합몰","SMALL_00014","andy801"],
   ["도매1","a",wholesale,"도매꾹","B2B쇼핑몰","SMALL_00069","andy8010"],
-  ["도매1","a",wholesale,"도매창고","B2B쇼핑몰","SMALL_00071","andy801"],
   ["도매1","a",wholesale,"오너클랜","B2B쇼핑몰","SMALL_00107","2010022841"],
   ["도매1","a",wholesale,"셀파","B2B쇼핑몰","SMALL_00116","andy8010"],
-  ["도매1","a",wholesale,"셀링콕","B2B쇼핑몰","SMALL_00165","andy801"],
   ["도매1","a",wholesale,"투비즈온","B2B쇼핑몰","SMALL_00179","andy801"],
-  ["도매1","a",wholesale,"도매아토즈","B2B쇼핑몰","SMALL_00180","andy801"],
-  ["도매1","a",wholesale,"셀리어스","B2B쇼핑몰","SMALL_00188","andy801"],
-  ["도매1","a",wholesale,"도매의신","B2B쇼핑몰","SMALL_00190","andy801"],
   ["도매2","b",wholesale,"도매꾹","B2B쇼핑몰","SMALL_00069","buzz1237"],
   ["도매2","b",wholesale,"오너클랜","B2B쇼핑몰","SMALL_00107","2010024263"],
   ["도매2","b",wholesale,"셀파","B2B쇼핑몰","SMALL_00116","andy80101"],
-  ["도매2","b",wholesale,"셀링콕","B2B쇼핑몰","SMALL_00165","andy8010"],
   ["도매3","c",wholesale,"도매꾹","B2B쇼핑몰","SMALL_00069","everysale999"],
   ["도매3","c",wholesale,"오너클랜","B2B쇼핑몰","SMALL_00107","2010026398"],
   ["도매3","c",wholesale,"셀파","B2B쇼핑몰","SMALL_00116","andydome103"],
-  ["도매3","c",wholesale,"셀링콕","B2B쇼핑몰","SMALL_00165","andydome103"],
   ["도매4","d",wholesale,"도매꾹","B2B쇼핑몰","SMALL_00069","andy80101"],
   ["소매1","e",retail,"옥션","오픈마켓","SMALL_00001","andy801"],
   ["소매1","e",retail,"지마켓","오픈마켓","SMALL_00002","andy80101"],
@@ -58,4 +54,8 @@ export function getMarketsForProductGroup(productGroup: string): ProductGroupMar
 
 export function getMarketsForGroupSuffix(groupSuffix: string): ProductGroupMarketAccount[] {
   return PRODUCT_GROUP_MARKET_REGISTRY.filter((account) => account.groupSuffix === groupSuffix.trim());
+}
+
+export function getShoppingMallIdsForProductGroup(productGroup: string): string[] {
+  return getMarketsForProductGroup(productGroup).map((account) => account.mallKey);
 }
