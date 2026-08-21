@@ -9,6 +9,18 @@ const laneRules = [
   [/opsAiHelp|api\/ops-ai-help\//, "OPS_AI_HELP_OPENAI_API_KEY"],
 ];
 
+const multiLaneRules = [
+  [
+    /openAiKeyHealth/,
+    [
+      "KEYWORD_ENGINE_OPENAI_API_KEY",
+      "SHOPLING_CATEGORY_OPENAI_API_KEY",
+      "PRODUCT_TITLE_OPENAI_API_KEY",
+      "OPS_AI_HELP_OPENAI_API_KEY",
+    ],
+  ],
+];
+
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -26,6 +38,21 @@ for (const file of await walk("src")) {
   const source = readFileSync(file, "utf8");
   if (!source.includes("api.openai.com")) continue;
   const normalized = file.replaceAll("\\", "/");
+
+  const multiLaneRule = multiLaneRules.find(([pattern]) => pattern.test(normalized));
+  if (multiLaneRule) {
+    const envNames = multiLaneRule[1];
+    const missing = envNames.filter((envName) => !source.includes(envName));
+    if (missing.length) {
+      failures.push(
+        `${normalized}: multi-lane OpenAI caller is missing dedicated keys ${missing.join(", ")}`,
+      );
+      continue;
+    }
+    classified.push(`${normalized} -> ${envNames.join(" + ")}`);
+    continue;
+  }
+
   const rule = laneRules.find(([pattern]) => pattern.test(normalized));
   if (!rule) {
     failures.push(`${normalized}: direct OpenAI call has no registered cost lane`);
