@@ -119,7 +119,6 @@ export type KeywordElonSeoPackageInput = {
 };
 
 type KeywordRole = "anchor" | "exact" | "form" | "modifier" | "generic";
-
 type GroupStrategyInternal = KeywordElonSeoGroupStrategy & {
   rank: (keyword: KeywordElonSeoSearchKeyword, input: KeywordElonSeoPackageInput) => number;
 };
@@ -179,17 +178,6 @@ function number100(value: unknown) {
   return Math.max(0, Math.min(100, numeric));
 }
 
-function cleanTitlePhrase(value: unknown) {
-  return normalizedText(value)
-    .replace(/\([^)]*[\u3400-\u9fff][^)]*\)/g, " ")
-    .replace(/[\u3400-\u9fff]+/g, " ")
-    .replace(/[()[\]{}<>]/g, " ")
-    .replace(/[·•:;,|/\\]+/g, " ")
-    .replace(/[_~`^=*#@!?]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function candidateText(row: KeywordElonSeoCandidate) {
   return normalizedText(row.searchKeyword || row.searchKey || row.keyword);
 }
@@ -229,12 +217,13 @@ function demandScore(totalSearch: number | null | undefined) {
 }
 
 function candidateMetrics(row: KeywordElonSeoCandidate) {
-  const relevance = number100(row.relevance);
-  const shoppingIntent = number100(row.shoppingIntent);
-  const specificity = number100(row.specificity);
-  const qualityScore = number100(row.qualityScore);
-  const demand = demandScore(row.totalSearch);
-  return { relevance, shoppingIntent, specificity, qualityScore, demand };
+  return {
+    relevance: number100(row.relevance),
+    shoppingIntent: number100(row.shoppingIntent),
+    specificity: number100(row.specificity),
+    qualityScore: number100(row.qualityScore),
+    demand: demandScore(row.totalSearch),
+  };
 }
 
 function directPriority(row: KeywordElonSeoCandidate) {
@@ -256,9 +245,18 @@ function coreKeys(input: KeywordElonSeoPackageInput) {
   ].map(keywordElonSeoCanonical).filter(Boolean);
 }
 
+function exactCoreMatch(keyword: string, input: KeywordElonSeoPackageInput) {
+  const key = keywordElonSeoCanonical(keyword);
+  return coreKeys(input).some((core) => core === key);
+}
+
 function matchesCore(keyword: string, input: KeywordElonSeoPackageInput) {
   const key = keywordElonSeoCanonical(keyword);
-  return coreKeys(input).some((core) => core === key || core.includes(key) || key.includes(core));
+  if (!key) return false;
+  return coreKeys(input).some((core) => (
+    core === key
+    || (key.length >= 4 && (core.includes(key) || key.includes(core)))
+  ));
 }
 
 function keywordRole(
@@ -266,10 +264,11 @@ function keywordRole(
   input: KeywordElonSeoPackageInput,
 ): KeywordRole {
   const key = keywordElonSeoCanonical(keyword.keyword);
-  if (matchesCore(key, input)) return "anchor";
-  if (keyword.origin === "step4_pair") return "exact";
+  if (exactCoreMatch(key, input)) return "anchor";
   if (FORM_ONLY_TERMS.has(key)) return "form";
   if (MODIFIER_ONLY_TERMS.has(key)) return "modifier";
+  if (matchesCore(key, input)) return "anchor";
+  if (keyword.origin === "step4_pair") return "exact";
   if (key.length <= 3) return "modifier";
   if (keyword.relevance >= 88 && keyword.specificity >= 65) return "exact";
   return "generic";
@@ -314,13 +313,11 @@ function buildPairKeyword(
   if (!leftKey || !rightKey || leftKey === rightKey) return null;
   if (leftKey.includes(rightKey) || rightKey.includes(leftKey)) return null;
 
-  const leftRole = keywordRole(left, input);
-  const rightRole = keywordRole(right, input);
-  const roleBonus = pairRoleBonus(leftRole, rightRole);
+  const roleBonus = pairRoleBonus(keywordRole(left, input), keywordRole(right, input));
   if (roleBonus < 0) return null;
-
   const keyword = safeSearchTerm(`${leftKey}${rightKey}`, blockedKeys);
   if (!keyword) return null;
+
   const relevance = Math.min(left.relevance, right.relevance);
   const shoppingIntent = (left.shoppingIntent + right.shoppingIntent) / 2;
   const specificity = Math.min(100, (left.specificity + right.specificity) / 2 + 8);
@@ -361,23 +358,21 @@ function buildSearchKeywords(
     .filter((row): row is KeywordElonSeoSearchKeyword => Boolean(row))
     .sort((left, right) => right.score - left.score || right.relevance - left.relevance);
 
-  const directByKeyword = new Map<string, KeywordElonSeoSearchKeyword>();
-  for (const row of direct) {
-    if (!directByKeyword.has(row.keyword)) directByKeyword.set(row.keyword, row);
-  }
-  const directUnique = [...directByKeyword.values()];
+  const directMap = new Map<string, KeywordElonSeoSearchKeyword>();
+  for (const row of direct) if (!directMap.has(row.keyword)) directMap.set(row.keyword, row);
+  const directUnique = [...directMap.values()];
 
-  const pairs: KeywordElonSeoSearchKeyword[] = [];
-  const seenPairs = new Set<string>();
+  const pairMap = new Map<string, KeywordElonSeoSearchKeyword>();
   for (const left of directUnique) {
     for (const right of directUnique) {
       const pair = buildPairKeyword(left, right, input, blockedKeys);
-      if (!pair || seenPairs.has(pair.keyword)) continue;
-      seenPairs.add(pair.keyword);
-      pairs.push(pair);
+      const current = pair ? pairMap.get(pair.keyword) : null;
+      if (pair && (!current || pair.score > current.score)) pairMap.set(pair.keyword, pair);
     }
   }
-  pairs.sort((left, right) => right.score - left.score || left.keyword.length - right.keyword.length);
+  const pairs = [...pairMap.values()].sort(
+    (left, right) => right.score - left.score || left.keyword.length - right.keyword.length,
+  );
 
   const selected: KeywordElonSeoSearchKeyword[] = [];
   const seen = new Set<string>();
@@ -533,7 +528,10 @@ function fitTitle(
   }
 
   if (!selected.length) {
-    const fallback = ordered.find((keyword) => keywordElonSeoUtf8Bytes(keyword.keyword) <= KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT);
+    const fallback = ordered.find((keyword) => (
+      !["form", "modifier", "generic"].includes(keywordRole(keyword, input))
+      && keywordElonSeoUtf8Bytes(keyword.keyword) <= KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+    ));
     if (fallback) selected.push(fallback);
   }
 
@@ -560,15 +558,10 @@ function buildGroupVariants(
 
   for (let variantIndex = 0; variantIndex < strategy.variantLimit; variantIndex += 1) {
     for (let attempt = 0; attempt < Math.max(1, leadPool.length); attempt += 1) {
-      const leadIndex = (variantIndex + attempt) % Math.max(1, leadPool.length);
-      const lead = leadPool[leadIndex];
+      const lead = leadPool[(variantIndex + attempt) % Math.max(1, leadPool.length)];
       if (!lead) continue;
-      const rotated = [
-        lead,
-        ...ranked.slice((variantIndex * 2 + attempt) % Math.max(1, ranked.length)),
-        ...ranked.slice(0, (variantIndex * 2 + attempt) % Math.max(1, ranked.length)),
-      ];
-      const result = fitTitle(rotated, input, strategy.maxTerms);
+      const pivot = (variantIndex * 2 + attempt) % Math.max(1, ranked.length);
+      const result = fitTitle([lead, ...ranked.slice(pivot), ...ranked.slice(0, pivot)], input, strategy.maxTerms);
       const key = keywordElonSeoCanonical(result.title);
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -613,15 +606,14 @@ export function buildKeywordElonSeoPackage(
   const marketDerivedKeywordCount = search.details.filter((row) => row.origin === "step4").length;
   const generatedFallbackKeywordCount = search.details.filter((row) => row.origin === "step4_pair").length;
 
-  const strategiesByGroup = new Map(Object.entries(STRATEGY_CONFIGS));
   const variantsByGroup = new Map<string, ReturnType<typeof buildGroupVariants>>();
-  for (const group of strategiesByGroup.keys()) {
+  for (const group of Object.keys(STRATEGY_CONFIGS)) {
     variantsByGroup.set(group, buildGroupVariants(STRATEGY_CONFIGS[group], search.details, input));
   }
 
   const groupIndexes = new Map<string, number>();
   const mallTitles = markets.map((market) => {
-    const strategy = STRATEGY_CONFIGS[market.productGroup] ?? STRATEGY_CONFIGS.소매1;
+    const strategy = STRATEGY_CONFIGS[market.productGroup] ?? STRATEGY_CONFIGS["소매1"];
     const variants = variantsByGroup.get(market.productGroup) ?? buildGroupVariants(strategy, search.details, input);
     const groupIndex = groupIndexes.get(market.productGroup) ?? 0;
     groupIndexes.set(market.productGroup, groupIndex + 1);
