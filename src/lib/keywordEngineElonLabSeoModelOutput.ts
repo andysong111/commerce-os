@@ -50,7 +50,15 @@ export type KeywordElonSeoModelMallTitle = {
 
 export type KeywordElonSeoModelPackage = Omit<
   KeywordElonSeoPackage,
-  "status" | "groupStrategies" | "mallTitles" | "uniqueTitleCount" | "warnings"
+  | "status"
+  | "modelName"
+  | "modelNameSource"
+  | "modelNameByteLength"
+  | "modelNameCoverageCount"
+  | "groupStrategies"
+  | "mallTitles"
+  | "uniqueTitleCount"
+  | "warnings"
 > & {
   status: "ready" | "needs_more_keywords";
   modelName: string;
@@ -613,7 +621,7 @@ export function buildKeywordElonSeoModelPackage(
   const modelNameCoverageCount = mallTitles.filter((row) => (
     titleOccurrenceCount(row.title, model.modelName) === 1
   )).length;
-  const warnings = [...base.warnings];
+  const warnings = base.warnings.filter((warning) => !/쇼핑몰별 상품명|쇼핑몰 제목/.test(warning));
   if (model.source === "fallback") {
     warnings.push("링크 기반 모델명이 보수적 fallback으로 결정되었습니다. STEP 1 상품 정체성 결과를 확인하세요.");
   }
