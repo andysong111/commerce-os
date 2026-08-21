@@ -65,7 +65,7 @@ Studio, AI-Saurus and Sourcing use equivalent Production build gates for their r
 6. Delete duplicate/noncanonical deployments before revoking any key they may still reference.
 7. Keep `OPENAI_ADMIN_KEY` separate from AI-Saurus runtime rotation.
 
-OPS Center still supports `OPENAI_API_KEY` as a temporary code fallback during this migration. Once the four dedicated Production variables have been verified and the generic Vercel `OPENAI_API_KEY` value is removed, the fallback is inert. Future Production builds still require all four dedicated variables.
+OPS Center direct OpenAI callers no longer use the generic `OPENAI_API_KEY` fallback. The generic Vercel `OPENAI_API_KEY` value should be removed as cleanup; even before deletion it is no longer read by paid OPS OpenAI call paths. Future Production builds require all four dedicated variables.
 
 ## Rule for future AI features
 

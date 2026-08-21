@@ -41,7 +41,7 @@ function discoveryFrom(value: unknown): KeywordElonDiscovery { if (!isRecord(val
 function candidatesFrom(value: unknown): KeywordElonCandidate[] { if (!Array.isArray(value)) throw new Error("candidates 입력이 없습니다."); return value.filter(isRecord) as unknown as KeywordElonCandidate[]; }
 function readiness() {
   return {
-    openAiConfigured: Boolean((process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY)?.trim()),
+    openAiConfigured: Boolean(process.env.KEYWORD_ENGINE_OPENAI_API_KEY?.trim()),
     searchAdConfigured: Boolean(process.env.NAVER_SEARCHAD_API_KEY?.trim() && process.env.NAVER_SEARCHAD_SECRET_KEY?.trim() && process.env.NAVER_SEARCHAD_CUSTOMER_ID?.trim()),
     apiHubConfigured: keywordElonApiHubConfigured(),
     searchTrendConfigured: keywordElonApiHubConfigured(),

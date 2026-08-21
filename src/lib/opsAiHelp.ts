@@ -362,9 +362,9 @@ export async function answerOpsAiHelpQuestion(
   }
 
   const apiKey =
-    options.apiKey ?? process.env.OPS_AI_HELP_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
+    options.apiKey ?? process.env.OPS_AI_HELP_OPENAI_API_KEY;
   if (!apiKey?.trim()) {
-    throw new Error("OPS_AI_HELP_OPENAI_API_KEY 또는 OPENAI_API_KEY 설정이 필요합니다.");
+    throw new Error("OPS_AI_HELP_OPENAI_API_KEY 설정이 필요합니다.");
   }
   const model =
     limitedText(

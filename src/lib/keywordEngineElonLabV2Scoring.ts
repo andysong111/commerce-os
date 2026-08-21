@@ -78,7 +78,7 @@ function scoreRationale(input: { relevance: number; shoppingIntent: number; spec
 }
 
 async function callScoreOpenAi(input: { keywords: string[]; source: KeywordElonSourceDraft; identity: KeywordElonIdentity }) {
-  const apiKey = normalizeKeywordElonText((process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = normalizeKeywordElonText(process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   if (!apiKey) throw new Error("OPENAI_API_KEY가 설정되지 않아 AI 점수화를 실행할 수 없습니다.");
   const model = openAiModel();
   const controller = new AbortController();

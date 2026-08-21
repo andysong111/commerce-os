@@ -68,7 +68,7 @@ function bridgeSchema() {
 }
 
 async function generateBridgeSeeds(source: KeywordElonSourceDraft, identity: KeywordElonIdentity) {
-  const apiKey = normalizeKeywordElonText((process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = normalizeKeywordElonText(process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   const model = openAiModel();
   if (!apiKey) {
     return {
