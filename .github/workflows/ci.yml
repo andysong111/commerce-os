@@ -29,6 +29,8 @@ jobs:
           src/lib/extendedModuleRegistry.ts
           src/lib/productLaunchTrackerRows.ts
           src/lib/productLaunchTrackerShopling.ts
+          src/lib/productGroupMarketRegistry.ts
+          src/lib/productTitleVariants.ts
           src/app/api/product-launch-tracker/flow-selection/route.ts
           src/components/product-launch-flow/ProductLaunchFlowConnected.tsx
           src/components/product-launch-flow/ProductLaunchTrackerHandoffSync.tsx
@@ -141,6 +143,8 @@ jobs:
           tests/productLaunchTrackerRows.test.mjs
           tests/productLaunchTrackerBarcodeMapping.test.mjs
           tests/productLaunchTrackerFlowConnection.test.mjs
+      - name: Test product-group Shopling mall expansion
+        run: node --experimental-strip-types --test tests/productGroupTitleVariants.test.mjs
       - name: Build
         run: npm run build
         env:
