@@ -116,14 +116,15 @@ export default function KeywordElonShoplingSeoOutput() {
   }, [output]);
 
   if (!output) return null;
+  const readyOutput = output;
 
   async function copyKeywords() {
-    await navigator.clipboard.writeText(output.commonSearchKeywords.join(","));
+    await navigator.clipboard.writeText(readyOutput.commonSearchKeywords.join(","));
     setMessage("공통 검색어를 클립보드에 복사했습니다.");
   }
 
   async function copyTitles() {
-    const text = output.mallTitles
+    const text = readyOutput.mallTitles
       .map((row) => [row.productGroup, row.marketName, row.mallKey, row.title].join("\t"))
       .join("\n");
     await navigator.clipboard.writeText(text);
@@ -134,9 +135,9 @@ export default function KeywordElonShoplingSeoOutput() {
     await navigator.clipboard.writeText(JSON.stringify({
       sourceUrl: session?.source.url ?? "",
       offerId: session?.source.offerId ?? "",
-      commonSearchKeywords: output.commonSearchKeywords,
-      mallTitles: output.mallTitles,
-      warnings: output.warnings,
+      commonSearchKeywords: readyOutput.commonSearchKeywords,
+      mallTitles: readyOutput.mallTitles,
+      warnings: readyOutput.warnings,
     }, null, 2));
     setMessage("SEO OUTPUT 전체 JSON을 복사했습니다.");
   }
@@ -153,11 +154,11 @@ export default function KeywordElonShoplingSeoOutput() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">상품명 {output.mallTitles.length}개</span>
-            <span className={`rounded-full px-3 py-1 ${output.status === "ready" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
-              검색어 {output.commonSearchKeywords.length}/10
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-800">상품명 {readyOutput.mallTitles.length}개</span>
+            <span className={`rounded-full px-3 py-1 ${readyOutput.status === "ready" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
+              검색어 {readyOutput.commonSearchKeywords.length}/10
             </span>
-            <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">STEP 4 재료 {output.allowedMaterialCount}개</span>
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">STEP 4 재료 {readyOutput.allowedMaterialCount}개</span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">외부 적용 없음</span>
           </div>
         </div>
@@ -166,10 +167,10 @@ export default function KeywordElonShoplingSeoOutput() {
           공통 상품명·모델명은 변경하지 않습니다. SEO 상품명에는 ‘도매·대량·납품’을 사용하지 않으며, 검색어 10개는 모든 상품그룹에 공통으로 쓰는 결과입니다.
         </div>
 
-        {output.warnings.length ? (
+        {readyOutput.warnings.length ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             <div className="font-black">보완 안내</div>
-            {output.warnings.map((warning) => <div key={warning} className="mt-1">• {warning}</div>)}
+            {readyOutput.warnings.map((warning) => <div key={warning} className="mt-1">• {warning}</div>)}
           </div>
         ) : null}
 
@@ -178,7 +179,7 @@ export default function KeywordElonShoplingSeoOutput() {
             <div>
               <h3 className="text-lg font-black">공통 검색어</h3>
               <p className="mt-1 text-xs text-slate-500">
-                STEP 4 시장키워드 {output.marketDerivedKeywordCount}개 우선 · 보완 조합 {output.generatedFallbackKeywordCount}개 · 띄어쓰기 없이 저장
+                STEP 4 시장키워드 {readyOutput.marketDerivedKeywordCount}개 우선 · 보완 조합 {readyOutput.generatedFallbackKeywordCount}개 · 띄어쓰기 없이 저장
               </p>
             </div>
             <button type="button" onClick={() => void copyKeywords()} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-black text-white">
@@ -186,7 +187,7 @@ export default function KeywordElonShoplingSeoOutput() {
             </button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            {output.commonSearchKeywords.map((keyword, index) => (
+            {readyOutput.commonSearchKeywords.map((keyword, index) => (
               <span key={keyword} className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-black text-cyan-950">
                 <span className="mr-1 text-xs text-cyan-600">#{index + 1}</span>{keyword}
               </span>
@@ -239,7 +240,7 @@ export default function KeywordElonShoplingSeoOutput() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <span>고유 상품명 {output.uniqueTitleCount}/{output.mallTitles.length}개</span>
+          <span>고유 상품명 {readyOutput.uniqueTitleCount}/{readyOutput.mallTitles.length}개</span>
           {message ? <span className="font-bold text-blue-800">{message}</span> : null}
         </div>
       </div>
