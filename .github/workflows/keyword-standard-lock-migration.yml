@@ -34,10 +34,10 @@ jobs:
               p = Path(path)
               text = p.read_text(encoding="utf-8")
               if old not in text:
-                  raise SystemExit(f"expected snippet not found: {path}\n{old[:180]}")
+                  raise SystemExit(f"expected snippet not found: {path}\n{old[:220]}")
               p.write_text(text.replace(old, new), encoding="utf-8")
 
-          # STEP 2 standard = 60. Existing browser sessions are normalized to the standard.
+          # STEP 2 standard = 60. Old browser sessions are normalized to the standard.
           replace(
               "src/lib/keywordEngineElonLabV2.ts",
               'export const KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70;',
@@ -140,19 +140,36 @@ jobs:
 }''',
           )
 
-          # Remove numeric editors from the demand/accuracy summary.
+          # Demand/accuracy UI: remove numeric input and make thresholds render-only standards.
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx",
               '''  selectKeywordElonStep4Union,
   writeKeywordElonSelectionThresholds,
   type KeywordElonSelectionThresholds,''',
-              '''  selectKeywordElonStep4Union,
-  type KeywordElonSelectionThresholds,''',
+              '''  selectKeywordElonStep4Union,''',
           )
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx",
               '  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 60, accuracyRelevance: 90 }));',
-              '  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 65, accuracyRelevance: 90 }));',
+              '  const thresholds = readKeywordElonSelectionThresholds();',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx",
+              '''    setThresholds(readKeywordElonSelectionThresholds());
+    let last = "";''',
+              '''    let last = "";''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx",
+              '''    const thresholdListener = () => setThresholds(readKeywordElonSelectionThresholds());
+    window.addEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
+    };''',
+              '''    return () => {
+      window.clearInterval(timer);
+    };''',
           )
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx",
@@ -185,10 +202,37 @@ jobs:
               '''              <span className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-black text-emerald-950">표준 관련성 ≥ 90 · 고정</span>''',
           )
 
+          # STEP4 component reads the immutable standard directly; custom blocked terms still remain user-managed.
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx",
               '  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 60, accuracyRelevance: 90 }));',
-              '  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 65, accuracyRelevance: 90 }));',
+              '  const thresholds = readKeywordElonSelectionThresholds();',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx",
+              '''    setThresholds(readKeywordElonSelectionThresholds());
+    setCustomTerms(readCustomBlockedTerms());
+    let last = "";''',
+              '''    const customInitTimer = window.setTimeout(() => setCustomTerms(readCustomBlockedTerms()), 0);
+    let last = "";''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx",
+              '''    const thresholdListener = () => setThresholds(readKeywordElonSelectionThresholds());
+    const customListener = () => setCustomTerms(readCustomBlockedTerms());
+    window.addEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
+    window.addEventListener("keyword-elon-step4-custom-terms-updated", customListener);''',
+              '''    const customListener = () => setCustomTerms(readCustomBlockedTerms());
+    window.addEventListener("keyword-elon-step4-custom-terms-updated", customListener);''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx",
+              '''      window.clearInterval(timer);
+      window.removeEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
+      window.removeEventListener("keyword-elon-step4-custom-terms-updated", customListener);''',
+              '''      window.clearTimeout(customInitTimer);
+      window.clearInterval(timer);
+      window.removeEventListener("keyword-elon-step4-custom-terms-updated", customListener);''',
           )
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx",
@@ -196,7 +240,7 @@ jobs:
               '        <div className="mt-4 rounded-xl bg-white p-4 text-xs leading-6 text-slate-600">표준값은 STEP2 품질 60 / 월검색 품질 65 / 상품정확성 관련성 90으로 고정합니다. 안전 Gate 관련성 80 / 쇼핑의도 70도 고정이며, 정확성 경로는 검색량이 작은 정확한 롱테일 키워드를 보존합니다.</div>',
           )
 
-          # One-click must use the same fixed dual-selection union and must not re-cut accuracy candidates.
+          # One-click uses the exact same fixed union, including low-quality but high-accuracy keywords.
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
               '''  KEYWORD_ELON_V2_STORAGE_KEY,
@@ -251,6 +295,34 @@ import type { KeywordElonStep4FilterResult } from "@/lib/keywordEngineElonLabV2S
           )
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
+              '''  const [progress, setProgress] = useState("");
+  const [error, setError] = useState("");
+  const runningRef = useRef(false);''',
+              '''  const [progress, setProgress] = useState("");
+  const [error, setError] = useState("");
+  const [autoRunning, setAutoRunning] = useState(false);
+  const runningRef = useRef(false);''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
+              '''      runningRef.current = true;
+      writeMarker({ ...marker, status: "running", message: "수집 완료 · STEP 1 자동분석 시작" });''',
+              '''      runningRef.current = true;
+      setAutoRunning(true);
+      writeMarker({ ...marker, status: "running", message: "수집 완료 · STEP 1 자동분석 시작" });''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
+              '''      void runPipeline(session, marker).finally(() => {
+        runningRef.current = false;
+      });''',
+              '''      void runPipeline(session, marker).finally(() => {
+        runningRef.current = false;
+        setAutoRunning(false);
+      });''',
+          )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
               '''        stage2Round: 0,
         step3: undefined,''',
               '''        stage2Round: 0,
@@ -279,16 +351,28 @@ import type { KeywordElonStep4FilterResult } from "@/lib/keywordEngineElonLabV2S
           )
           replace(
               "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
-              '            inputFingerprint: fingerprint(finalCandidates, current.cutoff, customBlockedTerms),',
-              '            inputFingerprint: fingerprint(finalCandidates, selectionThresholds, customBlockedTerms, current.step3?.round ?? 3),',
-          )
-          replace(
-              "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
               '          lastMessage: `일괄 실행 완료 · STEP 4까지 완료 · 최종 재료 ${filtered.result.allowedCount}개`,',
               '          lastMessage: `일괄 실행 완료 · 표준값 60 / 65 / 90 · STEP 4 최종 재료 ${filtered.result.allowedCount}개`,',
           )
+          replace(
+              "src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx",
+              '            disabled={!collectorReady || runningRef.current}',
+              '            disabled={!collectorReady || autoRunning}',
+          )
 
-          # Contract tests now assert locked standards rather than editable thresholds.
+          # Move runPipeline before the effect that invokes it to satisfy React hooks immutability lint.
+          auto_path = Path("src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx")
+          auto = auto_path.read_text(encoding="utf-8")
+          block_start = auto.index("  async function runPipeline(")
+          block_end = auto.index("\n\n  return (", block_start)
+          block = auto[block_start:block_end]
+          auto_without = auto[:block_start] + auto[block_end:]
+          invoke_effect = "\n\n  useEffect(() => {\n    let cancelled = false;"
+          insert_at = auto_without.index(invoke_effect)
+          auto = auto_without[:insert_at] + "\n\n" + block + auto_without[insert_at:]
+          auto_path.write_text(auto, encoding="utf-8")
+
+          # Contract tests: locked values and one-click parity.
           replace(
               "tests/keywordEngineElonLabStep4.test.mjs",
               '''test("demand and accuracy thresholds are separately editable and persisted", () => {
@@ -341,7 +425,7 @@ import type { KeywordElonStep4FilterResult } from "@/lib/keywordEngineElonLabV2S
   assert.match(auto, /action: "filter_prohibited_keywords"/);''',
           )
 
-          # Remove this one-shot migration workflow from the resulting feature commit.
+          # This is a one-shot workflow; remove it from the resulting feature commit.
           Path(".github/workflows/keyword-standard-lock-migration.yml").unlink()
 
       - run: npm ci
