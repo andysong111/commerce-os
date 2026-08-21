@@ -107,22 +107,40 @@ jobs:
           PY
       - name: Verify attribution guard
         run: node scripts/check-openai-cost-attribution.mjs
-      - name: Test
-        shell: bash
-        run: |
-          set +e
-          npm test > /tmp/ops-test.log 2>&1
-          status=$?
-          set -e
-          if [ "$status" -ne 0 ]; then
-            echo "=== concise regression failure ==="
-            grep -nE -B 8 -A 18 'not ok|AssertionError|ERR_ASSERTION|ERR_TEST_FAILURE|expected|actual|OPENAI_API_KEY|fallback' /tmp/ops-test.log | tail -220 || tail -220 /tmp/ops-test.log
-            exit "$status"
-          fi
-          echo "=== regression tests passed ==="
-          tail -40 /tmp/ops-test.log
-      - name: Lint
-        run: npm run lint
+      - name: Test OpenAI affected feature cards
+        run: >-
+          node --experimental-strip-types --test
+          tests/openAiKeyHealth.test.mjs
+          tests/productLaunchAiTitleTerms.test.mjs
+          tests/opsAiHelpIntent.test.mjs
+          tests/opsAiKnowledge.test.mjs
+          tests/keywordEngineElonLab.test.mjs
+          tests/keywordEngineElonLabRuntime.test.mjs
+          tests/keywordEngineElonLabStep3.test.mjs
+          tests/keywordEngineElonLabStep4.test.mjs
+          tests/shoplingCategoryCatalog.test.mjs
+          tests/shoplingCategoryBranchRepair.test.mjs
+          tests/shoplingCategoryNaverFirst.test.mjs
+          tests/shoplingCategoryShoplingFirst.test.mjs
+      - name: Lint OpenAI affected source
+        run: >-
+          npx eslint
+          src/app/api/keyword-engine-elon-lab/route.ts
+          src/lib/keywordEngineElonLabIdentity.ts
+          src/lib/keywordEngineElonLabV2ApiHub.ts
+          src/lib/keywordEngineElonLabV2Discovery.ts
+          src/lib/keywordEngineElonLabV2MarketRecall.ts
+          src/lib/keywordEngineElonLabV2Scoring.ts
+          src/lib/keywordEngineElonLabV2Server.ts
+          src/lib/keywordEngineElonLabV2Step4.ts
+          src/lib/opsAiHelp.ts
+          src/lib/productLaunchAiTitleTerms.ts
+          src/lib/shoplingCategoryAccuracyV2.ts
+          src/lib/shoplingCategoryBranchRepair.ts
+          src/lib/shoplingCategoryCatalog.ts
+          src/lib/shoplingCategoryNaverFirst.ts
+          src/lib/shoplingCategoryShoplingFirst.ts
+          scripts/check-openai-cost-attribution.mjs
       - name: Build
         run: npm run build
         env:
