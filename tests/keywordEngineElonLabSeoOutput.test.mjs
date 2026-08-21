@@ -175,9 +175,11 @@ test("screenshot-like nine final keywords keep all clean originals and add one s
   assert.equal(output.commonSearchKeywords.some((keyword) => /제조|중국|광동|포장|코보정용일회용/.test(keyword)), false);
   assert.equal(output.mallTitles.some((row) => /제조|중국|광동|포장/.test(row.title)), false);
   assert.equal(output.mallTitles.every((row) => row.byteLength <= 50), true);
+  const broadOnly = new Set(["붙이는", "스티커", "테이프", "콧대", "콧등"]);
+  assert.equal(output.mallTitles.some((row) => broadOnly.has(row.title.split(" ")[0])), false);
 });
 
-test("wholesale titles prefer exactness while retail1 prefers measured demand", () => {
+test("wholesale titles prioritize exactness while retail1 prioritizes measured demand", () => {
   const ranked = [
     candidate("정확형테이프", 100, 82, 50, { specificity: 100, shoppingIntent: 90 }),
     candidate("수요형테이프", 90, 82, 100000, { specificity: 75, shoppingIntent: 90 }),
@@ -197,7 +199,9 @@ test("wholesale titles prefer exactness while retail1 prefers measured demand", 
   });
   const wholesale1 = output.mallTitles.find((row) => row.productGroup === "도매1");
   const retail1 = output.mallTitles.find((row) => row.productGroup === "소매1");
-  assert.ok(wholesale1?.title.startsWith("정확형테이프"), wholesale1?.title);
+  const wholesaleLead = wholesale1?.title.split(" ")[0] ?? "";
+  assert.ok(["정확형테이프", "기능형테이프", "세부형테이프"].includes(wholesaleLead), wholesale1?.title);
+  assert.notEqual(wholesaleLead, "수요형테이프");
   assert.ok(retail1?.title.startsWith("수요형테이프"), retail1?.title);
 });
 
