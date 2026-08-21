@@ -1,0 +1,78 @@
+name: Apply OpenAI cost attribution via PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/bootstrap-openai-cost-attribution-pr.yml"
+      - "scripts/apply-openai-cost-attribution.py"
+  push:
+    branches:
+      - feat/openai-cost-attribution-20260821
+    paths:
+      - ".github/workflows/bootstrap-openai-cost-attribution-pr.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/openai-cost-attribution-20260821
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+
+      - name: Apply dedicated OpenAI keys
+        run: python scripts/apply-openai-cost-attribution.py
+
+      - name: Verify every direct OpenAI call has a cost lane
+        run: node scripts/check-openai-cost-attribution.mjs
+
+      - name: Commit migration to PR branch
+        shell: bash
+        run: |
+          rm -f scripts/apply-openai-cost-attribution.py
+          rm -f .github/workflows/bootstrap-openai-cost-attribution.yml
+          rm -f .github/workflows/bootstrap-openai-cost-attribution-v2.yml
+          rm -f .github/workflows/bootstrap-openai-cost-attribution-pr.yml
+          git config user.name "commerce-os-automation"
+          git config user.email "commerce-os-automation@users.noreply.github.com"
+          git add -- \
+            src/lib/keywordEngineElonLabIdentity.ts \
+            src/lib/keywordEngineElonLabV2Scoring.ts \
+            src/lib/keywordEngineElonLabV2Step4.ts \
+            src/lib/keywordEngineElonLabV2Server.ts \
+            src/lib/keywordEngineElonLabV2MarketRecall.ts \
+            src/lib/keywordEngineElonLabV2ApiHub.ts \
+            src/lib/keywordEngineElonLabV2Discovery.ts \
+            src/app/api/keyword-engine-elon-lab/route.ts \
+            src/lib/shoplingCategoryCatalog.ts \
+            src/lib/shoplingCategoryNaverFirst.ts \
+            src/lib/shoplingCategoryBranchRepair.ts \
+            src/lib/shoplingCategoryAccuracyV2.ts \
+            src/lib/shoplingCategoryShoplingFirst.ts \
+            src/lib/shoplingCategoryRecommendationRunner.ts \
+            src/app/api/product-launch-tracker/ai-category/route.ts \
+            src/lib/productLaunchAiTitleTerms.ts \
+            src/app/api/product-launch-ai-title-terms/route.ts \
+            docs/openai-cost-attribution.md \
+            scripts/check-openai-cost-attribution.mjs \
+            .github/workflows/openai-cost-attribution-ci.yml
+          git add -u -- \
+            scripts/apply-openai-cost-attribution.py \
+            .github/workflows/bootstrap-openai-cost-attribution.yml \
+            .github/workflows/bootstrap-openai-cost-attribution-v2.yml \
+            .github/workflows/bootstrap-openai-cost-attribution-pr.yml
+          git diff --cached --check
+          git commit -m "Separate OpenAI API keys by cost lane"
+          git push origin HEAD:feat/openai-cost-attribution-20260821
