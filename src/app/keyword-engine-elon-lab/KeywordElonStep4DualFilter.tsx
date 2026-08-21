@@ -161,7 +161,7 @@ function RemovedCard({ row }: { row: KeywordElonStep4Decision }) {
 
 export default function KeywordElonStep4DualFilter() {
   const [session, setSession] = useState<ExtendedSession | null>(null);
-  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 60, accuracyRelevance: 90 }));
+  const thresholds = useMemo(() => readKeywordElonSelectionThresholds(), []);
   const [customTerms, setCustomTerms] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -170,8 +170,7 @@ export default function KeywordElonStep4DualFilter() {
   const attemptedFingerprint = useRef("");
 
   useEffect(() => {
-    setThresholds(readKeywordElonSelectionThresholds());
-    setCustomTerms(readCustomBlockedTerms());
+    const customInitTimer = window.setTimeout(() => setCustomTerms(readCustomBlockedTerms()), 0);
     let last = "";
     const sync = () => {
       const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY) || "";
@@ -181,14 +180,12 @@ export default function KeywordElonStep4DualFilter() {
     };
     sync();
     const timer = window.setInterval(sync, 500);
-    const thresholdListener = () => setThresholds(readKeywordElonSelectionThresholds());
     const customListener = () => setCustomTerms(readCustomBlockedTerms());
-    window.addEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
     window.addEventListener("keyword-elon-step4-custom-terms-updated", customListener);
     window.addEventListener("keyword-elon-session-updated", sync);
     return () => {
+      window.clearTimeout(customInitTimer);
       window.clearInterval(timer);
-      window.removeEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
       window.removeEventListener("keyword-elon-step4-custom-terms-updated", customListener);
       window.removeEventListener("keyword-elon-session-updated", sync);
     };
@@ -302,7 +299,7 @@ export default function KeywordElonStep4DualFilter() {
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl bg-white p-4 text-xs leading-6 text-slate-600">안전 Gate 관련성 80 / 쇼핑의도 70은 고정입니다. 상품정확성 경로는 품질점수가 낮아도 관련성 기준을 통과하면 STEP 4 재료로 들어오므로, 검색량이 작은 정확한 롱테일 키워드를 보존할 수 있습니다.</div>
+        <div className="mt-4 rounded-xl bg-white p-4 text-xs leading-6 text-slate-600">표준값은 STEP2 품질 60 / 월검색 품질 65 / 상품정확성 관련성 90으로 고정합니다. 안전 Gate 관련성 80 / 쇼핑의도 70도 고정이며, 정확성 경로는 검색량이 작은 정확한 롱테일 키워드를 보존합니다.</div>
 
         <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
           <div className="text-sm font-black">사용자 금지키워드</div>

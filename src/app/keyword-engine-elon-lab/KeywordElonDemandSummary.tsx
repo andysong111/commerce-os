@@ -13,8 +13,6 @@ import {
   selectKeywordElonAccuracyCandidates,
   selectKeywordElonDemandCandidates,
   selectKeywordElonStep4Union,
-  writeKeywordElonSelectionThresholds,
-  type KeywordElonSelectionThresholds,
 } from "@/lib/keywordEngineElonLabV2Selection";
 
 const V6_CACHE_RESET_MARKER = "keywordElon.marketRecallV6.cacheReset";
@@ -65,7 +63,7 @@ function TagChips({ values }: { values: string[] }) {
 
 export default function KeywordElonDemandSummary() {
   const [session, setSession] = useState<KeywordElonLabSession | null>(null);
-  const [thresholds, setThresholds] = useState<KeywordElonSelectionThresholds>(() => ({ demandQuality: 60, accuracyRelevance: 90 }));
+  const thresholds = useMemo(() => readKeywordElonSelectionThresholds(), []);
 
   useEffect(() => {
     if (window.localStorage.getItem(V6_CACHE_RESET_MARKER) !== "1") {
@@ -78,7 +76,6 @@ export default function KeywordElonDemandSummary() {
       window.localStorage.setItem(V6_CACHE_RESET_MARKER, "1");
     }
 
-    setThresholds(readKeywordElonSelectionThresholds());
     let last = "";
     const sync = () => {
       const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY) || "";
@@ -88,11 +85,8 @@ export default function KeywordElonDemandSummary() {
     };
     sync();
     const timer = window.setInterval(sync, 700);
-    const thresholdListener = () => setThresholds(readKeywordElonSelectionThresholds());
-    window.addEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("keyword-elon-selection-thresholds-updated", thresholdListener);
     };
   }, []);
 
@@ -114,12 +108,6 @@ export default function KeywordElonDemandSummary() {
   const permissionWarnings = warnings.filter((warning) => warning.includes("PERMISSION_REQUIRED"));
   const apiHubMissing = session.discovery?.apiHubConfigured === false;
 
-  function updateThreshold(field: keyof KeywordElonSelectionThresholds, value: number) {
-    const next = { ...thresholds, [field]: Math.max(0, Math.min(100, Number.isFinite(value) ? Math.round(value) : thresholds[field])) };
-    setThresholds(next);
-    writeKeywordElonSelectionThresholds(next);
-  }
-
   return (
     <section className="mx-auto mb-10 mt-[-1rem] max-w-[1500px] px-5 text-slate-900">
       <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/40 p-6 shadow-sm">
@@ -127,7 +115,7 @@ export default function KeywordElonDemandSummary() {
           <div>
             <div className="text-xs font-black uppercase tracking-[0.16em] text-violet-700">STEP 2 · MARKET RECALL V6</div>
             <h2 className="mt-1 text-2xl font-black">Evidence Market Mine + SearchAd 수요 계측</h2>
-            <p className="mt-2 text-sm text-slate-600">실제 시장 문서와 SearchAd에서 모은 후보를 수요와 상품 정확성 두 개의 그물로 따로 선별합니다. 각 기준은 아래에서 직접 조절할 수 있습니다.</p>
+            <p className="mt-2 text-sm text-slate-600">실제 시장 문서와 SearchAd에서 모은 후보를 수요와 상품 정확성 두 개의 그물로 따로 선별합니다. 10개 상품 × 64조합 실험으로 확정한 표준값을 고정 적용합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
             <span className="rounded-full bg-cyan-100 px-3 py-1 text-cyan-900">Bridge {bridgeTerms.length}개</span>
@@ -157,9 +145,7 @@ export default function KeywordElonDemandSummary() {
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div><h3 className="text-lg font-black">월검색량 TOP · canonical no-space</h3><div className="mt-1 text-xs text-slate-500">기준 통과 {demandQualified.length}개 · 월검색량 높은 순</div></div>
-              <label className="flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-black text-blue-950">품질점수 ≥
-                <input type="number" min={0} max={100} step={1} value={thresholds.demandQuality} onChange={(event) => updateThreshold("demandQuality", Number(event.target.value))} className="w-16 rounded-lg border border-blue-200 px-2 py-1 text-right tabular-nums" />
-              </label>
+              <span className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-black text-blue-950">표준 품질점수 ≥ 65 · 고정</span>
             </div>
             <div className="space-y-2">{demandTop.length ? demandTop.map((row, index) => <KeywordRow key={`demand-${row.searchKey}`} row={row} rank={index + 1} metric="demand" />) : <div className="rounded-xl bg-white p-4 text-sm text-slate-500">현재 월검색량 기준을 통과한 후보가 없습니다.</div>}</div>
           </div>
@@ -167,9 +153,7 @@ export default function KeywordElonDemandSummary() {
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div><h3 className="text-lg font-black">상품 정확성 TOP</h3><div className="mt-1 text-xs text-slate-500">기준 통과 {accuracyQualified.length}개 · 관련성 높은 순</div></div>
-              <label className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-black text-emerald-950">관련성 ≥
-                <input type="number" min={0} max={100} step={1} value={thresholds.accuracyRelevance} onChange={(event) => updateThreshold("accuracyRelevance", Number(event.target.value))} className="w-16 rounded-lg border border-emerald-200 px-2 py-1 text-right tabular-nums" />
-              </label>
+              <span className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm font-black text-emerald-950">표준 관련성 ≥ 90 · 고정</span>
             </div>
             <div className="space-y-2">{accuracyTop.length ? accuracyTop.map((row, index) => <KeywordRow key={`accuracy-${row.searchKey}`} row={row} rank={index + 1} metric="accuracy" />) : <div className="rounded-xl bg-white p-4 text-sm text-slate-500">현재 상품정확성 기준을 통과한 후보가 없습니다.</div>}</div>
           </div>

@@ -9,7 +9,8 @@ const core = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const merge = await readFile("src/lib/keywordEngineElonLabV2Merge.ts", "utf8");
 const workflow = await readFile(".github/workflows/keyword-engine-elon-lab-ci.yml", "utf8");
 
-test("STEP 2 is a persisted cumulative round rather than a destructive rerun", () => {
+test("STEP 2 is a persisted cumulative round with the locked 60-point standard", () => {
+  assert.match(core, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 60/);
   assert.match(core, /stage2Round: number/);
   assert.match(core, /stage2Round: 0/);
   assert.match(page, /const round = \(session\.stage2Round \?\? 0\) \+ 1/);
@@ -22,6 +23,8 @@ test("STEP 2 is a persisted cumulative round rather than a destructive rerun", (
   assert.match(page, /완료 round/);
   assert.match(page, /누적 후보/);
   assert.match(page, /기존 결과 누적/);
+  assert.match(page, /표준 품질 커트라인 60점 · 고정/);
+  assert.doesNotMatch(page, /changeCutoff/);
 });
 
 test("shared merge helpers canonicalize and preserve accumulated results", () => {
@@ -56,6 +59,9 @@ test("one-click pipeline performs STEP 1, STEP 2 round 1, STEP 3 rounds 1-3, STE
   assert.match(auto, /mergeKeywordElonCandidates/);
   assert.match(auto, /mergeKeywordElonDiscovery/);
   assert.match(auto, /keywordEngineElonLab\.step4\.customBlockedTerms\.v1/);
+  assert.match(auto, /selectKeywordElonStep4Union/);
+  assert.match(auto, /readKeywordElonSelectionThresholds/);
+  assert.match(auto, /cutoff: 0/);
   assert.match(auto, /action: "filter_prohibited_keywords"/);
   assert.match(auto, /action: "generate_title"/);
   assert.match(auto, /일괄 실행 완료 · 표준값 60 \/ 65 \/ 90/);

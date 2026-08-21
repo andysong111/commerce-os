@@ -1,5 +1,5 @@
 export const KEYWORD_ELON_V2_STORAGE_KEY = "keywordEngineElonLab.v2.session";
-export const KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70;
+export const KEYWORD_ELON_V2_DEFAULT_CUTOFF = 60;
 export const KEYWORD_ELON_V2_MINIMUM_KEYWORDS = 10;
 export const KEYWORD_ELON_V2_RELEVANCE_GATE = 80;
 export const KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70;

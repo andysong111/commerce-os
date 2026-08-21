@@ -18,15 +18,16 @@ test("STEP 4 is mounted after demand summary and uses dual threshold component",
   assert.match(component, /Number\(session\?\.step3\?\.round\) >= 3/);
 });
 
-test("demand and accuracy thresholds are separately editable and persisted", () => {
-  assert.match(selection, /KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 60/);
+test("demand and accuracy standards are locked at 65 and 90 with no numeric editor", () => {
+  assert.match(selection, /KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 65/);
   assert.match(selection, /KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE = 90/);
-  assert.match(selection, /keywordEngineElonLab\.selectionThresholds\.v1/);
-  assert.match(demandSummary, /품질점수 ≥/);
-  assert.match(demandSummary, /관련성 ≥/);
-  assert.match(demandSummary, /updateThreshold\("demandQuality"/);
-  assert.match(demandSummary, /updateThreshold\("accuracyRelevance"/);
-  assert.match(demandSummary, /writeKeywordElonSelectionThresholds/);
+  assert.match(selection, /demandQuality: KEYWORD_ELON_DEFAULT_DEMAND_QUALITY/);
+  assert.match(selection, /accuracyRelevance: KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE/);
+  assert.doesNotMatch(demandSummary, /type="number"/);
+  assert.doesNotMatch(demandSummary, /updateThreshold/);
+  assert.doesNotMatch(demandSummary, /writeKeywordElonSelectionThresholds/);
+  assert.match(demandSummary, /표준 품질점수 ≥ 65 · 고정/);
+  assert.match(demandSummary, /표준 관련성 ≥ 90 · 고정/);
 });
 
 test("STEP 4 input is the canonical union of demand and accuracy qualified candidates", () => {

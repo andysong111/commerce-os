@@ -4,7 +4,7 @@ import {
 } from "@/lib/keywordEngineElonLabV2";
 
 export const KEYWORD_ELON_SELECTION_STORAGE_KEY = "keywordEngineElonLab.selectionThresholds.v1";
-export const KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 60;
+export const KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 65;
 export const KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE = 90;
 
 export type KeywordElonSelectionThresholds = {
@@ -19,34 +19,21 @@ export function clampKeywordElonThreshold(value: unknown, fallback: number) {
 }
 
 export function normalizeKeywordElonSelectionThresholds(
-  value?: Partial<KeywordElonSelectionThresholds> | null,
+  _value?: Partial<KeywordElonSelectionThresholds> | null,
 ): KeywordElonSelectionThresholds {
   return {
-    demandQuality: clampKeywordElonThreshold(
-      value?.demandQuality,
-      KEYWORD_ELON_DEFAULT_DEMAND_QUALITY,
-    ),
-    accuracyRelevance: clampKeywordElonThreshold(
-      value?.accuracyRelevance,
-      KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE,
-    ),
+    demandQuality: KEYWORD_ELON_DEFAULT_DEMAND_QUALITY,
+    accuracyRelevance: KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE,
   };
 }
 
 export function readKeywordElonSelectionThresholds(): KeywordElonSelectionThresholds {
-  if (typeof window === "undefined") return normalizeKeywordElonSelectionThresholds();
-  try {
-    const raw = window.localStorage.getItem(KEYWORD_ELON_SELECTION_STORAGE_KEY);
-    if (!raw) return normalizeKeywordElonSelectionThresholds();
-    return normalizeKeywordElonSelectionThresholds(JSON.parse(raw) as Partial<KeywordElonSelectionThresholds>);
-  } catch {
-    return normalizeKeywordElonSelectionThresholds();
-  }
+  return normalizeKeywordElonSelectionThresholds();
 }
 
-export function writeKeywordElonSelectionThresholds(value: KeywordElonSelectionThresholds) {
+export function writeKeywordElonSelectionThresholds(_value: KeywordElonSelectionThresholds) {
   if (typeof window === "undefined") return;
-  const normalized = normalizeKeywordElonSelectionThresholds(value);
+  const normalized = normalizeKeywordElonSelectionThresholds();
   window.localStorage.setItem(KEYWORD_ELON_SELECTION_STORAGE_KEY, JSON.stringify(normalized));
   window.dispatchEvent(new CustomEvent("keyword-elon-selection-thresholds-updated"));
 }

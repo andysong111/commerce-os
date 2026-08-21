@@ -93,7 +93,7 @@ function loadLocalSession() {
     return {
       ...emptyKeywordElonSession(),
       ...parsed,
-      cutoff: Number.isFinite(Number(parsed.cutoff)) ? Number(parsed.cutoff) : KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+      cutoff: KEYWORD_ELON_V2_DEFAULT_CUTOFF,
       stage2Round: Number.isFinite(Number(parsed.stage2Round)) ? Math.max(0, Number(parsed.stage2Round)) : 0,
     } as KeywordElonLabSession;
   } catch {
@@ -420,17 +420,6 @@ export default function KeywordEngineElonLabPage() {
     }
   }
 
-  function changeCutoff(value: number) {
-    const cutoff = Math.max(0, Math.min(100, value));
-    setSession((previous) => ({
-      ...previous,
-      cutoff,
-      titleResult: null,
-      lastMessage: `품질 커트라인을 ${cutoff}점으로 변경했습니다. 상품명은 새 커트라인으로 다시 생성해 주세요.`,
-      updatedAt: new Date().toISOString(),
-    }));
-  }
-
   function newExperiment() {
     if (!window.confirm("현재 브라우저에 저장된 실험 결과를 비우고 새 1688 상품으로 시작할까요?")) return;
     setSession(emptyKeywordElonSession());
@@ -462,7 +451,7 @@ export default function KeywordEngineElonLabPage() {
             <div className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Commerce OS · Keyword Lab V2</div>
             <h1 className="mt-2 text-3xl font-black">키워드엔진 일론머스크식 분해개선작업</h1>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              1688 실제 화면에서 중국 상품명·옵션을 수집하고 상품 정체성을 확정한 뒤, 품질 커트라인을 넘는 키워드를 개수 제한 없이 보존해 상품명까지 만듭니다.
+              1688 실제 화면에서 중국 상품명·옵션을 수집하고 상품 정체성을 확정한 뒤, 검증된 표준값(STEP2 60 · 월검색 품질 65 · 정확성 90)으로 키워드를 선별해 상품명까지 만듭니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -592,9 +581,7 @@ export default function KeywordEngineElonLabPage() {
             <button disabled={busy !== ""} onClick={runStage2} className="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white disabled:opacity-40">
               {busy === "stage2" ? `STEP 2 round ${(session.stage2Round ?? 0) + 1} 실행 중 · ${statusLabel}` : session.stage2Round > 0 ? `STEP 2 · 추가발굴 round ${session.stage2Round + 1}` : "STEP 2 · 키워드 대량 발굴 round 1"}
             </button>
-            <label className="flex items-center gap-3 text-sm font-bold">품질 커트라인
-              <input type="number" min={0} max={100} step={1} value={session.cutoff} onChange={(event) => changeCutoff(Number(event.target.value))} className="w-20 rounded-lg border px-3 py-2" />점
-            </label>
+            <span className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-black text-violet-950">표준 품질 커트라인 60점 · 고정</span>
             <span className="text-sm text-slate-500">기존 결과 누적 · 최소 목표 {KEYWORD_ELON_V2_MINIMUM_KEYWORDS}개 · 상한 없음</span>
           </div>
         )}

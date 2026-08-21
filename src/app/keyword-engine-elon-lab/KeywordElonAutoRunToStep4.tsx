@@ -8,6 +8,7 @@ import {
   KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION,
 } from "@/lib/keywordEngineElonLabBrowserImport";
 import {
+  KEYWORD_ELON_V2_DEFAULT_CUTOFF,
   KEYWORD_ELON_V2_STORAGE_KEY,
   compactKeywordElonKey,
   parse1688OfferId,
@@ -23,6 +24,11 @@ import {
   mergeKeywordElonCandidates,
   mergeKeywordElonDiscovery,
 } from "@/lib/keywordEngineElonLabV2Merge";
+import {
+  readKeywordElonSelectionThresholds,
+  selectKeywordElonStep4Union,
+  type KeywordElonSelectionThresholds,
+} from "@/lib/keywordEngineElonLabV2Selection";
 import type { KeywordElonStep4FilterResult } from "@/lib/keywordEngineElonLabV2Step4";
 
 const AUTO_RUN_KEY = "keywordEngineElonLab.autoRunToStep4.v1";
@@ -169,12 +175,19 @@ function step3Meta(
   };
 }
 
-function fingerprint(candidates: KeywordElonCandidate[], cutoff: number, customTerms: string[]) {
+function fingerprint(
+  candidates: KeywordElonCandidate[],
+  thresholds: KeywordElonSelectionThresholds,
+  customTerms: string[],
+  round: number,
+) {
   return [
-    `auto:1`,
-    `cutoff:${cutoff}`,
+    "dual-selection:v1",
+    `demandQuality:${thresholds.demandQuality}`,
+    `accuracyRelevance:${thresholds.accuracyRelevance}`,
+    `round:${round}`,
     `custom:${customTerms.join(",")}`,
-    ...candidates.map((row) => `${compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword)}:${row.qualityScore.toFixed(2)}`),
+    ...candidates.map((row) => `${compactKeywordElonKey(row.searchKeyword || row.searchKey || row.keyword)}:${row.qualityScore.toFixed(2)}:${row.relevance.toFixed(0)}`),
   ].join("|");
 }
 
@@ -183,6 +196,7 @@ export default function KeywordElonAutoRunToStep4() {
   const [collectorVersion, setCollectorVersion] = useState("");
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [autoRunning, setAutoRunning] = useState(false);
   const runningRef = useRef(false);
 
   useEffect(() => {
@@ -202,55 +216,6 @@ export default function KeywordElonAutoRunToStep4() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const timer = window.setInterval(() => {
-      if (cancelled || runningRef.current) return;
-      const marker = readMarker();
-      if (!marker || marker.status !== "armed") return;
-      const session = readSession();
-      if (!session) return;
-      const sameOffer = same1688Offer(marker.url, session);
-      const sourceReady = Boolean(session.source.chineseTitle.trim() || session.source.optionText.trim());
-      if (!sameOffer || !sourceReady) return;
-      runningRef.current = true;
-      writeMarker({ ...marker, status: "running", message: "수집 완료 · STEP 1 자동분석 시작" });
-      setProgress("1688 수집 완료 · STEP 1부터 STEP 4까지 자동 실행을 시작합니다.");
-      void runPipeline(session, marker).finally(() => {
-        runningRef.current = false;
-      });
-    }, 400);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const collectorReady = versionAtLeast(collectorVersion, KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION);
-
-  function startAutoRun() {
-    const normalized = url.trim();
-    setError("");
-    if (!validate1688Url(normalized)) {
-      setError("1688.com 상품 링크를 입력해 주세요.");
-      return;
-    }
-    if (!collectorReady) {
-      setError(`Keyword Lab Collector v${KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION} 이상이 필요합니다.`);
-      return;
-    }
-    const marker: AutoRunMarker = {
-      status: "armed",
-      url: normalized,
-      requestedAt: new Date().toISOString(),
-      message: "1688 원본 수집 대기",
-    };
-    writeMarker(marker);
-    setProgress("1688 브라우저 수집을 시작합니다. 수집 후 이 화면으로 돌아오면 STEP 4까지 자동 진행됩니다.");
-    const returnUrl = new URL("/keyword-engine-elon-lab", window.location.origin).toString();
-    window.location.assign(buildKeywordElonBrowserImportUrl(normalized, returnUrl));
-  }
-
   async function runPipeline(initial: ExtendedSession, marker: AutoRunMarker) {
     try {
       const source = initial.source;
@@ -269,6 +234,7 @@ export default function KeywordElonAutoRunToStep4() {
         titleResult: null,
         stage2Status: "idle",
         stage2Round: 0,
+        cutoff: KEYWORD_ELON_V2_DEFAULT_CUTOFF,
         step3: undefined,
         step4: undefined,
         lastMessage: "일괄 실행 · STEP 1 자동 통과",
@@ -367,8 +333,9 @@ export default function KeywordElonAutoRunToStep4() {
         writeSession(current);
       }
 
-      setProgress("일괄 실행 6/6 · STEP 4 위험·사용자 금지키워드 제거 중…");
-      const finalCandidates = passingRows(current);
+      setProgress("일괄 실행 6/6 · 표준 월검색 품질 65 / 정확성 90 합집합에 STEP 4 위험필터 적용 중…");
+      const selectionThresholds = readKeywordElonSelectionThresholds();
+      const finalCandidates = selectKeywordElonStep4Union(current.scoredCandidates, selectionThresholds);
       const customBlockedTerms = readCustomBlockedTerms();
       if (!finalCandidates.length) {
         const emptyResult: KeywordElonStep4FilterResult = {
@@ -390,7 +357,7 @@ export default function KeywordElonAutoRunToStep4() {
           step4: {
             ...emptyResult,
             status: "done",
-            inputFingerprint: fingerprint(finalCandidates, current.cutoff, customBlockedTerms),
+            inputFingerprint: fingerprint(finalCandidates, selectionThresholds, customBlockedTerms, current.step3?.round ?? 3),
             customBlockedTerms,
             titleResult: null,
             lastMessage: "STEP 4 완료 · 최종 통과 키워드가 없어 수동 검토 필요",
@@ -417,7 +384,7 @@ export default function KeywordElonAutoRunToStep4() {
             source,
             identity: current.identity,
             candidates: allowedCandidates,
-            cutoff: current.cutoff,
+            cutoff: 0,
           });
           titleResult = titled.titleResult;
         }
@@ -427,13 +394,13 @@ export default function KeywordElonAutoRunToStep4() {
           step4: {
             ...filtered.result,
             status: "done",
-            inputFingerprint: fingerprint(finalCandidates, current.cutoff, customBlockedTerms),
+            inputFingerprint: fingerprint(finalCandidates, selectionThresholds, customBlockedTerms, current.step3?.round ?? 3),
             customBlockedTerms,
             titleResult,
             lastMessage: `STEP 4 완료 · ${filtered.result.removedCount}개 제거 · 최종 재료 ${filtered.result.allowedCount}개`,
             updatedAt: new Date().toISOString(),
           },
-          lastMessage: `일괄 실행 완료 · STEP 4까지 완료 · 최종 재료 ${filtered.result.allowedCount}개`,
+          lastMessage: `일괄 실행 완료 · 표준값 60 / 65 / 90 · STEP 4 최종 재료 ${filtered.result.allowedCount}개`,
           updatedAt: new Date().toISOString(),
         };
       }
@@ -457,6 +424,59 @@ export default function KeywordElonAutoRunToStep4() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      if (cancelled || runningRef.current) return;
+      const marker = readMarker();
+      if (!marker || marker.status !== "armed") return;
+      const session = readSession();
+      if (!session) return;
+      const sameOffer = same1688Offer(marker.url, session);
+      const sourceReady = Boolean(session.source.chineseTitle.trim() || session.source.optionText.trim());
+      if (!sameOffer || !sourceReady) return;
+      runningRef.current = true;
+      setAutoRunning(true);
+      writeMarker({ ...marker, status: "running", message: "수집 완료 · STEP 1 자동분석 시작" });
+      setProgress("1688 수집 완료 · STEP 1부터 STEP 4까지 자동 실행을 시작합니다.");
+      void runPipeline(session, marker).finally(() => {
+        runningRef.current = false;
+        setAutoRunning(false);
+      });
+    }, 400);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const collectorReady = versionAtLeast(collectorVersion, KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION);
+
+  function startAutoRun() {
+    const normalized = url.trim();
+    setError("");
+    if (!validate1688Url(normalized)) {
+      setError("1688.com 상품 링크를 입력해 주세요.");
+      return;
+    }
+    if (!collectorReady) {
+      setError(`Keyword Lab Collector v${KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION} 이상이 필요합니다.`);
+      return;
+    }
+    const marker: AutoRunMarker = {
+      status: "armed",
+      url: normalized,
+      requestedAt: new Date().toISOString(),
+      message: "1688 원본 수집 대기",
+    };
+    writeMarker(marker);
+    setProgress("1688 브라우저 수집을 시작합니다. 수집 후 이 화면으로 돌아오면 STEP 4까지 자동 진행됩니다.");
+    const returnUrl = new URL("/keyword-engine-elon-lab", window.location.origin).toString();
+    window.location.assign(buildKeywordElonBrowserImportUrl(normalized, returnUrl));
+  }
+
+
+
   return (
     <section className="mx-auto mt-6 max-w-[1500px] px-5 text-slate-900">
       <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50/70 p-5 shadow-sm">
@@ -477,7 +497,7 @@ export default function KeywordElonAutoRunToStep4() {
           />
           <button
             type="button"
-            disabled={!collectorReady || runningRef.current}
+            disabled={!collectorReady || autoRunning}
             onClick={startAutoRun}
             className="rounded-xl bg-emerald-700 px-6 py-3 text-sm font-black text-white disabled:opacity-40"
           >
