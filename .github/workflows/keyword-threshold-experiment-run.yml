@@ -6,6 +6,9 @@ on:
       - "experiments/keyword-threshold-run-request.json"
       - "src/lib/keywordEngineElonLabExperimentFixtures.ts"
       - "src/lib/keywordEngineElonLabThresholdExperiment.ts"
+      - "src/lib/keywordEngineElonLabV2Scoring.ts"
+      - "src/lib/keywordEngineElonLabV2SearchAd.ts"
+      - "src/lib/keywordEngineElonLabV2Step3.ts"
       - "src/app/api/keyword-engine-elon-lab/experiment/route.ts"
       - ".github/workflows/keyword-threshold-experiment-run.yml"
   workflow_dispatch:
@@ -13,26 +16,30 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: keyword-threshold-experiment-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   run-experiment:
-    name: run-experiment-shard-${{ matrix.shard }}
+    name: run-experiment-${{ matrix.sample }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        include:
-          - shard: 1
-            samples: '["nose-tape-step1-v1","shoehorn-step1-v1"]'
-          - shard: 2
-            samples: '["sponge-brush-step1-v1","adjustable-thimble-step1-v1"]'
-          - shard: 3
-            samples: '["open-top-sunhat-step1-v1","pimple-extractor-step1-v1"]'
-          - shard: 4
-            samples: '["mens-hiking-shoes-step1-v1","drawer-desk-step1-v1"]'
-          - shard: 5
-            samples: '["drawer-module-step1-v1","egg-piercer-step1-v1"]'
+        sample:
+          - nose-tape-step1-v1
+          - shoehorn-step1-v1
+          - sponge-brush-step1-v1
+          - adjustable-thimble-step1-v1
+          - open-top-sunhat-step1-v1
+          - pimple-extractor-step1-v1
+          - mens-hiking-shoes-step1-v1
+          - drawer-desk-step1-v1
+          - drawer-module-step1-v1
+          - egg-piercer-step1-v1
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       NAVER_SEARCHAD_API_KEY: ${{ secrets.NAVER_SEARCHAD_API_KEY }}
@@ -46,8 +53,7 @@ jobs:
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
       PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
       PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
-      EXPERIMENT_SAMPLES_JSON: ${{ matrix.samples }}
-      EXPERIMENT_SHARD: ${{ matrix.shard }}
+      EXPERIMENT_SAMPLE: ${{ matrix.sample }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,19 +84,25 @@ jobs:
       - name: Build experiment app
         run: npm run build
 
-      - name: Run STEP1-fixed threshold matrix shard
+      - name: Run one isolated STEP1-fixed threshold matrix
         shell: bash
         run: |
           mkdir -p experiment-results
+          result_file="experiment-results/${EXPERIMENT_SAMPLE}.json"
           npm start -- -p 3001 > experiment-results/next-server.log 2>&1 &
           server_pid=$!
-          cleanup() { kill "$server_pid" 2>/dev/null || true; }
+          tail -n +1 -F experiment-results/next-server.log &
+          tail_pid=$!
+          cleanup() {
+            kill "$tail_pid" 2>/dev/null || true
+            kill "$server_pid" 2>/dev/null || true
+          }
           trap cleanup EXIT
 
           ready=0
           for attempt in $(seq 1 90); do
             status=$(curl -sS -o /tmp/plan.json -w "%{http_code}" --max-time 10 \
-              "http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?sample=nose-tape-step1-v1" || true)
+              "http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?sample=${EXPERIMENT_SAMPLE}" || true)
             if [ "$status" = "200" ]; then
               ready=1
               break
@@ -99,107 +111,56 @@ jobs:
           done
           if [ "$ready" != "1" ]; then
             echo "Local experiment server did not become ready."
-            cat experiment-results/next-server.log || true
+            cp /tmp/plan.json "$result_file" 2>/dev/null || true
+            exit 1
+          fi
+
+          request_url="http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?sample=${EXPERIMENT_SAMPLE}&step2=55%2C60%2C65%2C70&demand=50%2C55%2C60%2C65&accuracy=80%2C85%2C90%2C95&rounds=3&concurrency=1&mode=run&confirm=RUN_THRESHOLD_EXPERIMENT"
+          echo "RUN ${EXPERIMENT_SAMPLE}"
+          set +e
+          status=$(curl -sS -o "$result_file" -w "%{http_code}" --max-time 3000 "$request_url")
+          curl_exit=$?
+          set -e
+          echo "HTTP $status · curl_exit $curl_exit"
+
+          if [ "$curl_exit" != "0" ]; then
+            printf '{"ok":false,"sampleId":"%s","error":"CLIENT_TIMEOUT_OR_NETWORK","curlExit":%s}\n' \
+              "$EXPERIMENT_SAMPLE" "$curl_exit" > "$result_file"
+            exit 1
+          fi
+          if [ "$status" != "200" ]; then
+            cat "$result_file" || true
             exit 1
           fi
 
           python - <<'PY'
           import json
           import os
-          import time
-          import urllib.parse
-          import urllib.request
           from pathlib import Path
 
-          request_path = Path("experiments/keyword-threshold-run-request.json")
-          output_dir = Path("experiment-results")
-          request = json.loads(request_path.read_text(encoding="utf-8"))
-          samples = json.loads(os.environ["EXPERIMENT_SAMPLES_JSON"])
-          cooldown = max(0, int(request.get("cooldownSeconds", 20)))
-
-          def csv(name, fallback):
-              return ",".join(str(value) for value in request.get(name, fallback))
-
-          common = {
-              "step2": csv("step2", [60, 65, 70]),
-              "demand": csv("demand", [55, 60, 65]),
-              "accuracy": csv("accuracy", [85, 90, 95]),
-              "rounds": str(request.get("rounds", 3)),
-              "concurrency": str(request.get("concurrency", 2)),
-              "mode": "run",
-              "confirm": "RUN_THRESHOLD_EXPERIMENT",
-          }
-          blocked = request.get("blocked", [])
-          if blocked:
-              common["blocked"] = ",".join(str(value) for value in blocked)
-
-          summary = {
-              "requestId": request.get("requestId", "unnamed"),
-              "shard": int(os.environ.get("EXPERIMENT_SHARD", "0")),
-              "requestedSamples": samples,
-              "thresholds": {
-                  "step2": request.get("step2", []),
-                  "demand": request.get("demand", []),
-                  "accuracy": request.get("accuracy", []),
-                  "rounds": request.get("rounds", 3),
-              },
-              "runs": [],
-          }
-
-          for index, sample in enumerate(samples):
-              params = dict(common)
-              params["sample"] = sample
-              url = "http://127.0.0.1:3001/api/keyword-engine-elon-lab/experiment?" + urllib.parse.urlencode(params)
-              started = time.time()
-              filename = output_dir / f"{sample}.json"
-              print(f"RUN {index + 1}/{len(samples)} {sample}", flush=True)
-              try:
-                  with urllib.request.urlopen(url, timeout=4200) as response:
-                      raw = response.read()
-                      filename.write_bytes(raw)
-                      payload = json.loads(raw)
-                      ok = bool(payload.get("ok"))
-                      summary["runs"].append({
-                          "sample": sample,
-                          "ok": ok,
-                          "seconds": round(time.time() - started, 1),
-                          "file": filename.name,
-                      })
-                      if not ok:
-                          print(f"FAILED_PAYLOAD {sample}", flush=True)
-              except Exception as exc:
-                  error_payload = {
-                      "ok": False,
-                      "sampleId": sample,
-                      "error": type(exc).__name__,
-                      "message": str(exc),
-                  }
-                  filename.write_text(json.dumps(error_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-                  summary["runs"].append({
-                      "sample": sample,
-                      "ok": False,
-                      "seconds": round(time.time() - started, 1),
-                      "file": filename.name,
-                      "error": str(exc),
-                  })
-                  print(f"ERROR {sample}: {exc}", flush=True)
-
-              if index + 1 < len(samples) and cooldown:
-                  print(f"COOLDOWN {cooldown}s", flush=True)
-                  time.sleep(cooldown)
-
-          (output_dir / "summary.json").write_text(
-              json.dumps(summary, ensure_ascii=False, indent=2),
-              encoding="utf-8",
-          )
-          print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+          sample = os.environ["EXPERIMENT_SAMPLE"]
+          path = Path("experiment-results") / f"{sample}.json"
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          if payload.get("ok") is not True:
+              raise SystemExit(f"Experiment payload was not ok: {payload.get('message') or payload.get('error')}")
+          result = payload.get("result") or {}
+          if result.get("valid") is not True:
+              raise SystemExit("Experiment result did not pass validity checks")
+          validity = result.get("validity") or {}
+          print(json.dumps({
+              "sample": sample,
+              "engine": result.get("engine"),
+              "validity": validity,
+              "timings": result.get("timings"),
+              "cache": result.get("cache"),
+          }, ensure_ascii=False, indent=2))
           PY
 
-      - name: Upload experiment results
+      - name: Upload experiment result
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: keyword-threshold-broad-10-sample-matrix-v1-shard-${{ matrix.shard }}
+          name: keyword-threshold-broad-v2-${{ matrix.sample }}
           path: experiment-results/
           if-no-files-found: error
           retention-days: 14
