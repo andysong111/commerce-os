@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import KeywordElonAutoRunResumeBridge from "./KeywordElonAutoRunResumeBridge";
 import KeywordElonAutoRunToStep4 from "./KeywordElonAutoRunToStep4";
+import KeywordElonCollectorPresenceBridge from "./KeywordElonCollectorPresenceBridge";
 import KeywordElonCollapsibleSection from "./KeywordElonCollapsibleSection";
 import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonDiversitySupplement from "./KeywordElonDiversitySupplement";
@@ -13,6 +14,7 @@ import KeywordElonStep4DualFilter from "./KeywordElonStep4DualFilter";
 export default function KeywordEngineElonLabLayout({ children }: { children: ReactNode }) {
   return (
     <>
+      <KeywordElonCollectorPresenceBridge />
       <KeywordElonScoreFetchBridge />
       <KeywordElonAutoRunResumeBridge />
       <KeywordElonAutoRunToStep4 />
