@@ -1,0 +1,65 @@
+name: Lock Keyword Standard Once
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/lock-keyword-standard.py"
+      - ".github/workflows/keyword-standard-lock-pr.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  lock-standard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/keyword-step4-risk-filter
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Apply fixed 60 / 65 / 90 standard
+        run: python scripts/lock-keyword-standard.py
+
+      - run: npm ci
+
+      - name: Lint locked keyword files
+        run: >-
+          npx eslint
+          src/app/keyword-engine-elon-lab/page.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
+          src/lib/keywordEngineElonLabV2.ts
+          src/lib/keywordEngineElonLabV2Selection.ts
+
+      - name: Test locked standard contracts
+        run: >-
+          node --experimental-strip-types --test
+          tests/keywordEngineElonLabStep4.test.mjs
+          tests/keywordEngineElonLabRoundsAndAuto.test.mjs
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+
+      - name: Commit fixed standard
+        shell: bash
+        run: |
+          git config user.name "commerce-os-automation"
+          git config user.email "commerce-os-automation@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: lock keyword engine standard thresholds"
+          git push origin HEAD:feature/keyword-step4-risk-filter
