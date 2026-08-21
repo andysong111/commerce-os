@@ -14,8 +14,13 @@ import {
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 42_000;
 const DEFAULT_MODEL = "gpt-5-mini";
-const SCORE_CHUNK_SIZE = 12;
-const SCORE_CONCURRENCY = 1;
+const EXPERIMENT_MODE = process.env.KEYWORD_THRESHOLD_EXPERIMENT_LOCAL_RUN === "1";
+const SCORE_CHUNK_SIZE = EXPERIMENT_MODE ? 8 : 12;
+const SCORE_CONCURRENCY = EXPERIMENT_MODE ? 3 : 1;
+const SCORE_MAX_OUTPUT_TOKENS = EXPERIMENT_MODE ? 6_000 : 2_600;
+const SCORE_MAX_SPLIT_DEPTH = EXPERIMENT_MODE ? 3 : 1;
+const SCORE_RETRY_DELAY_MS = 750;
+const EXPERIMENT_MIN_SCORING_COVERAGE = 0.9;
 
 type OpenAiPayload = {
   status?: unknown;
@@ -23,6 +28,13 @@ type OpenAiPayload = {
   output_text?: unknown;
   output?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }>;
   error?: { message?: unknown };
+};
+
+type ResilientScoreResult = {
+  model: string;
+  scores: KeywordElonSemanticScore[];
+  successfulKeywordCount: number;
+  warnings: string[];
 };
 
 function openAiModel() {
@@ -39,7 +51,9 @@ function outputText(payload: OpenAiPayload) {
   if (direct) return direct;
   for (const item of payload.output ?? []) {
     for (const content of item.content ?? []) {
-      if (content.type === "output_text" && normalizeKeywordElonText(content.text)) return normalizeKeywordElonText(content.text);
+      if (content.type === "output_text" && normalizeKeywordElonText(content.text)) {
+        return normalizeKeywordElonText(content.text);
+      }
     }
   }
   return "";
@@ -72,12 +86,36 @@ function scoringSchema() {
   };
 }
 
-function scoreRationale(input: { relevance: number; shoppingIntent: number; specificity: number; titleEligible: boolean }) {
+function scoreRationale(input: {
+  relevance: number;
+  shoppingIntent: number;
+  specificity: number;
+  titleEligible: boolean;
+}) {
   const title = input.titleEligible ? " · 상품명사용 가능" : "";
   return `관련성 ${input.relevance.toFixed(0)} · 쇼핑의도 ${input.shoppingIntent.toFixed(0)} · 구체성 ${input.specificity.toFixed(0)}${title}`;
 }
 
-async function callScoreOpenAi(input: { keywords: string[]; source: KeywordElonSourceDraft; identity: KeywordElonIdentity }) {
+function failedScores(keywords: string[], message: string) {
+  return keywords.map<KeywordElonSemanticScore>((keyword) => ({
+    keyword: compactKeywordElonKey(keyword),
+    relevance: 0,
+    shoppingIntent: 0,
+    specificity: 0,
+    titleEligible: false,
+    rationale: `AI 점수화 실패 · ${message.slice(0, 120)}`,
+  }));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callScoreOpenAi(input: {
+  keywords: string[];
+  source: KeywordElonSourceDraft;
+  identity: KeywordElonIdentity;
+}) {
   const apiKey = normalizeKeywordElonText(process.env.OPENAI_API_KEY);
   if (!apiKey) throw new Error("OPENAI_API_KEY가 설정되지 않아 AI 점수화를 실행할 수 없습니다.");
   const model = openAiModel();
@@ -90,7 +128,7 @@ async function callScoreOpenAi(input: { keywords: string[]; source: KeywordElonS
       body: JSON.stringify({
         model,
         store: false,
-        max_output_tokens: 2_600,
+        max_output_tokens: SCORE_MAX_OUTPUT_TOKENS,
         input: [
           {
             role: "system",
@@ -120,26 +158,53 @@ async function callScoreOpenAi(input: { keywords: string[]; source: KeywordElonS
                 coreProduct: input.identity.coreProduct,
                 identityAnchor: input.identity.identityAnchor,
                 keywords: input.keywords,
-              }, null, 2),
+              }),
             }],
           },
         ],
-        text: { format: { type: "json_schema", name: "keyword_elon_semantic_scores_v6", strict: true, schema: scoringSchema() } },
+        text: {
+          format: {
+            type: "json_schema",
+            name: "keyword_elon_semantic_scores_v6",
+            strict: true,
+            schema: scoringSchema(),
+          },
+        },
       }),
       signal: controller.signal,
       cache: "no-store",
     });
+
     const raw = await response.text();
     let payload: OpenAiPayload = {};
-    try { payload = JSON.parse(raw) as OpenAiPayload; } catch { throw new Error(`AI_SCORE_INVALID_JSON: ${raw.replace(/\s+/g, " ").slice(0, 180)}`); }
-    if (!response.ok) throw new Error(`AI_SCORE_HTTP_${response.status}: ${normalizeKeywordElonText(payload.error?.message) || "OpenAI 요청 실패"}`);
+    try {
+      payload = JSON.parse(raw) as OpenAiPayload;
+    } catch {
+      throw new Error(`AI_SCORE_INVALID_JSON: ${raw.replace(/\s+/g, " ").slice(0, 180)}`);
+    }
+    if (!response.ok) {
+      throw new Error(
+        `AI_SCORE_HTTP_${response.status}: ${normalizeKeywordElonText(payload.error?.message) || "OpenAI 요청 실패"}`,
+      );
+    }
     const status = normalizeKeywordElonText(payload.status);
     const incompleteReason = normalizeKeywordElonText(payload.incomplete_details?.reason);
-    if (status === "incomplete") throw new Error(`AI_SCORE_INCOMPLETE: ${incompleteReason || "응답이 완료되지 않았습니다."}`);
+    if (status === "incomplete") {
+      throw new Error(`AI_SCORE_INCOMPLETE: ${incompleteReason || "응답이 완료되지 않았습니다."}`);
+    }
     const text = outputText(payload);
-    if (!text) throw new Error(`AI_SCORE_EMPTY_OUTPUT: status=${status || "unknown"}${incompleteReason ? ` reason=${incompleteReason}` : ""}`);
+    if (!text) {
+      throw new Error(
+        `AI_SCORE_EMPTY_OUTPUT: status=${status || "unknown"}${incompleteReason ? ` reason=${incompleteReason}` : ""}`,
+      );
+    }
     let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(text) as Record<string, unknown>; } catch { throw new Error("AI_SCORE_OUTPUT_PARSE_FAILED: OpenAI 구조화 응답 JSON 파싱에 실패했습니다."); }
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error("AI_SCORE_OUTPUT_PARSE_FAILED: OpenAI 구조화 응답 JSON 파싱에 실패했습니다.");
+    }
+
     const rawScores = Array.isArray(parsed.scores) ? parsed.scores : [];
     const byKey = new Map<string, KeywordElonSemanticScore>();
     for (const item of rawScores) {
@@ -151,65 +216,174 @@ async function callScoreOpenAi(input: { keywords: string[]; source: KeywordElonS
       const shoppingIntent = Math.max(0, Math.min(100, Number(row.shoppingIntent) || 0));
       const specificity = Math.max(0, Math.min(100, Number(row.specificity) || 0));
       const titleEligible = Boolean(row.titleEligible);
-      byKey.set(key, { keyword: key, relevance, shoppingIntent, specificity, titleEligible, rationale: scoreRationale({ relevance, shoppingIntent, specificity, titleEligible }) });
+      byKey.set(key, {
+        keyword: key,
+        relevance,
+        shoppingIntent,
+        specificity,
+        titleEligible,
+        rationale: scoreRationale({ relevance, shoppingIntent, specificity, titleEligible }),
+      });
     }
+
+    const missing = input.keywords.filter((keyword) => !byKey.has(compactKeywordElonKey(keyword)));
+    if (missing.length) {
+      throw new Error(`AI_SCORE_MISSING_ITEMS: ${missing.length}/${input.keywords.length}`);
+    }
+
     return {
       model,
-      scores: input.keywords.map((keyword) => {
-        const key = compactKeywordElonKey(keyword);
-        return byKey.get(key) ?? { keyword: key, relevance: 0, shoppingIntent: 0, specificity: 0, titleEligible: false, rationale: "AI 점수 응답 누락" };
-      }),
+      scores: input.keywords.map((keyword) => byKey.get(compactKeywordElonKey(keyword)) as KeywordElonSemanticScore),
     };
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new Error("AI_SCORE_TIMEOUT: OpenAI 점수화가 42초 안에 응답하지 않았습니다.");
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("AI_SCORE_TIMEOUT: OpenAI 점수화가 42초 안에 응답하지 않았습니다.");
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function scoreChunkOnce(keywords: string[], source: KeywordElonSourceDraft, identity: KeywordElonIdentity) {
+async function scoreChunkOnce(
+  keywords: string[],
+  source: KeywordElonSourceDraft,
+  identity: KeywordElonIdentity,
+) {
   try {
-    return { ok: true as const, ...(await callScoreOpenAi({ keywords, source, identity })), warning: "" };
+    return {
+      ok: true as const,
+      ...(await callScoreOpenAi({ keywords, source, identity })),
+      warning: "",
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI 점수화 실패";
     return {
       ok: false as const,
       model: openAiModel(),
       warning: message,
-      scores: keywords.map<KeywordElonSemanticScore>((keyword) => ({
-        keyword: compactKeywordElonKey(keyword), relevance: 0, shoppingIntent: 0, specificity: 0, titleEligible: false,
-        rationale: `AI 점수화 실패 · ${message.slice(0, 120)}`,
-      })),
+      scores: failedScores(keywords, message),
     };
   }
+}
+
+function retryableScoreFailure(message: string) {
+  return /(INCOMPLETE|TIMEOUT|EMPTY_OUTPUT|PARSE_FAILED|MISSING_ITEMS|HTTP_429|HTTP_5\d\d)/i.test(message);
+}
+
+async function scoreChunkResilient(
+  keywords: string[],
+  source: KeywordElonSourceDraft,
+  identity: KeywordElonIdentity,
+  depth = 0,
+): Promise<ResilientScoreResult> {
+  const first = await scoreChunkOnce(keywords, source, identity);
+  if (first.ok) {
+    return {
+      model: first.model,
+      scores: first.scores,
+      successfulKeywordCount: keywords.length,
+      warnings: [],
+    };
+  }
+
+  const warningPrefix = `AI_SCORE_RECOVERY depth=${depth} size=${keywords.length}: ${first.warning}`;
+  if (
+    EXPERIMENT_MODE
+    && retryableScoreFailure(first.warning)
+    && keywords.length > 2
+    && depth < SCORE_MAX_SPLIT_DEPTH
+  ) {
+    const midpoint = Math.ceil(keywords.length / 2);
+    const left = await scoreChunkResilient(keywords.slice(0, midpoint), source, identity, depth + 1);
+    const right = await scoreChunkResilient(keywords.slice(midpoint), source, identity, depth + 1);
+    return {
+      model: left.model || right.model || first.model,
+      scores: [...left.scores, ...right.scores],
+      successfulKeywordCount: left.successfulKeywordCount + right.successfulKeywordCount,
+      warnings: [warningPrefix, ...left.warnings, ...right.warnings],
+    };
+  }
+
+  if (retryableScoreFailure(first.warning)) {
+    await sleep(SCORE_RETRY_DELAY_MS);
+    const retry = await scoreChunkOnce(keywords, source, identity);
+    if (retry.ok) {
+      return {
+        model: retry.model,
+        scores: retry.scores,
+        successfulKeywordCount: keywords.length,
+        warnings: [warningPrefix, `AI_SCORE_RECOVERED size=${keywords.length}`],
+      };
+    }
+    return {
+      model: retry.model || first.model,
+      scores: retry.scores,
+      successfulKeywordCount: 0,
+      warnings: [warningPrefix, `AI_SCORE_RETRY_FAILED: ${retry.warning}`],
+    };
+  }
+
+  return {
+    model: first.model,
+    scores: first.scores,
+    successfulKeywordCount: 0,
+    warnings: [first.warning],
+  };
 }
 
 function statMap(stats: KeywordElonSearchAdStat[]) {
   return new Map(stats.map((row) => [compactKeywordElonKey(row.keyword), row] as const));
 }
 
-export async function scoreKeywordElonCandidatesBatched(input: { source: KeywordElonSourceDraft; identity: KeywordElonIdentity; discovery: KeywordElonDiscovery }) {
+export async function scoreKeywordElonCandidatesBatched(input: {
+  source: KeywordElonSourceDraft;
+  identity: KeywordElonIdentity;
+  discovery: KeywordElonDiscovery;
+}) {
   const candidates = uniqueKeywordElonCanonical(input.discovery.candidates, 500);
   if (!candidates.length) throw new Error("점수화할 키워드 후보가 없습니다.");
+
   const chunks: string[][] = [];
-  for (let index = 0; index < candidates.length; index += SCORE_CHUNK_SIZE) chunks.push(candidates.slice(index, index + SCORE_CHUNK_SIZE));
+  for (let index = 0; index < candidates.length; index += SCORE_CHUNK_SIZE) {
+    chunks.push(candidates.slice(index, index + SCORE_CHUNK_SIZE));
+  }
 
   const scored: KeywordElonSemanticScore[] = [];
   const warnings: string[] = [];
   let model = openAiModel();
-  let successfulChunks = 0;
+  let successfulKeywordCount = 0;
+  let fullySuccessfulChunks = 0;
+  let failedChunks = 0;
+
   for (let index = 0; index < chunks.length; index += SCORE_CONCURRENCY) {
     const wave = chunks.slice(index, index + SCORE_CONCURRENCY);
-    const waveResults = await Promise.all(wave.map((chunk) => scoreChunkOnce(chunk, input.source, input.identity)));
-    for (const result of waveResults) {
+    const waveResults = await Promise.all(
+      wave.map((chunk) => scoreChunkResilient(chunk, input.source, input.identity)),
+    );
+    for (let resultIndex = 0; resultIndex < waveResults.length; resultIndex += 1) {
+      const result = waveResults[resultIndex];
+      const expectedCount = wave[resultIndex].length;
       scored.push(...result.scores);
       model = result.model || model;
-      if (result.ok) successfulChunks += 1;
-      else if (result.warning) warnings.push(result.warning);
+      successfulKeywordCount += result.successfulKeywordCount;
+      if (result.successfulKeywordCount === expectedCount) fullySuccessfulChunks += 1;
+      else failedChunks += 1;
+      warnings.push(...result.warnings);
     }
   }
-  if (successfulChunks === 0) throw new Error(`AI_SCORE_ALL_CHUNKS_FAILED: ${warnings[0] || "모든 AI 점수화 묶음이 실패했습니다."}`);
+
+  const scoringCoverage = candidates.length
+    ? Math.round((successfulKeywordCount / candidates.length) * 10_000) / 10_000
+    : 0;
+  if (successfulKeywordCount === 0) {
+    throw new Error(`AI_SCORE_ALL_CHUNKS_FAILED: ${warnings[0] || "모든 AI 점수화 묶음이 실패했습니다."}`);
+  }
+  if (EXPERIMENT_MODE && scoringCoverage < EXPERIMENT_MIN_SCORING_COVERAGE) {
+    throw new Error(
+      `AI_SCORE_INSUFFICIENT_COVERAGE: ${(scoringCoverage * 100).toFixed(1)}% < ${(EXPERIMENT_MIN_SCORING_COVERAGE * 100).toFixed(0)}%`,
+    );
+  }
 
   const stats = statMap(input.discovery.searchAdStats);
   const result: KeywordElonCandidate[] = scored.map((row) => {
@@ -226,8 +400,16 @@ export async function scoreKeywordElonCandidatesBatched(input: { source: Keyword
     const sourceTags = input.discovery.sourceTagsByKeyword[key] ?? [];
     const hasDemand = stat?.totalSearch !== null && stat?.totalSearch !== undefined;
     const chunkFailed = row.rationale.startsWith("AI 점수화 실패");
-    const dataConfidence: "high" | "medium" | "low" = chunkFailed ? "low" : hasDemand && sourceTags.length >= 2 ? "high" : hasDemand || sourceTags.length >= 2 ? "medium" : "low";
-    const demandLabel = stat?.totalSearch === null || stat?.totalSearch === undefined ? "월검색 미측정" : `월검색 ${stat.totalSearch.toLocaleString()}`;
+    const dataConfidence: "high" | "medium" | "low" = chunkFailed
+      ? "low"
+      : hasDemand && sourceTags.length >= 2
+        ? "high"
+        : hasDemand || sourceTags.length >= 2
+          ? "medium"
+          : "low";
+    const demandLabel = stat?.totalSearch === null || stat?.totalSearch === undefined
+      ? "월검색 미측정"
+      : `월검색 ${stat.totalSearch.toLocaleString()}`;
     return {
       ...row,
       keyword: key,
@@ -244,6 +426,24 @@ export async function scoreKeywordElonCandidatesBatched(input: { source: Keyword
       dataConfidence,
     };
   });
-  result.sort((a, b) => Number(b.safetyPass) - Number(a.safetyPass) || b.qualityScore - a.qualityScore || (b.totalSearch ?? -1) - (a.totalSearch ?? -1));
-  return { candidates: result, model, scoringWarnings: [...new Set(warnings)].slice(0, 10), scoringChunkCount: chunks.length, scoringConcurrency: SCORE_CONCURRENCY, scoringSuccessfulChunks: successfulChunks };
+
+  result.sort(
+    (a, b) => Number(b.safetyPass) - Number(a.safetyPass)
+      || b.qualityScore - a.qualityScore
+      || (b.totalSearch ?? -1) - (a.totalSearch ?? -1),
+  );
+
+  return {
+    candidates: result,
+    model,
+    scoringWarnings: [...new Set(warnings)].slice(0, 30),
+    scoringChunkCount: chunks.length,
+    scoringConcurrency: SCORE_CONCURRENCY,
+    scoringSuccessfulChunks: fullySuccessfulChunks,
+    scoringFailedChunks: failedChunks,
+    scoringSuccessfulKeywordCount: successfulKeywordCount,
+    scoringCoverage,
+    scoringChunkSize: SCORE_CHUNK_SIZE,
+    scoringMaxOutputTokens: SCORE_MAX_OUTPUT_TOKENS,
+  };
 }
