@@ -164,6 +164,7 @@ export default function KeywordElonStep4DualFilter() {
   const thresholds = useMemo(() => readKeywordElonSelectionThresholds(), []);
   const [customTerms, setCustomTerms] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
+  const [blocklistOpen, setBlocklistOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -268,18 +269,36 @@ export default function KeywordElonStep4DualFilter() {
   if (!session || session.stage2Status !== "done") return null;
 
   function addCustomTerms() {
-    const additions = draft.split(/[\n,;|/]+/).map((value) => value.trim()).filter(Boolean);
-    if (!additions.length) return;
-    const next = uniqueKeywordElonCanonical([...customTerms, ...additions], 120).filter((term) => term.length >= 2);
+    const additions = uniqueKeywordElonCanonical(
+      draft.split(/[\n,;|/]+/).map((value) => value.trim()).filter(Boolean),
+      120,
+    ).filter((term) => term.length >= 2);
+    if (!additions.length) {
+      setMessage("2글자 이상의 금지어를 입력해 주세요.");
+      return;
+    }
+
+    const existing = new Set(customTerms);
+    const newTerms = additions.filter((term) => !existing.has(term));
+    const duplicateCount = additions.length - newTerms.length;
+    if (!newTerms.length) {
+      setMessage(`입력한 금지어 ${duplicateCount}개는 모두 이미 저장되어 있습니다.`);
+      setDraft("");
+      return;
+    }
+
+    const next = uniqueKeywordElonCanonical([...customTerms, ...newTerms], 120).filter((term) => term.length >= 2);
     saveCustomBlockedTerms(next);
     setCustomTerms(next);
     setDraft("");
+    setMessage(`금지어 ${newTerms.length}개 누적 저장 완료${duplicateCount ? ` · 중복 ${duplicateCount}개 건너뜀` : ""}`);
   }
 
   function removeCustomTerm(term: string) {
     const next = customTerms.filter((value) => value !== term);
     saveCustomBlockedTerms(next);
     setCustomTerms(next);
+    setMessage(`금지어 목록에서 '${term}'을 삭제했습니다.`);
   }
 
   return (
@@ -302,9 +321,38 @@ export default function KeywordElonStep4DualFilter() {
         <div className="mt-4 rounded-xl bg-white p-4 text-xs leading-6 text-slate-600">표준값은 STEP2 품질 60 / 월검색 품질 65 / 상품정확성 관련성 90으로 고정합니다. 안전 Gate 관련성 80 / 쇼핑의도 70도 고정이며, 정확성 경로는 검색량이 작은 정확한 롱테일 키워드를 보존합니다.</div>
 
         <div className="mt-4 rounded-2xl border border-violet-200 bg-white p-4">
-          <div className="text-sm font-black">사용자 금지키워드</div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-black">사용자 금지키워드</div>
+                <span className="rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-black text-violet-800">{customTerms.length}개 누적 저장</span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">한 번 저장한 금지어는 다음 상품에서도 계속 적용되며, 같은 단어를 다시 입력해도 중복 저장하지 않습니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBlocklistOpen((open) => !open)}
+              className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-2 text-xs font-black text-violet-900"
+            >
+              {blocklistOpen ? "금지어 목록 숨기기" : `금지어 목록 보기 (${customTerms.length})`}
+            </button>
+          </div>
           <div className="mt-3 flex flex-col gap-2 lg:flex-row"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="쉼표/줄바꿈으로 추가" className="min-h-12 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm" /><button onClick={addCustomTerms} className="rounded-xl bg-violet-700 px-5 py-3 text-sm font-black text-white">금지어 추가</button></div>
-          {customTerms.length ? <div className="mt-3 flex flex-wrap gap-2">{customTerms.map((term) => <button key={term} onClick={() => removeCustomTerm(term)} className="rounded-full bg-violet-100 px-3 py-1 text-xs font-black text-violet-900">{term} ×</button>)}</div> : null}
+          {blocklistOpen ? (
+            <div className="mt-3 rounded-xl border border-violet-100 bg-violet-50/50 p-3">
+              {customTerms.length ? (
+                <div className="flex flex-wrap gap-2">
+                  {customTerms.map((term) => (
+                    <button key={term} type="button" onClick={() => removeCustomTerm(term)} className="rounded-full bg-white px-3 py-1.5 text-xs font-black text-violet-900 ring-1 ring-violet-200" title="목록에서 삭제">
+                      {term} ×
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500">아직 저장된 사용자 금지어가 없습니다.</div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {!step3Ready ? <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">STEP 3 자동 round 1~3 완료 후 이 기준으로 STEP 4가 자동 계산됩니다.</div> : null}

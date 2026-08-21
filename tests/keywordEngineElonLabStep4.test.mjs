@@ -72,9 +72,16 @@ test("KIPRIS remains explicitly paused", () => {
   assert.match(component, /KIPRIS 보류/);
 });
 
-test("user blocked keywords persist and dual-filtered candidates regenerate the title", () => {
+test("user blocked keywords persist, dedupe and expose a viewable ledger", () => {
   assert.match(component, /keywordEngineElonLab\.step4\.customBlockedTerms\.v1/);
   assert.match(component, /saveCustomBlockedTerms/);
+  assert.match(component, /const existing = new Set\(customTerms\)/);
+  assert.match(component, /모두 이미 저장되어 있습니다/);
+  assert.match(component, /중복 .*개 건너뜀/);
+  assert.match(component, /blocklistOpen/);
+  assert.match(component, /금지어 목록 보기/);
+  assert.match(component, /금지어 목록 숨기기/);
+  assert.match(component, /개 누적 저장/);
   assert.match(component, /action: "filter_prohibited_keywords"/);
   assert.match(component, /const allowedSet = new Set\(filtered\.result\.allowedKeys\)/);
   assert.match(component, /action: "generate_title"/);
