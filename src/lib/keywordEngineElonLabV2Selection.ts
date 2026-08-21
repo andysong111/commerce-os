@@ -3,6 +3,7 @@ import {
   type KeywordElonCandidate,
 } from "@/lib/keywordEngineElonLabV2";
 
+// Fixed production standard selected from the 10-product × 64-combination threshold experiment.
 export const KEYWORD_ELON_SELECTION_STORAGE_KEY = "keywordEngineElonLab.selectionThresholds.v1";
 export const KEYWORD_ELON_DEFAULT_DEMAND_QUALITY = 65;
 export const KEYWORD_ELON_DEFAULT_ACCURACY_RELEVANCE = 90;
