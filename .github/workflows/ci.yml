@@ -18,6 +18,8 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
+      - name: Verify OpenAI cost attribution
+        run: node scripts/check-openai-cost-attribution.mjs
       - name: Lint changed integration files
         run: >-
           npx eslint
