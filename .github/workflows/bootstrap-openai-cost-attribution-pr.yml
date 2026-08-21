@@ -38,13 +38,10 @@ jobs:
       - name: Verify every direct OpenAI call has a cost lane
         run: node scripts/check-openai-cost-attribution.mjs
 
-      - name: Commit migration to PR branch
+      - name: Commit source migration only
         shell: bash
         run: |
-          rm -f scripts/apply-openai-cost-attribution.py
-          rm -f .github/workflows/bootstrap-openai-cost-attribution.yml
-          rm -f .github/workflows/bootstrap-openai-cost-attribution-v2.yml
-          rm -f .github/workflows/bootstrap-openai-cost-attribution-pr.yml
+          rm -f .github/workflows/openai-cost-attribution-ci.yml
           git config user.name "commerce-os-automation"
           git config user.email "commerce-os-automation@users.noreply.github.com"
           git add -- \
@@ -66,13 +63,7 @@ jobs:
             src/lib/productLaunchAiTitleTerms.ts \
             src/app/api/product-launch-ai-title-terms/route.ts \
             docs/openai-cost-attribution.md \
-            scripts/check-openai-cost-attribution.mjs \
-            .github/workflows/openai-cost-attribution-ci.yml
-          git add -u -- \
-            scripts/apply-openai-cost-attribution.py \
-            .github/workflows/bootstrap-openai-cost-attribution.yml \
-            .github/workflows/bootstrap-openai-cost-attribution-v2.yml \
-            .github/workflows/bootstrap-openai-cost-attribution-pr.yml
+            scripts/check-openai-cost-attribution.mjs
           git diff --cached --check
           git commit -m "Separate OpenAI API keys by cost lane"
           git push origin HEAD:feat/openai-cost-attribution-20260821
