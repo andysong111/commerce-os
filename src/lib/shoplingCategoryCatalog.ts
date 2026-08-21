@@ -429,7 +429,7 @@ export async function generateShoplingCategorySearchProfiles(
   } = {},
 ): Promise<ShoplingCategorySearchProfile[]> {
   const normalizedInputs = parseProductCategoryInputs({ items: inputs });
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY가 설정되지 않아 모델명 핵심명사를 분석할 수 없습니다.");
   }
@@ -674,7 +674,7 @@ export async function generateShoplingCategoryRecommendations(
   const unsupportedInputs = inputs.filter(
     (input) => (candidatesByItem.get(input.itemId)?.length ?? 0) === 0,
   );
-  const apiKey = text(options.apiKey ?? process.env.OPENAI_API_KEY);
+  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY가 설정되지 않아 AI 카테고리를 추천할 수 없습니다.");
   }
