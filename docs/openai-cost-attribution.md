@@ -1,6 +1,6 @@
 # OpenAI cost attribution
 
-Commerce OS server-side OpenAI calls are isolated by deployed service and, inside OPS Center, by functional cost lane. The goal is to make every production dollar attributable and to keep preview/development spend out of production reporting.
+Commerce OS server-side OpenAI calls are isolated by deployed service and, inside OPS Center, by functional cost lane. The goal is to make every production dollar attributable and to avoid accidental preview/development spend.
 
 ## Canonical OpenAI projects
 
@@ -10,7 +10,8 @@ Commerce OS server-side OpenAI calls are isolated by deployed service and, insid
 | `commerce-os-detail-page-studio` | Internal detail-page engine | `commerce-os-detail-page-studio` |
 | `ai-saurus-production` | AI-Saurus customer SaaS | `commerce-os-detail-page-saas` |
 | `commerce-os-sourcing-engine` | Commerce OS sourcing engine | `commerce-os-sourcing-engine` |
-| `commerce-os-development-test` | Preview/development only | Shared test bucket; never Production |
+
+`commerce-os-development-test` is not part of the canonical setup and may be deleted.
 
 The Vercel project `commerce-os-detail-page-studio-pzxe` is not part of the canonical production key map. Do not add a new production OpenAI key to it unless it is explicitly promoted to canonical production after a separate deployment audit.
 
@@ -37,21 +38,22 @@ The product-launch AI category route delegates to the Shopling category engine, 
 
 AI-Saurus `OPENAI_ADMIN_KEY` is a separate organization-cost reconciliation credential. It is not the runtime generation key and must not be replaced with `ai-saurus-runtime`.
 
-## Preview and development isolation
+## Vercel environment scope policy
 
-Create one service account named `commerce-os-dev-preview` inside `commerce-os-development-test`. Use that credential only for Vercel Preview/Development environments when OpenAI access is required. Never reuse a Production runtime key in Preview/Development and never use the development key in Production.
+Production service-account keys are configured for **Production only** by default. Leave Preview and Development unchecked unless OpenAI access is intentionally required there.
+
+Do not reuse a Production runtime key in Preview or Development merely for convenience. That would mix preview/test calls into production project/key spend and create an unnecessary cost-bearing surface. If a future preview deployment genuinely needs live OpenAI access, create a dedicated preview service account inside the same service's OpenAI project and track it separately.
 
 ## Rotation order
 
 1. Keep all legacy keys active during migration.
-2. Add the new service-account keys to the canonical Vercel Production projects only.
+2. Add the new service-account keys to the canonical Vercel Production projects with Production scope only.
 3. Redeploy each production project.
 4. Run one controlled OpenAI-bearing request per production cost lane/service.
 5. Confirm usage appears in the expected OpenAI project/API key.
-6. Configure Preview/Development with `commerce-os-dev-preview` or leave OpenAI unset if that environment does not require AI.
-7. Remove the generic/legacy Vercel key values only after every production lane is verified.
-8. Revoke legacy OpenAI keys only after Vercel no longer references them and a final controlled smoke test passes.
-9. Delete obsolete OpenAI projects only after confirming they have no active key or runtime dependency. Historical usage may be retained for accounting before deletion.
+6. Remove the generic/legacy Vercel key values only after every production lane is verified.
+7. Revoke legacy OpenAI keys only after Vercel no longer references them and a final controlled smoke test passes.
+8. Delete obsolete OpenAI projects only after confirming they have no active key or runtime dependency. Historical usage may be retained for accounting before deletion.
 
 ## Temporary OPS fallback
 
