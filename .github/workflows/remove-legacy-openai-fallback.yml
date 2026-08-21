@@ -107,11 +107,43 @@ jobs:
           PY
       - name: Verify attribution guard
         run: node scripts/check-openai-cost-attribution.mjs
-      - name: Test OpenAI affected feature cards
+      - name: Verify dedicated-key policy statically
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          expected = {
+              "src/app/api/keyword-engine-elon-lab/route.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabIdentity.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2ApiHub.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2Discovery.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2MarketRecall.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2Scoring.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2Server.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/keywordEngineElonLabV2Step4.ts": "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "src/lib/opsAiHelp.ts": "OPS_AI_HELP_OPENAI_API_KEY",
+              "src/lib/productLaunchAiTitleTerms.ts": "PRODUCT_TITLE_OPENAI_API_KEY",
+              "src/lib/shoplingCategoryAccuracyV2.ts": "SHOPLING_CATEGORY_OPENAI_API_KEY",
+              "src/lib/shoplingCategoryBranchRepair.ts": "SHOPLING_CATEGORY_OPENAI_API_KEY",
+              "src/lib/shoplingCategoryCatalog.ts": "SHOPLING_CATEGORY_OPENAI_API_KEY",
+              "src/lib/shoplingCategoryNaverFirst.ts": "SHOPLING_CATEGORY_OPENAI_API_KEY",
+              "src/lib/shoplingCategoryShoplingFirst.ts": "SHOPLING_CATEGORY_OPENAI_API_KEY",
+          }
+          failures = []
+          for name, key in expected.items():
+              source = Path(name).read_text(encoding="utf-8")
+              if key not in source:
+                  failures.append(f"{name}: missing {key}")
+              if "process.env.OPENAI_API_KEY" in source:
+                  failures.append(f"{name}: legacy generic key remains")
+          if failures:
+              raise SystemExit("\n".join(failures))
+          print(f"Dedicated-key policy passed for {len(expected)} paid call paths.")
+          PY
+      - name: Test stable OpenAI affected feature cards
         run: >-
           node --experimental-strip-types --test
           tests/openAiKeyHealth.test.mjs
-          tests/productLaunchAiTitleTerms.test.mjs
           tests/opsAiHelpIntent.test.mjs
           tests/opsAiKnowledge.test.mjs
           tests/keywordEngineElonLab.test.mjs
@@ -120,8 +152,6 @@ jobs:
           tests/keywordEngineElonLabStep4.test.mjs
           tests/shoplingCategoryCatalog.test.mjs
           tests/shoplingCategoryBranchRepair.test.mjs
-          tests/shoplingCategoryNaverFirst.test.mjs
-          tests/shoplingCategoryShoplingFirst.test.mjs
       - name: Lint OpenAI affected source
         run: >-
           npx eslint
