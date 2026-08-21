@@ -9,46 +9,82 @@ on:
       - "src/lib/opsModuleRegistry.ts"
       - "src/components/dashboard/OpsDashboardWithSaasTestClone.tsx"
       - "public/keyword-lab-collector/**"
-      - "tests/keywordEngineElonLab.test.mjs"
-      - "tests/keywordEngineElonLabRuntime.test.mjs"
-      - "tests/keywordEngineElonLabClientScoringBridge.test.mjs"
-      - "tests/keywordEngineElonLabStep3.test.mjs"
-      - "tests/keywordEngineElonLabStep4.test.mjs"
-      - "tests/keywordEngineElonLabRoundsAndAuto.test.mjs"
-      - "tests/keywordEngineElonLabOneClickResume.test.mjs"
-      - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
-      - "tests/keywordEngineElonLabThresholdExperiment.test.mjs"
-      - "tests/keywordEngineElonLabRecovery.test.mjs"
+      - "tests/keywordEngineElonLab*.test.mjs"
+      - "experiments/keyword-threshold-run-request.json"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
+      - ".github/workflows/keyword-threshold-experiment-run.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  EXPERIMENT_PREVIEW_BASE_URL: https://commerce-os-ops-center-git-experiment-keyword-a6e265-a2bsangsa.vercel.app
+concurrency:
+  group: keyword-engine-elon-lab-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
           cache: npm
+
       - run: npm ci
-      - name: Lint threshold experiment harness
+
+      - name: Lint keyword lab and experiment files
         run: >-
           npx eslint
+          src/app/api/keyword-engine-elon-lab/route.ts
+          src/app/api/keyword-engine-elon-lab/collector-zip/route.ts
           src/app/api/keyword-engine-elon-lab/experiment/route.ts
+          src/app/keyword-engine-elon-lab/page.tsx
+          src/app/keyword-engine-elon-lab/layout.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonAutoRunToStep4.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonAutoRunResumeBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonDiversitySupplement.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep4Filter.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx
+          src/lib/keywordEngineElonLabBrowserImport.ts
+          src/lib/keywordEngineElonLabModule.ts
+          src/lib/keywordEngineElonLabV2.ts
+          src/lib/keywordEngineElonLabV2ApiHub.ts
+          src/lib/keywordEngineElonLabV2SearchAd.ts
+          src/lib/keywordEngineElonLabV2Discovery.ts
+          src/lib/keywordEngineElonLabV2MarketRecall.ts
+          src/lib/keywordEngineElonLabV2DemandEnrichment.ts
+          src/lib/keywordEngineElonLabV2Trend.ts
+          src/lib/keywordEngineElonLabV2Scoring.ts
+          src/lib/keywordEngineElonLabV2Server.ts
+          src/lib/keywordEngineElonLabV2Step3.ts
+          src/lib/keywordEngineElonLabV2Step4.ts
+          src/lib/keywordEngineElonLabV2Merge.ts
+          src/lib/keywordEngineElonLabV2Selection.ts
           src/lib/keywordEngineElonLabExperimentFixtures.ts
           src/lib/keywordEngineElonLabThresholdExperiment.ts
-      - name: Test threshold experiment contract
+
+      - name: Test keyword lab V2 contracts
         run: >-
           node --experimental-strip-types --test
+          tests/keywordEngineElonLab.test.mjs
+          tests/keywordEngineElonLabRuntime.test.mjs
+          tests/keywordEngineElonLabClientScoringBridge.test.mjs
+          tests/keywordEngineElonLabStep3.test.mjs
+          tests/keywordEngineElonLabStep4.test.mjs
+          tests/keywordEngineElonLabRoundsAndAuto.test.mjs
+          tests/keywordEngineElonLabOneClickResume.test.mjs
+          tests/keywordEngineElonLabDiversitySupplement.test.mjs
           tests/keywordEngineElonLabThresholdExperiment.test.mjs
+          tests/keywordEngineElonLabRecovery.test.mjs
+
       - name: Build
         run: npm run build
         env:
@@ -56,113 +92,3 @@ jobs:
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
-
-      - name: Build experiment request URL
-        if: hashFiles('experiments/keyword-threshold-run-request.json') != ''
-        id: experiment_request
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.parse
-
-          with open("experiments/keyword-threshold-run-request.json", "r", encoding="utf-8") as handle:
-              request = json.load(handle)
-
-          def csv(name, fallback):
-              values = request.get(name, fallback)
-              return ",".join(str(value) for value in values)
-
-          mode = str(request.get("mode", "plan"))
-          sample = str(request.get("sample", "nose-tape-step1-v1"))
-          params = {
-              "sample": sample,
-              "step2": csv("step2", [60, 65, 70]),
-              "demand": csv("demand", [55, 60, 65]),
-              "accuracy": csv("accuracy", [85, 90, 95]),
-              "rounds": str(request.get("rounds", 3)),
-              "concurrency": str(request.get("concurrency", 2)),
-          }
-          blocked = request.get("blocked", [])
-          if blocked:
-              params["blocked"] = ",".join(str(value) for value in blocked)
-          query = urllib.parse.urlencode(params)
-          plan_url = f"{os.environ['EXPERIMENT_PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{query}"
-          run_params = dict(params)
-          run_params.update({"mode": "run", "confirm": "RUN_THRESHOLD_EXPERIMENT"})
-          run_url = f"{os.environ['EXPERIMENT_PREVIEW_BASE_URL']}/api/keyword-engine-elon-lab/experiment?{urllib.parse.urlencode(run_params)}"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"mode={mode}\n")
-              output.write(f"request_id={request.get('requestId', 'unnamed')}\n")
-              output.write(f"plan_url={plan_url}\n")
-              output.write(f"run_url={run_url}\n")
-          PY
-
-      - name: Wait for matching Vercel experiment Preview
-        if: hashFiles('experiments/keyword-threshold-run-request.json') != ''
-        shell: bash
-        env:
-          MODE: ${{ steps.experiment_request.outputs.mode }}
-          PLAN_URL: ${{ steps.experiment_request.outputs.plan_url }}
-        run: |
-          ready=0
-          for attempt in $(seq 1 60); do
-            status=$(curl -L -sS -o experiment-plan.json -w "%{http_code}" --max-time 20 "$PLAN_URL" || true)
-            if [ "$status" = "200" ]; then
-              if [ "$MODE" != "run" ]; then
-                ready=1
-                break
-              fi
-              source_ready=$(python - <<'PY'
-          import json
-          try:
-              with open("experiment-plan.json", "r", encoding="utf-8") as handle:
-                  payload = json.load(handle)
-              print("1" if payload.get("plan", {}).get("sourceReady") is True else "0")
-          except Exception:
-              print("0")
-          PY
-              )
-              if [ "$source_ready" = "1" ]; then
-                ready=1
-                break
-              fi
-            fi
-            sleep 5
-          done
-          if [ "$ready" != "1" ]; then
-            echo "Experiment Preview did not become ready."
-            cat experiment-plan.json || true
-            exit 1
-          fi
-          cat experiment-plan.json
-
-      - name: Run threshold matrix on Vercel Preview
-        if: hashFiles('experiments/keyword-threshold-run-request.json') != '' && steps.experiment_request.outputs.mode == 'run'
-        shell: bash
-        env:
-          RUN_URL: ${{ steps.experiment_request.outputs.run_url }}
-        run: |
-          status=$(curl -L -sS -o experiment-result.json -w "%{http_code}" --max-time 560 "$RUN_URL" || true)
-          echo "HTTP $status"
-          if [ "$status" != "200" ]; then
-            cat experiment-result.json || true
-            exit 1
-          fi
-          python -m json.tool experiment-result.json > /dev/null
-
-      - name: Save experiment plan as result
-        if: hashFiles('experiments/keyword-threshold-run-request.json') != '' && steps.experiment_request.outputs.mode != 'run'
-        shell: bash
-        run: cp experiment-plan.json experiment-result.json
-
-      - name: Upload threshold experiment artifact
-        if: hashFiles('experiments/keyword-threshold-run-request.json') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: keyword-threshold-${{ steps.experiment_request.outputs.request_id }}
-          path: experiment-result.json
-          if-no-files-found: error
-          retention-days: 14
