@@ -76,5 +76,5 @@ test("manual-category malls stay outside automatic product-group expansion", () 
 test("product upload expansion continues to send the registry mallKey as Shopling mall_key", () => {
   const source = readFileSync("src/lib/productTitleVariants.ts", "utf8");
   assert.match(source, /getMarketsForProductGroup/);
-  assert.match(source, /mallKey:\s*market\.mallKey/);
+  assert.match(source, /mall_key:\s*market\.mallKey/);
 });
