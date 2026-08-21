@@ -1,22 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { getMarketsForProductGroup } from "../src/lib/productGroupMarketRegistry.ts";
+import { getMarketsForProductGroup, getShoppingMallIdsForProductGroup } from "../src/lib/productGroupMarketRegistry.ts";
 import { buildExpandedGroupMarketApplyItems, buildGroupTitleVariant, buildMallSpecificTitleVariant, extractSafeAttributeModifiers } from "../src/lib/productTitleVariants.ts";
 
 function source(productGroup = "도매1") { return { goodsKey: "G1", productGroup, productGroupType: productGroup.startsWith("소매") ? "소매" : "도매", groupSuffix: "a", baseTitle: "미니 스텐 수납 정리 주방 세트 게임패드 컨트롤러", originalTitle: "미니 스텐 수납 정리 주방 세트", siteSrch: "미니, 스텐, 수납, 정리, 주방, 세트, 깔끔" }; }
 function row(productGroup = "도매1", goodsKey = "G1") { return { ...source(productGroup), goodsKey, mallKey: "SMALL_00004", originalTitle: "미니 스텐 수납 정리 주방 세트", recommendedTitle: "미니 스텐 수납 정리 주방 세트 게임패드 컨트롤러", originalSiteSrch: "미니, 수납", recommendedSiteSrch: "미니, 스텐, 수납, 정리, 주방, 세트, 깔끔, 게임패드, 컨트롤러, 조이스틱", editedTitle: "미니 스텐 수납 정리 주방 세트 게임패드 컨트롤러", editedSiteSrch: "미니, 스텐, 수납, 정리, 주방, 세트, 깔끔, 게임패드, 컨트롤러, 조이스틱", editedMallKey: "SMALL_00004", reviewStatus: "approved", classification: "manual_review", sourceRowIndex: 1, ptnGoodsCd: "PTN", groupSuffix: productGroup === "도매4" ? "d" : productGroup === "소매1" ? "e" : "a", productGroupStatus: "ok", blockReason: "", warningFlags: "", manualCandidateKeywords: "" }; }
 
-test("productGroupMarketRegistry has expected markets", () => {
-  assert.equal(getMarketsForProductGroup("도매1").length, 10);
-  assert.equal(getMarketsForProductGroup("도매2").length, 4);
-  assert.equal(getMarketsForProductGroup("도매3").length, 4);
-  assert.equal(getMarketsForProductGroup("도매4").length, 1);
-  assert.equal(getMarketsForProductGroup("소매1").length, 12);
-  assert.equal(getMarketsForProductGroup("소매2").length, 5);
+const EXPECTED_AUTOMATED_MALL_IDS = {
+  도매1: ["SMALL_00014", "SMALL_00069", "SMALL_00107", "SMALL_00116", "SMALL_00179"],
+  도매2: ["SMALL_00069", "SMALL_00107", "SMALL_00116"],
+  도매3: ["SMALL_00069", "SMALL_00107", "SMALL_00116"],
+  도매4: ["SMALL_00069"],
+  소매1: ["SMALL_00001", "SMALL_00002", "SMALL_00003", "SMALL_00004", "SMALL_00005", "SMALL_00012", "SMALL_00019", "SMALL_00101", "SMALL_00112", "SMALL_00130", "SMALL_00168", "SMALL_00194"],
+  소매2: ["SMALL_00001", "SMALL_00002", "SMALL_00003", "SMALL_00012", "SMALL_00194"],
+};
+
+test("productGroupMarketRegistry matches the automated Shopling group scope", () => {
+  for (const [group, mallIds] of Object.entries(EXPECTED_AUTOMATED_MALL_IDS)) {
+    assert.deepEqual(getShoppingMallIdsForProductGroup(group), mallIds, group);
+    assert.equal(getMarketsForProductGroup(group).length, mallIds.length, group);
+  }
   assert.ok(getMarketsForProductGroup("도매1").some((m) => m.mallKey === "SMALL_00069" && m.marketName === "도매꾹" && m.accountIdLabel === "andy8010"));
   assert.ok(getMarketsForProductGroup("소매1").some((m) => m.mallKey === "SMALL_00004" && m.marketName === "스마트스토어" && m.accountIdLabel === "andy8010@naver.com"));
   assert.ok(getMarketsForProductGroup("소매2").some((m) => m.mallKey === "SMALL_00194" && m.marketName === "토스쇼핑" && m.accountIdLabel === "andy80101@naver.com"));
+  const automatedNames = new Set(Object.keys(EXPECTED_AUTOMATED_MALL_IDS).flatMap((group) => getMarketsForProductGroup(group).map((market) => market.marketName)));
+  for (const manuallyCategorizedMall of ["도매창고", "셀링콕", "도매아토즈", "셀리어스", "도매의신"]) {
+    assert.equal(automatedNames.has(manuallyCategorizedMall), false, manuallyCategorizedMall);
+  }
 });
 
 test("safe modifier extraction uses source only", () => {
@@ -39,8 +50,11 @@ test("group and mall title variants are differentiated and safe", () => {
 });
 
 test("apply plan expansion counts, blocking, and duplicate goods/mall removal", () => {
-  assert.equal(buildExpandedGroupMarketApplyItems([row("도매1")], true).items.length, 10);
+  assert.equal(buildExpandedGroupMarketApplyItems([row("도매1")], true).items.length, 5);
+  assert.equal(buildExpandedGroupMarketApplyItems([row("도매2")], true).items.length, 3);
+  assert.equal(buildExpandedGroupMarketApplyItems([row("도매3")], true).items.length, 3);
   assert.equal(buildExpandedGroupMarketApplyItems([row("소매1")], true).items.length, 12);
+  assert.equal(buildExpandedGroupMarketApplyItems([row("소매2")], true).items.length, 5);
   assert.equal(buildExpandedGroupMarketApplyItems([row("도매4")], true).items.length, 1);
   assert.equal(buildExpandedGroupMarketApplyItems([row("미등록")], true).blockedRows.length, 1);
   assert.equal(buildExpandedGroupMarketApplyItems([row("도매4", "G1"), row("도매4", "G1")], true).items.length, 1);
