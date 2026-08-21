@@ -141,6 +141,23 @@ export default function KeywordElonDemandSummary() {
           <div className="rounded-2xl border border-sky-100 bg-sky-50/50 p-4"><div className="mb-3 text-sm font-black text-sky-950">API HUB Evidence 시장어</div><TagChips values={evidenceTerms} /></div>
         </div>
 
+        {trendSignals.length ? (
+          <div className="mt-5 rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-black text-amber-950">Search Trend · 최근 검색 흐름</div>
+              <div className="text-xs font-bold text-amber-800">상위 {Math.min(10, trendSignals.length)}개</div>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {trendSignals.slice(0, 10).map((signal) => (
+                <div key={signal.keyword} className="rounded-xl bg-white px-3 py-2 text-xs text-slate-700 ring-1 ring-amber-100">
+                  <div className="font-black">{compactKeywordElonKey(signal.keyword)}</div>
+                  <div className="mt-1 tabular-nums text-slate-500">추세 {signal.score.toFixed(0)} · 모멘텀 {signal.momentum.toFixed(1)} · 최근 {signal.recentAverage.toFixed(1)} / 이전 {signal.priorAverage.toFixed(1)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
