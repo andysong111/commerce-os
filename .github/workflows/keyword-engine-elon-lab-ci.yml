@@ -18,6 +18,7 @@ on:
       - "tests/keywordEngineElonLabOneClickResume.test.mjs"
       - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
+      - "tests/keywordEngineElonLabSeoOutput.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -50,11 +51,13 @@ jobs:
           src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonShoplingSeoOutput.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep4Filter.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
+          src/lib/keywordEngineElonLabSeoOutput.ts
           src/lib/keywordEngineElonLabV2.ts
           src/lib/keywordEngineElonLabV2ApiHub.ts
           src/lib/keywordEngineElonLabV2SearchAd.ts
@@ -80,6 +83,7 @@ jobs:
           tests/keywordEngineElonLabOneClickResume.test.mjs
           tests/keywordEngineElonLabDiversitySupplement.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
+          tests/keywordEngineElonLabSeoOutput.test.mjs
       - name: Build
         run: npm run build
         env:
