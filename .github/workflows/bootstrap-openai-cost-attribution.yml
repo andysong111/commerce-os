@@ -1,0 +1,172 @@
+name: Bootstrap OpenAI cost attribution
+
+on:
+  push:
+    branches:
+      - feat/openai-cost-attribution-20260821
+    paths:
+      - .github/workflows/bootstrap-openai-cost-attribution.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/openai-cost-attribution-20260821
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Split OpenAI API keys by cost lane
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          lanes = {
+              "OPENAI_API_KEY_KEYWORD_ENGINE": [
+                  "src/lib/keywordEngineElonLabIdentity.ts",
+                  "src/lib/keywordEngineElonLabV2Scoring.ts",
+                  "src/lib/keywordEngineElonLabV2Step4.ts",
+                  "src/lib/keywordEngineElonLabV2Server.ts",
+                  "src/lib/keywordEngineElonLabV2MarketRecall.ts",
+                  "src/lib/keywordEngineElonLabV2ApiHub.ts",
+                  "src/lib/keywordEngineElonLabV2Discovery.ts",
+                  "src/app/api/keyword-engine-elon-lab/route.ts",
+              ],
+              "OPENAI_API_KEY_SHOPLING_CATEGORY": [
+                  "src/lib/shoplingCategoryCatalog.ts",
+                  "src/lib/shoplingCategoryNaverFirst.ts",
+                  "src/lib/shoplingCategoryBranchRepair.ts",
+                  "src/lib/shoplingCategoryAccuracyV2.ts",
+                  "src/lib/shoplingCategoryShoplingFirst.ts",
+                  "src/lib/shoplingCategoryRecommendationRunner.ts",
+              ],
+              "OPENAI_API_KEY_PRODUCT_CATEGORY": [
+                  "src/app/api/product-launch-tracker/ai-category/route.ts",
+              ],
+              "OPENAI_API_KEY_PRODUCT_TITLE": [
+                  "src/lib/productLaunchAiTitleTerms.ts",
+                  "src/app/api/product-launch-ai-title-terms/route.ts",
+              ],
+          }
+
+          changed = []
+          for env_name, paths in lanes.items():
+              for raw_path in paths:
+                  path = Path(raw_path)
+                  if not path.exists():
+                      raise SystemExit(f"Expected OpenAI call site is missing: {raw_path}")
+                  text = path.read_text(encoding="utf-8")
+                  if env_name in text:
+                      continue
+                  occurrences = text.count("process.env.OPENAI_API_KEY")
+                  if occurrences == 0:
+                      raise SystemExit(f"Expected OPENAI_API_KEY reference is missing: {raw_path}")
+                  text = text.replace(
+                      "process.env.OPENAI_API_KEY",
+                      f"(process.env.{env_name} ?? process.env.OPENAI_API_KEY)",
+                  )
+                  path.write_text(text, encoding="utf-8")
+                  changed.append((raw_path, env_name, occurrences))
+
+          ops_paths = [
+              "src/lib/opsAiHelp.ts",
+              "src/app/api/ops-ai-help/route.ts",
+          ]
+          for raw_path in ops_paths:
+              path = Path(raw_path)
+              if not path.exists():
+                  raise SystemExit(f"Expected Ops AI file is missing: {raw_path}")
+              text = path.read_text(encoding="utf-8")
+              before = text
+              text = text.replace(
+                  "process.env.OPS_AI_HELP_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY",
+                  "process.env.OPENAI_API_KEY_OPS_AI_HELP ?? process.env.OPS_AI_HELP_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY",
+              )
+              text = text.replace(
+                  "process.env.OPS_AI_HELP_OPENAI_API_KEY || process.env.OPENAI_API_KEY",
+                  "process.env.OPENAI_API_KEY_OPS_AI_HELP || process.env.OPS_AI_HELP_OPENAI_API_KEY || process.env.OPENAI_API_KEY",
+              )
+              if "OPENAI_API_KEY_OPS_AI_HELP" not in text:
+                  text = text.replace(
+                      "process.env.OPENAI_API_KEY",
+                      "(process.env.OPENAI_API_KEY_OPS_AI_HELP ?? process.env.OPENAI_API_KEY)",
+                  )
+              if text == before:
+                  raise SystemExit(f"Could not add Ops AI dedicated key: {raw_path}")
+              path.write_text(text, encoding="utf-8")
+              changed.append((raw_path, "OPENAI_API_KEY_OPS_AI_HELP", 1))
+
+          docs = Path("docs/openai-cost-attribution.md")
+          docs.write_text('''# OpenAI cost attribution\n\nCommerce OS server-side OpenAI calls are split into cost lanes so OpenAI usage can be traced by project/API key instead of being mixed under one `OPENAI_API_KEY`.\n\n## Cost lanes\n\n| Cost lane | Vercel environment variable | Main use |\n| --- | --- | --- |\n| Keyword Engine | `OPENAI_API_KEY_KEYWORD_ENGINE` | Keyword identity, discovery, scoring, market recall, STEP 4 AI checks |\n| Shopling Category AI | `OPENAI_API_KEY_SHOPLING_CATEGORY` | Shopling category catalog/recommendation/accuracy/repair |\n| Product Category AI | `OPENAI_API_KEY_PRODUCT_CATEGORY` | Product launch tracker AI category selection |\n| Product Title AI | `OPENAI_API_KEY_PRODUCT_TITLE` | AI title-term generation |\n| Ops AI Help | `OPENAI_API_KEY_OPS_AI_HELP` | OPS Center read-only AI help desk |\n\n`OPENAI_API_KEY` remains a temporary fallback so production does not break during migration. `OPS_AI_HELP_OPENAI_API_KEY` also remains as a legacy fallback for the Ops AI Help lane.\n\n## Recommended OpenAI setup\n\nCreate one OpenAI Platform project (or at minimum one distinct project API key) per cost lane, then put only that lane's key into the matching Vercel environment variable. This makes usage visible by project/API key in the OpenAI usage dashboard.\n\nRecommended project names:\n\n- `commerce-os-keyword-engine`\n- `commerce-os-shopling-category`\n- `commerce-os-product-category`\n- `commerce-os-product-title`\n- `commerce-os-ops-ai-help`\n\nSet a monthly budget/alert per OpenAI project. Keep the generic `OPENAI_API_KEY` only until every dedicated key is confirmed in production; then remove the generic fallback value from Vercel to make accidental unclassified usage fail loudly.\n\n## Vercel migration order\n\n1. Create the five OpenAI projects/keys.\n2. Add the five dedicated environment variables to the Commerce OS Vercel project for Production (and Preview if needed).\n3. Redeploy.\n4. Run one controlled request in each lane.\n5. Confirm usage appears under the intended OpenAI project/API key.\n6. After confirmation, remove the generic `OPENAI_API_KEY` from the Commerce OS Vercel project.\n\nNever commit actual API key values to GitHub.\n''', encoding="utf-8")
+
+          guard = Path("scripts/check-openai-cost-attribution.mjs")
+          guard.write_text('''import { readFileSync } from "node:fs";\nimport { readdir } from "node:fs/promises";\nimport { join } from "node:path";\n\nconst expected = [\n  [/keywordEngineElonLab|api\\/keyword-engine-elon-lab\\//, "OPENAI_API_KEY_KEYWORD_ENGINE"],\n  [/shoplingCategory/, "OPENAI_API_KEY_SHOPLING_CATEGORY"],\n  [/api\\/product-launch-tracker\\/ai-category\\//, "OPENAI_API_KEY_PRODUCT_CATEGORY"],\n  [/productLaunchAiTitleTerms|api\\/product-launch-ai-title-terms\\//, "OPENAI_API_KEY_PRODUCT_TITLE"],\n  [/opsAiHelp|api\\/ops-ai-help\\//, "OPENAI_API_KEY_OPS_AI_HELP"],\n];\n\nasync function walk(dir) {\n  const entries = await readdir(dir, { withFileTypes: true });\n  const files = [];\n  for (const entry of entries) {\n    const full = join(dir, entry.name);\n    if (entry.isDirectory()) files.push(...await walk(full));\n    else if (/\\.(?:ts|tsx|js|mjs)$/.test(entry.name)) files.push(full);\n  }\n  return files;\n}\n\nconst failures = [];\nfor (const file of await walk("src")) {\n  const source = readFileSync(file, "utf8");\n  if (!source.includes("api.openai.com")) continue;\n  const normalized = file.replaceAll("\\\\", "/");\n  const rule = expected.find(([pattern]) => pattern.test(normalized));\n  if (!rule) {\n    failures.push(`${normalized}: direct OpenAI call has no registered cost lane`);\n    continue;\n  }\n  const envName = rule[1];\n  if (!source.includes(envName)) {\n    failures.push(`${normalized}: expected ${envName}`);\n  }\n  if (!source.includes("process.env.OPENAI_API_KEY")) {\n    failures.push(`${normalized}: migration fallback OPENAI_API_KEY is unexpectedly absent`);\n  }\n}\n\nif (failures.length) {\n  console.error("OpenAI cost-attribution guard failed:\\n" + failures.map((x) => `- ${x}`).join("\\n"));\n  process.exit(1);\n}\nconsole.log("OpenAI cost-attribution guard passed.");\n''', encoding="utf-8")
+
+          permanent_ci = Path(".github/workflows/openai-cost-attribution-ci.yml")
+          permanent_ci.write_text('''name: OpenAI Cost Attribution CI\n\non:\n  pull_request:\n    paths:\n      - "src/**"\n      - "scripts/check-openai-cost-attribution.mjs"\n      - ".github/workflows/openai-cost-attribution-ci.yml"\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 22\n      - run: node scripts/check-openai-cost-attribution.mjs\n''', encoding="utf-8")
+
+          bootstrap = Path(".github/workflows/bootstrap-openai-cost-attribution.yml")
+          bootstrap.unlink()
+
+          print("Updated OpenAI cost lanes:")
+          for item in changed:
+              print(" -", item)
+          PY
+
+      - name: Verify cost attribution guard
+        run: node scripts/check-openai-cost-attribution.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+
+      - name: Commit migration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            src/lib/keywordEngineElonLabIdentity.ts \
+            src/lib/keywordEngineElonLabV2Scoring.ts \
+            src/lib/keywordEngineElonLabV2Step4.ts \
+            src/lib/keywordEngineElonLabV2Server.ts \
+            src/lib/keywordEngineElonLabV2MarketRecall.ts \
+            src/lib/keywordEngineElonLabV2ApiHub.ts \
+            src/lib/keywordEngineElonLabV2Discovery.ts \
+            src/app/api/keyword-engine-elon-lab/route.ts \
+            src/lib/shoplingCategoryCatalog.ts \
+            src/lib/shoplingCategoryNaverFirst.ts \
+            src/lib/shoplingCategoryBranchRepair.ts \
+            src/lib/shoplingCategoryAccuracyV2.ts \
+            src/lib/shoplingCategoryShoplingFirst.ts \
+            src/lib/shoplingCategoryRecommendationRunner.ts \
+            src/app/api/product-launch-tracker/ai-category/route.ts \
+            src/lib/productLaunchAiTitleTerms.ts \
+            src/app/api/product-launch-ai-title-terms/route.ts \
+            src/lib/opsAiHelp.ts \
+            src/app/api/ops-ai-help/route.ts \
+            docs/openai-cost-attribution.md \
+            scripts/check-openai-cost-attribution.mjs \
+            .github/workflows/openai-cost-attribution-ci.yml \
+            .github/workflows/bootstrap-openai-cost-attribution.yml
+          git diff --cached --check
+          git commit -m "Separate OpenAI API keys by cost lane"
+          git push origin HEAD:feat/openai-cost-attribution-20260821
