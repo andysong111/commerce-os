@@ -1,0 +1,258 @@
+name: Apply Keyword Score Cache Quota Hotfix
+
+on:
+  push:
+    branches:
+      - fix/keyword-score-cache-quota-20260821
+    paths:
+      - .github/workflows/keyword-score-cache-quota-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/keyword-score-cache-quota-20260821
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Apply quota-safe score cache patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          bridge_path = Path("src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx")
+          bridge = bridge_path.read_text(encoding="utf-8")
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if text.count(old) != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {text.count(old)}")
+              return text.replace(old, new, 1)
+
+          bridge = replace_once(
+              bridge,
+              'const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v3.marketRecall";\n',
+              'const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v3.marketRecall";\nconst SCORE_CACHE_FAMILY_PREFIX = "keywordElon.scoreBridge.";\n',
+              "cache family prefix",
+          )
+
+          bridge = replace_once(
+              bridge,
+              '''function saveCache(key: string, cache: ScoreCache) {
+            cache.updatedAt = new Date().toISOString();
+            window.localStorage.setItem(key, JSON.stringify(cache));
+          }
+          ''',
+              '''type CacheSaveResult = {
+            persisted: boolean;
+            clearedCacheCount: number;
+          };
+
+          function scoreCacheStorageKeys() {
+            const keys: string[] = [];
+            try {
+              for (let index = 0; index < window.localStorage.length; index += 1) {
+                const key = window.localStorage.key(index);
+                if (key?.startsWith(SCORE_CACHE_FAMILY_PREFIX)) keys.push(key);
+              }
+            } catch {
+              return [];
+            }
+            return keys;
+          }
+
+          function pruneScoreCacheStorage(keepKey = "") {
+            let removed = 0;
+            for (const storedKey of scoreCacheStorageKeys()) {
+              if (storedKey === keepKey) continue;
+              try {
+                window.localStorage.removeItem(storedKey);
+                removed += 1;
+              } catch {
+                // Storage access can be denied in restricted browser modes. The live run still continues in memory.
+              }
+            }
+            return removed;
+          }
+
+          function isQuotaExceededError(error: unknown) {
+            if (error instanceof DOMException) {
+              return error.name === "QuotaExceededError"
+                || error.name === "NS_ERROR_DOM_QUOTA_REACHED"
+                || error.code === 22
+                || error.code === 1014;
+            }
+            return error instanceof Error && /quota|storage.*full|exceeded/i.test(error.message);
+          }
+
+          function saveCache(key: string, cache: ScoreCache): CacheSaveResult {
+            cache.updatedAt = new Date().toISOString();
+            const serialized = JSON.stringify(cache);
+            try {
+              window.localStorage.setItem(key, serialized);
+              return { persisted: true, clearedCacheCount: 0 };
+            } catch (error) {
+              if (!isQuotaExceededError(error)) throw error;
+            }
+
+            const clearedCacheCount = pruneScoreCacheStorage();
+            try {
+              window.localStorage.setItem(key, serialized);
+              return { persisted: true, clearedCacheCount };
+            } catch (error) {
+              if (!isQuotaExceededError(error)) throw error;
+              try {
+                window.localStorage.removeItem(key);
+              } catch {
+                // Keep the in-memory cache even when persistent storage is unavailable.
+              }
+              return { persisted: false, clearedCacheCount };
+            }
+          }
+          ''',
+              "quota-safe saveCache",
+          )
+
+          bridge = replace_once(
+              bridge,
+              '''      const { fingerprint, key } = cacheKey(body, discovery);
+                const cache = loadCache(key, fingerprint);
+                const chunks: string[][] = [];
+          ''',
+              '''      const { fingerprint, key } = cacheKey(body, discovery);
+                const staleCacheCount = pruneScoreCacheStorage(key);
+                const cache = loadCache(key, fingerprint);
+                let cachePersistenceAvailable = true;
+                let cacheStorageWarning = staleCacheCount > 0
+                  ? `오래된 점수 캐시 ${staleCacheCount}개를 자동 정리했습니다.`
+                  : "";
+                const chunks: string[][] = [];
+          ''',
+              "cache initialization",
+          )
+
+          bridge = replace_once(
+              bridge,
+              '''          saveCache(key, cache);
+                    scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
+          ''',
+              '''          if (cachePersistenceAvailable) {
+                    const saveResult = saveCache(key, cache);
+                    cachePersistenceAvailable = saveResult.persisted;
+                    if (saveResult.clearedCacheCount > 0) {
+                      cacheStorageWarning = `브라우저 저장공간 확보를 위해 이전 점수 캐시 ${saveResult.clearedCacheCount}개를 자동 정리했습니다.`;
+                    }
+                    if (!saveResult.persisted) {
+                      cacheStorageWarning = "브라우저 저장공간이 가득 차 캐시 저장 없이 현재 실행을 메모리에서 계속했습니다.";
+                    }
+                  }
+                  scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
+          ''',
+              "non-fatal cache save",
+          )
+
+          bridge = replace_once(
+              bridge,
+              '''            message: `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`,
+          ''',
+              '''            message: cachePersistenceAvailable
+                      ? `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`
+                      : `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 처리 · 브라우저 캐시 없이 계속`,
+          ''',
+              "quota progress message",
+          )
+
+          bridge = replace_once(
+              bridge,
+              '''      const finalWarnings = [...warnings, enrichmentWarning].filter(Boolean).slice(0, 12);
+                setProgress({
+          ''',
+              '''      const finalWarnings = [...warnings, enrichmentWarning, cacheStorageWarning].filter(Boolean).slice(0, 12);
+                try {
+                  window.localStorage.removeItem(key);
+                } catch {
+                  // A completed score action no longer needs its resume cache.
+                }
+                setProgress({
+          ''',
+              "successful cache cleanup",
+          )
+
+          bridge_path.write_text(bridge, encoding="utf-8")
+
+          test_path = Path("tests/keywordEngineElonLabClientScoringBridge.test.mjs")
+          test_text = test_path.read_text(encoding="utf-8")
+          test_text = replace_once(
+              test_text,
+              '''test("Keyword Lab persists completed scoring chunks with a new market-recall cache namespace", () => {
+            assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\\.scoreBridge\\.v3\\.marketRecall"/);
+            assert.match(bridge, /marketRecallVersion: 4/);
+            assert.match(bridge, /window\\.localStorage\\.setItem\\(key/);
+            assert.match(bridge, /sessionDiscoveryForResume/);
+            assert.match(bridge, /stage2Status !== "error"/);
+            assert.match(bridge, /이전 후보 .*SearchAd 재호출 없이 점수화를 재개/);
+            assert.match(bridge, /STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개/);
+          });
+          ''',
+              '''test("Keyword Lab persists completed scoring chunks and survives browser quota exhaustion", () => {
+            assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\\.scoreBridge\\.v3\\.marketRecall"/);
+            assert.match(bridge, /SCORE_CACHE_FAMILY_PREFIX = "keywordElon\\.scoreBridge\\."/);
+            assert.match(bridge, /marketRecallVersion: 4/);
+            assert.match(bridge, /window\\.localStorage\\.setItem\\(key/);
+            assert.match(bridge, /isQuotaExceededError/);
+            assert.match(bridge, /pruneScoreCacheStorage/);
+            assert.match(bridge, /cachePersistenceAvailable/);
+            assert.match(bridge, /캐시 저장 없이 현재 실행을 메모리에서 계속/);
+            assert.match(bridge, /window\\.localStorage\\.removeItem\\(key\\)/);
+            assert.match(bridge, /sessionDiscoveryForResume/);
+            assert.match(bridge, /stage2Status !== "error"/);
+            assert.match(bridge, /이전 후보 .*SearchAd 재호출 없이 점수화를 재개/);
+            assert.match(bridge, /STEP 2를 다시 누르면 완료된 묶음은 건너뛰고 실패 지점부터 재개/);
+          });
+          ''',
+              "quota regression test",
+          )
+          test_path.write_text(test_text, encoding="utf-8")
+
+          Path(".github/workflows/keyword-score-cache-quota-hotfix.yml").unlink()
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint changed keyword files
+        run: npx eslint src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
+
+      - name: Test quota and Keyword Lab contracts
+        run: >-
+          node --experimental-strip-types --test
+          tests/keywordEngineElonLabClientScoringBridge.test.mjs
+          tests/keywordEngineElonLab.test.mjs
+          tests/keywordEngineElonLabRuntime.test.mjs
+          tests/keywordEngineElonLabRoundsAndAuto.test.mjs
+          tests/keywordEngineElonLabStep4.test.mjs
+
+      - name: Build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+        run: npm run build
+
+      - name: Commit hotfix
+        shell: bash
+        run: |
+          git config user.name "commerce-os-automation"
+          git config user.email "commerce-os-automation@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: continue keyword scoring when browser cache quota is full"
+          git push origin HEAD:fix/keyword-score-cache-quota-20260821
