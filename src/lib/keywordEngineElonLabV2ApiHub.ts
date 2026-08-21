@@ -242,7 +242,7 @@ function evidenceSchema() {
 }
 
 async function extractEvidenceTerms(identity: KeywordElonIdentity, bridgeSeeds: string[], documents: MarketDocument[]) {
-  const apiKey = normalizeKeywordElonText((process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = normalizeKeywordElonText(process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   if (!apiKey || documents.length === 0) return { terms: [] as KeywordElonApiHubMarketTerm[], warning: apiKey ? "" : "API_HUB_EVIDENCE_AI_NOT_CONFIGURED" };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EVIDENCE_TIMEOUT_MS);

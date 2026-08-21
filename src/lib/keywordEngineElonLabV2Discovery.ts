@@ -62,7 +62,7 @@ async function discoverAiCandidates(
   identity: KeywordElonIdentity,
   market: KeywordElonMarketRecall,
 ) {
-  const apiKey = normalizeKeywordElonText((process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = normalizeKeywordElonText(process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   if (!apiKey) return { keywords: [] as string[], model: openAiModel(), warning: "AI_DISCOVERY_NOT_CONFIGURED" };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), AI_DISCOVERY_TIMEOUT_MS);

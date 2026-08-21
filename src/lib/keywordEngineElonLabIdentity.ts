@@ -339,7 +339,7 @@ export async function analyzeKeywordEngineIdentityBatch(
     .slice(0, MAX_ITEMS);
   if (!normalizedInputs.length) throw new Error("STEP 4에서 분석할 정제 Seed가 없습니다.");
 
-  const apiKey = text(options.apiKey ?? (process.env.KEYWORD_ENGINE_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = text(options.apiKey ?? process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY가 설정되지 않아 STEP 4 상품 정체성 분석을 실행할 수 없습니다.");
   }

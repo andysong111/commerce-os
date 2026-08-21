@@ -154,7 +154,7 @@ export async function generateNaverFirstShoplingCategoryRecommendations(
     );
   }
 
-  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = text(options.apiKey ?? process.env.SHOPLING_CATEGORY_OPENAI_API_KEY);
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY가 설정되지 않아 네이버 쇼핑 카테고리를 검색할 수 없습니다.");
   }

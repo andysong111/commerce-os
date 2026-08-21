@@ -180,7 +180,7 @@ async function validateLeafCandidates(
   priorById: ReadonlyMap<string, string>,
   options: AccuracyOptions,
 ) {
-  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = text(options.apiKey ?? process.env.SHOPLING_CATEGORY_OPENAI_API_KEY);
   if (!apiKey) return recommendations;
   const model = text(
     options.model ??
@@ -376,7 +376,7 @@ async function naverCandidateRerank(
   recommendation: ProductCategoryRecommendation,
   options: AccuracyOptions,
 ): Promise<CandidateRerank | null> {
-  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = text(options.apiKey ?? process.env.SHOPLING_CATEGORY_OPENAI_API_KEY);
   if (!apiKey) return null;
   const candidatePaths = candidatePool(recommendation, "", 3);
   if (candidatePaths.length < 2) return null;
@@ -516,7 +516,7 @@ async function imageCandidateRerank(
   recommendation: ProductCategoryRecommendation,
   options: AccuracyOptions,
 ): Promise<ImageRerank | null> {
-  const apiKey = text(options.apiKey ?? (process.env.SHOPLING_CATEGORY_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY));
+  const apiKey = text(options.apiKey ?? process.env.SHOPLING_CATEGORY_OPENAI_API_KEY);
   const imageUrl = validImageUrl(input.imageUrl) ? text(input.imageUrl) : "";
   if (!apiKey || !imageUrl) return null;
   const candidatePaths = candidatePool(recommendation, "", 3);
