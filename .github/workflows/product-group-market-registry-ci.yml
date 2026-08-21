@@ -1,0 +1,36 @@
+name: Product Group Market Registry CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/productGroupMarketRegistry.ts"
+      - "src/lib/productTitleVariants.ts"
+      - "tests/productGroupMarketRegistry.test.mjs"
+      - ".github/workflows/product-group-market-registry-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint market registry
+        run: npx eslint src/lib/productGroupMarketRegistry.ts src/lib/productTitleVariants.ts
+      - name: Test product-group Shopling mall IDs
+        run: node --experimental-strip-types --test tests/productGroupMarketRegistry.test.mjs
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
