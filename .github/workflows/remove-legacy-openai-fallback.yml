@@ -1,0 +1,126 @@
+name: Remove Legacy OpenAI Fallback
+
+on:
+  push:
+    branches:
+      - chore/remove-legacy-openai-fallback-20260822
+    paths:
+      - .github/workflows/remove-legacy-openai-fallback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/remove-legacy-openai-fallback-20260822
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Remove generic OpenAI fallback from paid callers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          dedicated = [
+              "KEYWORD_ENGINE_OPENAI_API_KEY",
+              "SHOPLING_CATEGORY_OPENAI_API_KEY",
+              "PRODUCT_TITLE_OPENAI_API_KEY",
+              "OPS_AI_HELP_OPENAI_API_KEY",
+          ]
+
+          changed = []
+          for path in Path("src").rglob("*"):
+              if not path.is_file() or path.suffix not in {".ts", ".tsx", ".js", ".mjs"}:
+                  continue
+              source = path.read_text(encoding="utf-8")
+              updated = source
+              for name in dedicated:
+                  updated = re.sub(
+                      rf"\(\s*process\.env\.{name}\s*\?\?\s*process\.env\.OPENAI_API_KEY\s*\)",
+                      f"process.env.{name}",
+                      updated,
+                  )
+                  updated = re.sub(
+                      rf"process\.env\.{name}\s*\?\?\s*process\.env\.OPENAI_API_KEY",
+                      f"process.env.{name}",
+                      updated,
+                  )
+              updated = updated.replace(
+                  "OPS_AI_HELP_OPENAI_API_KEY 또는 OPENAI_API_KEY 설정이 필요합니다.",
+                  "OPS_AI_HELP_OPENAI_API_KEY 설정이 필요합니다.",
+              )
+              if updated != source:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append(str(path))
+
+          guard = Path("scripts/check-openai-cost-attribution.mjs")
+          source = guard.read_text(encoding="utf-8")
+          needle = '  if (!source.includes("api.openai.com")) continue;\n'
+          addition = (
+              needle
+              + '  if (source.includes("process.env.OPENAI_API_KEY")) {\n'
+              + '    failures.push(`${normalized}: legacy generic OPENAI_API_KEY fallback is forbidden in direct OpenAI callers`);\n'
+              + '    continue;\n'
+              + '  }\n'
+          )
+          if "legacy generic OPENAI_API_KEY fallback is forbidden" not in source:
+              if needle not in source:
+                  raise SystemExit("Could not locate OpenAI attribution guard insertion point")
+              guard.write_text(source.replace(needle, addition), encoding="utf-8")
+              changed.append(str(guard))
+
+          docs = Path("docs/openai-cost-attribution.md")
+          source = docs.read_text(encoding="utf-8")
+          source = source.replace(
+              "OPS Center still supports `OPENAI_API_KEY` as a temporary code fallback during this migration. Once the four dedicated Production variables have been verified and the generic Vercel `OPENAI_API_KEY` value is removed, the fallback is inert. Future Production builds still require all four dedicated variables.",
+              "OPS Center direct OpenAI callers no longer use the generic `OPENAI_API_KEY` fallback. The generic Vercel `OPENAI_API_KEY` value should be removed as cleanup; even before deletion it is no longer read by paid OPS OpenAI call paths. Future Production builds require all four dedicated variables.",
+          )
+          docs.write_text(source, encoding="utf-8")
+          changed.append(str(docs))
+
+          paid_leftovers = []
+          for path in Path("src").rglob("*"):
+              if not path.is_file() or path.suffix not in {".ts", ".tsx", ".js", ".mjs"}:
+                  continue
+              source = path.read_text(encoding="utf-8")
+              if "api.openai.com" in source and "process.env.OPENAI_API_KEY" in source:
+                  paid_leftovers.append(str(path))
+          if paid_leftovers:
+              raise SystemExit("Paid callers still use generic key: " + ", ".join(paid_leftovers))
+
+          print("Changed files:")
+          for item in sorted(set(changed)):
+              print("-", item)
+          PY
+      - name: Verify attribution guard
+        run: node scripts/check-openai-cost-attribution.mjs
+      - name: Test
+        run: npm test
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+      - name: Commit migration
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src scripts/check-openai-cost-attribution.mjs docs/openai-cost-attribution.md
+          git commit -m "Remove legacy OpenAI API key fallback"
+          git push origin HEAD:chore/remove-legacy-openai-fallback-20260822
