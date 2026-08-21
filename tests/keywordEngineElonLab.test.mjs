@@ -28,7 +28,7 @@ test("session survives refresh with browser storage", () => {
 
 test("minimum ten is a target, not a maximum", () => {
   assert.match(domain, /KEYWORD_ELON_V2_MINIMUM_KEYWORDS = 10/);
-  assert.match(domain, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 70/);
+  assert.match(domain, /KEYWORD_ELON_V2_DEFAULT_CUTOFF = 60/);
   assert.match(page, /최소 목표/);
   assert.match(page, /상한 없음/);
 });
