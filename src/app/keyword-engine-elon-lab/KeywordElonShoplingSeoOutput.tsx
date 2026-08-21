@@ -114,13 +114,17 @@ export default function KeywordElonShoplingSeoOutput() {
     }
     return [...map.entries()];
   }, [output]);
+  const strategyByGroup = useMemo(
+    () => new Map((output?.groupStrategies ?? []).map((strategy) => [strategy.productGroup, strategy] as const)),
+    [output],
+  );
 
   if (!output) return null;
   const readyOutput = output;
 
   async function copyKeywords() {
-    await navigator.clipboard.writeText(readyOutput.commonSearchKeywords.join(","));
-    setMessage("공통 검색어를 클립보드에 복사했습니다.");
+    await navigator.clipboard.writeText(readyOutput.commonSearchLine);
+    setMessage("띄어쓰기 없는 공통 검색어 10개를 콤마 구분 형식으로 복사했습니다.");
   }
 
   async function copyTitles() {
@@ -135,7 +139,10 @@ export default function KeywordElonShoplingSeoOutput() {
     await navigator.clipboard.writeText(JSON.stringify({
       sourceUrl: session?.source.url ?? "",
       offerId: session?.source.offerId ?? "",
+      commonSearchLine: readyOutput.commonSearchLine,
       commonSearchKeywords: readyOutput.commonSearchKeywords,
+      searchKeywordDetails: readyOutput.searchKeywordDetails,
+      groupStrategies: readyOutput.groupStrategies,
       mallTitles: readyOutput.mallTitles,
       warnings: readyOutput.warnings,
     }, null, 2));
@@ -150,7 +157,7 @@ export default function KeywordElonShoplingSeoOutput() {
             <div className="text-xs font-black uppercase tracking-[0.16em] text-cyan-700">SEO OUTPUT · PREVIEW ONLY</div>
             <h2 className="mt-1 text-2xl font-black">쇼핑몰별 상품명 + 공통 검색어 10개</h2>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              STEP 4 최종 통과 키워드를 최우선으로 사용해 29개 쇼핑몰별 상품명을 구성했습니다. 현재는 이 페이지에 결과만 보여주며 Shopling·상품출시진행관리·마켓에는 아무것도 쓰지 않습니다.
+              STEP 4 최종 통과 재료만 사용합니다. 검색어는 띄어쓰기 없이 콤마로 구분하고, 쇼핑몰별 상품명은 도매·소매 시장 성격에 맞춰 최대 50bytes로 구성합니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -158,18 +165,20 @@ export default function KeywordElonShoplingSeoOutput() {
             <span className={`rounded-full px-3 py-1 ${readyOutput.status === "ready" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-900"}`}>
               검색어 {readyOutput.commonSearchKeywords.length}/10
             </span>
-            <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">STEP 4 재료 {readyOutput.allowedMaterialCount}개</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">외부 적용 없음</span>
+            <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-800">STEP 4 원본 {readyOutput.marketDerivedKeywordCount}개</span>
+            <span className="rounded-full bg-fuchsia-100 px-3 py-1 text-fuchsia-800">2개 재료 조합 {readyOutput.generatedFallbackKeywordCount}개</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">외부 재료 {readyOutput.externalMaterialCount}개</span>
+            <span className="rounded-full bg-cyan-100 px-3 py-1 text-cyan-900">제목 최대 {readyOutput.titleByteLimit}bytes</span>
           </div>
         </div>
 
         <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-950">
-          공통 상품명·모델명은 변경하지 않습니다. SEO 상품명에는 ‘도매·대량·납품’을 사용하지 않으며, 검색어 10개는 모든 상품그룹에 공통으로 쓰는 결과입니다.
+          공통 상품명·모델명은 변경하지 않습니다. SEO OUTPUT은 ‘도매·대량·납품’과 원산지·제조·포장성 노이즈를 사용하지 않으며 Shopling·상품출시진행관리·마켓에는 아무것도 쓰지 않습니다.
         </div>
 
         {readyOutput.warnings.length ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            <div className="font-black">보완 안내</div>
+            <div className="font-black">검증 안내</div>
             {readyOutput.warnings.map((warning) => <div key={warning} className="mt-1">• {warning}</div>)}
           </div>
         ) : null}
@@ -177,19 +186,28 @@ export default function KeywordElonShoplingSeoOutput() {
         <div className="mt-5 rounded-2xl border border-cyan-200 bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-black">공통 검색어</h3>
+              <h3 className="text-lg font-black">공통 검색어 · 정확히 10개</h3>
               <p className="mt-1 text-xs text-slate-500">
-                STEP 4 시장키워드 {readyOutput.marketDerivedKeywordCount}개 우선 · 보완 조합 {readyOutput.generatedFallbackKeywordCount}개 · 띄어쓰기 없이 저장
+                STEP 4 원본을 우선 사용하고 부족분만 최종 재료 2개 조합으로 채웁니다. 외부 단어·Identity 설명·스펙 문장은 추가하지 않습니다.
               </p>
             </div>
             <button type="button" onClick={() => void copyKeywords()} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-black text-white">
-              검색어 복사
+              콤마 형식 복사
             </button>
           </div>
+          <textarea
+            readOnly
+            value={readyOutput.commonSearchLine}
+            rows={2}
+            className="mt-4 w-full resize-none rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 font-mono text-sm font-bold text-cyan-950"
+          />
           <div className="mt-4 flex flex-wrap gap-2">
-            {readyOutput.commonSearchKeywords.map((keyword, index) => (
-              <span key={keyword} className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-black text-cyan-950">
-                <span className="mr-1 text-xs text-cyan-600">#{index + 1}</span>{keyword}
+            {readyOutput.searchKeywordDetails.map((detail, index) => (
+              <span key={detail.keyword} className="rounded-full border border-cyan-200 bg-white px-3 py-2 text-sm font-black text-cyan-950">
+                <span className="mr-1 text-xs text-cyan-600">#{index + 1}</span>{detail.keyword}
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] ${detail.origin === "step4" ? "bg-emerald-100 text-emerald-800" : "bg-fuchsia-100 text-fuchsia-800"}`}>
+                  {detail.origin === "step4" ? "STEP4 원본" : "2개 재료 조합"}
+                </span>
               </span>
             ))}
           </div>
@@ -198,7 +216,7 @@ export default function KeywordElonShoplingSeoOutput() {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-black">쇼핑몰별 상품명</h3>
-            <p className="mt-1 text-xs text-slate-500">상품그룹별 SEO 순서와 쇼핑몰별 안정적 변형을 적용했습니다. 각 제목은 UTF-8 100bytes 이하입니다.</p>
+            <p className="mt-1 text-xs text-slate-500">확정 검색어 10개만 제목 재료로 사용합니다. 29개를 억지로 모두 다르게 만들지 않고 상품그룹별 고품질 변형을 안정적으로 배분합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => void copyTitles()} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black">상품명 표 복사</button>
@@ -207,40 +225,55 @@ export default function KeywordElonShoplingSeoOutput() {
         </div>
 
         <div className="mt-4 space-y-3">
-          {grouped.map(([group, rows]) => (
-            <details key={group} className="rounded-2xl border border-slate-200 bg-white">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 font-black">
-                <span>{group} · {rows.length}개 쇼핑몰</span>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">펼쳐보기</span>
-              </summary>
-              <div className="overflow-x-auto border-t border-slate-100">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">쇼핑몰</th>
-                      <th className="px-4 py-3">쇼핑몰ID</th>
-                      <th className="min-w-[620px] px-4 py-3">SEO 상품명</th>
-                      <th className="px-4 py-3 text-right">bytes</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rows.map((row) => (
-                      <tr key={`${row.productGroup}:${row.mallKey}:${row.accountIdLabel}`}>
-                        <td className="whitespace-nowrap px-4 py-3"><div className="font-black">{row.marketName}</div><div className="mt-1 text-[11px] text-slate-400">{row.accountIdLabel}</div></td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{row.mallKey}</td>
-                        <td className="px-4 py-3 font-bold text-slate-900">{row.title}</td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right font-black tabular-nums">{row.byteLength}</td>
+          {grouped.map(([group, rows]) => {
+            const strategy = strategyByGroup.get(group);
+            const variantCount = new Set(rows.map((row) => row.title)).size;
+            return (
+              <details key={group} className="rounded-2xl border border-slate-200 bg-white">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 font-black">
+                  <div>
+                    <div>{group} · {rows.length}개 쇼핑몰 · {strategy?.label ?? "SEO 전략"}</div>
+                    <div className="mt-1 text-xs font-medium text-slate-500">{strategy?.description}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-cyan-50 px-3 py-1 text-xs text-cyan-800">제목 변형 {variantCount}/{strategy?.variantLimit ?? variantCount}</span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">펼쳐보기</span>
+                  </div>
+                </summary>
+                <div className="overflow-x-auto border-t border-slate-100">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">쇼핑몰</th>
+                        <th className="px-4 py-3">쇼핑몰ID</th>
+                        <th className="min-w-[520px] px-4 py-3">SEO 상품명</th>
+                        <th className="px-4 py-3">전략</th>
+                        <th className="px-4 py-3 text-right">bytes</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          ))}
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {rows.map((row) => (
+                        <tr key={`${row.productGroup}:${row.mallKey}:${row.accountIdLabel}`}>
+                          <td className="whitespace-nowrap px-4 py-3"><div className="font-black">{row.marketName}</div><div className="mt-1 text-[11px] text-slate-400">{row.accountIdLabel}</div></td>
+                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{row.mallKey}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-bold text-slate-900">{row.title}</div>
+                            <div className="mt-1 text-[11px] text-slate-400">사용 재료: {row.usedMaterials.join(" / ")}</div>
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-xs font-bold text-slate-600">{row.strategyLabel} · 변형 {row.variantIndex}</td>
+                          <td className={`whitespace-nowrap px-4 py-3 text-right font-black tabular-nums ${row.byteLength <= readyOutput.titleByteLimit ? "text-emerald-700" : "text-rose-700"}`}>{row.byteLength}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            );
+          })}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-          <span>고유 상품명 {readyOutput.uniqueTitleCount}/{readyOutput.mallTitles.length}개</span>
+          <span>고유 상품명 {readyOutput.uniqueTitleCount}/{readyOutput.mallTitles.length}개 · 최대 변형 정책 13개 · 제목 단어는 검색어 10개 안에서만 사용</span>
           {message ? <span className="font-bold text-blue-800">{message}</span> : null}
         </div>
       </div>
