@@ -13,6 +13,7 @@ import {
 const SCORE_CLIENT_CHUNK_SIZE = 12;
 const SCORE_MIN_ADAPTIVE_CHUNK_SIZE = 3;
 const SCORE_CACHE_PREFIX = "keywordElon.scoreBridge.v3.marketRecall";
+const SCORE_CACHE_FAMILY_PREFIX = "keywordElon.scoreBridge.";
 
 type BridgeProgress = {
   active: boolean;
@@ -102,9 +103,71 @@ function loadCache(key: string, fingerprint: string): ScoreCache {
   }
 }
 
-function saveCache(key: string, cache: ScoreCache) {
+type CacheSaveResult = {
+  persisted: boolean;
+  clearedCacheCount: number;
+};
+
+function scoreCacheStorageKeys() {
+  const keys: string[] = [];
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(SCORE_CACHE_FAMILY_PREFIX)) keys.push(key);
+    }
+  } catch {
+    return [];
+  }
+  return keys;
+}
+
+function pruneScoreCacheStorage(keepKey = "") {
+  let removed = 0;
+  for (const storedKey of scoreCacheStorageKeys()) {
+    if (storedKey === keepKey) continue;
+    try {
+      window.localStorage.removeItem(storedKey);
+      removed += 1;
+    } catch {
+      // Storage access can be denied in restricted browser modes. The live run still continues in memory.
+    }
+  }
+  return removed;
+}
+
+function isQuotaExceededError(error: unknown) {
+  if (error instanceof DOMException) {
+    return error.name === "QuotaExceededError"
+      || error.name === "NS_ERROR_DOM_QUOTA_REACHED"
+      || error.code === 22
+      || error.code === 1014;
+  }
+  return error instanceof Error && /quota|storage.*full|exceeded/i.test(error.message);
+}
+
+function saveCache(key: string, cache: ScoreCache): CacheSaveResult {
   cache.updatedAt = new Date().toISOString();
-  window.localStorage.setItem(key, JSON.stringify(cache));
+  const serialized = JSON.stringify(cache);
+  try {
+    window.localStorage.setItem(key, serialized);
+    return { persisted: true, clearedCacheCount: 0 };
+  } catch (error) {
+    if (!isQuotaExceededError(error)) throw error;
+  }
+
+  const clearedCacheCount = pruneScoreCacheStorage();
+  try {
+    window.localStorage.setItem(key, serialized);
+    return { persisted: true, clearedCacheCount };
+  } catch (error) {
+    if (!isQuotaExceededError(error)) throw error;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Keep the in-memory cache even when persistent storage is unavailable.
+    }
+    return { persisted: false, clearedCacheCount };
+  }
 }
 
 function sessionDiscoveryForResume() {
@@ -285,7 +348,12 @@ export default function KeywordElonScoreFetchBridge() {
       };
 
       const { fingerprint, key } = cacheKey(body, discovery);
+      const staleCacheCount = pruneScoreCacheStorage(key);
       const cache = loadCache(key, fingerprint);
+      let cachePersistenceAvailable = true;
+      let cacheStorageWarning = staleCacheCount > 0
+        ? `오래된 점수 캐시 ${staleCacheCount}개를 자동 정리했습니다.`
+        : "";
       const chunks: string[][] = [];
       for (let index = 0; index < discovery.candidates.length; index += SCORE_CLIENT_CHUNK_SIZE) {
         chunks.push(discovery.candidates.slice(index, index + SCORE_CLIENT_CHUNK_SIZE));
@@ -322,14 +390,25 @@ export default function KeywordElonScoreFetchBridge() {
             candidates: result.candidates,
             warnings: result.warnings,
           };
-          saveCache(key, cache);
-          scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
+          if (cachePersistenceAvailable) {
+          const saveResult = saveCache(key, cache);
+          cachePersistenceAvailable = saveResult.persisted;
+          if (saveResult.clearedCacheCount > 0) {
+            cacheStorageWarning = `브라우저 저장공간 확보를 위해 이전 점수 캐시 ${saveResult.clearedCacheCount}개를 자동 정리했습니다.`;
+          }
+          if (!saveResult.persisted) {
+            cacheStorageWarning = "브라우저 저장공간이 가득 차 캐시 저장 없이 현재 실행을 메모리에서 계속했습니다.";
+          }
+        }
+        scoredCount = Object.values(cache.chunks).reduce((sum, row) => sum + row.candidates.length, 0);
           setProgress({
             active: true,
             done: index + 1,
             total: chunks.length,
             scored: scoredCount,
-            message: `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`,
+            message: cachePersistenceAvailable
+            ? `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 저장`
+            : `AI 점수화 진행 · ${index + 1}/${chunks.length} · ${scoredCount}/${discovery.candidates.length}개 처리 · 브라우저 캐시 없이 계속`,
             error: "",
           });
           await sleep(200);
@@ -383,7 +462,12 @@ export default function KeywordElonScoreFetchBridge() {
       }
 
       finalCandidates.sort((a, b) => b.qualityScore - a.qualityScore || (b.totalSearch ?? -1) - (a.totalSearch ?? -1));
-      const finalWarnings = [...warnings, enrichmentWarning].filter(Boolean).slice(0, 12);
+      const finalWarnings = [...warnings, enrichmentWarning, cacheStorageWarning].filter(Boolean).slice(0, 12);
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // A completed score action no longer needs its resume cache.
+      }
       setProgress({
         active: false,
         done: chunks.length,

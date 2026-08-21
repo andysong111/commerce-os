@@ -26,10 +26,16 @@ test("Keyword Lab adaptively splits slow scoring chunks", () => {
   assert.match(bridge, /12개 묶음이 느리면 6개 → 3개로 자동 축소/);
 });
 
-test("Keyword Lab persists completed scoring chunks with a new market-recall cache namespace", () => {
+test("Keyword Lab persists completed scoring chunks and survives browser quota exhaustion", () => {
   assert.match(bridge, /SCORE_CACHE_PREFIX = "keywordElon\.scoreBridge\.v3\.marketRecall"/);
+  assert.match(bridge, /SCORE_CACHE_FAMILY_PREFIX = "keywordElon\.scoreBridge\."/);
   assert.match(bridge, /marketRecallVersion: 4/);
   assert.match(bridge, /window\.localStorage\.setItem\(key/);
+  assert.match(bridge, /isQuotaExceededError/);
+  assert.match(bridge, /pruneScoreCacheStorage/);
+  assert.match(bridge, /cachePersistenceAvailable/);
+  assert.match(bridge, /캐시 저장 없이 현재 실행을 메모리에서 계속/);
+  assert.match(bridge, /window\.localStorage\.removeItem\(key\)/);
   assert.match(bridge, /sessionDiscoveryForResume/);
   assert.match(bridge, /stage2Status !== "error"/);
   assert.match(bridge, /이전 후보 .*SearchAd 재호출 없이 점수화를 재개/);
