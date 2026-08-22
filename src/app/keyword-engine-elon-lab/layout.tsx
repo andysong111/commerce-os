@@ -7,6 +7,7 @@ import KeywordElonCollapsibleSection from "./KeywordElonCollapsibleSection";
 import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonDiversitySupplement from "./KeywordElonDiversitySupplement";
 import KeywordElonInterruptedRunRecovery from "./KeywordElonInterruptedRunRecovery";
+import KeywordElonLinkHealthBridge from "./KeywordElonLinkHealthBridge";
 import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
 import KeywordElonShoplingSeoOutput from "./KeywordElonShoplingSeoOutput";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
@@ -21,8 +22,9 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       <SeoTitleLedgerPageIdentityBridge />
       <KeywordElonCollectorPresenceBridge />
       <KeywordElonScoreFetchBridge />
-      <KeywordElonAutoRunResumeBridge />
       <SeoTitleLedgerLaunchHandoff />
+      <KeywordElonLinkHealthBridge />
+      <KeywordElonAutoRunResumeBridge />
       <KeywordElonAutoRunToStep4 />
       <KeywordElonShoplingSeoOutput />
       <SeoTitleLedgerControlPanel />
