@@ -1,0 +1,66 @@
+name: SEO Title Inventory Ledger CI
+
+on:
+  pull_request:
+    paths:
+      - "src/app/api/seo-title-ledger/**"
+      - "src/app/api/seo-title-dispatch/**"
+      - "src/app/keyword-engine-elon-lab/SeoTitleLedger*.tsx"
+      - "src/app/keyword-engine-elon-lab/layout.tsx"
+      - "src/app/shopling-seo-dispatch/**"
+      - "src/app/product-launch-tracker/page.tsx"
+      - "src/lib/seoTitle*"
+      - "src/lib/shoplingSeoDispatchModule.ts"
+      - "src/lib/keywordEngineElonLabModule.ts"
+      - "src/lib/opsModuleRegistry.ts"
+      - "public/product-launch-tracker-app/seo-title-ledger-handoff.js"
+      - "public/product-launch-tracker-app/app.js"
+      - "supabase/migrations/202608220001_seo_title_inventory_ledger.sql"
+      - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
+      - "tests/seoTitleInventoryLedger.test.mjs"
+      - ".github/workflows/seo-title-inventory-ledger-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint SEO title inventory files
+        run: >-
+          npx eslint
+          src/app/api/seo-title-ledger/route.ts
+          src/app/api/seo-title-dispatch/route.ts
+          src/app/keyword-engine-elon-lab/SeoTitleLedgerControlPanel.tsx
+          src/app/keyword-engine-elon-lab/SeoTitleLedgerLaunchHandoff.tsx
+          src/app/keyword-engine-elon-lab/SeoTitleLedgerPageIdentityBridge.tsx
+          src/app/keyword-engine-elon-lab/layout.tsx
+          src/app/shopling-seo-dispatch/page.tsx
+          src/app/shopling-seo-dispatch/ShoplingSeoDispatchCenter.tsx
+          src/app/product-launch-tracker/page.tsx
+          src/lib/seoTitleInventoryGenerator.ts
+          src/lib/seoTitleLedgerServer.ts
+          src/lib/shoplingSeoDispatchModule.ts
+          src/lib/keywordEngineElonLabModule.ts
+          src/lib/opsModuleRegistry.ts
+      - name: Test title inventory, no-reuse and safe dispatch contracts
+        run: >-
+          node --experimental-strip-types --test
+          tests/seoTitleInventoryLedger.test.mjs
+          tests/keywordEngineElonLabSeoOutput.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://seo-title-ledger-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_seo_title_ledger_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36

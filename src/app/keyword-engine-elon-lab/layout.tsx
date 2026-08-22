@@ -11,19 +11,25 @@ import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
 import KeywordElonShoplingSeoOutput from "./KeywordElonShoplingSeoOutput";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
 import KeywordElonStep4DualFilter from "./KeywordElonStep4DualFilter";
+import SeoTitleLedgerControlPanel from "./SeoTitleLedgerControlPanel";
+import SeoTitleLedgerLaunchHandoff from "./SeoTitleLedgerLaunchHandoff";
+import SeoTitleLedgerPageIdentityBridge from "./SeoTitleLedgerPageIdentityBridge";
 
 export default function KeywordEngineElonLabLayout({ children }: { children: ReactNode }) {
   return (
     <>
+      <SeoTitleLedgerPageIdentityBridge />
       <KeywordElonCollectorPresenceBridge />
       <KeywordElonScoreFetchBridge />
       <KeywordElonAutoRunResumeBridge />
+      <SeoTitleLedgerLaunchHandoff />
       <KeywordElonAutoRunToStep4 />
       <KeywordElonShoplingSeoOutput />
+      <SeoTitleLedgerControlPanel />
 
       <KeywordElonCollapsibleSection
-        title="STEP 1~4 세부내용"
-        description="수동 실행, 상품 정체성, 점수표, STEP 3 확장과 STEP 4 위험어 검수는 필요할 때만 펼쳐서 확인합니다."
+        title="STEP 1~4 세부내용 · 제조 근거"
+        description="상품 정체성, 시장어, 점수표, STEP 3 확장과 STEP 4 위험어 검수는 필요할 때만 펼쳐서 확인합니다."
       >
         {children}
         <KeywordElonInterruptedRunRecovery />
@@ -33,8 +39,8 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       </KeywordElonCollapsibleSection>
 
       <KeywordElonCollapsibleSection
-        title="STEP 5 · 다양성 보조"
-        description="STEP 5는 원클릭 실행에서 제외합니다. FINAL RESULT와 SEO OUTPUT을 확인한 뒤 부족할 때만 펼쳐서 직접 실행합니다."
+        title="STEP 5 · 다양성 보조 · 원장 재료 확장"
+        description="상품명 재고가 목표 수량에 미달할 때만 펼쳐서 안전 키워드 재료를 추가 발굴합니다."
         badge="수동 실행"
       >
         <KeywordElonDiversitySupplement />
