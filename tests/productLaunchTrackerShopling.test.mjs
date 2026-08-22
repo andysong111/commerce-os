@@ -264,7 +264,7 @@ test("OPS Center는 서버 저장·실제 업로드·발주 연동 경로를 포
   assert.match(seoUploadPanel, /partialPage: true/);
 });
 
-test("SEO 실제등록 기능은 클라우드와 분리된 전용 기능카드·라우트에서 실행한다", async () => {
+test("SEO 실제등록 기능은 전용 실행기에서 선택 상품 1건만 읽고 저장한다", async () => {
   const moduleFile = await readFile(
     new URL("../src/lib/seoTitleCloudShoplingRunnerModule.ts", import.meta.url),
     "utf8",
@@ -275,6 +275,10 @@ test("SEO 실제등록 기능은 클라우드와 분리된 전용 기능카드·
   );
   const runnerPage = await readFile(
     new URL("../src/app/seo-title-cloud-shopling-runner/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const runnerPanel = await readFile(
+    new URL("../src/app/seo-title-cloud-shopling-runner/SeoTitleCloudShoplingRunnerPanel.tsx", import.meta.url),
     "utf8",
   );
   const keywordLayout = await readFile(
@@ -289,9 +293,24 @@ test("SEO 실제등록 기능은 클라우드와 분리된 전용 기능카드·
   assert.match(moduleFile, /SEO 상품명 클라우드 · 샵플링 등록 실행기/);
   assert.match(moduleFile, /route: "\/seo-title-cloud-shopling-runner"/);
   assert.match(registry, /seoTitleCloudShoplingRunnerModule/);
-  assert.match(runnerPage, /SeoFinalShoplingUploadPanel/);
+  assert.match(runnerPage, /SeoTitleCloudShoplingRunnerPanel/);
   assert.match(runnerPage, /SEO 상품명 클라우드 · 샵플링 등록 실행기/);
+  assert.match(runnerPanel, /mode: "item"/);
+  assert.match(runnerPanel, /operation: "patch_item"/);
+  assert.match(runnerPanel, /normalized-optimized/);
+  assert.doesNotMatch(runnerPanel, /\/api\/product-launch-tracker\/state/);
   assert.doesNotMatch(keywordLayout, /SeoFinalShoplingUploadPanel/);
   assert.match(keywordLayout, /SeoTitleCloudShoplingRunnerHandoff/);
   assert.match(handoff, /href="\/seo-title-cloud-shopling-runner"/);
+});
+
+test("Supabase egress 제한 시 상세페이지 활성 폴링은 제한 상태를 캐시해 재조회 폭주를 막는다", async () => {
+  const route = await readFile(
+    new URL("../src/app/api/product-launch-tracker/detail-page-jobs/active/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(route, /detail-page-active-job-probe-v2-backpressure/);
+  assert.match(route, /SUPABASE_EGRESS_QUOTA_RESTRICTED/);
+  assert.match(route, /exceed_egress_quota/);
+  assert.match(route, /RESTRICTED_PROBE_RETRY_SECONDS = 120/);
 });
