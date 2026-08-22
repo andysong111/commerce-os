@@ -13,7 +13,7 @@ export const KEYWORD_ELON_BROWSER_CONTEXT_HASH_PARAMETER =
   "commerce_os_keyword_lab_context";
 export const KEYWORD_ELON_BROWSER_LINK_ERROR_HASH_PARAMETER =
   "commerce_china_link_error";
-export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.2";
+export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.3";
 
 type BrowserOptionValue = {
   id?: unknown;
