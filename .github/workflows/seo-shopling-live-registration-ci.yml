@@ -18,6 +18,7 @@ on:
       - "src/app/keyword-engine-elon-lab/layout.tsx"
       - "src/lib/shoplingSeoDispatchModule.ts"
       - "supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql"
+      - "supabase/migrations/20260823071600_seo_shopling_direct_apply_atomic_claim.sql"
       - "tests/seoShoplingLiveRegistration.test.mjs"
       - "vercel.json"
       - ".github/workflows/seo-shopling-live-registration-ci.yml"
