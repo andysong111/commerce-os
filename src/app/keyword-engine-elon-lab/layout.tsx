@@ -28,7 +28,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       <SeoTitleLedgerControlPanel />
 
       <KeywordElonCollapsibleSection
-        title="STEP 1~4 제조 근거"
+        title="STEP 1~4 세부내용 · 제조 근거"
         description="상품 정체성, 시장어, 점수표, STEP 3 확장과 STEP 4 위험어 검수는 필요할 때만 펼쳐서 확인합니다."
       >
         {children}
@@ -39,7 +39,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       </KeywordElonCollapsibleSection>
 
       <KeywordElonCollapsibleSection
-        title="STEP 5 · 원장 재료 확장"
+        title="STEP 5 · 다양성 보조 · 원장 재료 확장"
         description="상품명 재고가 목표 수량에 미달할 때만 펼쳐서 안전 키워드 재료를 추가 발굴합니다."
         badge="수동 실행"
       >
