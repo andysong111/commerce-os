@@ -14,7 +14,8 @@ const cron = readFileSync("src/app/api/cron/seo-shopling-live-registration/route
 const ui = readFileSync("src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx", "utf8");
 const page = readFileSync("src/app/shopling-seo-dispatch/page.tsx", "utf8");
 const moduleSource = readFileSync("src/lib/shoplingSeoDispatchModule.ts", "utf8");
-const migration = readFileSync("supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql", "utf8");
+const activeMigration = readFileSync("supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql", "utf8");
+const claimMigration = readFileSync("supabase/migrations/20260823071600_seo_shopling_direct_apply_atomic_claim.sql", "utf8");
 const vercel = readFileSync("vercel.json", "utf8");
 
 test("one user action is hard-limited to one full-market round and 29 title reservations", () => {
@@ -55,10 +56,23 @@ test("repeated registrations never overwrite canonical six goods keys", () => {
 });
 
 test("same ledger cannot start two active dispatches even from concurrent browser tabs", () => {
-  assert.match(migration, /create unique index if not exists seo_title_dispatches_one_active_per_ledger_idx/);
-  assert.match(migration, /owner_id, ledger_id/);
-  assert.match(migration, /status in \('reserved', 'ready', 'submitted'\)/);
+  assert.match(activeMigration, /create unique index if not exists seo_title_dispatches_one_active_per_ledger_idx/);
+  assert.match(activeMigration, /owner_id, ledger_id/);
+  assert.match(activeMigration, /status in \('reserved', 'ready', 'submitted'\)/);
   assert.match(liveRoute, /SEO_TITLE_ACTIVE_DISPATCH_EXISTS/);
+});
+
+test("replayed product-upload callbacks atomically claim direct apply only once", () => {
+  assert.match(claimMigration, /claim_seo_title_dispatch_direct_apply/);
+  assert.match(claimMigration, /status = 'submitted'/);
+  assert.match(claimMigration, /base_upload_queued/);
+  assert.match(callback, /claim_seo_title_dispatch_direct_apply/);
+  assert.match(callback, /if \(!claimed\)/);
+  assert.match(callback, /duplicateCallback: true/);
+  assert.ok(
+    callback.indexOf("claim_seo_title_dispatch_direct_apply") <
+      callback.indexOf("dispatchPreparedSeoShoplingDirectApply(prepared)"),
+  );
 });
 
 test("six base products are followed by 29 mall title and common-search writes", () => {
@@ -84,10 +98,17 @@ test("external request ids are persisted before direct writes and started work n
   assert.match(liveRoute, /if \(reservationCreated && !externalWriteStarted\)/);
   assert.match(liveRoute, /SEO_SHOPLING_LIVE_START_UNCERTAIN/);
   assert.match(liveRoute, /재실행하지 마세요/);
-  assert.ok(
-    callback.indexOf("external_request_id: prepared.requestId") <
-      callback.indexOf("dispatchPreparedSeoShoplingDirectApply(prepared)"),
-  );
+  assert.match(callback, /phase: "direct_apply_dispatching"/);
+});
+
+test("failed review finalization stays nonterminal until cron successfully quarantines titles", () => {
+  assert.match(callback, /review_finalization_pending/);
+  assert.doesNotMatch(callback, /finalize_seo_title_reservation[\s\S]{0,220}\.catch\(\(\) => null\)/);
+  assert.match(callback, /status: "submitted"/);
+  assert.match(cron, /phase === "review_finalization_pending"/);
+  assert.match(cron, /retry_review_finalization/);
+  assert.match(cron, /recoveredFinalization: true/);
+  assert.match(cron, /phase: "review_required"/);
 });
 
 test("titles are consumed only after strict direct-apply success and uncertain results go to review", () => {
@@ -97,7 +118,7 @@ test("titles are consumed only after strict direct-apply success and uncertain r
   assert.match(cron, /p_success: true/);
   assert.match(cron, /verifiedItemCount: 29/);
   assert.match(cron, /p_success: false/);
-  assert.match(cron, /phase: "review_required"/);
+  assert.match(cron, /review_finalization_pending/);
   assert.match(callback, /finalize_seo_title_reservation/);
   assert.match(callback, /p_success: false/);
 });
@@ -106,6 +127,8 @@ test("server-side reconciliation is low load and continues after the browser clo
   assert.match(cron, /VERCEL_ENV !== "production"/);
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /MAX_ACTIVE_DISPATCHES = 5/);
+  assert.match(cron, /DIRECT_APPLY_PHASES/);
+  assert.match(cron, /direct_apply_dispatching/);
   assert.match(cron, /fetchKeywordShoplingDirectApplyResult/);
   assert.match(vercel, /\/api\/cron\/seo-shopling-live-registration/);
   assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
