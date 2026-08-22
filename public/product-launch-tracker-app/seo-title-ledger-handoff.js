@@ -1,6 +1,7 @@
 const SEO_LEDGER_ROUTE = "/keyword-engine-elon-lab";
 const NORMALIZED_ITEM_API = "/api/product-launch-tracker/normalized-optimized";
 const BUTTON_ID = "seo-title-ledger-handoff-button";
+const DATA_GROUP_ID = "bulk-action-group-data";
 
 function text(value) {
   return String(value ?? "").trim();
@@ -93,15 +94,15 @@ function showMessage(message) {
 function updateButton(button) {
   const selectedCount = readSelectedItemIds().length;
   button.textContent = selectedCount === 1
-    ? "선택 상품 SEO 원장 생성·보기"
-    : `SEO 원장 생성·보기${selectedCount ? ` (${selectedCount})` : ""}`;
+    ? "선택 상품 SEO 대량등록 클라우드 열기"
+    : `SEO 대량등록 클라우드 열기${selectedCount ? ` (${selectedCount})` : ""}`;
   button.dataset.selectedCount = String(selectedCount);
 }
 
 async function openLedger(button) {
   const selectedIds = readSelectedItemIds();
   if (selectedIds.length !== 1) {
-    showMessage("SEO 상품명 재고 원장은 상품 한 개씩 생성합니다. 상품을 정확히 1개 선택하세요.");
+    showMessage("SEO 대량등록 클라우드는 상품 한 개씩 원장을 생성합니다. 상품을 정확히 1개 선택하세요.");
     return;
   }
 
@@ -129,21 +130,27 @@ async function openLedger(button) {
       window.location.assign(target);
     }
   } catch (error) {
-    showMessage(error instanceof Error ? error.message : "SEO 원장으로 이동하지 못했습니다.");
+    showMessage(error instanceof Error ? error.message : "SEO 대량등록 클라우드로 이동하지 못했습니다.");
     button.disabled = false;
-    button.textContent = original || "선택 상품 SEO 원장 생성·보기";
+    button.textContent = original || "선택 상품 SEO 대량등록 클라우드 열기";
   }
 }
 
 function installButton() {
   const controls = document.querySelector(".bulk-controls");
-  if (!controls || document.querySelector(`#${BUTTON_ID}`)) return;
-  const button = document.createElement("button");
-  button.id = BUTTON_ID;
-  button.type = "button";
-  button.className = "button seo-title-ledger-button";
-  button.addEventListener("click", () => void openLedger(button));
-  controls.append(button);
+  const dataGroup = document.querySelector(`#${DATA_GROUP_ID}`);
+  const destination = dataGroup || controls;
+  if (!destination) return;
+
+  let button = document.querySelector(`#${BUTTON_ID}`);
+  if (!button) {
+    button = document.createElement("button");
+    button.id = BUTTON_ID;
+    button.type = "button";
+    button.className = "button seo-title-ledger-button";
+    button.addEventListener("click", () => void openLedger(button));
+  }
+  if (button.parentElement !== destination) destination.append(button);
   updateButton(button);
 }
 
@@ -153,12 +160,13 @@ function installStyles() {
   style.id = "seo-title-ledger-handoff-style";
   style.textContent = `
     .seo-title-ledger-button {
-      border: 1px solid #7c3aed;
-      background: #6d28d9;
-      color: #fff;
-      font-weight: 800;
+      border: 1px solid #7c3aed !important;
+      background: #6d28d9 !important;
+      color: #fff !important;
+      font-weight: 850 !important;
+      min-width: 190px;
     }
-    .seo-title-ledger-button:hover { background: #5b21b6; }
+    .seo-title-ledger-button:hover { background: #5b21b6 !important; }
     .seo-title-ledger-button:disabled { cursor: wait; opacity: .55; }
   `;
   document.head.append(style);
