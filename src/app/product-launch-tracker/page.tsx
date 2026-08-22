@@ -1,6 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
-const PRODUCT_LAUNCH_ASSET_VERSION = "20260822-seo-title-ledger-handoff-v1";
+const PRODUCT_LAUNCH_ASSET_VERSION =
+  "20260815-bidirectional-purchase-metadata-v1-seo-bulk-cloud-v2";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -31,9 +32,9 @@ export default async function ProductLaunchTrackerPage({
 
       <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <strong className="block text-sm text-violet-950">SEO 상품명 재고 원장 연결</strong>
+          <strong className="block text-sm text-violet-950">SEO 대량등록 클라우드 연결</strong>
           <span className="mt-1 block text-xs leading-5 text-violet-800">
-            목록에서 상품 한 개를 선택한 뒤 ‘SEO 원장 생성·보기’를 누르면 저장된 1688 링크로 상품명 재고 원장을 생성하거나 기존 원장을 확인합니다.
+            목록에서 상품 한 개를 선택한 뒤 ‘선택 상품 SEO 대량등록 클라우드 열기’를 누르면 저장된 1688 링크를 불러와 고유 상품명 재고를 제조하거나 기존 클라우드 재고를 확인합니다.
           </span>
         </div>
         <a href="/shopling-seo-dispatch" className="rounded-lg bg-violet-700 px-4 py-2 text-center text-sm font-black text-white">
