@@ -263,3 +263,35 @@ test("OPS Center는 서버 저장·실제 업로드·발주 연동 경로를 포
   assert.match(seoUploadPanel, /SEO 확정 → Shopling 6채널 실제등록/);
   assert.match(seoUploadPanel, /partialPage: true/);
 });
+
+test("SEO 실제등록 기능은 클라우드와 분리된 전용 기능카드·라우트에서 실행한다", async () => {
+  const moduleFile = await readFile(
+    new URL("../src/lib/seoTitleCloudShoplingRunnerModule.ts", import.meta.url),
+    "utf8",
+  );
+  const registry = await readFile(
+    new URL("../src/lib/opsModuleRegistry.ts", import.meta.url),
+    "utf8",
+  );
+  const runnerPage = await readFile(
+    new URL("../src/app/seo-title-cloud-shopling-runner/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const keywordLayout = await readFile(
+    new URL("../src/app/keyword-engine-elon-lab/layout.tsx", import.meta.url),
+    "utf8",
+  );
+  const handoff = await readFile(
+    new URL("../src/app/keyword-engine-elon-lab/SeoTitleCloudShoplingRunnerHandoff.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(moduleFile, /SEO 상품명 클라우드 · 샵플링 등록 실행기/);
+  assert.match(moduleFile, /route: "\/seo-title-cloud-shopling-runner"/);
+  assert.match(registry, /seoTitleCloudShoplingRunnerModule/);
+  assert.match(runnerPage, /SeoFinalShoplingUploadPanel/);
+  assert.match(runnerPage, /SEO 상품명 클라우드 · 샵플링 등록 실행기/);
+  assert.doesNotMatch(keywordLayout, /SeoFinalShoplingUploadPanel/);
+  assert.match(keywordLayout, /SeoTitleCloudShoplingRunnerHandoff/);
+  assert.match(handoff, /href="\/seo-title-cloud-shopling-runner"/);
+});
