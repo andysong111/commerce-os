@@ -14,6 +14,7 @@ import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
 import KeywordElonShoplingSeoOutput from "./KeywordElonShoplingSeoOutput";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
 import KeywordElonStep4DualFilter from "./KeywordElonStep4DualFilter";
+import SeoShoplingDispatchShortcut from "./SeoShoplingDispatchShortcut";
 import SeoTitleLedgerControlPanel from "./SeoTitleLedgerControlPanel";
 import SeoTitleLedgerLaunchHandoff from "./SeoTitleLedgerLaunchHandoff";
 import SeoTitleLedgerPageIdentityBridge from "./SeoTitleLedgerPageIdentityBridge";
@@ -32,6 +33,7 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
       <KeywordElonAutoRunToStep4 />
       <KeywordElonShoplingSeoOutput />
       <SeoTitleLedgerControlPanel />
+      <SeoShoplingDispatchShortcut />
 
       <KeywordElonCollapsibleSection
         title="STEP 1~4 세부내용 · 제조 근거"
