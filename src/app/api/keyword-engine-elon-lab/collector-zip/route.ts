@@ -8,6 +8,8 @@ export const dynamic = "force-dynamic";
 
 const FILES = [
   "manifest.json",
+  "content-1688-audit-v013.js",
+  "content-1688-recovery-v013.js",
   "content-1688-health.js",
   "content-1688.js",
   "content-ops.js",
@@ -28,7 +30,7 @@ export async function GET() {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition":
-          'attachment; filename="commerce-os-keyword-lab-collector-v0.1.2.zip"',
+          'attachment; filename="commerce-os-keyword-lab-collector-v0.1.3.zip"',
         "Cache-Control": "no-store",
       },
     });
