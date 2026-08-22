@@ -5,6 +5,7 @@ on:
     paths:
       - "src/lib/seoShoplingLiveRegistration.ts"
       - "src/lib/seoShoplingLiveStorage.ts"
+      - "src/lib/seoShoplingLiveReadiness.ts"
       - "src/lib/seoShoplingDirectPrepared.ts"
       - "src/lib/seoShoplingUploadCallback.ts"
       - "src/lib/seoShoplingUploadCallbackV2.ts"
@@ -13,7 +14,10 @@ on:
       - "src/app/api/cron/seo-shopling-live-registration/route.ts"
       - "src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts"
       - "src/app/shopling-seo-dispatch/**"
+      - "src/app/keyword-engine-elon-lab/SeoShoplingDispatchShortcut.tsx"
+      - "src/app/keyword-engine-elon-lab/layout.tsx"
       - "src/lib/shoplingSeoDispatchModule.ts"
+      - "supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql"
       - "tests/seoShoplingLiveRegistration.test.mjs"
       - "vercel.json"
       - ".github/workflows/seo-shopling-live-registration-ci.yml"
@@ -38,6 +42,7 @@ jobs:
           npx eslint
           src/lib/seoShoplingLiveRegistration.ts
           src/lib/seoShoplingLiveStorage.ts
+          src/lib/seoShoplingLiveReadiness.ts
           src/lib/seoShoplingDirectPrepared.ts
           src/lib/seoShoplingUploadCallback.ts
           src/lib/seoShoplingUploadCallbackV2.ts
@@ -45,8 +50,11 @@ jobs:
           src/app/api/seo-title-dispatch/live-register-v2/route.ts
           src/app/api/cron/seo-shopling-live-registration/route.ts
           'src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts'
+          src/app/shopling-seo-dispatch/SeoShoplingLiveReadinessBanner.tsx
           src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx
           src/app/shopling-seo-dispatch/page.tsx
+          src/app/keyword-engine-elon-lab/SeoShoplingDispatchShortcut.tsx
+          src/app/keyword-engine-elon-lab/layout.tsx
           src/lib/shoplingSeoDispatchModule.ts
       - name: Test live registration safety contracts
         run: node --test tests/seoShoplingLiveRegistration.test.mjs
