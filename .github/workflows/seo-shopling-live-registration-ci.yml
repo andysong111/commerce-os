@@ -1,0 +1,57 @@
+name: SEO Shopling Live Registration CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/seoShoplingLiveRegistration.ts"
+      - "src/lib/seoShoplingLiveStorage.ts"
+      - "src/lib/seoShoplingDirectPrepared.ts"
+      - "src/lib/seoShoplingUploadCallback.ts"
+      - "src/lib/seoShoplingUploadCallbackV2.ts"
+      - "src/app/api/seo-title-dispatch/live-register/**"
+      - "src/app/api/seo-title-dispatch/live-register-v2/**"
+      - "src/app/api/cron/seo-shopling-live-registration/route.ts"
+      - "src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts"
+      - "src/app/shopling-seo-dispatch/**"
+      - "src/lib/shoplingSeoDispatchModule.ts"
+      - "tests/seoShoplingLiveRegistration.test.mjs"
+      - "vercel.json"
+      - ".github/workflows/seo-shopling-live-registration-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint live registration files
+        run: >-
+          npx eslint
+          src/lib/seoShoplingLiveRegistration.ts
+          src/lib/seoShoplingLiveStorage.ts
+          src/lib/seoShoplingDirectPrepared.ts
+          src/lib/seoShoplingUploadCallback.ts
+          src/lib/seoShoplingUploadCallbackV2.ts
+          src/app/api/seo-title-dispatch/live-register/route.ts
+          src/app/api/seo-title-dispatch/live-register-v2/route.ts
+          src/app/api/cron/seo-shopling-live-registration/route.ts
+          'src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts'
+          src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx
+          src/app/shopling-seo-dispatch/page.tsx
+          src/lib/shoplingSeoDispatchModule.ts
+      - name: Test live registration safety contracts
+        run: node --test tests/seoShoplingLiveRegistration.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://seo-live-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_seo_live_build_check

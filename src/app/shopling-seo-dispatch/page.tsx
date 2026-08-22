@@ -1,5 +1,11 @@
-import ShoplingSeoDispatchCenter from "./ShoplingSeoDispatchCenter";
+import SeoShoplingLiveReadinessBanner from "./SeoShoplingLiveReadinessBanner";
+import ShoplingSeoLiveDispatchCenter from "./ShoplingSeoLiveDispatchCenter";
 
 export default function ShoplingSeoDispatchPage() {
-  return <ShoplingSeoDispatchCenter />;
+  return (
+    <>
+      <SeoShoplingLiveReadinessBanner />
+      <ShoplingSeoLiveDispatchCenter />
+    </>
+  );
 }

@@ -9,6 +9,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/seo-shopling-live-registration",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/product-decision-live-refresh",
       "schedule": "2,17,32,47 * * * *"
     },
