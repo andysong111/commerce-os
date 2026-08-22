@@ -38,7 +38,11 @@ export async function dispatchPreparedSeoShoplingDirectApply(prepared: PreparedS
   });
   if (![200, 204].includes(response.status)) {
     const body = await response.text();
-    throw new Error(`쇼핑몰별 상품명·검색어 GitHub Actions 실행 요청에 실패했습니다. status=${response.status}${body ? ` body=${body.slice(0, 220)}` : ""}`);
+    const error = new Error(
+      `쇼핑몰별 상품명·검색어 GitHub Actions 실행 요청에 실패했습니다. status=${response.status}${body ? ` body=${body.slice(0, 220)}` : ""}`,
+    ) as Error & { definitelyNotAccepted?: boolean };
+    error.definitelyNotAccepted = true;
+    throw error;
   }
   return {
     status: "queued" as const,
