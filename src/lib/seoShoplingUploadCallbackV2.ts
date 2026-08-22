@@ -159,29 +159,13 @@ export async function handleSeoShoplingProductUploadCallback(
       error instanceof Error
         ? error.message
         : "쇼핑몰별 상품명·검색어 반영을 시작하지 못했습니다.";
-    if (claimed && requestId) {
-      await patchSeoTitleDispatch(context, meta.dispatchId, {
-        status: "submitted",
-        external_request_id: requestId,
-        result_payload: {
-          pipelineVersion: meta.pipelineVersion,
-          phase: "direct_apply_dispatching",
-          canonicalSeed: meta.canonicalSeed,
-          directApplyRequestId: requestId,
-          dispatchWarning: message,
-          externalWriteExecuted: true,
-          updatedAt: completedAt,
-        },
-      }).catch(() => null);
-      return {
-        handled: true as const,
-        ok: false as const,
-        uncertain: true as const,
-        directApplyRequestId: requestId,
-      };
-    }
     await quarantineDispatch(context, meta, message, completedAt, requestId);
-    return { handled: true as const, ok: false as const };
+    return {
+      handled: true as const,
+      ok: false as const,
+      directApplyRequestId: requestId,
+      claimed,
+    };
   }
 }
 
