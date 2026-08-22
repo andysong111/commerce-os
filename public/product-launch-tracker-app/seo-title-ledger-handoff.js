@@ -132,15 +132,21 @@ async function openLedger(button) {
       sourceUrl: item.sourceUrl,
     });
     const target = `${SEO_LEDGER_ROUTE}?${query.toString()}`;
-    if (window.top && window.top !== window) {
-      window.top.location.assign(target);
-    } else {
-      window.location.assign(target);
+    const opened = window.open(target, "_blank");
+    if (!opened) {
+      throw new Error("SEO 대량등록 클라우드 새 탭이 차단됐습니다. Ops Center의 팝업을 허용해 주세요.");
+    }
+    try {
+      opened.opener = null;
+    } catch {
+      // The new tab can still operate when the browser blocks opener changes.
     }
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "SEO 대량등록 클라우드로 이동하지 못했습니다.");
+  } finally {
     button.disabled = false;
     button.textContent = original || "선택 상품 SEO 대량등록 클라우드 열기";
+    updateButton(button);
   }
 }
 
@@ -198,7 +204,10 @@ function scheduleHealthPanel() {
   if (healthPanelScheduled) return;
   healthPanelScheduled = true;
   const load = () => {
-    void import("./china-link-health-panel.js").catch((error) => {
+    void Promise.all([
+      import("./china-link-health-panel.js"),
+      import("./china-link-health-run-state.js"),
+    ]).catch((error) => {
       console.error("China primary link health panel failed to load", error);
     });
   };

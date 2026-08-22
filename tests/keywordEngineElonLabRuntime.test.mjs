@@ -17,9 +17,13 @@ const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
+const collectorAuditPath = "public/keyword-lab-collector/content-1688-audit-v013.js";
+const collectorRecoveryPath = "public/keyword-lab-collector/content-1688-recovery-v013.js";
 const collectorHealthPath = "public/keyword-lab-collector/content-1688-health.js";
 const collector1688Path = "public/keyword-lab-collector/content-1688.js";
 const collectorOpsPath = "public/keyword-lab-collector/content-ops.js";
+const collectorAudit = await readFile(collectorAuditPath, "utf8");
+const collectorRecovery = await readFile(collectorRecoveryPath, "utf8");
 const collector1688 = await readFile(collector1688Path, "utf8");
 const collectorOps = await readFile(collectorOpsPath, "utf8");
 const collectorManifest = JSON.parse(await readFile("public/keyword-lab-collector/manifest.json", "utf8"));
@@ -38,21 +42,34 @@ test("dedicated collector remains independent from detail-page SaaS", () => {
   assert.doesNotMatch(browserImport, /AI-Saurus/);
 });
 
-test("collector v0.1.2 supports canonical and Vercel URLs plus 1688 link health", () => {
-  assert.equal(collectorManifest.version, "0.1.2");
+test("collector v0.1.3 supports popup recovery and robust 1688 link health", () => {
+  assert.equal(collectorManifest.version, "0.1.3");
   assert.ok(collectorManifest.host_permissions.includes("https://*.vercel.app/*"));
-  assert.deepEqual(collectorManifest.content_scripts[0].js.slice(0, 2), [
+  assert.deepEqual(collectorManifest.content_scripts[0].js.slice(0, 4), [
+    "content-1688-audit-v013.js",
+    "content-1688-recovery-v013.js",
     "content-1688-health.js",
     "content-1688.js",
   ]);
   assert.match(collectorOps, /commerceOsKeywordLabCollectorVersion/);
-  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.2"/);
-  for (const path of [collectorHealthPath, collector1688Path, collectorOpsPath]) {
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.3"/);
+  assert.match(collectorAudit, /link_audit/);
+  assert.match(collectorAudit, /empty_or_unreadable/);
+  assert.match(collectorRecovery, /product_title_unreadable/);
+  assert.match(collectorRecovery, /window\.alert =/);
+  for (const path of [
+    collectorAuditPath,
+    collectorRecoveryPath,
+    collectorHealthPath,
+    collector1688Path,
+    collectorOpsPath,
+  ]) {
     const result = spawnSync(process.execPath, ["--check", path], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   }
-  assert.match(zipRoute, /content-1688-health\.js/);
-  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.2\.zip/);
+  assert.match(zipRoute, /content-1688-audit-v013\.js/);
+  assert.match(zipRoute, /content-1688-recovery-v013\.js/);
+  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.3\.zip/);
 });
 
 test("identity analysis still uses only 1688 source truth", () => {

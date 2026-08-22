@@ -1,4 +1,4 @@
-Commerce OS Keyword Lab Collector v0.1.2
+Commerce OS Keyword Lab Collector v0.1.3
 
 목적:
 1688 상품 페이지의 실제 렌더링 화면에서 중국 상품명과 옵션명·옵션값을 읽어 Commerce OS Keyword Lab으로 전달합니다.
@@ -12,10 +12,13 @@ Commerce OS Keyword Lab Collector v0.1.2
 5. 압축해제된 확장프로그램을 로드합니다.
 6. Commerce OS Ops Center를 Ctrl+F5로 새로고침합니다.
 
-v0.1.2 변경:
-- 1688 Error 404, 상품 하차·삭제, 판매처·공장 폐업을 영구 링크 오류로 판정합니다.
+v0.1.3 변경:
+- SEO 대량등록 클라우드의 1688 수집을 별도 작은 창에서 실행할 수 있도록 안정화했습니다.
+- 1688 동적 렌더링이 늦어 상품명이 즉시 보이지 않는 경우 추가 대기 후 JSON·메타·제목 DOM을 다시 검사합니다.
+- 상품명을 끝내 읽지 못하면 브라우저 alert로 멈추지 않고 일시 오류 결과를 Commerce OS에 돌려보냅니다.
+- 고정링크 전체검사도 기존보다 긴 렌더링 대기와 추가 상품명 신호를 사용해 빈 화면 오탐을 줄였습니다.
+- Error 404, 상품 하차·삭제, 판매처·공장 폐업은 계속 영구 링크 오류로 구분합니다.
 - 로그인, 보안검증, 접속 제한, 일시적인 빈 화면은 영구 오류로 확정하지 않습니다.
-- 상품출시 진행관리에서 고정링크 1번을 한 번에 하나씩 저속 검사할 수 있습니다.
 - commerce-os-ops-center.vercel.app 기본 주소와 Commerce OS 계열 Vercel Preview 주소에서 작동합니다.
 
 수집 원칙:
