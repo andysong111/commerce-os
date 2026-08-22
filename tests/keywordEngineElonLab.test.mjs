@@ -9,6 +9,7 @@ const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.
 const moduleFile = await readFile("src/lib/keywordEngineElonLabModule.ts", "utf8");
 const manifest = await readFile("public/keyword-lab-collector/manifest.json", "utf8");
 const collector1688 = await readFile("public/keyword-lab-collector/content-1688.js", "utf8");
+const popupBridge = await readFile("src/app/keyword-engine-elon-lab/KeywordElonPopupCollectorBridge.tsx", "utf8");
 const layout = await readFile("src/app/keyword-engine-elon-lab/layout.tsx", "utf8");
 const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
 
@@ -68,11 +69,15 @@ test("API exposes V6 pipeline actions", () => {
 test("Keyword Lab collector remains dedicated and independent from AI-Saurus", () => {
   assert.match(page, /Commerce OS Keyword Lab Collector/);
   assert.match(page, /전용 수집기 ZIP 다운로드/);
-  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.2"/);
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.3"/);
   assert.match(browserImport, /commerce_os_keyword_lab_collect/);
   assert.match(manifest, /Commerce OS Keyword Lab Collector/);
   assert.match(collector1688, /extractProductName/);
   assert.match(collector1688, /extractStructuredOptionGroups/);
+  assert.match(layout, /KeywordElonPopupCollectorBridge/);
+  assert.match(popupBridge, /window\.open\(/);
+  assert.match(popupBridge, /AUDIT_RUN_KEY/);
+  assert.match(popupBridge, /stopImmediatePropagation/);
   assert.doesNotMatch(page, /AI-Saurus|SaaS 방식 자동수집/);
 });
 
