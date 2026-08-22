@@ -7,10 +7,24 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const readiness = getSeoShoplingLiveReadiness();
-  return Response.json({ ok: true, ...readiness });
+  return Response.json({
+    ok: true,
+    ...readiness,
+    productionWriteAllowed: process.env.VERCEL_ENV === "production",
+  });
 }
 
 export async function POST(request: NextRequest) {
+  if (process.env.VERCEL_ENV !== "production") {
+    return Response.json(
+      {
+        ok: false,
+        code: "SEO_SHOPLING_LIVE_PRODUCTION_ONLY",
+        message: "샵플링 실제등록은 Vercel Production에서만 실행할 수 있습니다.",
+      },
+      { status: 403 },
+    );
+  }
   const readiness = getSeoShoplingLiveReadiness();
   if (!readiness.ready) {
     return Response.json(
