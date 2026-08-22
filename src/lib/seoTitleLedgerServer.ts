@@ -110,7 +110,10 @@ export async function requireSeoTitleLedgerContext(request: Request) {
   }
   return {
     ok: true as const,
-    value: { identity: identity.value, config: config.value } satisfies SeoTitleLedgerContext,
+    value: {
+      identity: identity.value,
+      config: config.value,
+    } satisfies SeoTitleLedgerContext,
   };
 }
 
@@ -342,7 +345,7 @@ export async function insertSeoTitleDispatch(
   context: SeoTitleLedgerContext,
   row: Record<string, unknown>,
 ) {
-  const rows = await requestStorage<Array<Record<string, unknown>>(
+  const rows = await requestStorage<Array<Record<string, unknown>>>(
     context,
     "seo_title_dispatches",
     {
@@ -359,7 +362,7 @@ export async function insertSeoTitleDispatchItems(
   rows: Array<Record<string, unknown>>,
 ) {
   if (!rows.length) return [];
-  return requestStorage<Array<Record<string, unknown>>(
+  return requestStorage<Array<Record<string, unknown>>>(
     context,
     "seo_title_dispatch_items",
     {
@@ -383,7 +386,7 @@ export async function listSeoTitleDispatches(
     limit: String(Math.max(1, Math.min(200, Math.trunc(options.limit ?? 50)))),
   });
   if (options.ledgerId) params.set("ledger_id", `eq.${options.ledgerId}`);
-  const rows = await requestStorage<Array<Record<string, unknown>>(
+  const rows = await requestStorage<Array<Record<string, unknown>>>(
     context,
     `seo_title_dispatches?${params.toString()}`,
   );
@@ -401,7 +404,7 @@ export async function readSeoTitleDispatchItems(
     order: "product_group.asc,created_at.asc",
     limit: "1500",
   });
-  const rows = await requestStorage<Array<Record<string, unknown>>(
+  const rows = await requestStorage<Array<Record<string, unknown>>>(
     context,
     `seo_title_dispatch_items?${params.toString()}`,
   );
@@ -417,7 +420,7 @@ export async function patchSeoTitleDispatch(
     owner_id: `eq.${context.identity.userId}`,
     dispatch_id: `eq.${dispatchId}`,
   });
-  const rows = await requestStorage<Array<Record<string, unknown>>(
+  const rows = await requestStorage<Array<Record<string, unknown>>>(
     context,
     `seo_title_dispatches?${params.toString()}`,
     {
@@ -438,7 +441,7 @@ export async function patchSeoTitleDispatchItems(
     owner_id: `eq.${context.identity.userId}`,
     dispatch_id: `eq.${dispatchId}`,
   });
-  return requestStorage<Array<Record<string, unknown>>(
+  return requestStorage<Array<Record<string, unknown>>>(
     context,
     `seo_title_dispatch_items?${params.toString()}`,
     {
