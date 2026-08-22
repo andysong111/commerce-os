@@ -2,6 +2,9 @@ const SEO_LEDGER_ROUTE = "/keyword-engine-elon-lab";
 const NORMALIZED_ITEM_API = "/api/product-launch-tracker/normalized-optimized";
 const BUTTON_ID = "seo-title-ledger-handoff-button";
 const DATA_GROUP_ID = "bulk-action-group-data";
+const MAX_INSTALL_ATTEMPTS = 40;
+let installAttempt = 0;
+let installTimer = null;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -93,10 +96,14 @@ function showMessage(message) {
 
 function updateButton(button) {
   const selectedCount = readSelectedItemIds().length;
-  button.textContent = selectedCount === 1
+  const nextText = selectedCount === 1
     ? "선택 상품 SEO 대량등록 클라우드 열기"
     : `SEO 대량등록 클라우드 열기${selectedCount ? ` (${selectedCount})` : ""}`;
-  button.dataset.selectedCount = String(selectedCount);
+  if (button.textContent !== nextText) button.textContent = nextText;
+  const nextCount = String(selectedCount);
+  if (button.dataset.selectedCount !== nextCount) {
+    button.dataset.selectedCount = nextCount;
+  }
 }
 
 async function openLedger(button) {
@@ -140,7 +147,7 @@ function installButton() {
   const controls = document.querySelector(".bulk-controls");
   const dataGroup = document.querySelector(`#${DATA_GROUP_ID}`);
   const destination = dataGroup || controls;
-  if (!destination) return;
+  if (!destination) return false;
 
   let button = document.querySelector(`#${BUTTON_ID}`);
   if (!button) {
@@ -151,7 +158,8 @@ function installButton() {
     button.addEventListener("click", () => void openLedger(button));
   }
   if (button.parentElement !== destination) destination.append(button);
-  updateButton(button);
+  if (!button.disabled) updateButton(button);
+  return true;
 }
 
 function installStyles() {
@@ -172,20 +180,47 @@ function installStyles() {
   document.head.append(style);
 }
 
-function sync() {
+function scheduleInstall(reset = false) {
+  if (reset) installAttempt = 0;
+  if (installTimer) {
+    window.clearTimeout(installTimer);
+    installTimer = null;
+  }
   installStyles();
-  installButton();
-  const button = document.querySelector(`#${BUTTON_ID}`);
-  if (button && !button.disabled) updateButton(button);
+  if (installButton()) return;
+  if (installAttempt >= MAX_INSTALL_ATTEMPTS) return;
+  installAttempt += 1;
+  installTimer = window.setTimeout(() => scheduleInstall(false), 100);
 }
 
-sync();
-document.addEventListener("change", (event) => {
-  if (event.target instanceof Element && event.target.matches(".row-check, #select-visible")) {
-    window.setTimeout(sync, 0);
+function handleSelectionChange(event) {
+  if (
+    !(event.target instanceof Element) ||
+    !event.target.matches(".row-check, #select-visible")
+  ) {
+    return;
   }
-}, true);
-window.addEventListener("product-launch-tracker:page-loaded", sync);
-const observer = new MutationObserver(sync);
-observer.observe(document.documentElement, { childList: true, subtree: true });
-window.addEventListener("pagehide", () => observer.disconnect(), { once: true });
+  const button = document.querySelector(`#${BUTTON_ID}`);
+  if (button && !button.disabled) {
+    updateButton(button);
+    return;
+  }
+  scheduleInstall(true);
+}
+
+function handlePageLoaded() {
+  scheduleInstall(true);
+}
+
+scheduleInstall(true);
+document.addEventListener("change", handleSelectionChange, true);
+window.addEventListener("product-launch-tracker:page-loaded", handlePageLoaded);
+window.addEventListener(
+  "pagehide",
+  () => {
+    if (installTimer) window.clearTimeout(installTimer);
+    document.removeEventListener("change", handleSelectionChange, true);
+    window.removeEventListener("product-launch-tracker:page-loaded", handlePageLoaded);
+  },
+  { once: true },
+);
