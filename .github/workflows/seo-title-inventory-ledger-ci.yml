@@ -18,6 +18,7 @@ on:
       - "supabase/migrations/202608220001_seo_title_inventory_ledger.sql"
       - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
+      - "tests/seoCloudPerformance.test.mjs"
       - ".github/workflows/seo-title-inventory-ledger-ci.yml"
   workflow_dispatch:
 
@@ -52,11 +53,12 @@ jobs:
           src/lib/shoplingSeoDispatchModule.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/opsModuleRegistry.ts
-      - name: Test title inventory, no-reuse and safe dispatch contracts
+      - name: Test title inventory, no-reuse and performance contracts
         run: >-
           node --experimental-strip-types --test
           tests/seoTitleInventoryLedger.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
+          tests/seoCloudPerformance.test.mjs
       - name: Build
         run: npm run build
         env:
