@@ -1,5 +1,5 @@
-import ShoplingSeoDispatchCenter from "./ShoplingSeoDispatchCenter";
+import ShoplingSeoLiveDispatchCenter from "./ShoplingSeoLiveDispatchCenter";
 
 export default function ShoplingSeoDispatchPage() {
-  return <ShoplingSeoDispatchCenter />;
+  return <ShoplingSeoLiveDispatchCenter />;
 }
