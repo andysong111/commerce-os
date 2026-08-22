@@ -12,6 +12,10 @@ import {
   readResponseJson,
   writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
+import {
+  handleSeoShoplingProductUploadCallback,
+  readSeoBulkMetadata,
+} from "@/lib/seoShoplingUploadCallback";
 
 const JOB_TABLE = "product_launch_upload_jobs";
 const CHANNEL_KEY_BY_LABEL: Record<string, string> = {
@@ -138,6 +142,28 @@ export async function PUT(
       updated_at: completedAt,
       completed_at: completedAt,
     });
+
+    const seoBulk = readSeoBulkMetadata(job);
+    if (seoBulk) {
+      if (seoBulk.canonicalSeed && input.status === "success") {
+        await applyResultToTrackerState(config.value, job, input, completedAt);
+      }
+      const chained = await handleSeoShoplingProductUploadCallback(
+        config.value,
+        job,
+        input,
+        completedAt,
+      );
+      return Response.json({
+        ok: true,
+        jobId,
+        status: input.status,
+        completedAt,
+        seoBulk: true,
+        chained: chained.ok === true,
+      });
+    }
+
     await applyResultToTrackerState(config.value, job, input, completedAt);
     return Response.json({ ok: true, jobId, status: input.status, completedAt });
   } catch (error) {
