@@ -12,6 +12,7 @@ import {
   readProductLaunchState,
   readResponseJson,
   resolveProductLaunchIdentity,
+  type ProductLaunchAdminConfig,
 } from "@/lib/productLaunchTrackerServer";
 
 export const dynamic = "force-dynamic";
@@ -120,9 +121,7 @@ function shiftPrimaryLink(
 }
 
 async function conditionalWrite(input: {
-  config: ReturnType<typeof getProductLaunchAdminConfig> extends { ok: true; value: infer T }
-    ? T
-    : never;
+  config: ProductLaunchAdminConfig;
   ownerId: string;
   email: string;
   state: UnknownRecord;
