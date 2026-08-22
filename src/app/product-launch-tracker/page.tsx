@@ -1,6 +1,6 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
-const PRODUCT_LAUNCH_ASSET_VERSION = "20260815-bidirectional-purchase-metadata-v1";
+const PRODUCT_LAUNCH_ASSET_VERSION = "20260822-seo-title-ledger-handoff-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -28,6 +28,18 @@ export default async function ProductLaunchTrackerPage({
           상품마스터 조회와 자동화 실행을 분리해 한쪽의 지연이 다른 쪽의 화면 사용을 막지 않도록 운영합니다.
         </span>
       </section>
+
+      <div className="flex flex-col gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <strong className="block text-sm text-violet-950">SEO 상품명 재고 원장 연결</strong>
+          <span className="mt-1 block text-xs leading-5 text-violet-800">
+            목록에서 상품 한 개를 선택한 뒤 ‘SEO 원장 생성·보기’를 누르면 저장된 1688 링크로 상품명 재고 원장을 생성하거나 기존 원장을 확인합니다.
+          </span>
+        </div>
+        <a href="/shopling-seo-dispatch" className="rounded-lg bg-violet-700 px-4 py-2 text-center text-sm font-black text-white">
+          샵플링 SEO 출고센터
+        </a>
+      </div>
 
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div>
