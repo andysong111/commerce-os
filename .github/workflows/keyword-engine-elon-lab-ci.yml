@@ -19,6 +19,7 @@ on:
       - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
       - "tests/keywordEngineElonLabSeoOutput.test.mjs"
+      - "tests/productLaunchTrackerChinaLinkHealth.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
 
@@ -55,6 +56,7 @@ jobs:
           src/app/keyword-engine-elon-lab/KeywordElonStep3Expansion.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep4Filter.tsx
           src/app/keyword-engine-elon-lab/KeywordElonStep4DualFilter.tsx
+          src/lib/keywordEngineElonLabBrowserContext.ts
           src/lib/keywordEngineElonLabBrowserImport.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/keywordEngineElonLabSeoOutput.ts
@@ -85,6 +87,7 @@ jobs:
           tests/keywordEngineElonLabDiversitySupplement.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
+          tests/productLaunchTrackerChinaLinkHealth.test.mjs
       - name: Build
         run: npm run build
         env:
