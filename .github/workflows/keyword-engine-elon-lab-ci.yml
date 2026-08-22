@@ -50,6 +50,8 @@ jobs:
           src/app/keyword-engine-elon-lab/KeywordElonCollapsibleSection.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDiversitySupplement.tsx
           src/app/keyword-engine-elon-lab/KeywordElonInterruptedRunRecovery.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonLinkHealthBridge.tsx
+          src/app/keyword-engine-elon-lab/KeywordElonPopupCollectorBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonScoreFetchBridge.tsx
           src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx
           src/app/keyword-engine-elon-lab/KeywordElonShoplingSeoOutput.tsx
