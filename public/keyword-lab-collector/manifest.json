@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Keyword Lab Collector",
   "short_name": "Keyword Lab",
-  "version": "0.1.2",
-  "description": "1688 실제 렌더링 화면에서 중국 상품 정보와 고정링크 오류 상태를 읽어 Commerce OS로 전달합니다.",
+  "version": "0.1.3",
+  "description": "1688 실제 렌더링 화면에서 중국 상품 정보와 고정링크 오류 상태를 안정적으로 읽어 Commerce OS로 전달합니다.",
   "host_permissions": [
     "https://detail.1688.com/*",
     "https://*.1688.com/*",
@@ -16,7 +16,12 @@
         "https://1688.com/*",
         "https://*.1688.com/*"
       ],
-      "js": ["content-1688-health.js", "content-1688.js"],
+      "js": [
+        "content-1688-audit-v013.js",
+        "content-1688-recovery-v013.js",
+        "content-1688-health.js",
+        "content-1688.js"
+      ],
       "run_at": "document_idle"
     },
     {
