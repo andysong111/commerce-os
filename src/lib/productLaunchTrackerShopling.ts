@@ -37,6 +37,17 @@ const DEFAULT_SHIPPING_NOTICE_HTML =
 
 type UnknownRecord = Record<string, unknown>;
 
+export type ProductLaunchSeoFinal = {
+  productName: string;
+  groupProductNames: Record<string, string>;
+  searchKeywords: string[];
+  searchLine: string;
+  source: string;
+  sourceUrl: string;
+  offerId: string;
+  generatedAt: string;
+};
+
 export type ProductLaunchShoplingPayload = {
   schemaVersion: 1;
   jobRequestId: string;
@@ -44,6 +55,8 @@ export type ProductLaunchShoplingPayload = {
   modelNumber: string;
   modelName: string;
   category: string;
+  siteSearch: string;
+  seoFinal: ProductLaunchSeoFinal | null;
   detailHtml: string;
   images: {
     main: string;
@@ -100,6 +113,7 @@ export function buildProductLaunchShoplingPayload(
   const detailHtml = text(detailPage.html);
   const mainImage = text(detailPage.mainImageUrl);
   const additionalImages = stringList(detailPage.additionalImageUrls).slice(0, 10);
+  const seoFinal = normalizeSeoFinal(item.seoFinal);
   const rawOptions = Array.isArray(item.orderOptions) ? item.orderOptions : [];
   const singleOptionBarcode =
     rawOptions.length === 1
@@ -129,6 +143,20 @@ export function buildProductLaunchShoplingPayload(
   if (!detailHtml) errors.push("상세페이지 HTML이 없습니다.");
   if (!mainImage) errors.push("대표이미지가 없습니다.");
   if (!options.length) errors.push("발주·입고 옵션가격이 없습니다.");
+
+  if (seoFinal) {
+    if (!seoFinal.productName) {
+      errors.push("SEO FINAL 공통 상품명이 없습니다.");
+    }
+    if (seoFinal.searchKeywords.length !== 10) {
+      errors.push("SEO FINAL 검색어는 중복 없이 정확히 10개여야 합니다.");
+    }
+    for (const channel of PRODUCT_LAUNCH_CHANNELS) {
+      if (!seoGroupProductName(seoFinal, channel.key, channel.label)) {
+        errors.push(`SEO FINAL ${channel.label} 상품명이 없습니다.`);
+      }
+    }
+  }
 
   const seenBarcodes = new Set<string>();
   for (const option of options) {
@@ -160,6 +188,7 @@ export function buildProductLaunchShoplingPayload(
   const goodsNoticeAttributes = Object.fromEntries(
     PRODUCT_NOTICE_ATTRIBUTE_CODES.map((code) => [code, goodsNoticeValue]),
   );
+  const seoProductName = seoFinal?.productName || modelName;
 
   const channels = PRODUCT_LAUNCH_CHANNELS.map((channel) => {
     const multiplier = positiveNumber(
@@ -176,12 +205,15 @@ export function buildProductLaunchShoplingPayload(
     const orgPrice = Math.min(
       ...pricedOptions.map((option) => option.unitCostKrw),
     );
+    const seoChannelName = seoFinal
+      ? seoGroupProductName(seoFinal, channel.key, channel.label)
+      : "";
     return {
       key: channel.key,
       label: channel.label,
       ptnGoodsCd: `${selfCodeBase}${channel.suffix}`,
-      productName: `${modelName} ${channel.label}`,
-      productAbbreviation: modelName,
+      productName: seoChannelName || `${modelName} ${channel.label}`,
+      productAbbreviation: seoProductName,
       brandName:
         channel.key === "retail1"
           ? text(policy.retail1BrandName) || "동네일등"
@@ -209,6 +241,8 @@ export function buildProductLaunchShoplingPayload(
     modelNumber,
     modelName,
     category,
+    siteSearch: seoFinal?.searchLine || "",
+    seoFinal,
     detailHtml: appendShippingNotice(detailHtml, shippingNoticeHtml),
     images: { main: mainImage, additional: additionalImages },
     fixedFields: {
@@ -237,6 +271,41 @@ export function appendShippingNotice(detailHtml: string, noticeHtml: string) {
   const url = notice.match(/https?:\/\/[^'"\s>]+/)?.[0];
   if (detail.includes(notice) || (url && detail.includes(url))) return detail;
   return [detail, notice].filter(Boolean).join("\n");
+}
+
+function normalizeSeoFinal(value: unknown): ProductLaunchSeoFinal | null {
+  const source = asRecord(value);
+  if (!Object.keys(source).length) return null;
+  const groupSource = asRecord(source.groupProductNames);
+  const groupProductNames = Object.fromEntries(
+    Object.entries(groupSource)
+      .map(([key, productName]) => [key, text(productName)] as const)
+      .filter(([, productName]) => Boolean(productName)),
+  );
+  const searchKeywords = [
+    ...new Set(stringList(source.searchKeywords)),
+  ];
+  return {
+    productName: text(source.productName),
+    groupProductNames,
+    searchKeywords,
+    searchLine: searchKeywords.join(","),
+    source: text(source.source),
+    sourceUrl: text(source.sourceUrl),
+    offerId: text(source.offerId),
+    generatedAt: text(source.generatedAt),
+  };
+}
+
+function seoGroupProductName(
+  seoFinal: ProductLaunchSeoFinal,
+  channelKey: string,
+  channelLabel: string,
+) {
+  return text(
+    seoFinal.groupProductNames[channelKey]
+      ?? seoFinal.groupProductNames[channelLabel],
+  );
 }
 
 function asRecord(value: unknown): UnknownRecord {
