@@ -5,6 +5,11 @@ import { getSeoShoplingLiveReadiness } from "@/lib/seoShoplingLiveReadiness";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  const readiness = getSeoShoplingLiveReadiness();
+  return Response.json({ ok: true, ...readiness });
+}
+
 export async function POST(request: NextRequest) {
   const readiness = getSeoShoplingLiveReadiness();
   if (!readiness.ready) {
