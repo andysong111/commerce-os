@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import SeoFinalShoplingUploadPanel from "@/app/keyword-engine-elon-lab/SeoFinalShoplingUploadPanel";
+import SeoTitleCloudShoplingRunnerPanel from "./SeoTitleCloudShoplingRunnerPanel";
 
 export default function SeoTitleCloudShoplingRunnerPage() {
   return (
@@ -40,7 +40,7 @@ export default function SeoTitleCloudShoplingRunnerPage() {
         </div>
       </header>
 
-      <SeoFinalShoplingUploadPanel />
+      <SeoTitleCloudShoplingRunnerPanel />
     </main>
   );
 }
