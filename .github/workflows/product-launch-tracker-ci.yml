@@ -50,6 +50,7 @@ jobs:
           tests/productLaunchTrackerSingleRowAdd.test.mjs
           tests/productLaunchTrackerTableOps.test.mjs
           tests/productLaunchTrackerChinaProductLinks.test.mjs
+          tests/productLaunchTrackerChinaLinkHealth.test.mjs
           tests/productLaunchTrackerChinaOrderMappingActiveUi.test.mjs
           tests/productLaunchTrackerModelBcodeAuthority.test.mjs
           tests/productLaunchTrackerNormalizedCutover.test.mjs
