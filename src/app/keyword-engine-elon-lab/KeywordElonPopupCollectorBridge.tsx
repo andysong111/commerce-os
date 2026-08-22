@@ -240,6 +240,19 @@ function isCollectorActionButton(button: HTMLButtonElement) {
   return label === "FINAL RESULT 받기" || label === "1688 브라우저 자동수집";
 }
 
+function armAutoRun(url: string) {
+  window.localStorage.setItem(
+    AUTO_RUN_KEY,
+    JSON.stringify({
+      status: "armed",
+      url,
+      requestedAt: new Date().toISOString(),
+      message: "새 수집창에서 1688 원본 수집 대기",
+    }),
+  );
+  window.dispatchEvent(new StorageEvent("storage", { key: AUTO_RUN_KEY }));
+}
+
 export default function KeywordElonPopupCollectorBridge() {
   const [notice, setNotice] = useState("");
 
@@ -355,18 +368,20 @@ export default function KeywordElonPopupCollectorBridge() {
         return;
       }
 
-      const autoRun = String(button.textContent || "").includes("FINAL RESULT");
-      if (autoRun) {
-        window.localStorage.setItem(
-          AUTO_RUN_KEY,
-          JSON.stringify({
-            status: "armed",
-            url,
-            requestedAt: new Date().toISOString(),
-            message: "새 수집창에서 1688 원본 수집 대기",
-          }),
+      const returnUrl = new URL(
+        "/keyword-engine-elon-lab",
+        window.location.origin,
+      ).toString();
+      let collectionUrl = "";
+      try {
+        collectionUrl = buildKeywordElonBrowserImportUrl(url, returnUrl);
+      } catch (error) {
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "1688 새 수집창 주소를 만들지 못했습니다.",
         );
-        window.dispatchEvent(new StorageEvent("storage", { key: AUTO_RUN_KEY }));
+        return;
       }
 
       const popup = window.open(
@@ -381,17 +396,17 @@ export default function KeywordElonPopupCollectorBridge() {
         return;
       }
 
+      const autoRun = String(button.textContent || "").includes("FINAL RESULT");
+      if (autoRun) armAutoRun(url);
+
       try {
-        const returnUrl = new URL(
-          "/keyword-engine-elon-lab",
-          window.location.origin,
-        ).toString();
-        popup.location.replace(buildKeywordElonBrowserImportUrl(url, returnUrl));
+        popup.location.replace(collectionUrl);
         setNotice(
           "1688 원본을 새 수집창에서 확인하고 있습니다. 현재 SEO 대량등록 클라우드 화면은 그대로 유지됩니다.",
         );
       } catch (error) {
         popup.close();
+        if (autoRun) window.localStorage.removeItem(AUTO_RUN_KEY);
         setNotice(
           error instanceof Error
             ? error.message
