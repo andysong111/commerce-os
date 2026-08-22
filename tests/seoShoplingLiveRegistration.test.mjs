@@ -5,6 +5,7 @@ import test from "node:test";
 const liveLib = readFileSync("src/lib/seoShoplingLiveRegistration.ts", "utf8");
 const liveRouteAlias = readFileSync("src/app/api/seo-title-dispatch/live-register/route.ts", "utf8");
 const liveRoute = readFileSync("src/app/api/seo-title-dispatch/live-register-v2/route.ts", "utf8");
+const readiness = readFileSync("src/lib/seoShoplingLiveReadiness.ts", "utf8");
 const prepared = readFileSync("src/lib/seoShoplingDirectPrepared.ts", "utf8");
 const callbackAlias = readFileSync("src/lib/seoShoplingUploadCallback.ts", "utf8");
 const callback = readFileSync("src/lib/seoShoplingUploadCallbackV2.ts", "utf8");
@@ -13,6 +14,7 @@ const cron = readFileSync("src/app/api/cron/seo-shopling-live-registration/route
 const ui = readFileSync("src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx", "utf8");
 const page = readFileSync("src/app/shopling-seo-dispatch/page.tsx", "utf8");
 const moduleSource = readFileSync("src/lib/shoplingSeoDispatchModule.ts", "utf8");
+const migration = readFileSync("supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql", "utf8");
 const vercel = readFileSync("vercel.json", "utf8");
 
 test("one user action is hard-limited to one full-market round and 29 title reservations", () => {
@@ -26,6 +28,20 @@ test("one user action is hard-limited to one full-market round and 29 title rese
   assert.match(liveRouteAlias, /live-register-v2/);
 });
 
+test("actual external writes are production-only and all required integrations are checked before starting", () => {
+  assert.match(liveRouteAlias, /VERCEL_ENV !== "production"/);
+  assert.match(liveRouteAlias, /SEO_SHOPLING_LIVE_PRODUCTION_ONLY/);
+  assert.match(liveRouteAlias, /getSeoShoplingLiveReadiness/);
+  assert.match(liveRouteAlias, /SEO_SHOPLING_LIVE_NOT_READY/);
+  assert.match(readiness, /SHOPLING_UPLOAD_REPO/);
+  assert.match(readiness, /GITHUB_ACTIONS_TOKEN/);
+  assert.match(readiness, /PRODUCT_LAUNCH_UPLOAD_SECRET/);
+  assert.match(readiness, /KEYWORD_SHOPLING_APPLY_ACTIONS_TOKEN/);
+  assert.match(readiness, /KEYWORD_SHOPLING_APPLY_ENABLED=1/);
+  assert.match(readiness, /CRON_SECRET/);
+  assert.match(prepared, /KEYWORD_SHOPLING_APPLY_ENABLED/);
+});
+
 test("repeated registrations never overwrite canonical six goods keys", () => {
   assert.match(liveRoute, /canonicalMode === "complete" && usedCount === 0/);
   assert.match(liveRoute, /"apply_existing_first"/);
@@ -36,6 +52,13 @@ test("repeated registrations never overwrite canonical six goods keys", () => {
   assert.match(liveLib, /-S\$\{token\}\$\{channelSuffix\}/);
   assert.match(uploadCallbackRoute, /if \(seoBulk\.canonicalSeed && input\.status === "success"\)/);
   assert.doesNotMatch(uploadCallbackRoute, /if \(seoBulk\) \{\s*await applyResultToTrackerState/);
+});
+
+test("same ledger cannot start two active dispatches even from concurrent browser tabs", () => {
+  assert.match(migration, /create unique index if not exists seo_title_dispatches_one_active_per_ledger_idx/);
+  assert.match(migration, /owner_id, ledger_id/);
+  assert.match(migration, /status in \('reserved', 'ready', 'submitted'\)/);
+  assert.match(liveRoute, /SEO_TITLE_ACTIVE_DISPATCH_EXISTS/);
 });
 
 test("six base products are followed by 29 mall title and common-search writes", () => {
