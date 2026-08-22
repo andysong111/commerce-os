@@ -17,6 +17,11 @@ export function prepareSeoShoplingDirectApply(
   items: unknown,
   goodsKeys: SeoShoplingGoodsKeys,
 ): PreparedSeoShoplingDirectApply {
+  if (process.env.KEYWORD_SHOPLING_APPLY_ENABLED?.trim() !== "1") {
+    throw new Error(
+      "KEYWORD_SHOPLING_APPLY_ENABLED=1인 Production에서만 쇼핑몰별 상품명·검색어 실제 반영을 실행할 수 있습니다.",
+    );
+  }
   const plan = buildSeoShoplingDirectPlan(items, goodsKeys);
   const request = buildKeywordShoplingDirectApplyDispatch({
     execution_plan_json: JSON.stringify(plan),
