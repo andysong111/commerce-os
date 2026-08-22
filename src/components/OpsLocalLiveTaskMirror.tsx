@@ -327,6 +327,7 @@ export function OpsLocalLiveTaskMirror() {
 
     const sync = () => {
       if (stopped) return;
+      if (timer !== null) window.clearTimeout(timer);
       const now = Date.now();
       const next = [readKeywordTask(now), readAuditTask(now)].filter(
         (task): task is LiveTask => Boolean(task),
@@ -348,7 +349,7 @@ export function OpsLocalLiveTaskMirror() {
     const onKeywordUpdate = () => sync();
     const onFocus = () => sync();
 
-    sync();
+    timer = window.setTimeout(sync, 0);
     window.addEventListener("storage", onStorage);
     window.addEventListener("keyword-elon-session-updated", onKeywordUpdate);
     window.addEventListener("focus", onFocus);
