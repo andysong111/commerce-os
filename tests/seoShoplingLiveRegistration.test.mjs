@@ -16,6 +16,7 @@ const page = readFileSync("src/app/shopling-seo-dispatch/page.tsx", "utf8");
 const moduleSource = readFileSync("src/lib/shoplingSeoDispatchModule.ts", "utf8");
 const activeMigration = readFileSync("supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql", "utf8");
 const claimMigration = readFileSync("supabase/migrations/20260823071600_seo_shopling_direct_apply_atomic_claim.sql", "utf8");
+const uncertainClaimMigration = readFileSync("supabase/migrations/20260823071700_seo_shopling_direct_apply_claim_start_uncertain.sql", "utf8");
 const vercel = readFileSync("vercel.json", "utf8");
 
 test("one user action is hard-limited to one full-market round and 29 title reservations", () => {
@@ -66,6 +67,7 @@ test("replayed product-upload callbacks atomically claim direct apply only once"
   assert.match(claimMigration, /claim_seo_title_dispatch_direct_apply/);
   assert.match(claimMigration, /status = 'submitted'/);
   assert.match(claimMigration, /base_upload_queued/);
+  assert.match(uncertainClaimMigration, /start_uncertain/);
   assert.match(callback, /claim_seo_title_dispatch_direct_apply/);
   assert.match(callback, /if \(!claimed\)/);
   assert.match(callback, /duplicateCallback: true/);
@@ -99,6 +101,15 @@ test("external request ids are persisted before direct writes and started work n
   assert.match(liveRoute, /SEO_SHOPLING_LIVE_START_UNCERTAIN/);
   assert.match(liveRoute, /재실행하지 마세요/);
   assert.match(callback, /phase: "direct_apply_dispatching"/);
+});
+
+test("uncertain handoffs are recoverable without treating product-upload request IDs as direct apply", () => {
+  assert.match(cron, /"start_uncertain"/);
+  assert.match(cron, /DIRECT_APPLY_REQUEST_ID = \/\^direct-apply-/);
+  assert.match(cron, /phase === "start_uncertain" && !DIRECT_APPLY_REQUEST_ID\.test\(requestId\)/);
+  assert.match(cron, /waiting_product_upload_callback/);
+  assert.match(uncertainClaimMigration, /base_upload_queued/);
+  assert.match(uncertainClaimMigration, /start_uncertain/);
 });
 
 test("failed review finalization stays nonterminal until cron successfully quarantines titles", () => {
