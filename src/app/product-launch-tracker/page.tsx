@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260815-bidirectional-purchase-metadata-v1-seo-bulk-cloud-v2";
+  "20260815-bidirectional-purchase-metadata-v1-seo-bulk-cloud-v3-perf";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
