@@ -19,7 +19,9 @@ const DIRECT_APPLY_PHASES = new Set([
   "direct_apply_dispatching",
   "direct_apply_queued",
   "direct_apply_running",
+  "start_uncertain",
 ]);
+const DIRECT_APPLY_REQUEST_ID = /^direct-apply-/;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -132,6 +134,13 @@ export async function GET(request: Request) {
         dispatchId,
         status: "retry",
         message: "direct apply request ID를 기다리고 있습니다.",
+      });
+      continue;
+    }
+    if (phase === "start_uncertain" && !DIRECT_APPLY_REQUEST_ID.test(requestId)) {
+      results.push({
+        dispatchId,
+        status: "waiting_product_upload_callback",
       });
       continue;
     }
