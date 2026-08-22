@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260823-seo-cloud-popup-audit-status-v1";
+  "20260815-bidirectional-purchase-metadata-v1-seo-bulk-cloud-v3-perf-primary-link-health-v1-20260823-seo-cloud-popup-audit-status-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
