@@ -48,52 +48,57 @@ export default function SeoTitleLedgerLaunchHandoff() {
   const [context, setContext] = useState<SeoTitleLedgerLaunchContext | null>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sourceUrl = text(params.get("sourceUrl"));
-    const launchItemId = text(params.get("launchItemId"));
-    const modelNumber = text(params.get("modelNumber"));
-    const trackerRow = Number(params.get("trackerRowNumber"));
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const sourceUrl = text(params.get("sourceUrl"));
+      const launchItemId = text(params.get("launchItemId"));
+      const modelNumber = text(params.get("modelNumber"));
+      const trackerRow = Number(params.get("trackerRowNumber"));
 
-    if (!sourceUrl || !validate1688Url(sourceUrl)) {
-      setContext(readSeoTitleLedgerLaunchContext());
-      return;
-    }
+      if (!sourceUrl || !validate1688Url(sourceUrl)) {
+        setContext(readSeoTitleLedgerLaunchContext());
+        return;
+      }
 
-    const nextContext: SeoTitleLedgerLaunchContext = {
-      launchItemId,
-      trackerRowNumber:
-        Number.isSafeInteger(trackerRow) && trackerRow > 0 ? trackerRow : null,
-      modelNumber,
-      sourceUrl,
-      handedOffAt: new Date().toISOString(),
-    };
-    window.localStorage.setItem(
-      SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY,
-      JSON.stringify(nextContext),
-    );
-
-    const current = readSession();
-    const currentOffer = current?.source.offerId || parse1688OfferId(current?.source.url || "");
-    const nextOffer = parse1688OfferId(sourceUrl);
-    if (!current || !currentOffer || currentOffer !== nextOffer) {
-      const session = emptyKeywordElonSession();
-      session.source = {
-        ...session.source,
-        url: sourceUrl,
-        offerId: nextOffer,
-        autoStatus: "idle",
+      const nextContext: SeoTitleLedgerLaunchContext = {
+        launchItemId,
+        trackerRowNumber:
+          Number.isSafeInteger(trackerRow) && trackerRow > 0 ? trackerRow : null,
+        modelNumber,
+        sourceUrl,
+        handedOffAt: new Date().toISOString(),
       };
-      session.lastMessage = modelNumber
-        ? `${modelNumber} 상품의 1688 링크를 상품출시 진행관리에서 불러왔습니다. FINAL RESULT 받기를 눌러 원장 재료를 생성하세요.`
-        : "상품출시 진행관리의 1688 링크를 불러왔습니다. FINAL RESULT 받기를 눌러 원장 재료를 생성하세요.";
-      session.updatedAt = new Date().toISOString();
       window.localStorage.setItem(
-        KEYWORD_ELON_V2_STORAGE_KEY,
-        JSON.stringify(session),
+        SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY,
+        JSON.stringify(nextContext),
       );
-      window.dispatchEvent(new CustomEvent("keyword-elon-session-updated"));
-    }
-    setContext(nextContext);
+
+      const current = readSession();
+      const currentOffer =
+        current?.source.offerId || parse1688OfferId(current?.source.url || "");
+      const nextOffer = parse1688OfferId(sourceUrl);
+      if (!current || !currentOffer || currentOffer !== nextOffer) {
+        const session = emptyKeywordElonSession();
+        session.source = {
+          ...session.source,
+          url: sourceUrl,
+          offerId: nextOffer,
+          autoStatus: "idle",
+        };
+        session.lastMessage = modelNumber
+          ? `${modelNumber} 상품의 1688 링크를 상품출시 진행관리에서 불러왔습니다. FINAL RESULT 받기를 눌러 원장 재료를 생성하세요.`
+          : "상품출시 진행관리의 1688 링크를 불러왔습니다. FINAL RESULT 받기를 눌러 원장 재료를 생성하세요.";
+        session.updatedAt = new Date().toISOString();
+        window.localStorage.setItem(
+          KEYWORD_ELON_V2_STORAGE_KEY,
+          JSON.stringify(session),
+        );
+        window.dispatchEvent(new CustomEvent("keyword-elon-session-updated"));
+      }
+      setContext(nextContext);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   if (!context?.sourceUrl) return null;
