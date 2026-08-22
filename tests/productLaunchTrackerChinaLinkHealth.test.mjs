@@ -55,6 +55,14 @@ test("링크 검사는 페이지 로딩과 분리된 단일창 저속 배치 방
   assert.match(handoff, /import\("\.\/china-link-health-panel\.js"\)/);
 });
 
+test("상품출시 iframe은 상위 Ops 문서의 Collector 버전을 재사용한다", async () => {
+  const panel = await read("public/product-launch-tracker-app/china-link-health-panel.js");
+  assert.match(panel, /window\.parent\.document\.documentElement\.dataset/);
+  assert.match(panel, /parentCollectorDocument\.addEventListener/);
+  assert.match(panel, /commerce-os-keyword-lab-collector-ready/);
+  assert.match(panel, /parentCollectorDocument\?\.removeEventListener/);
+});
+
 test("Collector는 영구 링크 오류와 일시적 접속 문제를 분리한다", async () => {
   const health = await read("public/keyword-lab-collector/content-1688-health.js");
   const manifest = JSON.parse(
