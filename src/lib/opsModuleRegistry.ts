@@ -4,6 +4,7 @@ import { DETAIL_PAGE_V3_BASELINE_NOTE } from "@/lib/detailPageV3ProductionBaseli
 import { extendedModuleRegistry } from "@/lib/extendedModuleRegistry";
 import { fastPurchaseMvpModule } from "@/lib/fastPurchaseMvpModule";
 import { keywordEngineElonLabModule } from "@/lib/keywordEngineElonLabModule";
+import { seoTitleCloudShoplingRunnerModule } from "@/lib/seoTitleCloudShoplingRunnerModule";
 import { shoplingSeoDispatchModule } from "@/lib/shoplingSeoDispatchModule";
 import type { CommerceModule } from "@/lib/moduleRegistry";
 
@@ -51,6 +52,7 @@ const isolatedBaseModules: readonly CommerceModule[] = extendedModuleRegistry.ma
 export const opsModuleRegistry: readonly CommerceModule[] = [
   ...isolatedBaseModules,
   keywordEngineElonLabModule,
+  seoTitleCloudShoplingRunnerModule,
   shoplingSeoDispatchModule,
   fastPurchaseMvpModule,
   detailPageSaasTestModule,
