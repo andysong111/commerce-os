@@ -65,7 +65,7 @@ export async function handleSeoShoplingProductUploadCallback(
   const context: SeoTitleLedgerContext = { config, identity };
   const items = await readSeoTitleDispatchItems(context, meta.dispatchId);
   if (items.length !== 29) {
-    await failDispatch(
+    await quarantineDispatch(
       context,
       meta,
       "예약된 전체몰 상품명이 29개가 아니어서 실제 반영을 중단했습니다.",
@@ -76,10 +76,11 @@ export async function handleSeoShoplingProductUploadCallback(
   }
 
   if (input.status !== "success") {
-    await failDispatch(
+    await quarantineDispatch(
       context,
       meta,
-      input.errorMessage || "샵플링 기본상품 6개 신규등록이 모두 성공하지 않아 SEO 반영을 중단했습니다.",
+      input.errorMessage ||
+        "샵플링 기본상품 6개 신규등록이 모두 성공하지 않아 SEO 반영을 중단했습니다.",
       completedAt,
       "",
     );
@@ -87,6 +88,7 @@ export async function handleSeoShoplingProductUploadCallback(
   }
 
   let requestId = "";
+  let claimed = false;
   try {
     const goodsKeys = extractSeoShoplingGoodsKeys(input.rows);
     for (const group of SEO_SHOPLING_GROUPS) {
@@ -98,25 +100,39 @@ export async function handleSeoShoplingProductUploadCallback(
     const refreshedItems = await readSeoTitleDispatchItems(context, meta.dispatchId);
     const prepared = prepareSeoShoplingDirectApply(refreshedItems, goodsKeys);
     requestId = prepared.requestId;
+    const claimPayload = {
+      pipelineVersion: meta.pipelineVersion,
+      phase: "direct_apply_dispatching",
+      canonicalSeed: meta.canonicalSeed,
+      productUploadJobId: text(job.id),
+      productUploadRequestId: text(job.request_id),
+      productUploadStatus: input.status,
+      createdGoodsKeys: goodsKeys,
+      directApplyRequestId: prepared.requestId,
+      directApplyRunUrl: prepared.githubActionsUrl,
+      externalWriteExecuted: true,
+      updatedAt: completedAt,
+    };
+    claimed =
+      (await callSeoTitleRpc<boolean>(
+        context,
+        "claim_seo_title_dispatch_direct_apply",
+        {
+          p_owner_id: context.identity.userId,
+          p_dispatch_id: meta.dispatchId,
+          p_request_id: prepared.requestId,
+          p_result_payload: claimPayload,
+        },
+      )) === true;
 
-    await patchSeoTitleDispatch(context, meta.dispatchId, {
-      status: "submitted",
-      external_request_id: prepared.requestId,
-      submitted_at: completedAt,
-      result_payload: {
-        pipelineVersion: meta.pipelineVersion,
-        phase: "direct_apply_dispatching",
-        canonicalSeed: meta.canonicalSeed,
-        productUploadJobId: text(job.id),
-        productUploadRequestId: text(job.request_id),
-        productUploadStatus: input.status,
-        createdGoodsKeys: goodsKeys,
-        directApplyRequestId: prepared.requestId,
-        directApplyRunUrl: prepared.githubActionsUrl,
-        externalWriteExecuted: true,
-        updatedAt: completedAt,
-      },
-    });
+    if (!claimed) {
+      return {
+        handled: true as const,
+        ok: true as const,
+        duplicateCallback: true as const,
+        directApplyRequestId: "",
+      };
+    }
 
     const apply = await dispatchPreparedSeoShoplingDirectApply(prepared);
     await patchSeoTitleDispatch(context, meta.dispatchId, {
@@ -124,13 +140,8 @@ export async function handleSeoShoplingProductUploadCallback(
       external_request_id: apply.requestId,
       submitted_at: completedAt,
       result_payload: {
-        pipelineVersion: meta.pipelineVersion,
+        ...claimPayload,
         phase: "direct_apply_queued",
-        canonicalSeed: meta.canonicalSeed,
-        productUploadJobId: text(job.id),
-        productUploadRequestId: text(job.request_id),
-        productUploadStatus: input.status,
-        createdGoodsKeys: goodsKeys,
         directApplyRequestId: apply.requestId,
         directApplyRunUrl: apply.runUrl || apply.githubActionsUrl || "",
         externalWriteExecuted: true,
@@ -144,18 +155,37 @@ export async function handleSeoShoplingProductUploadCallback(
       directApplyRequestId: apply.requestId,
     };
   } catch (error) {
-    await failDispatch(
-      context,
-      meta,
-      error instanceof Error ? error.message : "쇼핑몰별 상품명·검색어 반영을 시작하지 못했습니다.",
-      completedAt,
-      requestId,
-    );
+    const message =
+      error instanceof Error
+        ? error.message
+        : "쇼핑몰별 상품명·검색어 반영을 시작하지 못했습니다.";
+    if (claimed && requestId) {
+      await patchSeoTitleDispatch(context, meta.dispatchId, {
+        status: "submitted",
+        external_request_id: requestId,
+        result_payload: {
+          pipelineVersion: meta.pipelineVersion,
+          phase: "direct_apply_dispatching",
+          canonicalSeed: meta.canonicalSeed,
+          directApplyRequestId: requestId,
+          dispatchWarning: message,
+          externalWriteExecuted: true,
+          updatedAt: completedAt,
+        },
+      }).catch(() => null);
+      return {
+        handled: true as const,
+        ok: false as const,
+        uncertain: true as const,
+        directApplyRequestId: requestId,
+      };
+    }
+    await quarantineDispatch(context, meta, message, completedAt, requestId);
     return { handled: true as const, ok: false as const };
   }
 }
 
-async function failDispatch(
+async function quarantineDispatch(
   context: SeoTitleLedgerContext,
   meta: {
     dispatchId: string;
@@ -167,16 +197,49 @@ async function failDispatch(
   completedAt: string,
   directApplyRequestId: string,
 ) {
-  await callSeoTitleRpc<number>(context, "finalize_seo_title_reservation", {
-    p_owner_id: context.identity.userId,
-    p_reservation_id: meta.reservationId,
-    p_dispatch_id: meta.dispatchId,
-    p_success: false,
-  }).catch(() => null);
+  try {
+    await callSeoTitleRpc<number>(context, "finalize_seo_title_reservation", {
+      p_owner_id: context.identity.userId,
+      p_reservation_id: meta.reservationId,
+      p_dispatch_id: meta.dispatchId,
+      p_success: false,
+    });
+  } catch (finalizationError) {
+    const finalizationMessage =
+      finalizationError instanceof Error
+        ? finalizationError.message
+        : "상품명 review 격리 처리에 실패했습니다.";
+    await Promise.all([
+      patchSeoTitleDispatch(context, meta.dispatchId, {
+        status: "submitted",
+        ...(directApplyRequestId
+          ? { external_request_id: directApplyRequestId }
+          : {}),
+        result_payload: {
+          pipelineVersion: meta.pipelineVersion,
+          phase: "review_finalization_pending",
+          canonicalSeed: meta.canonicalSeed,
+          directApplyRequestId,
+          error: message,
+          finalizationError: finalizationMessage,
+          externalWriteExecuted: true,
+          updatedAt: completedAt,
+        },
+      }),
+      patchSeoTitleDispatchItems(context, meta.dispatchId, {
+        status: "submitted",
+        error_message: message,
+      }),
+    ]);
+    return false;
+  }
+
   await Promise.all([
     patchSeoTitleDispatch(context, meta.dispatchId, {
       status: "failed",
-      ...(directApplyRequestId ? { external_request_id: directApplyRequestId } : {}),
+      ...(directApplyRequestId
+        ? { external_request_id: directApplyRequestId }
+        : {}),
       completed_at: completedAt,
       result_payload: {
         pipelineVersion: meta.pipelineVersion,
@@ -193,4 +256,5 @@ async function failDispatch(
       error_message: message,
     }),
   ]);
+  return true;
 }
