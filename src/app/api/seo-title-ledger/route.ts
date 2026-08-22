@@ -73,28 +73,28 @@ function stringArray(value: unknown, limit = 500) {
 
 function keywordMaterials(value: unknown): SeoTitleKeywordMaterial[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => {
-      const row = record(item);
-      const keyword = text(row.keyword);
-      if (!keyword) return null;
-      return {
-        keyword,
-        score: Number(row.score) || 0,
-        relevance: Number(row.relevance) || 0,
-        shoppingIntent: Number(row.shoppingIntent) || 0,
-        specificity: Number(row.specificity) || 0,
-        qualityScore: Number(row.qualityScore) || 0,
-        demandScore: Number(row.demandScore) || 0,
-        totalSearch:
-          row.totalSearch === null || row.totalSearch === undefined
-            ? null
-            : Number(row.totalSearch),
-        origin: text(row.origin),
-        sourceMaterials: stringArray(row.sourceMaterials, 4),
-      } satisfies SeoTitleKeywordMaterial;
-    })
-    .filter((row): row is SeoTitleKeywordMaterial => Boolean(row));
+  const output: SeoTitleKeywordMaterial[] = [];
+  for (const item of value) {
+    const row = record(item);
+    const keyword = text(row.keyword);
+    if (!keyword) continue;
+    output.push({
+      keyword,
+      score: Number(row.score) || 0,
+      relevance: Number(row.relevance) || 0,
+      shoppingIntent: Number(row.shoppingIntent) || 0,
+      specificity: Number(row.specificity) || 0,
+      qualityScore: Number(row.qualityScore) || 0,
+      demandScore: Number(row.demandScore) || 0,
+      totalSearch:
+        row.totalSearch === null || row.totalSearch === undefined
+          ? null
+          : Number(row.totalSearch),
+      origin: text(row.origin),
+      sourceMaterials: stringArray(row.sourceMaterials, 4),
+    });
+  }
+  return output;
 }
 
 function resolveLedgerKey(input: {
