@@ -11,6 +11,8 @@ import {
 
 export const SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY =
   "commerceOs.seoTitleLedger.launchContext.v1";
+export const SEO_TITLE_LEDGER_LAUNCH_CONTEXT_EVENT =
+  "seo-title-ledger-launch-context-updated";
 
 export type SeoTitleLedgerLaunchContext = {
   launchItemId: string;
@@ -71,6 +73,9 @@ export default function SeoTitleLedgerLaunchHandoff() {
       window.localStorage.setItem(
         SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY,
         JSON.stringify(nextContext),
+      );
+      window.dispatchEvent(
+        new CustomEvent(SEO_TITLE_LEDGER_LAUNCH_CONTEXT_EVENT),
       );
 
       const current = readSession();

@@ -11,6 +11,8 @@ import {
   type KeywordElonSeoModelPackage,
 } from "@/lib/keywordEngineElonLabSeoModelOutput";
 import {
+  SEO_TITLE_LEDGER_LAUNCH_CONTEXT_EVENT,
+  SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY,
   readSeoTitleLedgerLaunchContext,
   type SeoTitleLedgerLaunchContext,
 } from "./SeoTitleLedgerLaunchHandoff";
@@ -139,11 +141,16 @@ export default function SeoTitleLedgerControlPanel() {
   useEffect(() => {
     let lastSession = "";
     let lastCustom = "";
+    let lastContext = "";
+
     const sync = () => {
       const rawSession =
         window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY) || "";
       const rawCustom =
         window.localStorage.getItem(CUSTOM_BLOCKED_STORAGE_KEY) || "";
+      const rawContext =
+        window.localStorage.getItem(SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY) || "";
+
       if (rawSession !== lastSession) {
         lastSession = rawSession;
         setSession(readSession());
@@ -152,16 +159,34 @@ export default function SeoTitleLedgerControlPanel() {
         lastCustom = rawCustom;
         setCustomTerms(readCustomBlockedTerms());
       }
-      setLaunchContext(readSeoTitleLedgerLaunchContext());
+      if (rawContext !== lastContext) {
+        lastContext = rawContext;
+        setLaunchContext(readSeoTitleLedgerLaunchContext());
+      }
     };
-    sync();
-    const timer = window.setInterval(sync, 600);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (
+        event.key === KEYWORD_ELON_V2_STORAGE_KEY ||
+        event.key === CUSTOM_BLOCKED_STORAGE_KEY ||
+        event.key === SEO_TITLE_LEDGER_LAUNCH_CONTEXT_KEY
+      ) {
+        sync();
+      }
+    };
+
+    const frame = window.requestAnimationFrame(sync);
     window.addEventListener("keyword-elon-session-updated", sync);
     window.addEventListener("keyword-elon-step4-custom-terms-updated", sync);
+    window.addEventListener(SEO_TITLE_LEDGER_LAUNCH_CONTEXT_EVENT, sync);
+    window.addEventListener("storage", handleStorage);
+
     return () => {
-      window.clearInterval(timer);
+      window.cancelAnimationFrame(frame);
       window.removeEventListener("keyword-elon-session-updated", sync);
       window.removeEventListener("keyword-elon-step4-custom-terms-updated", sync);
+      window.removeEventListener(SEO_TITLE_LEDGER_LAUNCH_CONTEXT_EVENT, sync);
+      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
@@ -172,8 +197,15 @@ export default function SeoTitleLedgerControlPanel() {
 
   const refreshLedger = useCallback(async () => {
     if (!session?.source.url) return;
+    const lookupKey = session.source.offerId || launchContext?.modelNumber || "";
+    if (!lookupKey) return;
+
     try {
-      const response = await fetch("/api/seo-title-ledger?limit=200", {
+      const query = new URLSearchParams({
+        search: lookupKey,
+        limit: "5",
+      });
+      const response = await fetch(`/api/seo-title-ledger?${query.toString()}`, {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
@@ -192,7 +224,7 @@ export default function SeoTitleLedgerControlPanel() {
         );
       }
     } catch {
-      // Ledger list is supplementary; current keyword work remains usable.
+      // Ledger lookup is supplementary; current keyword work remains usable.
     }
   }, [launchContext, session]);
 
