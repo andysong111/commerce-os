@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const liveLib = readFileSync("src/lib/seoShoplingLiveRegistration.ts", "utf8");
-const liveRoute = readFileSync("src/app/api/seo-title-dispatch/live-register/route.ts", "utf8");
-const callback = readFileSync("src/lib/seoShoplingUploadCallback.ts", "utf8");
+const liveRouteAlias = readFileSync("src/app/api/seo-title-dispatch/live-register/route.ts", "utf8");
+const liveRoute = readFileSync("src/app/api/seo-title-dispatch/live-register-v2/route.ts", "utf8");
+const prepared = readFileSync("src/lib/seoShoplingDirectPrepared.ts", "utf8");
+const callbackAlias = readFileSync("src/lib/seoShoplingUploadCallback.ts", "utf8");
+const callback = readFileSync("src/lib/seoShoplingUploadCallbackV2.ts", "utf8");
 const uploadCallbackRoute = readFileSync("src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts", "utf8");
 const cron = readFileSync("src/app/api/cron/seo-shopling-live-registration/route.ts", "utf8");
 const ui = readFileSync("src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx", "utf8");
@@ -20,6 +23,7 @@ test("one user action is hard-limited to one full-market round and 29 title rese
   assert.match(ui, /전체몰 1회 · 상품명 29개/);
   assert.match(ui, /실제 샵플링 등록 1회/);
   assert.doesNotMatch(ui, /이번 전체몰 출고 횟수/);
+  assert.match(liveRouteAlias, /live-register-v2/);
 });
 
 test("repeated registrations never overwrite canonical six goods keys", () => {
@@ -38,10 +42,29 @@ test("six base products are followed by 29 mall title and common-search writes",
   assert.match(liveLib, /createSeoShoplingProductUploadJob/);
   assert.match(liveLib, /shopling-product-launch-upload\.yml/);
   assert.match(callback, /extractSeoShoplingGoodsKeys/);
-  assert.match(callback, /dispatchSeoShoplingDirectApply/);
+  assert.match(callback, /prepareSeoShoplingDirectApply/);
+  assert.match(callback, /dispatchPreparedSeoShoplingDirectApply/);
   assert.match(liveLib, /plan\.length !== 29/);
   assert.match(liveLib, /final_site_srch: finalSiteSrch/);
   assert.match(liveLib, /final_title: finalTitle/);
+  assert.match(callbackAlias, /seoShoplingUploadCallbackV2/);
+});
+
+test("external request ids are persisted before direct writes and started work never releases inventory", () => {
+  assert.match(prepared, /buildKeywordShoplingDirectApplyDispatch/);
+  assert.match(prepared, /dispatchPreparedSeoShoplingDirectApply/);
+  assert.ok(
+    liveRoute.indexOf("external_request_id: prepared.requestId") <
+      liveRoute.indexOf("dispatchPreparedSeoShoplingDirectApply(prepared)"),
+  );
+  assert.match(liveRoute, /let externalWriteStarted = false/);
+  assert.match(liveRoute, /if \(reservationCreated && !externalWriteStarted\)/);
+  assert.match(liveRoute, /SEO_SHOPLING_LIVE_START_UNCERTAIN/);
+  assert.match(liveRoute, /재실행하지 마세요/);
+  assert.ok(
+    callback.indexOf("external_request_id: prepared.requestId") <
+      callback.indexOf("dispatchPreparedSeoShoplingDirectApply(prepared)"),
+  );
 });
 
 test("titles are consumed only after strict direct-apply success and uncertain results go to review", () => {
