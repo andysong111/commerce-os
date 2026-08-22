@@ -5,6 +5,7 @@ const DATA_GROUP_ID = "bulk-action-group-data";
 const MAX_INSTALL_ATTEMPTS = 40;
 let installAttempt = 0;
 let installTimer = null;
+let healthPanelScheduled = false;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -193,6 +194,21 @@ function scheduleInstall(reset = false) {
   installTimer = window.setTimeout(() => scheduleInstall(false), 100);
 }
 
+function scheduleHealthPanel() {
+  if (healthPanelScheduled) return;
+  healthPanelScheduled = true;
+  const load = () => {
+    void import("./china-link-health-panel.js").catch((error) => {
+      console.error("China primary link health panel failed to load", error);
+    });
+  };
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(load, { timeout: 2_000 });
+  } else {
+    window.setTimeout(load, 700);
+  }
+}
+
 function handleSelectionChange(event) {
   if (
     !(event.target instanceof Element) ||
@@ -213,6 +229,7 @@ function handlePageLoaded() {
 }
 
 scheduleInstall(true);
+scheduleHealthPanel();
 document.addEventListener("change", handleSelectionChange, true);
 window.addEventListener("product-launch-tracker:page-loaded", handlePageLoaded);
 window.addEventListener(

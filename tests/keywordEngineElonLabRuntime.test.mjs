@@ -17,6 +17,7 @@ const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
 const demandSummary = await readFile("src/app/keyword-engine-elon-lab/KeywordElonDemandSummary.tsx", "utf8");
+const collectorHealthPath = "public/keyword-lab-collector/content-1688-health.js";
 const collector1688Path = "public/keyword-lab-collector/content-1688.js";
 const collectorOpsPath = "public/keyword-lab-collector/content-ops.js";
 const collector1688 = await readFile(collector1688Path, "utf8");
@@ -37,16 +38,21 @@ test("dedicated collector remains independent from detail-page SaaS", () => {
   assert.doesNotMatch(browserImport, /AI-Saurus/);
 });
 
-test("collector v0.1.1 still supports canonical and Vercel deployment URLs", () => {
-  assert.equal(collectorManifest.version, "0.1.1");
+test("collector v0.1.2 supports canonical and Vercel URLs plus 1688 link health", () => {
+  assert.equal(collectorManifest.version, "0.1.2");
   assert.ok(collectorManifest.host_permissions.includes("https://*.vercel.app/*"));
+  assert.deepEqual(collectorManifest.content_scripts[0].js.slice(0, 2), [
+    "content-1688-health.js",
+    "content-1688.js",
+  ]);
   assert.match(collectorOps, /commerceOsKeywordLabCollectorVersion/);
-  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.1"/);
-  for (const path of [collector1688Path, collectorOpsPath]) {
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.2"/);
+  for (const path of [collectorHealthPath, collector1688Path, collectorOpsPath]) {
     const result = spawnSync(process.execPath, ["--check", path], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   }
-  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.1\.zip/);
+  assert.match(zipRoute, /content-1688-health\.js/);
+  assert.match(zipRoute, /commerce-os-keyword-lab-collector-v0\.1\.2\.zip/);
 });
 
 test("identity analysis still uses only 1688 source truth", () => {

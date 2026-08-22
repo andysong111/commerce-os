@@ -68,7 +68,7 @@ test("API exposes V6 pipeline actions", () => {
 test("Keyword Lab collector remains dedicated and independent from AI-Saurus", () => {
   assert.match(page, /Commerce OS Keyword Lab Collector/);
   assert.match(page, /전용 수집기 ZIP 다운로드/);
-  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.1"/);
+  assert.match(browserImport, /KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0\.1\.2"/);
   assert.match(browserImport, /commerce_os_keyword_lab_collect/);
   assert.match(manifest, /Commerce OS Keyword Lab Collector/);
   assert.match(collector1688, /extractProductName/);

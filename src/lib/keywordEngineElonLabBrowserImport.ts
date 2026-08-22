@@ -9,7 +9,11 @@ export const KEYWORD_ELON_BROWSER_IMPORT_PARAMETER =
 export const KEYWORD_ELON_BROWSER_RETURN_PARAMETER =
   "commerce_os_keyword_lab_return";
 export const KEYWORD_ELON_BROWSER_HASH_PARAMETER = "commerce_keyword_import";
-export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.1";
+export const KEYWORD_ELON_BROWSER_CONTEXT_HASH_PARAMETER =
+  "commerce_os_keyword_lab_context";
+export const KEYWORD_ELON_BROWSER_LINK_ERROR_HASH_PARAMETER =
+  "commerce_china_link_error";
+export const KEYWORD_ELON_REQUIRED_COLLECTOR_VERSION = "0.1.2";
 
 type BrowserOptionValue = {
   id?: unknown;
@@ -40,8 +44,32 @@ export type KeywordElonBrowserImportPayload = {
   collectedAt: string;
 };
 
+export type KeywordElonBrowserLinkErrorPayload = {
+  schemaVersion: number;
+  source: string;
+  collectorVersion: string;
+  mode: "keyword_collect";
+  sourceUrl: string;
+  finalUrl: string;
+  status: "link_error" | "temporary_error";
+  errorCode: string;
+  errorMessage: string;
+  detectedText: string;
+  checkedAt: string;
+};
+
 function text(value: unknown, max = 8000) {
   return String(value ?? "").replace(/\r/g, "").trim().slice(0, max);
+}
+
+function encodeBase64Utf8(value: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  const chunk = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return btoa(binary);
 }
 
 function decodeBase64Utf8(value: string) {
@@ -107,28 +135,39 @@ export function buildKeywordElonBrowserImportUrl(
   const target = new URL(raw1688Url);
   target.searchParams.set(KEYWORD_ELON_BROWSER_IMPORT_PARAMETER, "1");
   target.searchParams.set(KEYWORD_ELON_BROWSER_RETURN_PARAMETER, returnUrl);
+  target.hash = new URLSearchParams({
+    [KEYWORD_ELON_BROWSER_CONTEXT_HASH_PARAMETER]: encodeBase64Utf8({
+      mode: "keyword_collect",
+      returnUrl,
+      sourceUrl: raw1688Url,
+      requestedAt: new Date().toISOString(),
+    }),
+  }).toString();
   return target.toString();
 }
 
-export function parseKeywordElonBrowserImportHash(
-  hash: string,
-): KeywordElonBrowserImportPayload | null {
+function parseHashRecord(hash: string, parameter: string) {
   const rawHash = String(hash || "").replace(/^#/, "");
   if (!rawHash) return null;
-  const encoded = new URLSearchParams(rawHash).get(
-    KEYWORD_ELON_BROWSER_HASH_PARAMETER,
-  );
+  const encoded = new URLSearchParams(rawHash).get(parameter);
   if (!encoded) return null;
   let raw: unknown;
   try {
     raw = JSON.parse(decodeBase64Utf8(encoded));
   } catch {
-    throw new Error("키워드 실험실 수집기가 전달한 1688 자료를 해석하지 못했습니다.");
+    throw new Error("1688 수집기가 전달한 자료를 해석하지 못했습니다.");
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error("키워드 실험실 수집기의 1688 자료 형식이 올바르지 않습니다.");
+    throw new Error("1688 수집기가 전달한 자료 형식이 올바르지 않습니다.");
   }
-  const value = raw as Record<string, unknown>;
+  return raw as Record<string, unknown>;
+}
+
+export function parseKeywordElonBrowserImportHash(
+  hash: string,
+): KeywordElonBrowserImportPayload | null {
+  const value = parseHashRecord(hash, KEYWORD_ELON_BROWSER_HASH_PARAMETER);
+  if (!value) return null;
   const productName = text(value.productName, 300);
   const sourceUrl = text(value.sourceUrl, 1000);
   if (!productName || !validate1688Url(sourceUrl)) {
@@ -148,6 +187,37 @@ export function parseKeywordElonBrowserImportHash(
     sourceProductInfo: text(value.sourceProductInfo, 6000),
     productAttributes: text(value.productAttributes, 3000),
     collectedAt: text(value.collectedAt, 80),
+  };
+}
+
+export function parseKeywordElonBrowserLinkErrorHash(
+  hash: string,
+): KeywordElonBrowserLinkErrorPayload | null {
+  const value = parseHashRecord(
+    hash,
+    KEYWORD_ELON_BROWSER_LINK_ERROR_HASH_PARAMETER,
+  );
+  if (!value) return null;
+  const sourceUrl = text(value.sourceUrl, 4000);
+  const status = text(value.status, 40);
+  if (
+    !validate1688Url(sourceUrl) ||
+    (status !== "link_error" && status !== "temporary_error")
+  ) {
+    throw new Error("1688 링크 오류 결과 형식이 올바르지 않습니다.");
+  }
+  return {
+    schemaVersion: Number(value.schemaVersion) || 1,
+    source: text(value.source, 100),
+    collectorVersion: text(value.collectorVersion, 40),
+    mode: "keyword_collect",
+    sourceUrl,
+    finalUrl: text(value.finalUrl, 4000),
+    status,
+    errorCode: text(value.errorCode, 120),
+    errorMessage: text(value.errorMessage, 500),
+    detectedText: text(value.detectedText, 500),
+    checkedAt: text(value.checkedAt, 80),
   };
 }
 

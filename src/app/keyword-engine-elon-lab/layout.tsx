@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 
 import KeywordElonAutoRunResumeBridge from "./KeywordElonAutoRunResumeBridge";
 import KeywordElonAutoRunToStep4 from "./KeywordElonAutoRunToStep4";
+import KeywordElonBrowserContextBridge from "./KeywordElonBrowserContextBridge";
 import KeywordElonCollectorPresenceBridge from "./KeywordElonCollectorPresenceBridge";
 import KeywordElonCollapsibleSection from "./KeywordElonCollapsibleSection";
 import KeywordElonDemandSummary from "./KeywordElonDemandSummary";
 import KeywordElonDiversitySupplement from "./KeywordElonDiversitySupplement";
 import KeywordElonInterruptedRunRecovery from "./KeywordElonInterruptedRunRecovery";
+import KeywordElonLinkHealthBridge from "./KeywordElonLinkHealthBridge";
 import KeywordElonScoreFetchBridge from "./KeywordElonScoreFetchBridge";
 import KeywordElonShoplingSeoOutput from "./KeywordElonShoplingSeoOutput";
 import KeywordElonStep3Expansion from "./KeywordElonStep3Expansion";
@@ -19,10 +21,12 @@ export default function KeywordEngineElonLabLayout({ children }: { children: Rea
   return (
     <>
       <SeoTitleLedgerPageIdentityBridge />
+      <KeywordElonBrowserContextBridge />
       <KeywordElonCollectorPresenceBridge />
       <KeywordElonScoreFetchBridge />
-      <KeywordElonAutoRunResumeBridge />
       <SeoTitleLedgerLaunchHandoff />
+      <KeywordElonLinkHealthBridge />
+      <KeywordElonAutoRunResumeBridge />
       <KeywordElonAutoRunToStep4 />
       <KeywordElonShoplingSeoOutput />
       <SeoTitleLedgerControlPanel />
