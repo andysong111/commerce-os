@@ -50,6 +50,37 @@ function readyItem() {
   );
 }
 
+function seoFinal() {
+  return {
+    productName: "틈새 청소브러시",
+    groupProductNames: {
+      wholesale1: "틈새 청소브러시 욕실청소솔",
+      wholesale2: "주방청소솔 틈새 청소브러시",
+      wholesale3: "틈새 청소브러시 다용도솔",
+      wholesale4: "세척브러시 틈새 청소브러시",
+      retail1: "욕실청소솔 틈새 청소브러시",
+      retail2: "틈새청소 틈새 청소브러시",
+    },
+    searchKeywords: [
+      "청소브러시",
+      "틈새브러시",
+      "욕실청소솔",
+      "주방청소솔",
+      "세척브러시",
+      "다용도솔",
+      "청소도구",
+      "틈새청소",
+      "욕실솔",
+      "주방솔",
+    ],
+    searchLine: "이 값은 서버에서 검색어 배열 기준으로 다시 정규화한다",
+    source: "keyword-engine-elon-lab",
+    sourceUrl: "https://detail.1688.com/offer/123456.html",
+    offerId: "123456",
+    generatedAt: "2026-08-23T00:00:00.000Z",
+  };
+}
+
 test("기존 상품에 중복되지 않는 자사상품 기본코드를 자동 배정한다", () => {
   const result = assignMissingSelfCodes(
     [
@@ -112,6 +143,38 @@ test("서버 실행 payload도 화면 미리보기와 동일한 가격·코드�
   assert.deepEqual(
     serverPayload.channels[5].options.map(({ additionalAmountKrw }) => additionalAmountKrw),
     [0, 2800, 7000],
+  );
+  assert.equal(serverPayload.siteSearch, "");
+  assert.equal(serverPayload.seoFinal, null);
+});
+
+test("SEO FINAL 상품명 6개와 검색어 10개를 실제 Shopling payload에 반영한다", () => {
+  const item = readyItem();
+  item.seoFinal = seoFinal();
+  const payload = buildProductLaunchShoplingPayload(
+    item,
+    DEFAULT_POLICY,
+    "request-seo-final",
+  );
+  assert.equal(payload.channels[0].productName, "틈새 청소브러시 욕실청소솔");
+  assert.equal(payload.channels[4].productName, "욕실청소솔 틈새 청소브러시");
+  assert.equal(payload.channels[0].productAbbreviation, "틈새 청소브러시");
+  assert.equal(
+    payload.siteSearch,
+    "청소브러시,틈새브러시,욕실청소솔,주방청소솔,세척브러시,다용도솔,청소도구,틈새청소,욕실솔,주방솔",
+  );
+  assert.deepEqual(payload.seoFinal?.searchKeywords, seoFinal().searchKeywords);
+});
+
+test("SEO FINAL 검색어가 정확히 10개가 아니면 실제 등록 payload 생성을 차단한다", () => {
+  const item = readyItem();
+  item.seoFinal = {
+    ...seoFinal(),
+    searchKeywords: seoFinal().searchKeywords.slice(0, 9),
+  };
+  assert.throws(
+    () => buildProductLaunchShoplingPayload(item, DEFAULT_POLICY),
+    /정확히 10개/,
   );
 });
 
@@ -184,6 +247,10 @@ test("OPS Center는 서버 저장·실제 업로드·발주 연동 경로를 포
     new URL("../public/product-launch-tracker-app/shopling-upload-ui.js", import.meta.url),
     "utf8",
   );
+  const seoUploadPanel = await readFile(
+    new URL("../src/app/keyword-engine-elon-lab/SeoFinalShoplingUploadPanel.tsx", import.meta.url),
+    "utf8",
+  );
   assert.match(stateMigration, /product_launch_tracker_states/);
   assert.match(jobMigration, /product_launch_upload_jobs/);
   assert.match(stateRoute, /export async function GET/);
@@ -193,4 +260,6 @@ test("OPS Center는 서버 저장·실제 업로드·발주 연동 경로를 포
   assert.match(uploadRoute, /shopling-product-launch-upload\.yml/);
   assert.match(workerRoute, /PRODUCT_LAUNCH_UPLOAD_SECRET/);
   assert.match(uploadUi, /실제 샵플링 6채널 등록/);
+  assert.match(seoUploadPanel, /SEO 확정 → Shopling 6채널 실제등록/);
+  assert.match(seoUploadPanel, /partialPage: true/);
 });
