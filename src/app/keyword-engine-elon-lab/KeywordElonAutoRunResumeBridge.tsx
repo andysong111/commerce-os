@@ -26,7 +26,7 @@ type ExtendedSession = KeywordElonLabSession & {
 function readMarker() {
   try {
     const raw = window.localStorage.getItem(AUTO_RUN_KEY);
-    return raw ? JSON.parse(raw) as AutoRunMarker : null;
+    return raw ? (JSON.parse(raw) as AutoRunMarker) : null;
   } catch {
     return null;
   }
@@ -34,12 +34,13 @@ function readMarker() {
 
 function writeMarker(marker: AutoRunMarker) {
   window.localStorage.setItem(AUTO_RUN_KEY, JSON.stringify(marker));
+  window.dispatchEvent(new StorageEvent("storage", { key: AUTO_RUN_KEY }));
 }
 
 function readSession() {
   try {
     const raw = window.localStorage.getItem(KEYWORD_ELON_V2_STORAGE_KEY);
-    return raw ? JSON.parse(raw) as ExtendedSession : null;
+    return raw ? (JSON.parse(raw) as ExtendedSession) : null;
   } catch {
     return null;
   }
@@ -47,7 +48,8 @@ function readSession() {
 
 function same1688Offer(markerUrl: string, session: ExtendedSession) {
   const markerOfferId = parse1688OfferId(markerUrl);
-  const sessionOfferId = session.source.offerId || parse1688OfferId(session.source.url);
+  const sessionOfferId =
+    session.source.offerId || parse1688OfferId(session.source.url);
   if (markerOfferId && sessionOfferId) return markerOfferId === sessionOfferId;
 
   try {
@@ -61,7 +63,9 @@ function same1688Offer(markerUrl: string, session: ExtendedSession) {
 
 function markerAgeMs(marker: AutoRunMarker) {
   const started = Date.parse(marker.requestedAt || "");
-  return Number.isFinite(started) ? Math.max(0, Date.now() - started) : Number.POSITIVE_INFINITY;
+  return Number.isFinite(started)
+    ? Math.max(0, Date.now() - started)
+    : Number.POSITIVE_INFINITY;
 }
 
 export default function KeywordElonAutoRunResumeBridge() {
@@ -70,14 +74,35 @@ export default function KeywordElonAutoRunResumeBridge() {
   useEffect(() => {
     const reconcile = () => {
       const marker = readMarker();
-      if (!marker?.url) return;
+      if (!marker?.url) {
+        setNotice("");
+        return;
+      }
       const session = readSession();
       if (!session) return;
-      const sourceReady = Boolean(session.source.chineseTitle.trim() || session.source.optionText.trim());
-      if (!sourceReady || !same1688Offer(marker.url, session)) return;
+      const sameOffer = same1688Offer(marker.url, session);
+
+      if (marker.status === "error") {
+        if (sameOffer || session.source.autoStatus === "failed") {
+          setNotice(
+            `원클릭 실행 오류 · ${
+              marker.message || "1688 링크 또는 수집 상태를 확인해 주세요."
+            }`,
+          );
+        }
+        return;
+      }
+
+      const sourceReady = Boolean(
+        session.source.chineseTitle.trim() || session.source.optionText.trim(),
+      );
+      if (!sourceReady || !sameOffer) return;
 
       const markerOfferId = parse1688OfferId(marker.url);
-      if (session.source.url !== marker.url || (markerOfferId && session.source.offerId !== markerOfferId)) {
+      if (
+        session.source.url !== marker.url ||
+        (markerOfferId && session.source.offerId !== markerOfferId)
+      ) {
         const next: ExtendedSession = {
           ...session,
           source: {
@@ -85,25 +110,29 @@ export default function KeywordElonAutoRunResumeBridge() {
             url: marker.url,
             offerId: markerOfferId || session.source.offerId,
           },
-          lastMessage: "원클릭 수집 복귀 확인 · 같은 1688 offerId로 자동 STEP 4 실행을 이어갑니다.",
+          lastMessage:
+            "원클릭 수집 복귀 확인 · 같은 1688 offerId로 자동 STEP 4 실행을 이어갑니다.",
           updatedAt: new Date().toISOString(),
         };
-        window.localStorage.setItem(KEYWORD_ELON_V2_STORAGE_KEY, JSON.stringify(next));
+        window.localStorage.setItem(
+          KEYWORD_ELON_V2_STORAGE_KEY,
+          JSON.stringify(next),
+        );
         window.dispatchEvent(new CustomEvent("keyword-elon-session-updated"));
       }
 
-      if (marker.status === "error") {
-        setNotice(`원클릭 실행 오류 · ${marker.message || "오류 원인을 확인하지 못했습니다."}`);
-        return;
-      }
-
-      if (marker.status === "running" && markerAgeMs(marker) >= RUNNING_STALE_MS) {
+      if (
+        marker.status === "running" &&
+        markerAgeMs(marker) >= RUNNING_STALE_MS
+      ) {
         writeMarker({
           ...marker,
           status: "armed",
           message: "브라우저 복귀 후 원클릭 실행을 자동 재개합니다.",
         });
-        setNotice("원클릭 자동 실행을 복구했습니다. STEP 1부터 STEP 4까지 이어서 진행합니다.");
+        setNotice(
+          "원클릭 자동 실행을 복구했습니다. STEP 1부터 STEP 4까지 이어서 진행합니다.",
+        );
         return;
       }
 
@@ -112,16 +141,27 @@ export default function KeywordElonAutoRunResumeBridge() {
       }
     };
 
-    reconcile();
-    const timer = window.setInterval(reconcile, 250);
-    return () => window.clearInterval(timer);
+    const initial = window.setTimeout(reconcile, 0);
+    window.addEventListener("keyword-elon-session-updated", reconcile);
+    window.addEventListener("storage", reconcile);
+    return () => {
+      window.clearTimeout(initial);
+      window.removeEventListener("keyword-elon-session-updated", reconcile);
+      window.removeEventListener("storage", reconcile);
+    };
   }, []);
 
   if (!notice) return null;
   const isError = notice.includes("오류");
   return (
     <section className="mx-auto mt-3 max-w-[1500px] px-5 text-slate-900">
-      <div className={`rounded-xl border px-4 py-3 text-sm font-black ${isError ? "border-rose-300 bg-rose-50 text-rose-900" : "border-emerald-300 bg-emerald-50 text-emerald-900"}`}>
+      <div
+        className={`rounded-xl border px-4 py-3 text-sm font-black ${
+          isError
+            ? "border-rose-300 bg-rose-50 text-rose-900"
+            : "border-emerald-300 bg-emerald-50 text-emerald-900"
+        }`}
+      >
         {notice}
       </div>
     </section>
