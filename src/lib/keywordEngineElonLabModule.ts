@@ -14,7 +14,7 @@ export const keywordEngineElonLabModule: CommerceModule = {
   historySupport: true,
   externalProject: false,
   note:
-    "기존 V6 Evidence Market Mine·Search Trend 검증 계약을 유지하면서 내부적으로 영구 상품명 원장·재고 구조를 추가합니다. STEP 1~4 검증 결과를 바탕으로 한 번 사용하거나 예약된 제목을 재발급하지 않으며, 실제 Shopling 전송은 별도 샵플링 SEO 출고센터에서만 수행합니다.",
+    "기존 V6 Evidence Market Mine·Search Trend 검증 계약을 유지하면서 내부적으로 영구 상품명 원장·재고 구조를 추가합니다. STEP 1~4 검증 결과를 바탕으로 한 번 사용하거나 예약된 제목을 재발급하지 않으며, 실제 Shopling 등록은 별도 ‘SEO 상품명 클라우드 · 샵플링 등록 실행기’에서만 수행합니다.",
   helperNote: "1688 링크 → 모델명·검색어 확정 → 고유 상품명 대량 제조 → 클라우드 재고 축적",
   actionLabel: "SEO 대량등록 클라우드 열기",
   safetyBadge: "제조·재고관리 / 외부전송 분리",
