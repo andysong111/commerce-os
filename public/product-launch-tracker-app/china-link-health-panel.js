@@ -21,6 +21,7 @@ let auditWorker = null;
 let auditResults = [];
 let installAttempts = 0;
 let installTimer = null;
+let parentCollectorDocument = null;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -66,7 +67,20 @@ function versionAtLeast(current, required) {
 }
 
 function collectorVersion() {
-  return document.documentElement.dataset.commerceOsKeywordLabCollectorVersion || "";
+  const local =
+    document.documentElement.dataset.commerceOsKeywordLabCollectorVersion || "";
+  if (local) return local;
+  try {
+    if (window.parent && window.parent !== window) {
+      return (
+        window.parent.document.documentElement.dataset
+          .commerceOsKeywordLabCollectorVersion || ""
+      );
+    }
+  } catch {
+    // Same-origin parent is expected, but keep the panel usable if embedding changes.
+  }
+  return "";
 }
 
 async function requestJson(url, init = {}) {
@@ -478,10 +492,26 @@ function onCollectorReady() {
 
 scheduleInstall();
 document.addEventListener("commerce-os-keyword-lab-collector-ready", onCollectorReady);
+try {
+  if (window.parent && window.parent !== window) {
+    parentCollectorDocument = window.parent.document;
+    parentCollectorDocument.addEventListener(
+      "commerce-os-keyword-lab-collector-ready",
+      onCollectorReady,
+    );
+  }
+} catch {
+  parentCollectorDocument = null;
+}
 window.addEventListener("pagehide", () => {
   auditCancelled = true;
   window.dispatchEvent(new Event(CANCEL_EVENT));
   if (auditWorker && !auditWorker.closed) auditWorker.close();
   if (installTimer) window.clearTimeout(installTimer);
   document.removeEventListener("commerce-os-keyword-lab-collector-ready", onCollectorReady);
+  parentCollectorDocument?.removeEventListener(
+    "commerce-os-keyword-lab-collector-ready",
+    onCollectorReady,
+  );
+  parentCollectorDocument = null;
 }, { once: true });
