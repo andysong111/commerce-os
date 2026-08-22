@@ -163,7 +163,7 @@ test("persistent ledger schema has inventory, dispatch, stats and atomic reserva
   assert.match(triggerFix, /tg_op = 'DELETE'/i);
 });
 
-test("dispatch center is reservation-only and product launch provides one-item ledger handoff", async () => {
+test("dispatch center is reservation-only and product launch provides one-item cloud handoff", async () => {
   const dispatchRoute = await readFile(
     "src/app/api/seo-title-dispatch/route.ts",
     "utf8",
@@ -186,13 +186,13 @@ test("dispatch center is reservation-only and product launch provides one-item l
     "utf8",
   );
 
-  assert.match(dispatchRoute, /externalSubmitEnabled:\s*false/);
+  assert.match(dispatchRoute, /externalWriteExecuted:\s*false/);
   assert.doesNotMatch(dispatchRoute, /keyword-shopling-direct-apply|shopling-upload|dispatchKeywordShoplingDirectApply/);
   assert.match(dispatchUi, /외부 전송 버튼을 열지 않습니다/);
-  assert.match(trackerHandoff, /선택 상품 SEO 원장 생성·보기/);
+  assert.match(trackerHandoff, /선택 상품 SEO 대량등록 클라우드 열기/);
   assert.match(trackerHandoff, /selectedIds\.length !== 1/);
   assert.match(trackerHandoff, /primaryChinaProductLink/);
   assert.match(trackerBootstrap, /seo-title-ledger-handoff\.js/);
   assert.match(moduleRegistry, /shoplingSeoDispatchModule/);
-  assert.match(keywordModule, /SEO 상품명 재고 원장/);
+  assert.match(keywordModule, /SEO 대량등록 클라우드/);
 });
