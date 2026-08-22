@@ -19,6 +19,7 @@ on:
       - "src/lib/shoplingSeoDispatchModule.ts"
       - "supabase/migrations/20260823071500_seo_shopling_live_dispatch_single_active.sql"
       - "supabase/migrations/20260823071600_seo_shopling_direct_apply_atomic_claim.sql"
+      - "supabase/migrations/20260823071700_seo_shopling_direct_apply_claim_start_uncertain.sql"
       - "tests/seoShoplingLiveRegistration.test.mjs"
       - "vercel.json"
       - ".github/workflows/seo-shopling-live-registration-ci.yml"
