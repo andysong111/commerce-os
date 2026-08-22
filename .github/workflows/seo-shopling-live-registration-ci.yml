@@ -5,8 +5,11 @@ on:
     paths:
       - "src/lib/seoShoplingLiveRegistration.ts"
       - "src/lib/seoShoplingLiveStorage.ts"
+      - "src/lib/seoShoplingDirectPrepared.ts"
       - "src/lib/seoShoplingUploadCallback.ts"
-      - "src/app/api/seo-title-dispatch/live-register/route.ts"
+      - "src/lib/seoShoplingUploadCallbackV2.ts"
+      - "src/app/api/seo-title-dispatch/live-register/**"
+      - "src/app/api/seo-title-dispatch/live-register-v2/**"
       - "src/app/api/cron/seo-shopling-live-registration/route.ts"
       - "src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts"
       - "src/app/shopling-seo-dispatch/**"
@@ -35,8 +38,11 @@ jobs:
           npx eslint
           src/lib/seoShoplingLiveRegistration.ts
           src/lib/seoShoplingLiveStorage.ts
+          src/lib/seoShoplingDirectPrepared.ts
           src/lib/seoShoplingUploadCallback.ts
+          src/lib/seoShoplingUploadCallbackV2.ts
           src/app/api/seo-title-dispatch/live-register/route.ts
+          src/app/api/seo-title-dispatch/live-register-v2/route.ts
           src/app/api/cron/seo-shopling-live-registration/route.ts
           'src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts'
           src/app/shopling-seo-dispatch/ShoplingSeoLiveDispatchCenter.tsx
