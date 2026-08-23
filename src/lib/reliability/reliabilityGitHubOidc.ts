@@ -6,8 +6,6 @@ export const RELIABILITY_AUTO_IMPROVEMENT_AUDIENCE =
   "commerce-os-reliability-auto-improvement";
 
 const ALLOWED_WORKFLOWS: Record<string, string> = {
-  "andysong111/commerce-os-ops-center":
-    "andysong111/commerce-os-ops-center/.github/workflows/reliability-auto-improvement.yml@refs/heads/main",
   "andysong111/commerce-os-detail-page-saas":
     "andysong111/commerce-os-detail-page-saas/.github/workflows/reliability-auto-improvement.yml@refs/heads/main",
 };
