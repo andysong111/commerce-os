@@ -18,11 +18,13 @@ const labels: Record<string, string> = {
   implemented: "구현",
   passing: "통과",
   failing: "실패",
+  pending: "분석 대기",
   queued: "자동복구 대기",
   approval_required: "승인 필요",
-  running: "복구 실행 중",
+  running: "실행 중",
   succeeded: "완료",
   failed: "실패",
+  dead_letter: "반복 실패 격리",
   started: "시작",
   progress: "진행",
   blocked: "차단",
@@ -40,7 +42,7 @@ const labels: Record<string, string> = {
 };
 
 function tone(value: string) {
-  if (["critical", "error", "failed", "failing"].includes(value)) {
+  if (["critical", "error", "failed", "failing", "dead_letter"].includes(value)) {
     return "border-rose-200 bg-rose-50 text-rose-800";
   }
   if (
@@ -51,6 +53,7 @@ function tone(value: string) {
       "open",
       "candidate",
       "proposed",
+      "pending",
       "approval_required",
       "blocked",
       "retrying",
@@ -100,7 +103,7 @@ export default async function ReliabilityPage() {
       <PageHeader
         eyebrow="COMMERCE OS · RELIABILITY & LEARNING"
         title="통합 신뢰성·자기개선 코어"
-        description="Commerce OS와 AI-Saurus 실행을 자동 수집하고, 반복 오류를 사건·학습 후보·회귀 테스트·안전한 복구 작업으로 전환합니다."
+        description="Commerce OS와 AI-Saurus 실행을 자동 수집하고, 반복 오류를 사건·AI 분석·학습 자산·회귀 테스트·안전한 복구 작업으로 전환합니다."
       />
 
       <section
@@ -138,12 +141,14 @@ export default async function ReliabilityPage() {
         </section>
       ) : null}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {[
           ["수집 이벤트", data.summary.totalEvents, "개인정보 최소화 실행 신호"],
           ["열린 사건", data.summary.openIncidents, "중복 오류를 하나로 집계"],
           ["고위험 사건", data.summary.criticalOrHighIncidents, "자동 반영 금지"],
           ["학습 후보", data.summary.learningCandidates, "반복 오류에서 자동 생성"],
+          ["AI 분석 대기", data.summary.analysisBacklog, "증거 기반 원인·예방 분석"],
+          ["AI 분석 실패", data.summary.analysisFailures, "재시도 또는 격리 필요"],
           ["회귀 테스트 제안", data.summary.regressionProposals, "CI 자산화 대기"],
           ["자동복구 대기", data.summary.queuedRecoveries, "저위험 정책만 실행"],
           ["승인 필요", data.summary.approvalRequired, "고위험·판단 필요 작업"],
@@ -236,6 +241,12 @@ export default async function ReliabilityPage() {
                   <p className="mt-2 text-xs leading-5 text-slate-600">
                     {short(item.symptom, 220)}
                   </p>
+                  {item.root_cause ? (
+                    <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+                      <p><strong>AI 원인:</strong> {short(item.root_cause, 260)}</p>
+                      <p className="mt-1"><strong>예방 규칙:</strong> {short(item.prevention_rule, 260)}</p>
+                    </div>
+                  ) : null}
                   <p className="mt-2 text-xs font-semibold text-slate-500">
                     신뢰도 {(Number(item.confidence) * 100).toFixed(0)}% · {ago(item.updated_at)}
                   </p>
@@ -249,6 +260,46 @@ export default async function ReliabilityPage() {
           </div>
         </article>
 
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-black text-slate-950">AI 분석 큐</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            비식별 운영 증거만 OpenAI가 읽고 원인·해결·예방 규칙을 구조화합니다.
+          </p>
+          <div className="mt-4 space-y-3">
+            {data.analysisQueue.length ? (
+              data.analysisQueue.slice(0, 15).map((item) => (
+                <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {badge(item.status)}
+                      <strong className="font-mono text-xs text-slate-700">
+                        {item.incident_id.slice(0, 8)}
+                      </strong>
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      시도 {item.attempts}/{item.max_attempts}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    모델 {item.model || "배정 전"} · {ago(item.updated_at)}
+                  </p>
+                  {item.last_error ? (
+                    <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-800">
+                      {short(item.last_error, 220)}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+                현재 AI 분석 대기 작업이 없습니다.
+              </p>
+            )}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-2">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-black text-slate-950">회귀 테스트 자산</h2>
           <p className="mt-1 text-sm text-slate-500">
@@ -279,52 +330,40 @@ export default async function ReliabilityPage() {
             )}
           </div>
         </article>
-      </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-lg font-black text-slate-950">복구 작업 큐</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          저위험·멱등 작업만 자동 대기열에 들어가며 가격·재고·주문·권한 변경은 승인 없이 실행하지 않습니다.
-        </p>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-3 py-3">상태</th>
-                <th className="px-3 py-3">시스템·엔진</th>
-                <th className="px-3 py-3">복구 행동</th>
-                <th className="px-3 py-3">시도</th>
-                <th className="px-3 py-3">생성</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.recoveryQueue.length ? (
-                data.recoveryQueue.slice(0, 30).map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-3 py-4">{badge(item.status)}</td>
-                    <td className="px-3 py-4">
-                      <p className="font-bold text-slate-900">{item.engine}</p>
-                      <p className="text-xs text-slate-500">{item.source_system}</p>
-                    </td>
-                    <td className="px-3 py-4 font-mono text-xs text-slate-700">
-                      {item.action}
-                    </td>
-                    <td className="px-3 py-4 text-slate-600">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-black text-slate-950">복구 작업 큐</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            저위험·멱등 작업만 자동 대기열에 들어가며 가격·재고·주문·권한 변경은 승인 없이 실행하지 않습니다.
+          </p>
+          <div className="mt-4 space-y-3">
+            {data.recoveryQueue.length ? (
+              data.recoveryQueue.slice(0, 15).map((item) => (
+                <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {badge(item.status)}
+                      <strong className="text-sm text-slate-950">{item.engine}</strong>
+                    </div>
+                    <span className="text-xs text-slate-500">
                       {item.attempt_count}/{item.max_attempts}
-                    </td>
-                    <td className="px-3 py-4 text-slate-600">{ago(item.created_at)}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-slate-500">
-                    현재 복구 대기 작업이 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                    </span>
+                  </div>
+                  <p className="mt-2 break-all font-mono text-xs text-slate-700">
+                    {item.action}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {item.source_system} · {ago(item.created_at)}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+                현재 복구 대기 작업이 없습니다.
+              </p>
+            )}
+          </div>
+        </article>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
