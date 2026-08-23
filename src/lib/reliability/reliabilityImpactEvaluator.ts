@@ -27,7 +27,10 @@ export async function runReliabilityImpactEvaluator(): Promise<ReliabilityImpact
     };
   }
 
-  const result = await admin.rpc("refresh_reliability_improvement_measurements");
+  const result = await admin.rpc(
+    "refresh_reliability_improvement_measurements",
+    {},
+  );
   if (result.error) {
     return {
       ok: false,
