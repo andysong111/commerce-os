@@ -21,12 +21,17 @@ jobs:
       job_id: ${{ steps.claim.outputs.job_id }}
       summary: ${{ steps.patch.outputs.summary }}
       changed_paths: ${{ steps.patch.outputs.changed_paths }}
+      base_sha: ${{ steps.base.outputs.base_sha }}
     env:
       RELIABILITY_AUTOFIX_ENDPOINT: https://commerce-os-ops-center.vercel.app/api/integrations/reliability/autofix
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - id: base
+        name: Pin the exact main commit being analyzed
+        run: echo "base_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -72,12 +77,17 @@ jobs:
           retention-days: 2
           if-no-files-found: error
 
-      - name: Return failed generation to bounded retry
+      - name: Return failed generation to bounded retry with a fresh identity
         if: failure() && steps.claim.outputs.has_job == 'true'
+        shell: bash
         env:
           AUTOFIX_STATUS: failed
           AUTOFIX_ERROR: "자동수정 제안 생성 또는 결정적 안전 검사에 실패했습니다. 최대 3회까지만 재시도합니다."
-        run: node scripts/reliability-autofix-worker.mjs finish || true
+        run: |
+          response="$(curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")" || exit 0
+          token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')" || exit 0
+          export RELIABILITY_AUTOFIX_OIDC_TOKEN="$token"
+          node scripts/reliability-autofix-worker.mjs finish || true
 
   validate:
     needs: prepare
@@ -144,6 +154,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Abort if main changed after analysis
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          [[ "$current_main" == "$BASE_SHA" ]]
+
       - uses: actions/download-artifact@v4
         with:
           name: reliability-autofix-bundle
@@ -172,19 +192,12 @@ jobs:
           git config user.email "commerce-os-reliability-bot@users.noreply.github.com"
           git checkout -b "$branch"
           cat /tmp/reliability-autofix-bundle/changed-paths.json | node -e '
-            const {spawnSync}=require("node:child_process");
-            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-              const paths=JSON.parse(s); const r=spawnSync("git",["add","--",...paths],{stdio:"inherit"}); process.exit(r.status||0);
-            });'
+            const {spawnSync}=require("node:child_process"); let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const paths=JSON.parse(s);const r=spawnSync("git",["add","--",...paths],{stdio:"inherit"});process.exit(r.status||0);});'
           git diff --cached --check
           git commit -m "fix(reliability): auto-fix ${short_id}"
           git push --set-upstream origin "$branch"
           head_sha="$(git rev-parse HEAD)"
-          pr_url="$(gh pr create \
-            --base main \
-            --head "$branch" \
-            --title "fix(reliability): safe autofix ${short_id}" \
-            --body "자동 자기개선 후보를 낮은 위험 경계 안에서 수정했습니다.\n\n- 수정: ${PATCH_SUMMARY}\n- 안전장치: 생성 코드와 GitHub 쓰기 권한 격리, 금지 경로 차단, 회귀 테스트 필수, 독립 CI + Vercel Preview 성공 후에만 자동 병합\n- 자동 생성 run: ${GITHUB_RUN_ID}")"
+          pr_url="$(gh pr create --base main --head "$branch" --title "fix(reliability): safe autofix ${short_id}" --body "자동 자기개선 후보를 낮은 위험 경계 안에서 수정했습니다.\n\n- 수정: ${PATCH_SUMMARY}\n- 안전장치: 생성 코드와 GitHub 쓰기 권한 격리, 금지 경로 차단, 실행되는 회귀 테스트 필수, 독립 CI + Vercel Preview 성공 후에만 자동 병합\n- 자동 생성 run: ${GITHUB_RUN_ID}")"
           pr_number="${pr_url##*/}"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
@@ -194,9 +207,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ steps.pr.outputs.branch }}
-        shell: bash
         run: |
-          set -euo pipefail
           gh workflow run ci.yml --ref "$BRANCH"
           gh workflow run reliability-learning-core.yml --ref "$BRANCH"
 
@@ -210,29 +221,25 @@ jobs:
       checks: read
       actions: read
     steps:
-      - name: Wait for independent CI and Vercel Preview
+      - name: Wait for independent CI, unchanged main, and Vercel Preview
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ needs.publish.outputs.head_sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
         shell: bash
         run: |
           set -euo pipefail
           for i in $(seq 1 60); do
+            current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+            [[ "$current_main" == "$BASE_SHA" ]] || { echo "main changed; regenerate against the new base"; exit 1; }
             vercel="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status" --jq '[.statuses[] | select(.context=="Vercel")][0].state // "pending"')"
             checks="$(gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --jq '[.check_runs[] | select(.name=="build-and-test" or .name=="regression") | .conclusion]')"
             ci_ok="$(printf '%s' "$checks" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.length>=2&&a.every(v=>v==="success")?"yes":"no")})')"
             ci_bad="$(printf '%s' "$checks" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.some(v=>["failure","cancelled","timed_out","action_required"].includes(v))?"yes":"no")})')"
-            if [[ "$vercel" == "failure" || "$vercel" == "error" || "$ci_bad" == "yes" ]]; then
-              echo "Independent validation failed: vercel=$vercel checks=$checks"
-              exit 1
-            fi
-            if [[ "$vercel" == "success" && "$ci_ok" == "yes" ]]; then
-              echo "Independent CI and Vercel Preview passed."
-              exit 0
-            fi
+            if [[ "$vercel" == "failure" || "$vercel" == "error" || "$ci_bad" == "yes" ]]; then exit 1; fi
+            if [[ "$vercel" == "success" && "$ci_ok" == "yes" ]]; then exit 0; fi
             sleep 10
           done
-          echo "Timed out waiting for independent CI/Preview"
           exit 1
 
   merge:
@@ -256,22 +263,49 @@ jobs:
           name: reliability-autofix-bundle
           path: /tmp/reliability-autofix-bundle
 
-      - name: Merge validated low-risk PR
+      - name: Merge only the exact code combination that passed validation
         id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.publish.outputs.pr_number }}
           HEAD_SHA: ${{ needs.publish.outputs.head_sha }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
         shell: bash
         run: |
           set -euo pipefail
+          current_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          [[ "$current_main" == "$BASE_SHA" ]]
           response="$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" -f merge_method=squash -f sha="$HEAD_SHA")"
           merged="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).merged?"true":"false"))')"
           merge_sha="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).sha||""))')"
           [[ "$merged" == "true" && -n "$merge_sha" ]]
           echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Request fresh OIDC identity immediately after merge
+        if: always()
+        shell: bash
+        run: |
+          response="$(curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")" || exit 0
+          token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')" || exit 0
+          echo "RELIABILITY_AUTOFIX_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Record merge before any long Production wait
+        if: steps.merge.outputs.merge_sha != ''
+        env:
+          AUTOFIX_STATUS: merged
+          AUTOFIX_BRANCH: ${{ needs.publish.outputs.branch }}
+          AUTOFIX_PR: ${{ needs.publish.outputs.pr_number }}
+          AUTOFIX_COMMIT: ${{ needs.publish.outputs.head_sha }}
+          AUTOFIX_MERGE: ${{ steps.merge.outputs.merge_sha }}
+          AUTOFIX_SUMMARY: ${{ needs.prepare.outputs.summary }}
+          AUTOFIX_CHANGED_PATHS: ${{ needs.prepare.outputs.changed_paths }}
+        run: |
+          cp /tmp/reliability-autofix-bundle/job.json /tmp/reliability-autofix-job.json
+          node scripts/reliability-autofix-worker.mjs finish
+
       - name: Confirm Production deployment
+        id: production
+        if: steps.merge.outputs.merge_sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
@@ -286,17 +320,16 @@ jobs:
           done
           exit 1
 
-      - name: Request fresh OIDC identity for result recording
-        if: always()
+      - name: Refresh OIDC identity after Production wait
+        if: always() && steps.merge.outputs.merge_sha != ''
         shell: bash
         run: |
-          set -euo pipefail
-          response="$(curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")"
-          token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')"
+          response="$(curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")" || exit 0
+          token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')" || exit 0
           echo "RELIABILITY_AUTOFIX_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
 
       - name: Record deployed improvement
-        if: success()
+        if: steps.production.outcome == 'success'
         env:
           AUTOFIX_STATUS: deployed
           AUTOFIX_BRANCH: ${{ needs.publish.outputs.branch }}
@@ -309,7 +342,7 @@ jobs:
           cp /tmp/reliability-autofix-bundle/job.json /tmp/reliability-autofix-job.json
           node scripts/reliability-autofix-worker.mjs finish
 
-      - name: Escalate if Production confirmation failed after merge
+      - name: Escalate a post-merge uncertainty instead of replaying it
         if: failure() && steps.merge.outputs.merge_sha != ''
         env:
           AUTOFIX_STATUS: approval_required
@@ -319,8 +352,24 @@ jobs:
           AUTOFIX_MERGE: ${{ steps.merge.outputs.merge_sha }}
           AUTOFIX_SUMMARY: ${{ needs.prepare.outputs.summary }}
           AUTOFIX_CHANGED_PATHS: ${{ needs.prepare.outputs.changed_paths }}
-          AUTOFIX_ERROR: "CI와 Preview는 통과했지만 Production 배포 확인에 실패했습니다. 자동 재시도하지 않고 사람 확인 대상으로 전환했습니다."
+          AUTOFIX_ERROR: "자동병합 이후 Production 상태 또는 결과 기록이 불확실합니다. 중복 배포를 막기 위해 자동 재시도하지 않고 사람 확인으로 전환했습니다."
         run: |
+          cp /tmp/reliability-autofix-bundle/job.json /tmp/reliability-autofix-job.json
+          node scripts/reliability-autofix-worker.mjs finish || true
+
+      - name: Return a pre-merge race to bounded retry
+        if: failure() && steps.merge.outputs.merge_sha == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOFIX_STATUS: failed
+          AUTOFIX_BRANCH: ${{ needs.publish.outputs.branch }}
+          AUTOFIX_PR: ${{ needs.publish.outputs.pr_number }}
+          AUTOFIX_COMMIT: ${{ needs.publish.outputs.head_sha }}
+          AUTOFIX_SUMMARY: ${{ needs.prepare.outputs.summary }}
+          AUTOFIX_CHANGED_PATHS: ${{ needs.prepare.outputs.changed_paths }}
+          AUTOFIX_ERROR: "검증 이후 main이 바뀌었거나 병합 직전 조건이 달라졌습니다. 새 main 기준으로 다시 생성·검증합니다."
+        run: |
+          gh pr close "${{ needs.publish.outputs.pr_number }}" || true
           cp /tmp/reliability-autofix-bundle/job.json /tmp/reliability-autofix-job.json
           node scripts/reliability-autofix-worker.mjs finish || true
 
@@ -341,29 +390,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - uses: actions/download-artifact@v4
         with:
           name: reliability-autofix-bundle
           path: /tmp/reliability-autofix-bundle
-
       - name: Close unmerged PR if one exists
         if: needs.publish.outputs.pr_number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.publish.outputs.pr_number }}
         run: gh pr close "$PR_NUMBER" || true
-
-      - name: Request OIDC identity and return job to bounded retry
+      - name: Request a fresh OIDC identity
         shell: bash
         run: |
-          set -euo pipefail
           response="$(curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")"
           token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')"
           echo "RELIABILITY_AUTOFIX_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
           cp /tmp/reliability-autofix-bundle/job.json /tmp/reliability-autofix-job.json
-
-      - name: Record bounded failure
+      - name: Record bounded pre-merge failure
         env:
           AUTOFIX_STATUS: failed
           AUTOFIX_BRANCH: ${{ needs.publish.outputs.branch }}
@@ -371,5 +415,5 @@ jobs:
           AUTOFIX_COMMIT: ${{ needs.publish.outputs.head_sha }}
           AUTOFIX_SUMMARY: ${{ needs.prepare.outputs.summary }}
           AUTOFIX_CHANGED_PATHS: ${{ needs.prepare.outputs.changed_paths }}
-          AUTOFIX_ERROR: "자동수정 코드가 격리 검증, 독립 CI 또는 Preview 게이트를 통과하지 못했습니다. 최대 3회까지만 재시도합니다."
+          AUTOFIX_ERROR: "자동수정 코드가 격리 검증, 독립 CI, Preview 또는 고정된 main 기준 검사를 통과하지 못했습니다. 최대 3회까지만 재시도합니다."
         run: node scripts/reliability-autofix-worker.mjs finish || true
