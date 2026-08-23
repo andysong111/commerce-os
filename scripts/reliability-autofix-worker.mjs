@@ -119,7 +119,10 @@ function applyProposal(proposal, context) {
   execFileSync("git",["diff","--check"],{stdio:"inherit"}); const numstat=execFileSync("git",["diff","--numstat"],{encoding:"utf8"}).trim(); if(!numstat)throw new Error("Autofix proposal produced no diff");
   const changed=[]; let lineBudget=0; for(const line of numstat.split("\n")){ const [aRaw,dRaw,path]=line.split("\t"); if(!safePath(path))throw new Error(`Diff touched forbidden path: ${path}`); const a=Number(aRaw),d=Number(dRaw); if(!Number.isFinite(a)||!Number.isFinite(d))throw new Error(`Binary or uncountable diff is forbidden: ${path}`); lineBudget+=a+d; changed.push(path); }
   if(changed.length>4||lineBudget>260)throw new Error(`Autofix diff exceeds safety budget: files=${changed.length}, lines=${lineBudget}`);
-  const sourceChanged=changed.some(path=>path.startsWith("src/")&&!path.includes(".test.")); const executedTestChanged=changed.some(isExecutedTestPath); if(sourceChanged&&!executedTestChanged)throw new Error("Source autofix must include a regression test that npm test actually executes"); return changed;
+  const sourceChanged=changed.some(path=>path.startsWith("src/")&&!path.includes(".test.")); const executedTestChanged=changed.some(isExecutedTestPath);
+  if(!sourceChanged)throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
+  if(!executedTestChanged)throw new Error("Source autofix must include a regression test that npm test actually executes");
+  return changed;
 }
 async function claim(){ const payload=await api({action:"claim"}); if(!payload.job){output("has_job","false");return;} if(payload.job.target_repo!==REPOSITORY)throw new Error("Claimed job repository mismatch"); writeFileSync(JOB_FILE,JSON.stringify(payload.job,null,2)); output("has_job","true"); output("job_id",payload.job.job_id); output("improvement_id",payload.job.improvement_id); }
 async function generate(){ const job=readJob(); const context=collectContext(job); const payload=await api({action:"generate",job_id:job.job_id,files:context}); const proposal=payload.proposal; writeFileSync(PROPOSAL_FILE,JSON.stringify(proposal,null,2)); const changed=applyProposal(proposal,context); output("changed_paths",JSON.stringify(changed)); output("summary",String(proposal.summary||"AI low-risk reliability fix").slice(0,500)); }
