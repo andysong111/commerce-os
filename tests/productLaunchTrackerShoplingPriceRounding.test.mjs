@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildProductLaunchShoplingPayload,
+  resolveProductLaunchCommonPurchasePriceKrw,
   roundUpShoplingPriceKrw,
   SHOPLING_PRICE_ROUND_UP_UNIT_KRW,
 } from "../src/lib/productLaunchTrackerShopling.ts";
@@ -41,7 +42,18 @@ test("샵플링 가격은 일의자리에서 올림해 10원 단위가 된다", 
   assert.equal(roundUpShoplingPriceKrw(1740), 1740);
 });
 
-test("실제 상품등록 payload의 판매가·원가·소비자가를 모두 10원 단위 올림한다", () => {
+test("상품출시 진행관리 원가를 기본 공통 원가로 한 번만 확정한다", () => {
+  assert.equal(resolveProductLaunchCommonPurchasePriceKrw(item().orderOptions), 580);
+  assert.equal(
+    resolveProductLaunchCommonPurchasePriceKrw([
+      { unitCostKrw: 577 },
+      { unitCostKrw: 800 },
+    ]),
+    580,
+  );
+});
+
+test("실제 상품등록 payload는 판매가가 달라도 6채널 원가는 공통값을 유지한다", () => {
   const payload = buildProductLaunchShoplingPayload(
     item(),
     {
@@ -60,7 +72,9 @@ test("실제 상품등록 payload의 판매가·원가·소비자가를 모두 1
 
   const wholesale1 = payload.channels.find((channel) => channel.key === "wholesale1");
   const wholesale2 = payload.channels.find((channel) => channel.key === "wholesale2");
+  const retail2 = payload.channels.find((channel) => channel.key === "retail2");
 
+  assert.equal(payload.commonPurchasePriceKrw, 580);
   assert.equal(wholesale1.salePrice, 1160);
   assert.equal(wholesale1.orgPrice, 580);
   assert.equal(wholesale1.listPrice, 1740);
@@ -70,6 +84,15 @@ test("실제 상품등록 payload의 판매가·원가·소비자가를 모두 1
   assert.equal(wholesale2.salePrice, 1210);
   assert.equal(wholesale2.orgPrice, 580);
   assert.equal(wholesale2.listPrice, 1820);
+
+  assert.equal(retail2.salePrice, 1470);
+  assert.equal(retail2.orgPrice, 580);
+  assert.notEqual(retail2.orgPrice, retail2.salePrice / 2);
+
+  assert.deepEqual(
+    [...new Set(payload.channels.map((channel) => channel.orgPrice))],
+    [580],
+  );
 
   for (const channel of payload.channels) {
     assert.equal(channel.salePrice % 10, 0);

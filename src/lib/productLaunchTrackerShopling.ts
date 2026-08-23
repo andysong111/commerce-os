@@ -59,6 +59,7 @@ export type ProductLaunchShoplingPayload = {
   category: string;
   siteSearch: string;
   seoFinal: ProductLaunchSeoFinal | null;
+  commonPurchasePriceKrw: number;
   detailHtml: string;
   images: {
     main: string;
@@ -104,9 +105,23 @@ export function roundUpShoplingPriceKrw(
   unit = SHOPLING_PRICE_ROUND_UP_UNIT_KRW,
 ) {
   const number = Number(value);
-  const normalizedUnit = Math.max(1, Math.floor(Number(unit) || SHOPLING_PRICE_ROUND_UP_UNIT_KRW));
+  const normalizedUnit = Math.max(
+    1,
+    Math.floor(Number(unit) || SHOPLING_PRICE_ROUND_UP_UNIT_KRW),
+  );
   if (!Number.isFinite(number) || number <= 0) return 0;
   return Math.ceil(number / normalizedUnit) * normalizedUnit;
+}
+
+export function resolveProductLaunchCommonPurchasePriceKrw(
+  orderOptionsInput: unknown,
+) {
+  const orderOptions = Array.isArray(orderOptionsInput) ? orderOptionsInput : [];
+  const positiveCosts = orderOptions
+    .map((value) => nonNegativeInteger(asRecord(value).unitCostKrw))
+    .filter((value) => value > 0);
+  if (!positiveCosts.length) return 0;
+  return roundUpShoplingPriceKrw(Math.min(...positiveCosts));
 }
 
 export function buildProductLaunchShoplingPayload(
@@ -145,6 +160,7 @@ export function buildProductLaunchShoplingPayload(
       index,
     };
   });
+  const commonPurchasePriceKrw = resolveProductLaunchCommonPurchasePriceKrw(options);
 
   const errors: string[] = [];
   if (!text(item.id)) errors.push("출시 상품 ID가 없습니다.");
@@ -155,6 +171,7 @@ export function buildProductLaunchShoplingPayload(
   if (!detailHtml) errors.push("상세페이지 HTML이 없습니다.");
   if (!mainImage) errors.push("대표이미지가 없습니다.");
   if (!options.length) errors.push("발주·입고 옵션가격이 없습니다.");
+  if (commonPurchasePriceKrw <= 0) errors.push("기본 공통 원가가 없습니다.");
 
   if (seoFinal) {
     if (!seoFinal.productName) {
@@ -216,9 +233,6 @@ export function buildProductLaunchShoplingPayload(
     const salePrice = Math.min(
       ...pricedOptions.map((option) => option.finalSalePriceKrw),
     );
-    const orgPrice = roundUpShoplingPriceKrw(
-      Math.min(...pricedOptions.map((option) => option.unitCostKrw)),
-    );
     const seoChannelName = seoFinal
       ? seoGroupProductName(seoFinal, channel.key, channel.label)
       : "";
@@ -232,7 +246,7 @@ export function buildProductLaunchShoplingPayload(
         channel.key === "retail1"
           ? text(policy.retail1BrandName) || "동네일등"
           : "",
-      orgPrice,
+      orgPrice: commonPurchasePriceKrw,
       salePrice,
       listPrice: roundUpShoplingPriceKrw(
         salePrice * listPriceMultiplier,
@@ -259,6 +273,7 @@ export function buildProductLaunchShoplingPayload(
     category,
     siteSearch: seoFinal?.searchLine || "",
     seoFinal,
+    commonPurchasePriceKrw,
     detailHtml: appendShippingNotice(detailHtml, shippingNoticeHtml),
     images: { main: mainImage, additional: additionalImages },
     fixedFields: {
