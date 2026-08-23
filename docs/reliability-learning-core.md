@@ -56,10 +56,11 @@ Commerce OS와 AI-Saurus의 실행 결과를 개인정보 최소화 이벤트로
 2. `source_system + engine + signature` 기준으로 incident를 집계한다.
 3. 동일 incident가 두 번 이상 발생하면 learning candidate와 regression proposal을 생성한다.
 4. learning candidate를 durable analysis queue에 넣는다.
-5. OpenAI Responses API가 최근 비식별 증거 최대 5건만 읽는다.
-6. 원인·해결·예방 규칙·보호 불변조건·회귀 테스트 제목을 strict JSON으로 저장한다.
-7. 분석은 자동 승인, 코드 변경, PR 생성, 병합 또는 배포를 수행하지 않는다.
-8. 실제 회귀 테스트가 구현되고 CI를 통과한 경우에만 regression state를 상향한다.
+5. 기존 `product-decision-live-refresh` Cron의 staggered wakeup을 재사용해 별도 Supabase Cron 충돌 없이 분석 작업을 최대 1건 처리한다.
+6. OpenAI Responses API가 최근 비식별 증거 최대 5건만 읽는다.
+7. 원인·해결·예방 규칙·보호 불변조건·회귀 테스트 제목을 strict JSON으로 저장한다.
+8. 분석은 자동 승인, 코드 변경, PR 생성, 병합 또는 배포를 수행하지 않는다.
+9. 실제 회귀 테스트가 구현되고 CI를 통과한 경우에만 regression state를 상향한다.
 
 ## 자동 행동 안전 경계
 
@@ -90,11 +91,13 @@ Commerce OS와 AI-Saurus의 실행 결과를 개인정보 최소화 이벤트로
   - AI-Saurus와 공유하는 긴 랜덤 비밀키
   - 수집 API는 값이 없으면 503, 잘못된 값이면 401로 닫힌다.
 - `CRON_SECRET`
-  - 기존 Vercel Cron 인증값 사용
-- `RELIABILITY_OPENAI_API_KEY` 선택
-  - 없으면 `OPENAI_API_KEY`, 그다음 `OPS_AI_HELP_OPENAI_API_KEY`를 사용한다.
+  - 기존 Vercel Cron 인증값을 그대로 사용한다. Reliability 전용 Cron을 추가하지 않는다.
+- `RELIABILITY_OPENAI_API_KEY`
+  - 신뢰성·자기개선 분석 전용 OpenAI 비용 lane이다.
+  - 다른 기능의 `OPENAI_API_KEY` 또는 `OPS_AI_HELP_OPENAI_API_KEY`로 자동 대체하지 않는다.
+  - 값이 없으면 사건·학습후보·회귀제안은 계속 축적되지만 OpenAI 원인 분석만 대기한다.
 - `RELIABILITY_OPENAI_MODEL` 선택
-  - 없으면 `OPENAI_MODEL`, 최종 기본값은 `gpt-5-mini`
+  - 미설정 시 `gpt-5-mini`를 사용한다.
 
 ### AI-Saurus
 
