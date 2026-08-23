@@ -77,12 +77,15 @@ test("효과 측정은 정확히 연결된 사건과 고유 실행만 비교한�
 });
 
 test("정책·커밋 근거가 사라지면 반영·측정 흔적을 모두 제거한다", async () => {
-  const [scopeHardening, cleanup] = await Promise.all([
+  const [scopeHardening, cleanup, statusPreserve] = await Promise.all([
     source(
       "supabase/migrations/202608241003_reliability_improvement_evidence_scope_hardening.sql",
     ),
     source(
       "supabase/migrations/202608241004_reliability_stale_application_cleanup.sql",
+    ),
+    source(
+      "supabase/migrations/202608241005_reliability_stale_application_status_preserve.sql",
     ),
   ]);
 
@@ -98,6 +101,14 @@ test("정책·커밋 근거가 사라지면 반영·측정 흔적을 모두 제�
   assert.match(
     cleanup,
     /revoke all on function public\.clear_stale_reliability_application_evidence\(\)/,
+  );
+  assert.match(
+    statusPreserve,
+    /new\.status in \('analysis_pending','approval_required','implementation_needed'\)/,
+  );
+  assert.match(
+    statusPreserve,
+    /new\.requires_approval := new\.status in/,
   );
 });
 
