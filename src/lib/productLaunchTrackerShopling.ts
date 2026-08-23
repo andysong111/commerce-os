@@ -23,6 +23,8 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
   "a149",
 ] as const;
 
+export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
+
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
   wholesale2: 1.15,
@@ -96,6 +98,16 @@ export type ProductLaunchShoplingPayload = {
     }>;
   }>;
 };
+
+export function roundUpShoplingPriceKrw(
+  value: unknown,
+  unit = SHOPLING_PRICE_ROUND_UP_UNIT_KRW,
+) {
+  const number = Number(value);
+  const normalizedUnit = Math.max(1, Math.floor(Number(unit) || SHOPLING_PRICE_ROUND_UP_UNIT_KRW));
+  if (!Number.isFinite(number) || number <= 0) return 0;
+  return Math.ceil(number / normalizedUnit) * normalizedUnit;
+}
 
 export function buildProductLaunchShoplingPayload(
   itemInput: unknown,
@@ -197,13 +209,15 @@ export function buildProductLaunchShoplingPayload(
     );
     const pricedOptions = options.map((option) => ({
       ...option,
-      finalSalePriceKrw: Math.ceil(option.baseSalePriceKrw * multiplier),
+      finalSalePriceKrw: roundUpShoplingPriceKrw(
+        option.baseSalePriceKrw * multiplier,
+      ),
     }));
     const salePrice = Math.min(
       ...pricedOptions.map((option) => option.finalSalePriceKrw),
     );
-    const orgPrice = Math.min(
-      ...pricedOptions.map((option) => option.unitCostKrw),
+    const orgPrice = roundUpShoplingPriceKrw(
+      Math.min(...pricedOptions.map((option) => option.unitCostKrw)),
     );
     const seoChannelName = seoFinal
       ? seoGroupProductName(seoFinal, channel.key, channel.label)
@@ -220,7 +234,9 @@ export function buildProductLaunchShoplingPayload(
           : "",
       orgPrice,
       salePrice,
-      listPrice: Math.ceil(salePrice * listPriceMultiplier),
+      listPrice: roundUpShoplingPriceKrw(
+        salePrice * listPriceMultiplier,
+      ),
       options: pricedOptions.map((option) => ({
         optionName: option.optionName,
         saleOption: option.saleOption,
