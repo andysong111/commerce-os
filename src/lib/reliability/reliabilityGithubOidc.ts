@@ -3,9 +3,9 @@ import { createPublicKey, verify } from "node:crypto";
 const ISSUER = "https://token.actions.githubusercontent.com";
 const DISCOVERY_URL = `${ISSUER}/.well-known/openid-configuration`;
 const AUDIENCE = "commerce-os-reliability-autofix";
-const ALLOWED_REPOSITORIES = new Set([
-  "andysong111/commerce-os-ops-center",
-  "andysong111/commerce-os-detail-page-saas",
+const ALLOWED_REPOSITORIES = new Map([
+  ["andysong111/commerce-os-ops-center", "1264506743"],
+  ["andysong111/commerce-os-detail-page-saas", "1327002897"],
 ]);
 const ALLOWED_EVENTS = new Set(["schedule", "workflow_dispatch"]);
 
@@ -22,8 +22,10 @@ type GithubOidcClaims = {
   nbf?: unknown;
   iat?: unknown;
   repository?: unknown;
+  repository_id?: unknown;
   ref?: unknown;
   workflow?: unknown;
+  workflow_ref?: unknown;
   event_name?: unknown;
   run_id?: unknown;
   run_attempt?: unknown;
@@ -122,8 +124,10 @@ export async function verifyReliabilityGithubOidc(
   const notBefore = numberValue(claims.nbf);
   const issuedAt = numberValue(claims.iat);
   const repository = stringValue(claims.repository, 240);
+  const repositoryId = stringValue(claims.repository_id, 80);
   const ref = stringValue(claims.ref, 300);
   const workflow = stringValue(claims.workflow, 200);
+  const workflowRef = stringValue(claims.workflow_ref, 500);
   const eventName = stringValue(claims.event_name, 100);
   const runId = stringValue(claims.run_id, 100);
   const runAttempt = stringValue(claims.run_attempt, 40) || "1";
@@ -134,13 +138,20 @@ export async function verifyReliabilityGithubOidc(
   if (!expiresAt || expiresAt < now - 30 || notBefore > now + 30 || issuedAt > now + 30) {
     throw new Error("GitHub Actions OIDC 토큰 유효시간이 올바르지 않습니다.");
   }
-  if (!ALLOWED_REPOSITORIES.has(repository)) {
+
+  const expectedRepositoryId = ALLOWED_REPOSITORIES.get(repository);
+  if (!expectedRepositoryId || repositoryId !== expectedRepositoryId) {
     throw new Error("자동수정이 허용되지 않은 GitHub 저장소입니다.");
   }
   if (ref !== "refs/heads/main") {
     throw new Error("자동수정 Worker는 main 기준 실행만 허용됩니다.");
   }
-  if (workflow !== "Reliability Safe Autofix" || !ALLOWED_EVENTS.has(eventName)) {
+  const expectedWorkflowRef = `${repository}/.github/workflows/reliability-safe-autofix.yml@refs/heads/main`;
+  if (
+    workflow !== "Reliability Safe Autofix" ||
+    workflowRef !== expectedWorkflowRef ||
+    !ALLOWED_EVENTS.has(eventName)
+  ) {
     throw new Error("허용되지 않은 GitHub Actions 실행입니다.");
   }
   if (!runId) throw new Error("GitHub Actions run_id가 없습니다.");
