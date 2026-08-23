@@ -42,6 +42,8 @@ export type ReliabilityAutoImprovementReport = {
   error?: string;
 };
 
+type AdminClient = NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>;
+
 function object(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -89,12 +91,43 @@ async function adminClient() {
   return admin;
 }
 
+async function rpc(
+  admin: AdminClient,
+  name: string,
+  parameters: Record<string, unknown>,
+) {
+  const result = await admin.rpc(name, parameters);
+  if (result.error) throw new Error(`${name} 실행에 실패했습니다: ${result.error.message}`);
+  return result.data;
+}
+
+async function recordActivity(
+  admin: AdminClient,
+  input: {
+    jobId: string;
+    eventType: string;
+    fromStatus?: string | null;
+    toStatus?: string | null;
+    summary: string;
+    metadata?: Record<string, unknown>;
+  },
+) {
+  await rpc(admin, "record_reliability_auto_improvement_activity", {
+    p_job_id: input.jobId,
+    p_event_type: input.eventType,
+    p_from_status: input.fromStatus ?? null,
+    p_to_status: input.toStatus ?? null,
+    p_summary: input.summary,
+    p_metadata: input.metadata ?? {},
+  });
+}
+
 export async function claimReliabilityAutoImprovementJob(
   repository: string,
   runner: string,
 ) {
   const admin = await adminClient();
-  await admin.rpc("requeue_expired_reliability_auto_improvement_jobs");
+  await rpc(admin, "requeue_expired_reliability_auto_improvement_jobs", {});
   const result = await admin.rpc("claim_reliability_auto_improvement_job", {
     p_target_repo: repository,
     p_runner: runner,
@@ -111,30 +144,14 @@ export async function saveReliabilityAutoImprovementPlan(input: {
   plan: Record<string, unknown>;
 }) {
   const admin = await adminClient();
-  const result = await admin
-    .from("reliability_auto_improvement_jobs")
-    .update({
-      status: "ready",
-      plan: input.plan,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.job.id)
-    .eq("lease_token", input.job.lease_token)
-    .eq("status", "planning")
-    .select("id")
-    .maybeSingle();
-  if (result.error || !result.data) {
-    throw new Error(
-      `자동개선 계획을 안전하게 고정하지 못했습니다${result.error ? `: ${result.error.message}` : "."}`,
-    );
-  }
-  await admin.from("reliability_auto_improvement_activity").insert({
-    job_id: input.job.id,
-    event_type: "plan_ready",
-    from_status: "planning",
-    to_status: "ready",
-    summary: "수정할 파일과 변경 내용을 안전구역 안에서 확정했습니다.",
+  const saved = await rpc(admin, "save_reliability_auto_improvement_plan", {
+    p_job_id: input.job.id,
+    p_lease_token: input.job.lease_token,
+    p_plan: input.plan,
   });
+  if (saved !== true) {
+    throw new Error("자동개선 계획을 안전하게 고정하지 못했습니다.");
+  }
 }
 
 async function markRegressionApplied(input: {
@@ -144,100 +161,26 @@ async function markRegressionApplied(input: {
   validation: Record<string, unknown>;
 }) {
   const admin = await adminClient();
-  const improvementResult = await admin
-    .from("reliability_improvements")
-    .select("id,incident_id,regression_case_id,target_test_name")
-    .eq("id", input.improvementId)
-    .maybeSingle();
-  if (improvementResult.error || !improvementResult.data) {
-    throw new Error("자동개선 반영 근거가 될 학습 항목을 찾지 못했습니다.");
-  }
-  const improvement = improvementResult.data as {
-    incident_id: string;
-    regression_case_id: string | null;
-    target_test_name: string | null;
-  };
   const testPath = String(input.validation.test_path ?? "").slice(0, 500);
   const testName = String(
-    input.validation.test_name ??
-      improvement.target_test_name ??
-      "자동개선 재발 방지 확인",
+    input.validation.test_name ?? "자동개선 재발 방지 확인",
   ).slice(0, 500);
-  const evidence = {
-    autoImprovement: true,
-    validation: input.validation,
-    productionVerifiedAt: new Date().toISOString(),
-  };
-
-  let regressionId = improvement.regression_case_id;
-  if (!regressionId) {
-    const latest = await admin
-      .from("reliability_regression_cases")
-      .select("id")
-      .eq("incident_id", improvement.incident_id)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    regressionId = latest.data?.id ?? null;
-  }
-
-  if (regressionId) {
-    const updated = await admin
-      .from("reliability_regression_cases")
-      .update({
-        source_repo: input.targetRepo,
-        test_path: testPath,
-        test_name: testName,
-        protected_invariant: "동일한 저위험 운영 오류가 재발하지 않아야 합니다.",
-        status: "implemented",
-        workflow_name: "Reliability Auto Improvement Validate",
-        commit_sha: input.mergeSha,
-        last_run_at: new Date().toISOString(),
-        evidence,
-      })
-      .eq("id", regressionId)
-      .select("id")
-      .maybeSingle();
-    if (updated.error || !updated.data) {
-      throw new Error("자동개선 GitHub 반영 근거를 갱신하지 못했습니다.");
-    }
-    return;
-  }
-
-  const created = await admin
-    .from("reliability_regression_cases")
-    .insert({
-      incident_id: improvement.incident_id,
-      source_repo: input.targetRepo,
-      test_path: testPath,
-      test_name: testName,
-      protected_invariant: "동일한 저위험 운영 오류가 재발하지 않아야 합니다.",
-      status: "implemented",
-      workflow_name: "Reliability Auto Improvement Validate",
-      commit_sha: input.mergeSha,
-      last_run_at: new Date().toISOString(),
-      evidence,
-    })
-    .select("id")
-    .single();
-  if (created.error) {
-    throw new Error(`자동개선 회귀방지 근거를 만들지 못했습니다: ${created.error.message}`);
-  }
+  const result = await rpc(admin, "finalize_reliability_auto_improvement_regression", {
+    p_improvement_id: input.improvementId,
+    p_target_repo: input.targetRepo,
+    p_merge_sha: input.mergeSha,
+    p_test_path: testPath,
+    p_test_name: testName,
+    p_validation: input.validation,
+  });
+  if (!result) throw new Error("자동개선 GitHub 반영 근거를 저장하지 못했습니다.");
 }
 
 async function markRegressionRolledBack(improvementId: string) {
   const admin = await adminClient();
-  const improvement = await admin
-    .from("reliability_improvements")
-    .select("regression_case_id")
-    .eq("id", improvementId)
-    .maybeSingle();
-  const regressionId = improvement.data?.regression_case_id;
-  if (!regressionId) return;
-  await admin
-    .from("reliability_regression_cases")
-    .update({ status: "failing", last_run_at: new Date().toISOString() })
-    .eq("id", regressionId);
+  await rpc(admin, "mark_reliability_auto_improvement_regression_failed", {
+    p_improvement_id: improvementId,
+  });
 }
 
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
@@ -263,7 +206,7 @@ export async function reportReliabilityAutoImprovement(
   if (currentResult.error || !currentResult.data) {
     throw new Error("자동개선 작업 또는 실행 권한을 찾지 못했습니다.");
   }
-  const current = currentResult.data as Record<string, unknown>;
+  const current = object(currentResult.data);
   const currentStatus = String(current.status ?? "");
   if (!(ALLOWED_TRANSITIONS[currentStatus] ?? []).includes(input.status)) {
     throw new Error(`허용되지 않는 자동개선 상태 변경입니다: ${currentStatus} → ${input.status}`);
@@ -308,12 +251,13 @@ export async function reportReliabilityAutoImprovement(
   if (updated.error || !updated.data) {
     throw new Error("자동개선 진행 상태를 저장하지 못했습니다.");
   }
+  const updatedRow = object(updated.data);
 
-  await admin.from("reliability_auto_improvement_activity").insert({
-    job_id: input.jobId,
-    event_type: input.status,
-    from_status: currentStatus,
-    to_status: storedStatus,
+  await recordActivity(admin, {
+    jobId: input.jobId,
+    eventType: input.status,
+    fromStatus: currentStatus,
+    toStatus: storedStatus,
     summary:
       input.status === "production_verified"
         ? "테스트와 미리보기를 통과한 수정이 실제 서비스에 반영됐습니다."
@@ -329,16 +273,19 @@ export async function reportReliabilityAutoImprovement(
     },
   });
 
+  const improvementId = String(updatedRow.improvement_id ?? "");
+  if (!improvementId) throw new Error("자동개선 항목 연결이 비어 있습니다.");
+
   if (input.status === "production_verified") {
     if (!input.mergeSha) throw new Error("실제 서비스 반영 커밋이 비어 있습니다.");
     await markRegressionApplied({
-      improvementId: String(updated.data.improvement_id),
+      improvementId,
       targetRepo: repository,
       mergeSha: input.mergeSha,
-      validation: input.validation ?? object(updated.data.validation),
+      validation: input.validation ?? object(updatedRow.validation),
     });
   } else if (input.status === "rolled_back") {
-    await markRegressionRolledBack(String(updated.data.improvement_id));
+    await markRegressionRolledBack(improvementId);
   }
 
   return { ok: true, status: storedStatus };
