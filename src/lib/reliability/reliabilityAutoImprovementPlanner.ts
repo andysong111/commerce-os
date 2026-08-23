@@ -140,6 +140,7 @@ function validatePlan(input: {
   const sourceByPath = new Map(input.sources.map((source) => [source.path, source]));
   let changedCharacters = 0;
   let changedFiles = 0;
+  let hasRuntimeChange = false;
   let hasRegressionTest = false;
 
   for (const file of input.plan.files) {
@@ -157,7 +158,12 @@ function validatePlan(input: {
       throw new Error("자동수정은 새로운 운영 코드 파일을 만들 수 없습니다.");
     }
     const before = source.content ?? "";
-    if (before !== content) changedFiles += 1;
+    if (before !== content) {
+      changedFiles += 1;
+      if (!file.path.endsWith(".test.ts") && source.content !== null) {
+        hasRuntimeChange = true;
+      }
+    }
     changedCharacters += Math.abs(content.length - before.length) + Math.min(content.length, before.length);
     if (file.path.endsWith(".test.ts") && content.includes("SERVER_FINALIZATION_FAILED")) {
       hasRegressionTest = true;
@@ -165,6 +171,9 @@ function validatePlan(input: {
   }
 
   if (changedFiles < 1) throw new Error("자동수정 계획이 실제 코드를 바꾸지 않았습니다.");
+  if (!hasRuntimeChange) {
+    throw new Error("테스트만 바꾼 계획은 실제 개선으로 배포할 수 없습니다.");
+  }
   if (changedCharacters > surface.maxChangedCharacters) {
     throw new Error("자동수정 변경량이 안전 한도를 넘었습니다.");
   }
@@ -217,6 +226,7 @@ export async function planReliabilityAutoImprovement(
     "Return only the strict JSON schema requested by the API.",
     "You may modify only the supplied allowlisted files. Do not request or invent any other path.",
     "Make the smallest reversible change that addresses the confirmed incident.",
+    "The plan must change at least one existing non-test runtime file and also add or strengthen the deterministic regression test.",
     "Preserve authentication, ownership checks, quality gates, durable state, billing, and existing successful behavior.",
     "Do not add dependencies, environment variables, migrations, workflows, secrets, feature flags, or network destinations.",
     "For transient failures, prefer bounded idempotent retry around the narrow failing operation; never retry authentication, validation, or deterministic quality failures.",
