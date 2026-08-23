@@ -112,6 +112,24 @@ test("정책·커밋 근거가 사라지면 반영·측정 흔적을 모두 제�
   );
 });
 
+test("같은 GitHub 커밋의 설명 수정은 적용 시각을 옮기지 않고 근거 삭제는 즉시 철회한다", async () => {
+  const guard = await source(
+    "supabase/migrations/202608241006_reliability_github_application_evidence_guard.sql",
+  );
+
+  assert.match(guard, /old\.applied_reference is not distinct from new\.applied_reference/);
+  assert.match(guard, /new\.applied_at := old\.applied_at/);
+  assert.match(guard, /old\.regression_case_id is not null/);
+  assert.match(guard, /new\.regression_case_id is null/);
+  assert.match(guard, /new\.application_mode := 'none'/);
+  assert.match(guard, /new\.applied_at := null/);
+  assert.match(guard, /before update of\s+regression_case_id/s);
+  assert.match(
+    guard,
+    /revoke all on function public\.guard_reliability_github_application_evidence\(\)/,
+  );
+});
+
 test("운영 Cron은 학습 분석 뒤에 개선 효과를 best-effort로 갱신한다", async () => {
   const [route, evaluator] = await Promise.all([
     source("src/app/api/cron/product-decision-live-refresh/route.ts"),
