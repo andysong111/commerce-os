@@ -26,6 +26,32 @@ test("학습사례는 실제 정책·커밋이 확인된 경우에만 반영 상
   assert.doesNotMatch(migration, /v_status := 'applied';\s*v_application_mode := 'none'/);
 });
 
+test("기존 정책이 학습사례보다 오래됐으면 새 개선 효과로 소급 계산하지 않는다", async () => {
+  const [guard, dashboard] = await Promise.all([
+    source(
+      "supabase/migrations/202608241002_reliability_existing_policy_baseline_guard.sql",
+    ),
+    source("src/lib/reliability/reliabilityDashboard.ts"),
+  ]);
+
+  assert.match(guard, /v_policy_created_at < v_learning_created_at/);
+  assert.match(guard, /new\.applied_at := null/);
+  assert.match(guard, /new\.measurement_result := 'not_started'/);
+  assert.match(guard, /measurementBaselineAvailable/);
+  assert.match(
+    guard,
+    /revoke all on function public\.guard_reliability_improvement_measurement_baseline\(\)/,
+  );
+  assert.match(
+    dashboard,
+    /\.eq\("application_mode", "existing_policy"\),/,
+  );
+  assert.doesNotMatch(
+    dashboard,
+    /\.eq\("application_mode", "existing_policy"\)\s*\.not\("applied_at"/,
+  );
+});
+
 test("효과 측정은 적용 전후 동일 길이 구간의 고유 실행 오류율을 비교한다", async () => {
   const migration = await source(
     "supabase/migrations/202608241001_reliability_improvement_measurement.sql",
