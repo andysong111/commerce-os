@@ -102,8 +102,7 @@ begin
     v_status := 'queued';
     v_surface := 'ai_saurus_server_finalization_retry_v1';
     v_paths := jsonb_build_array(
-      'src/app/api/saas/jobs/[jobId]/finalize/route.ts',
-      'src/lib/saasServerFinalizer.ts',
+      'src/config/saasServerFinalizationRetryPolicy.json',
       'src/lib/saasServerFinalizerRetry.test.ts'
     );
   else
@@ -289,7 +288,7 @@ grant execute on function public.claim_reliability_auto_improvement_job(text,tex
 grant execute on function public.requeue_expired_reliability_auto_improvement_jobs() to service_role;
 
 comment on table public.reliability_auto_improvement_jobs is
-  'Guarded queue for low-risk self-improvement. Only explicitly registered safe surfaces may enter auto mode.';
+  'Guarded queue for low-risk self-improvement. Auto mode is limited to explicit data-only safe surfaces.';
 comment on function public.claim_reliability_auto_improvement_job(text,text) is
   'Claims one allowlisted low-risk auto-improvement job for an authenticated repository runner.';
 
