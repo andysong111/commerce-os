@@ -19,6 +19,8 @@ type Sku = {
   id: string;
   productId: string;
   barcode: string;
+  optionBarcodeNo?: string | null;
+  optionBarcodeIdentityKey?: string | null;
   optionName: string;
   chinaOptionName?: string | null;
   optionImageUrl?: string | null;
@@ -145,6 +147,8 @@ export function buildProductMasterSnapshotFromTrackerState(
         id: skuId,
         productId,
         barcode,
+        optionBarcodeNo: optional(option.optionBarcodeNo),
+        optionBarcodeIdentityKey: optional(option.optionBarcodeIdentityKey),
         optionName,
         chinaOptionName: optional(option.chinaOption),
         optionImageUrl: optional(option.optionImageUrl),
