@@ -52,22 +52,52 @@ test("기존 정책이 학습사례보다 오래됐으면 새 개선 효과로 �
   );
 });
 
-test("효과 측정은 적용 전후 동일 길이 구간의 고유 실행 오류율을 비교한다", async () => {
-  const migration = await source(
-    "supabase/migrations/202608241001_reliability_improvement_measurement.sql",
+test("효과 측정은 정확히 연결된 사건과 고유 실행만 비교한다", async () => {
+  const hardening = await source(
+    "supabase/migrations/202608241003_reliability_improvement_evidence_scope_hardening.sql",
   );
 
-  assert.match(migration, /count\(distinct coalesce\(e\.run_id, e\.id::text\)\)/);
-  assert.match(migration, /v_baseline_start := r\.applied_at - v_duration/);
-  assert.match(migration, /v_current_start := r\.applied_at/);
-  assert.match(migration, /v_baseline_events < 5/);
-  assert.match(migration, /v_current_events < 5/);
-  assert.match(migration, /v_improvement_percent >= 20/);
-  assert.match(migration, /v_improvement_percent <= -20/);
-  assert.match(migration, /v_measurement_result := 'insufficient_data'/);
+  assert.match(hardening, /count\(distinct coalesce\(e\.run_id, e\.id::text\)\)/);
+  assert.match(hardening, /e\.incident_id = r\.incident_id/);
+  assert.match(hardening, /v_baseline_start := r\.applied_at - v_duration/);
+  assert.match(hardening, /v_current_start := r\.applied_at/);
+  assert.match(hardening, /v_baseline_events < 5/);
+  assert.match(hardening, /v_current_events < 5/);
+  assert.match(hardening, /v_improvement_percent >= 20/);
+  assert.match(hardening, /v_improvement_percent <= -20/);
+  assert.match(hardening, /v_measurement_result := 'insufficient_data'/);
   assert.match(
-    migration,
+    hardening,
+    /linked incident failures per distinct engine run before versus after application/,
+  );
+  assert.match(
+    hardening,
     /revoke all on function public\.refresh_reliability_improvement_measurements\(\)/,
+  );
+});
+
+test("정책·커밋 근거가 사라지면 반영·측정 흔적을 모두 제거한다", async () => {
+  const [scopeHardening, cleanup] = await Promise.all([
+    source(
+      "supabase/migrations/202608241003_reliability_improvement_evidence_scope_hardening.sql",
+    ),
+    source(
+      "supabase/migrations/202608241004_reliability_stale_application_cleanup.sql",
+    ),
+  ]);
+
+  assert.match(scopeHardening, /v_policy_enabled/);
+  assert.match(scopeHardening, /v_regression_qualifies/);
+  assert.match(scopeHardening, /new\.application_mode := 'none'/);
+  assert.match(scopeHardening, /new\.applied_at := null/);
+  assert.match(cleanup, /old\.application_mode in/);
+  assert.match(cleanup, /old\.status in \('applied','measuring','verified','neutral','regressed'\)/);
+  assert.match(cleanup, /applicationEvidenceActive', false/);
+  assert.match(cleanup, /new\.measurement_result := 'not_started'/);
+  assert.match(cleanup, /new\.improvement_percent := null/);
+  assert.match(
+    cleanup,
+    /revoke all on function public\.clear_stale_reliability_application_evidence\(\)/,
   );
 });
 
