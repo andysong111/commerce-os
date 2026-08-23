@@ -25,6 +25,7 @@ const SHOPLING_UPLOAD_ENDPOINT = "/api/product-launch-tracker/shopling-upload";
 const SHOPLING_MALL_SEO_ENDPOINT = "/api/product-launch-tracker/shopling-mall-seo";
 const DIRECT_APPLY_RESULT_ENDPOINT =
   "/api/keyword-shopling-direct-apply/actions-result";
+const SHOPLING_MALL_TITLE_COUNT = PRODUCT_GROUP_MARKET_REGISTRY.length;
 
 const SHOPLING_GROUPS = [
   { key: "wholesale1", label: "도매1" },
@@ -263,8 +264,7 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
   const groupTitlesReady = SHOPLING_GROUPS.every((group) =>
     Boolean(seoFinal.groupProductNames[group.key]),
   );
-  const mallTitlesReady =
-    seoFinal.mallTitles.length === PRODUCT_GROUP_MARKET_REGISTRY.length;
+  const mallTitlesReady = seoFinal.mallTitles.length === SHOPLING_MALL_TITLE_COUNT;
   const ready =
     output.status === "ready" &&
     seoFinal.searchKeywords.length === 10 &&
@@ -328,7 +328,7 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
       if (status === "success") {
         const summary = record(result.summary);
         const successCount = Number(summary.title_apply_success_count ?? 0);
-        if (summary.direct_apply_completed !== true || successCount < seoFinal.mallTitles.length) {
+        if (summary.direct_apply_completed !== true || successCount < SHOPLING_MALL_TITLE_COUNT) {
           throw new Error("쇼핑몰별 상품명 반영 결과가 완전 성공으로 확인되지 않았습니다.");
         }
         await requestJson<{ ok?: boolean }>(TRACKER_ITEM_ENDPOINT, {
@@ -340,7 +340,7 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
               mallSeoApply: {
                 status: "success",
                 requestId,
-                itemCount: seoFinal.mallTitles.length,
+                itemCount: SHOPLING_MALL_TITLE_COUNT,
                 message: "SEO Cloud 쇼핑몰별 상품명 29개 반영 완료",
                 completedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -362,7 +362,7 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
   async function repairMallTitles() {
     if (busy || !ready || !launchItemId) return;
     const confirmed = window.confirm(
-      `현재 등록된 6개 goods_key에 SEO Cloud 쇼핑몰별 상품명 ${seoFinal.mallTitles.length}개와 검색어 10개를 실제 반영할까요?`,
+      `현재 등록된 6개 goods_key에 SEO Cloud 쇼핑몰별 상품명 ${SHOPLING_MALL_TITLE_COUNT}개와 검색어 10개를 실제 반영할까요?`,
     );
     if (!confirmed) return;
     setBusy(true);
@@ -523,7 +523,7 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
             기준 상품명 {Object.values(seoFinal.groupProductNames).filter(Boolean).length}/6
           </span>
           <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-900">
-            쇼핑몰별 상품명 {seoFinal.mallTitles.length}/{PRODUCT_GROUP_MARKET_REGISTRY.length}
+            쇼핑몰별 상품명 {seoFinal.mallTitles.length}/{SHOPLING_MALL_TITLE_COUNT}
           </span>
         </div>
       </div>
