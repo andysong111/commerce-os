@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
+import { dispatchProductLaunchMallSeo } from "@/lib/productLaunchShoplingMallSeo";
 import {
   extractCanonicalPriceTargetsFromUploadResult,
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
@@ -344,6 +345,7 @@ async function applyResultToTrackerState(
   }
   item.shoplingProducts = products;
   await startCanonicalPricePolicy(item, input, completedAt);
+  await startMallSeoApply(item, input, completedAt);
 
   const stages = { ...asRecord(item.stages) };
   const currentStage = { ...asRecord(stages.shoplingUpload) };
@@ -375,6 +377,50 @@ async function applyResultToTrackerState(
     { userId: ownerId, email: ownerEmail },
     nextState,
   );
+}
+
+async function startMallSeoApply(
+  item: Record<string, unknown>,
+  input: { status: "success" | "partial_failure" | "failed" },
+  completedAt: string,
+) {
+  if (input.status !== "success") return;
+  const seoFinal = asRecord(item.seoFinal);
+  const mallTitles = Array.isArray(seoFinal.mallTitles) ? seoFinal.mallTitles : [];
+  if (!mallTitles.length) return;
+
+  const current = asRecord(item.mallSeoApply);
+  if (
+    String(current.requestId ?? "").trim() &&
+    ["pending", "running", "success"].includes(String(current.status ?? "").trim())
+  ) {
+    return;
+  }
+
+  try {
+    const dispatch = await dispatchProductLaunchMallSeo(item);
+    item.mallSeoApply = {
+      ...current,
+      status: "pending",
+      requestId: dispatch.requestId,
+      itemCount: dispatch.plan.length,
+      message: "상품등록 완료 후 SEO Cloud 쇼핑몰별 상품명 29개 반영을 시작했습니다.",
+      startedAt: completedAt,
+      updatedAt: completedAt,
+    };
+  } catch (error) {
+    item.mallSeoApply = {
+      ...current,
+      status: "failed",
+      requestId: "",
+      itemCount: mallTitles.length,
+      message:
+        error instanceof Error
+          ? error.message
+          : "쇼핑몰별 상품명 반영을 시작하지 못했습니다.",
+      updatedAt: completedAt,
+    };
+  }
 }
 
 async function startCanonicalPricePolicy(
