@@ -36,6 +36,7 @@ function safePath(raw) {
   const path = String(raw || "").replaceAll("\\", "/").replace(/^\.\//, "");
   if (!path || path.startsWith("/") || path.includes("../")) return false;
   if (!(path.startsWith("src/") || path.startsWith("tests/") || path.includes(".test."))) return false;
+  if (path.startsWith("src/") && !path.startsWith("src/lib/")) return false;
   const lower = path.toLowerCase();
   return !FORBIDDEN.some((part) => lower.includes(part));
 }
