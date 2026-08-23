@@ -24,6 +24,16 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
 ] as const;
 
 export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
+export const SHOPLING_REGISTRATION_IMAGE_COUNT = 5;
+
+const SHOPLING_CHANNEL_IMAGE_PERMUTATIONS: Record<string, readonly number[]> = {
+  wholesale1: [0, 2, 4, 1, 3],
+  wholesale2: [1, 3, 0, 4, 2],
+  wholesale3: [2, 4, 1, 3, 0],
+  wholesale4: [3, 0, 2, 4, 1],
+  retail1: [4, 1, 3, 0, 2],
+  retail2: [0, 4, 2, 1, 3],
+};
 
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
@@ -38,6 +48,11 @@ const DEFAULT_SHIPPING_NOTICE_HTML =
   "<img src='https://gi.esmplus.com/andy80101/%EB%8F%84%EB%A7%A4%EC%9E%AC%EA%B3%A0%20%ED%95%98%EB%8B%A8%EA%B3%B5%EC%A7%80/%ED%95%98%EB%8B%A8%20%EA%B3%B5%EC%A7%801%EB%B2%88111.jpg' />";
 
 type UnknownRecord = Record<string, unknown>;
+
+type ShoplingImages = {
+  main: string;
+  additional: string[];
+};
 
 export type ProductLaunchSeoFinal = {
   productName: string;
@@ -60,10 +75,7 @@ export type ProductLaunchShoplingPayload = {
   siteSearch: string;
   seoFinal: ProductLaunchSeoFinal | null;
   detailHtml: string;
-  images: {
-    main: string;
-    additional: string[];
-  };
+  images: ShoplingImages;
   fixedFields: {
     prodTp: string;
     taxTp: string;
@@ -89,6 +101,7 @@ export type ProductLaunchShoplingPayload = {
     orgPrice: number;
     salePrice: number;
     listPrice: number;
+    images: ShoplingImages;
     options: Array<{
       optionName: string;
       saleOption: string;
@@ -120,6 +133,40 @@ export function resolveProductLaunchBasePurchasePriceKrw(
   return roundUpShoplingPriceKrw(salePrice / 2);
 }
 
+export function buildShoplingChannelImageOrder(
+  mainImageInput: unknown,
+  additionalImagesInput: unknown,
+  channelKey: string,
+): ShoplingImages {
+  const sourceImages = [
+    text(mainImageInput),
+    ...stringList(additionalImagesInput),
+  ].filter(Boolean);
+  const uniqueImages = [...new Set(sourceImages)].slice(
+    0,
+    SHOPLING_REGISTRATION_IMAGE_COUNT,
+  );
+  if (!uniqueImages.length) return { main: "", additional: [] };
+
+  const permutation =
+    SHOPLING_CHANNEL_IMAGE_PERMUTATIONS[channelKey] ??
+    Array.from({ length: SHOPLING_REGISTRATION_IMAGE_COUNT }, (_, index) => index);
+  const ordered: string[] = [];
+  const used = new Set<number>();
+  for (const index of permutation) {
+    if (index < 0 || index >= uniqueImages.length || used.has(index)) continue;
+    ordered.push(uniqueImages[index]);
+    used.add(index);
+  }
+  for (let index = 0; index < uniqueImages.length; index += 1) {
+    if (!used.has(index)) ordered.push(uniqueImages[index]);
+  }
+  return {
+    main: ordered[0] ?? "",
+    additional: ordered.slice(1),
+  };
+}
+
 export function buildProductLaunchShoplingPayload(
   itemInput: unknown,
   policyInput: unknown,
@@ -136,6 +183,10 @@ export function buildProductLaunchShoplingPayload(
   const detailHtml = text(detailPage.html);
   const mainImage = text(detailPage.mainImageUrl);
   const additionalImages = stringList(detailPage.additionalImageUrls).slice(0, 10);
+  const registrationImages = [mainImage, ...additionalImages]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .slice(0, SHOPLING_REGISTRATION_IMAGE_COUNT);
   const seoFinal = normalizeSeoFinal(item.seoFinal);
   const rawOptions = Array.isArray(item.orderOptions) ? item.orderOptions : [];
   const singleOptionBarcode =
@@ -165,6 +216,11 @@ export function buildProductLaunchShoplingPayload(
   if (!selfCodeBase) errors.push("자사상품 기본코드가 없습니다.");
   if (!detailHtml) errors.push("상세페이지 HTML이 없습니다.");
   if (!mainImage) errors.push("대표이미지가 없습니다.");
+  if (registrationImages.length < SHOPLING_REGISTRATION_IMAGE_COUNT) {
+    errors.push(
+      `샵플링 순서 셔플 등록에는 대표·부가이미지 ${SHOPLING_REGISTRATION_IMAGE_COUNT}장이 필요합니다.`,
+    );
+  }
   if (!options.length) errors.push("발주·입고 옵션가격이 없습니다.");
 
   if (seoFinal) {
@@ -246,6 +302,11 @@ export function buildProductLaunchShoplingPayload(
       listPrice: roundUpShoplingPriceKrw(
         salePrice * listPriceMultiplier,
       ),
+      images: buildShoplingChannelImageOrder(
+        registrationImages[0],
+        registrationImages.slice(1),
+        channel.key,
+      ),
       options: pricedOptions.map((option) => ({
         optionName: option.optionName,
         saleOption: option.saleOption,
@@ -269,7 +330,10 @@ export function buildProductLaunchShoplingPayload(
     siteSearch: seoFinal?.searchLine || "",
     seoFinal,
     detailHtml: appendShippingNotice(detailHtml, shippingNoticeHtml),
-    images: { main: mainImage, additional: additionalImages },
+    images: {
+      main: registrationImages[0],
+      additional: registrationImages.slice(1),
+    },
     fixedFields: {
       prodTp: text(policy.productType) || "A",
       taxTp: text(policy.taxType) || "A",
