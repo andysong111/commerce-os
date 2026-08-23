@@ -49,18 +49,36 @@ export async function GET(
         { status: 404 },
       );
     }
-    if (job.status === "queued") {
-      await patchJob(config.value, jobId, {
-        status: "running",
-        updated_at: new Date().toISOString(),
-      });
+    if (String(job.status ?? "") !== "queued") {
+      return Response.json(
+        {
+          ok: false,
+          code: "SHOPLING_JOB_NOT_CLAIMABLE",
+          message: "이미 처리되었거나 폐기된 Shopling 등록 작업입니다.",
+          status: String(job.status ?? ""),
+        },
+        { status: 409 },
+      );
     }
+
+    const claimed = await claimQueuedJob(config.value, jobId);
+    if (!claimed) {
+      return Response.json(
+        {
+          ok: false,
+          code: "SHOPLING_JOB_ALREADY_CLAIMED",
+          message: "다른 Worker가 이미 이 Shopling 등록 작업을 가져갔습니다.",
+        },
+        { status: 409 },
+      );
+    }
+
     return Response.json({
       ok: true,
-      jobId: job.id,
-      requestId: job.request_id,
-      launchItemId: job.launch_item_id,
-      payload: job.payload,
+      jobId: claimed.id,
+      requestId: claimed.request_id,
+      launchItemId: claimed.launch_item_id,
+      payload: claimed.payload,
     });
   } catch (error) {
     return Response.json(
@@ -130,6 +148,31 @@ export async function PUT(
         { status: 404 },
       );
     }
+    if (String(job.status ?? "") !== "running") {
+      return Response.json(
+        {
+          ok: false,
+          code: "SHOPLING_JOB_CALLBACK_NOT_ACCEPTED",
+          message: "현재 실행 중인 작업이 아니므로 늦게 도착한 결과를 반영하지 않습니다.",
+          status: String(job.status ?? ""),
+        },
+        { status: 409 },
+      );
+    }
+    const callbackRequestId = String(
+      input.result.request_id ?? input.result.requestId ?? "",
+    ).trim();
+    if (!callbackRequestId || callbackRequestId !== String(job.request_id ?? "").trim()) {
+      return Response.json(
+        {
+          ok: false,
+          code: "SHOPLING_JOB_REQUEST_ID_MISMATCH",
+          message: "Shopling 등록 결과의 request_id가 현재 작업과 일치하지 않습니다.",
+        },
+        { status: 409 },
+      );
+    }
+
     const completedAt = new Date().toISOString();
     await patchJob(config.value, jobId, {
       status: input.status,
@@ -204,6 +247,34 @@ async function readJob(
     `${config.supabaseUrl}/rest/v1/${JOB_TABLE}?${params.toString()}`,
     {
       headers: createSupabaseAdminHeaders(config.secretKey),
+      cache: "no-store",
+    },
+  );
+  const body = await readResponseJson(response);
+  if (!response.ok) throw new Error(readProductLaunchError(body, response.status));
+  return Array.isArray(body) ? body[0] ?? null : null;
+}
+
+async function claimQueuedJob(
+  config: { supabaseUrl: string; secretKey: string },
+  jobId: string,
+) {
+  const params = new URLSearchParams({
+    id: `eq.${jobId}`,
+    status: "eq.queued",
+  });
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/${JOB_TABLE}?${params.toString()}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...createSupabaseAdminHeaders(config.secretKey),
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        status: "running",
+        updated_at: new Date().toISOString(),
+      }),
       cache: "no-store",
     },
   );
