@@ -58,28 +58,34 @@ test("저장소 worker는 서버와 별개로 경로·원본 SHA·diff·재발�
   assert.match(worker, /supabase\/migrations\//);
 });
 
-test("자동개선 API는 GitHub OIDC 후에만 claim/report를 처리하고 실제 운영 커밋만 반영 근거로 승격한다", async () => {
-  const [claim, report, store] = await Promise.all([
+test("자동개선 API는 GitHub OIDC 후에만 claim/report를 처리하고 Production 검증 커밋만 반영 근거로 승격한다", async () => {
+  const [claim, report, store, writeRpcs] = await Promise.all([
     source("src/app/api/integrations/reliability/auto-improvement/claim/route.ts"),
     source("src/app/api/integrations/reliability/auto-improvement/report/route.ts"),
     source("src/lib/reliability/reliabilityAutoImprovementStore.ts"),
+    source("supabase/migrations/202608241101_reliability_auto_improvement_write_rpcs.sql"),
   ]);
   assert.match(claim, /authorizeReliabilityGitHubRunner\(request\)/);
   assert.match(claim, /planReliabilityAutoImprovement/);
   assert.match(report, /authorizeReliabilityGitHubRunner\(request\)/);
   assert.match(report, /production_verified/);
-  assert.match(store, /markRegressionApplied/);
-  assert.match(store, /status: "implemented"/);
-  assert.match(store, /commit_sha: input\.mergeSha/);
-  assert.match(store, /Reliability Auto Improvement Validate/);
+  assert.match(store, /finalize_reliability_auto_improvement_regression/);
+  assert.match(store, /p_merge_sha: input\.mergeSha/);
+  assert.match(writeRpcs, /status='implemented'/);
+  assert.match(writeRpcs, /commit_sha=left\(btrim\(p_merge_sha\),80\)/);
+  assert.match(writeRpcs, /Reliability Auto Improvement Validate/);
+  assert.match(writeRpcs, /productionVerifiedAt/);
 });
 
-test("자동수정 큐와 claim 함수는 service-role 밖에서 실행할 수 없다", async () => {
-  const migration = await source(
-    "supabase/migrations/202608241100_reliability_auto_improvement_jobs.sql",
-  );
-  assert.match(migration, /enable row level security/);
-  assert.match(migration, /revoke all on table public\.reliability_auto_improvement_jobs from public, anon, authenticated/);
-  assert.match(migration, /revoke all on function public\.claim_reliability_auto_improvement_job\(text,text\)/);
-  assert.match(migration, /grant execute on function public\.claim_reliability_auto_improvement_job\(text,text\) to service_role/);
+test("자동수정 큐와 쓰기 RPC는 service-role 밖에서 실행할 수 없다", async () => {
+  const [queueMigration, writeRpcs] = await Promise.all([
+    source("supabase/migrations/202608241100_reliability_auto_improvement_jobs.sql"),
+    source("supabase/migrations/202608241101_reliability_auto_improvement_write_rpcs.sql"),
+  ]);
+  assert.match(queueMigration, /enable row level security/);
+  assert.match(queueMigration, /revoke all on table public\.reliability_auto_improvement_jobs from public, anon, authenticated/);
+  assert.match(queueMigration, /revoke all on function public\.claim_reliability_auto_improvement_job\(text,text\)/);
+  assert.match(queueMigration, /grant execute on function public\.claim_reliability_auto_improvement_job\(text,text\) to service_role/);
+  assert.match(writeRpcs, /revoke all on function public\.save_reliability_auto_improvement_plan/);
+  assert.match(writeRpcs, /grant execute on function public\.finalize_reliability_auto_improvement_regression/);
 });
