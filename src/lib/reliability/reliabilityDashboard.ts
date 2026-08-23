@@ -94,6 +94,56 @@ export type ReliabilityEventRow = {
   occurred_at: string;
 };
 
+export type ReliabilityImprovementRow = {
+  id: string;
+  learning_case_id: string;
+  incident_id: string;
+  source_system: string;
+  engine: string;
+  error_code: string | null;
+  title: string;
+  fact_summary: string;
+  root_cause: string;
+  change_summary: string;
+  prevention_rule: string;
+  expected_effect: string;
+  improvement_kind: string;
+  status: string;
+  application_mode: string;
+  safe_action: string;
+  policy_action: string | null;
+  risk_level: string;
+  confidence: number;
+  requires_approval: boolean;
+  target_repo: string | null;
+  target_test_name: string | null;
+  applied_at: string | null;
+  applied_reference: string | null;
+  baseline_events: number;
+  baseline_failures: number;
+  baseline_recoveries: number;
+  current_events: number;
+  current_failures: number;
+  current_recoveries: number;
+  baseline_failure_rate: number | null;
+  current_failure_rate: number | null;
+  current_recovery_rate: number | null;
+  improvement_percent: number | null;
+  measurement_result: string;
+  last_measured_at: string | null;
+  updated_at: string;
+};
+
+export type ReliabilityImprovementActivityRow = {
+  id: string;
+  improvement_id: string;
+  event_type: string;
+  from_status: string | null;
+  to_status: string | null;
+  summary: string;
+  occurred_at: string;
+};
+
 export type ReliabilityDashboardData = {
   configured: boolean;
   error: string | null;
@@ -102,12 +152,21 @@ export type ReliabilityDashboardData = {
     openIncidents: number;
     criticalOrHighIncidents: number;
     learningCandidates: number;
+    analyzedLearningCases: number;
     regressionProposals: number;
     analysisBacklog: number;
     analysisFailures: number;
     queuedRecoveries: number;
     approvalRequired: number;
     aiSaurusEvents: number;
+    improvementsTotal: number;
+    improvementsApplied: number;
+    policyActive: number;
+    implementationNeeded: number;
+    improvementApprovalRequired: number;
+    improvementsMeasuring: number;
+    improvementsVerified: number;
+    improvementsRegressed: number;
   };
   incidents: ReliabilityIncidentRow[];
   learningCases: ReliabilityLearningCaseRow[];
@@ -115,6 +174,8 @@ export type ReliabilityDashboardData = {
   analysisQueue: ReliabilityAnalysisQueueRow[];
   recoveryQueue: ReliabilityRecoveryQueueRow[];
   recentEvents: ReliabilityEventRow[];
+  improvements: ReliabilityImprovementRow[];
+  improvementActivity: ReliabilityImprovementActivityRow[];
 };
 
 const loadSnapshot = unstable_cache(
@@ -129,17 +190,28 @@ const loadSnapshot = unstable_cache(
       analysisResult,
       recoveryResult,
       eventsResult,
+      improvementsResult,
+      improvementActivityResult,
       totalEventsResult,
       openIncidentsResult,
       highIncidentsResult,
       criticalIncidentsResult,
       learningCountResult,
+      analyzedLearningResult,
       regressionCountResult,
       analysisBacklogResult,
       analysisFailureResult,
       queuedRecoveryResult,
       approvalRecoveryResult,
       aiSaurusEventsResult,
+      improvementsTotalResult,
+      improvementsAppliedResult,
+      policyActiveResult,
+      implementationNeededResult,
+      improvementApprovalResult,
+      improvementsMeasuringResult,
+      improvementsVerifiedResult,
+      improvementsRegressedResult,
     ] = await Promise.all([
       admin
         .from("reliability_incidents")
@@ -154,28 +226,28 @@ const loadSnapshot = unstable_cache(
           "id,incident_id,state,title,symptom,root_cause,resolution,prevention_rule,confidence,updated_at",
         )
         .order("updated_at", { ascending: false })
-        .limit(40),
+        .limit(50),
       admin
         .from("reliability_regression_cases")
         .select(
           "id,incident_id,source_repo,test_path,test_name,protected_invariant,status,workflow_name,commit_sha,updated_at",
         )
         .order("updated_at", { ascending: false })
-        .limit(40),
+        .limit(50),
       admin
         .from("reliability_learning_analysis_queue")
         .select(
           "id,learning_case_id,incident_id,status,attempts,max_attempts,model,last_error,not_before,created_at,updated_at",
         )
         .order("updated_at", { ascending: false })
-        .limit(40),
+        .limit(50),
       admin
         .from("reliability_recovery_queue")
         .select(
           "id,incident_id,source_system,engine,run_id,action,status,attempt_count,max_attempts,not_before,last_error,created_at",
         )
         .order("created_at", { ascending: false })
-        .limit(50),
+        .limit(60),
       admin
         .from("reliability_events")
         .select(
@@ -183,6 +255,20 @@ const loadSnapshot = unstable_cache(
         )
         .order("occurred_at", { ascending: false })
         .limit(100),
+      admin
+        .from("reliability_improvements")
+        .select(
+          "id,learning_case_id,incident_id,source_system,engine,error_code,title,fact_summary,root_cause,change_summary,prevention_rule,expected_effect,improvement_kind,status,application_mode,safe_action,policy_action,risk_level,confidence,requires_approval,target_repo,target_test_name,applied_at,applied_reference,baseline_events,baseline_failures,baseline_recoveries,current_events,current_failures,current_recoveries,baseline_failure_rate,current_failure_rate,current_recovery_rate,improvement_percent,measurement_result,last_measured_at,updated_at",
+        )
+        .order("updated_at", { ascending: false })
+        .limit(60),
+      admin
+        .from("reliability_improvement_activity")
+        .select(
+          "id,improvement_id,event_type,from_status,to_status,summary,occurred_at",
+        )
+        .order("occurred_at", { ascending: false })
+        .limit(80),
       admin.from("reliability_events").select("id", { count: "exact", head: true }),
       admin
         .from("reliability_incidents")
@@ -200,6 +286,10 @@ const loadSnapshot = unstable_cache(
         .from("reliability_learning_cases")
         .select("id", { count: "exact", head: true })
         .eq("state", "candidate"),
+      admin
+        .from("reliability_learning_analysis_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "succeeded"),
       admin
         .from("reliability_regression_cases")
         .select("id", { count: "exact", head: true })
@@ -224,6 +314,37 @@ const loadSnapshot = unstable_cache(
         .from("reliability_events")
         .select("id", { count: "exact", head: true })
         .eq("source_system", "ai-saurus"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true }),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .not("applied_at", "is", null),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("application_mode", "existing_policy"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "implementation_needed"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "approval_required"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("measurement_result", "insufficient_data"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("measurement_result", "improved"),
+      admin
+        .from("reliability_improvements")
+        .select("id", { count: "exact", head: true })
+        .eq("measurement_result", "regressed"),
     ]);
 
     const results = [
@@ -233,17 +354,28 @@ const loadSnapshot = unstable_cache(
       analysisResult,
       recoveryResult,
       eventsResult,
+      improvementsResult,
+      improvementActivityResult,
       totalEventsResult,
       openIncidentsResult,
       highIncidentsResult,
       criticalIncidentsResult,
       learningCountResult,
+      analyzedLearningResult,
       regressionCountResult,
       analysisBacklogResult,
       analysisFailureResult,
       queuedRecoveryResult,
       approvalRecoveryResult,
       aiSaurusEventsResult,
+      improvementsTotalResult,
+      improvementsAppliedResult,
+      policyActiveResult,
+      implementationNeededResult,
+      improvementApprovalResult,
+      improvementsMeasuringResult,
+      improvementsVerifiedResult,
+      improvementsRegressedResult,
     ];
     const errors = results
       .map((result) => result.error?.message)
@@ -259,12 +391,21 @@ const loadSnapshot = unstable_cache(
         criticalOrHighIncidents:
           (highIncidentsResult.count ?? 0) + (criticalIncidentsResult.count ?? 0),
         learningCandidates: learningCountResult.count ?? 0,
+        analyzedLearningCases: analyzedLearningResult.count ?? 0,
         regressionProposals: regressionCountResult.count ?? 0,
         analysisBacklog: analysisBacklogResult.count ?? 0,
         analysisFailures: analysisFailureResult.count ?? 0,
         queuedRecoveries: queuedRecoveryResult.count ?? 0,
         approvalRequired: approvalRecoveryResult.count ?? 0,
         aiSaurusEvents: aiSaurusEventsResult.count ?? 0,
+        improvementsTotal: improvementsTotalResult.count ?? 0,
+        improvementsApplied: improvementsAppliedResult.count ?? 0,
+        policyActive: policyActiveResult.count ?? 0,
+        implementationNeeded: implementationNeededResult.count ?? 0,
+        improvementApprovalRequired: improvementApprovalResult.count ?? 0,
+        improvementsMeasuring: improvementsMeasuringResult.count ?? 0,
+        improvementsVerified: improvementsVerifiedResult.count ?? 0,
+        improvementsRegressed: improvementsRegressedResult.count ?? 0,
       },
       incidents: rows<ReliabilityIncidentRow>(incidentsResult.data),
       learningCases: rows<ReliabilityLearningCaseRow>(learningResult.data),
@@ -272,9 +413,13 @@ const loadSnapshot = unstable_cache(
       analysisQueue: rows<ReliabilityAnalysisQueueRow>(analysisResult.data),
       recoveryQueue: rows<ReliabilityRecoveryQueueRow>(recoveryResult.data),
       recentEvents: rows<ReliabilityEventRow>(eventsResult.data),
+      improvements: rows<ReliabilityImprovementRow>(improvementsResult.data),
+      improvementActivity: rows<ReliabilityImprovementActivityRow>(
+        improvementActivityResult.data,
+      ),
     };
   },
-  ["reliability-learning-dashboard-v2"],
+  ["reliability-learning-dashboard-v3"],
   { revalidate: 15 },
 );
 
@@ -302,12 +447,21 @@ function empty(configured: boolean, error: string): ReliabilityDashboardData {
       openIncidents: 0,
       criticalOrHighIncidents: 0,
       learningCandidates: 0,
+      analyzedLearningCases: 0,
       regressionProposals: 0,
       analysisBacklog: 0,
       analysisFailures: 0,
       queuedRecoveries: 0,
       approvalRequired: 0,
       aiSaurusEvents: 0,
+      improvementsTotal: 0,
+      improvementsApplied: 0,
+      policyActive: 0,
+      implementationNeeded: 0,
+      improvementApprovalRequired: 0,
+      improvementsMeasuring: 0,
+      improvementsVerified: 0,
+      improvementsRegressed: 0,
     },
     incidents: [],
     learningCases: [],
@@ -315,5 +469,7 @@ function empty(configured: boolean, error: string): ReliabilityDashboardData {
     analysisQueue: [],
     recoveryQueue: [],
     recentEvents: [],
+    improvements: [],
+    improvementActivity: [],
   };
 }
