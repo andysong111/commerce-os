@@ -19,7 +19,7 @@ const EXPECTED_MULTIPLIERS = {
 const EXPECTED_PRICES = [10000, 11500, 11000, 13000, 13000, 14000];
 
 function readyItem() {
-  return createLaunchItem(
+  const item = createLaunchItem(
     {
       modelNumber: "AAA999",
       productName: "가격정책 테스트",
@@ -41,6 +41,10 @@ function readyItem() {
     },
     () => "policy-test",
   );
+  item.orderOptions[0].optionBarcodeNo = "OB000000000888";
+  item.orderOptions[0].optionBarcodeIdentityKey = "B:POLICY-1";
+  item.orderOptions[0].optionBarcodeIdentityKind = "B_CODE";
+  return item;
 }
 
 test("상품그룹 기본 가격정책은 승인된 6개 배수를 사용한다", () => {
