@@ -18,12 +18,9 @@ on:
       - "tests/reliabilityImprovementImpact.test.mjs"
       - "tests/reliabilityAutoImprovement.test.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
-      - "scripts/reliability-auto-improvement-worker.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
-      - ".github/workflows/reliability-auto-improvement.yml"
-      - ".github/workflows/reliability-auto-improvement-validate.yml"
   push:
     branches: [main]
     paths:
@@ -42,12 +39,9 @@ on:
       - "tests/reliabilityImprovementImpact.test.mjs"
       - "tests/reliabilityAutoImprovement.test.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
-      - "scripts/reliability-auto-improvement-worker.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
-      - ".github/workflows/reliability-auto-improvement.yml"
-      - ".github/workflows/reliability-auto-improvement-validate.yml"
   workflow_dispatch:
 
 permissions:
