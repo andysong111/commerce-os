@@ -25,10 +25,6 @@
       "schedule": "5,20,35,50 * * * *"
     },
     {
-      "path": "/api/cron/reliability-learning",
-      "schedule": "6,21,36,51 * * * *"
-    },
-    {
       "path": "/api/cron/product-master-shopling-sales-events",
       "schedule": "7,22,37,52 * * * *"
     },
