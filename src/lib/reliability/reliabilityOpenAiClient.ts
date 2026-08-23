@@ -1,18 +1,22 @@
 import { redactReliabilityText } from "@/lib/reliability/reliabilityEvent";
 import {
   buildReliabilityLearningPrompt,
+  isReliabilityOpenAiOutputLimitIncomplete,
   parseReliabilityLearningAnalysis,
   reliabilityLearningAnalysisSchema,
   reliabilityLearningSystemPrompt,
+  type OpenAiResponsePayload,
   type ReliabilityLearningAnalysis,
   type ReliabilityLearningAnalysisJob,
 } from "@/lib/reliability/reliabilityLearningPolicy";
 
-type OpenAiPayload = Parameters<typeof parseReliabilityLearningAnalysis>[0] & {
+type OpenAiPayload = OpenAiResponsePayload & {
   error?: { message?: unknown };
 };
 
-const OPENAI_TIMEOUT_MS = 42_000;
+const OPENAI_TIMEOUT_MS = 46_000;
+const INITIAL_OUTPUT_TOKEN_BUDGET = 3_600;
+const RETRY_OUTPUT_TOKEN_BUDGET = 8_000;
 
 export type ReliabilityOpenAiConfiguration = {
   apiKey: string;
@@ -28,10 +32,15 @@ export function reliabilityOpenAiConfiguration(): ReliabilityOpenAiConfiguration
   return { apiKey, model };
 }
 
-export async function requestReliabilityOpenAiAnalysis(
+function outputTokenBudget(attempt: number) {
+  return attempt <= 0 ? INITIAL_OUTPUT_TOKEN_BUDGET : RETRY_OUTPUT_TOKEN_BUDGET;
+}
+
+async function requestOnce(
   job: ReliabilityLearningAnalysisJob,
   config: ReliabilityOpenAiConfiguration,
-): Promise<ReliabilityLearningAnalysis> {
+  maxOutputTokens: number,
+): Promise<OpenAiPayload> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -42,7 +51,7 @@ export async function requestReliabilityOpenAiAnalysis(
       model: config.model,
       instructions: reliabilityLearningSystemPrompt(),
       input: buildReliabilityLearningPrompt(job),
-      max_output_tokens: 1_800,
+      max_output_tokens: maxOutputTokens,
       store: false,
       text: {
         format: {
@@ -64,5 +73,19 @@ export async function requestReliabilityOpenAiAnalysis(
       : `status=${response.status}`;
     throw new Error(`OpenAI 신뢰성 분석 요청에 실패했습니다: ${message}`);
   }
-  return parseReliabilityLearningAnalysis(payload, job.risk_level);
+  return payload;
+}
+
+export async function requestReliabilityOpenAiAnalysis(
+  job: ReliabilityLearningAnalysisJob,
+  config: ReliabilityOpenAiConfiguration,
+): Promise<ReliabilityLearningAnalysis> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const payload = await requestOnce(job, config, outputTokenBudget(attempt));
+    if (attempt === 0 && isReliabilityOpenAiOutputLimitIncomplete(payload)) {
+      continue;
+    }
+    return parseReliabilityLearningAnalysis(payload, job.risk_level);
+  }
+  throw new Error("OpenAI 신뢰성 분석 재시도 후에도 응답을 완성하지 못했습니다.");
 }
