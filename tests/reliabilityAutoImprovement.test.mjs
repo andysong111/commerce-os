@@ -5,7 +5,7 @@ import test from "node:test";
 const ROOT = new URL("../", import.meta.url);
 const source = (path) => readFile(new URL(path, ROOT), "utf8");
 
-test("자동수정은 등록된 저위험 SERVER_FINALIZATION_FAILED만 첫 안전구역으로 허용한다", async () => {
+test("자동수정은 등록된 저위험 SERVER_FINALIZATION_FAILED의 데이터형 정책만 허용한다", async () => {
   const [migration, policy] = await Promise.all([
     source("supabase/migrations/202608241100_reliability_auto_improvement_jobs.sql"),
     source("src/lib/reliability/reliabilityAutoImprovementPolicy.ts"),
@@ -16,10 +16,14 @@ test("자동수정은 등록된 저위험 SERVER_FINALIZATION_FAILED만 첫 안�
   assert.match(migration, /v\.safe_action = 'retry'/);
   assert.match(migration, /v_mode := 'approval'/);
   assert.match(migration, /v_mode := 'blocked'/);
-  assert.match(migration, /andysong111\/commerce-os-detail-page-saas/);
+  assert.match(migration, /src\/config\/saasServerFinalizationRetryPolicy\.json/);
+  assert.match(migration, /src\/lib\/saasServerFinalizerRetry\.test\.ts/);
+  assert.doesNotMatch(migration, /src\/app\/api\/saas\/jobs\/\[jobId\]\/finalize\/route\.ts/);
+  assert.doesNotMatch(migration, /src\/lib\/saasServerFinalizer\.ts/);
   assert.match(policy, /ai_saurus_server_finalization_retry_v1/);
-  assert.match(policy, /andysong111\/commerce-os-detail-page-saas/);
-  assert.match(policy, /saasServerFinalizerRetry\.test\.ts/);
+  assert.match(policy, /saasServerFinalizationRetryPolicy\.json/);
+  assert.match(policy, /maxFiles: 2/);
+  assert.match(policy, /서비스 권한 코드는 자동으로 변경하지 않습니다/);
   for (const forbidden of ["supabase/migrations/", "vercel.json", "billing", "payment", "inventory"]) {
     assert.match(policy, new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
@@ -36,17 +40,20 @@ test("GitHub 실행기는 OIDC 서명과 저장소·main·정확한 target workf
   assert.doesNotMatch(oidc, /GITHUB_TOKEN/);
 });
 
-test("계획기는 허용 파일 밖·테스트만 변경·새 운영파일·비밀정보·테스트 없는 수정을 차단한다", async () => {
+test("AI 계획기는 재시도 정책 3개 키와 1회 증가만 허용하고 서비스 코드 수정은 받지 않는다", async () => {
   const planner = await source("src/lib/reliability/reliabilityAutoImprovementPlanner.ts");
-  assert.match(planner, /validateReliabilityAutoImprovementPaths/);
-  assert.match(planner, /hasRuntimeChange/);
-  assert.match(planner, /테스트만 바꾼 계획은 실제 개선으로 배포할 수 없습니다/);
-  assert.match(planner, /새로운 운영 코드 파일을 만들 수 없습니다/);
-  assert.match(planner, /재발 방지 테스트가 포함되지 않았습니다/);
+  assert.match(planner, /POLICY_PATH = "src\/config\/saasServerFinalizationRetryPolicy\.json"/);
+  assert.match(planner, /TEST_PATH = "src\/lib\/saasServerFinalizerRetry\.test\.ts"/);
+  assert.match(planner, /expectedKeys = \["delayMs", "maxAttempts", "version"\]/);
+  assert.match(planner, /maxAttempts < 1 \|\| maxAttempts > 3/);
+  assert.match(planner, /delayMs < 100 \|\| delayMs > 1_500/);
+  assert.match(planner, /after\.maxAttempts !== before\.maxAttempts \+ 1/);
+  assert.match(planner, /재시도 횟수는 한 번에 정확히 1회만 늘릴 수 있습니다/);
+  assert.match(planner, /expect\(policy\.maxAttempts\)\.toBe\(\$\{after\.maxAttempts\}\)/);
+  assert.match(planner, /You are NOT allowed to edit application code/);
   assert.match(planner, /BEGIN PRIVATE KEY/);
-  assert.match(planner, /requireSaasUser\(request\)/);
-  assert.match(planner, /FINALIZER_QUALITY_NOT_READY/);
-  assert.match(planner, /FINALIZER_CHECKPOINT_NOT_READY/);
+  assert.doesNotMatch(planner, /requireSaasUser\(request\)/);
+  assert.doesNotMatch(planner, /FINALIZER_QUALITY_NOT_READY/);
   assert.match(planner, /requestReliabilityStructuredJson/);
 });
 
@@ -70,6 +77,8 @@ test("자동개선 API는 GitHub OIDC 후에만 claim/report를 처리하고 Pro
   assert.match(atomicReport, /production verified stage requires merge sha/);
   assert.match(atomicReport, /preview_passed.*production_verified/s);
   assert.match(atomicReport, /lease_expires_at = now\(\) \+ interval '120 minutes'/);
+  assert.match(atomicReport, /preview_passed','merged/);
+  assert.match(atomicReport, /중복 자동수정을 막고 운영 상태 확인 대상으로 격리/);
 });
 
 test("자동수정 큐와 쓰기 RPC는 service-role 밖에서 실행할 수 없다", async () => {
