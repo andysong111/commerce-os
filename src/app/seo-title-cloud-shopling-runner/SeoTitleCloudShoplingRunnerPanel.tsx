@@ -22,6 +22,9 @@ const CUSTOM_BLOCKED_STORAGE_KEY =
 const TRACKER_ITEM_ENDPOINT =
   "/api/product-launch-tracker/normalized-optimized";
 const SHOPLING_UPLOAD_ENDPOINT = "/api/product-launch-tracker/shopling-upload";
+const SHOPLING_MALL_SEO_ENDPOINT = "/api/product-launch-tracker/shopling-mall-seo";
+const DIRECT_APPLY_RESULT_ENDPOINT =
+  "/api/keyword-shopling-direct-apply/actions-result";
 
 const SHOPLING_GROUPS = [
   { key: "wholesale1", label: "도매1" },
@@ -50,6 +53,13 @@ type ExtendedSession = KeywordElonLabSession & { step4?: Step4Result };
 type SeoFinal = {
   productName: string;
   groupProductNames: Record<string, string>;
+  mallTitles: Array<{
+    productGroup: string;
+    marketName: string;
+    mallKey: string;
+    accountIdLabel: string;
+    title: string;
+  }>;
   searchKeywords: string[];
   searchLine: string;
   source: string;
@@ -151,6 +161,18 @@ async function requestJson<T extends UnknownRecord>(url: string, init?: RequestI
   return body;
 }
 
+async function readDirectApplyResult(requestId: string) {
+  const query = new URLSearchParams({ request_id: requestId });
+  const response = await fetch(`${DIRECT_APPLY_RESULT_ENDPOINT}?${query.toString()}`, {
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => ({}))) as UnknownRecord;
+  if (!response.ok) throw friendlyRequestError(response, body);
+  return body;
+}
+
 export default function SeoTitleCloudShoplingRunnerPanel() {
   const [session, setSession] = useState<ExtendedSession | null>(null);
   const [customTerms, setCustomTerms] = useState<string[]>([]);
@@ -214,6 +236,13 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
     return {
       productName: output.modelName,
       groupProductNames,
+      mallTitles: output.mallTitles.map((row) => ({
+        productGroup: row.productGroup,
+        marketName: row.marketName,
+        mallKey: row.mallKey,
+        accountIdLabel: row.accountIdLabel,
+        title: row.title,
+      })),
       searchKeywords: [...output.commonSearchKeywords],
       searchLine: output.commonSearchKeywords.join(","),
       source: "keyword-engine-elon-lab",
@@ -234,32 +263,39 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
   const groupTitlesReady = SHOPLING_GROUPS.every((group) =>
     Boolean(seoFinal.groupProductNames[group.key]),
   );
+  const mallTitlesReady =
+    seoFinal.mallTitles.length === PRODUCT_GROUP_MARKET_REGISTRY.length;
   const ready =
     output.status === "ready" &&
     seoFinal.searchKeywords.length === 10 &&
-    groupTitlesReady;
+    groupTitlesReady &&
+    mallTitlesReady;
 
-  async function persistSeoFinal() {
+  async function readLaunchItem() {
+    if (!launchItemId) throw new Error("상품 연결정보가 없습니다.");
+    const query = new URLSearchParams({ mode: "item", id: launchItemId });
+    const response = await requestJson<{ ok?: boolean; item?: unknown }>(
+      `${TRACKER_ITEM_ENDPOINT}?${query.toString()}`,
+    );
+    const item = record(response.item);
+    if (!text(item.id)) {
+      throw new Error("상품출시 진행관리 서버 저장본에서 선택 상품을 찾지 못했습니다.");
+    }
+    return item;
+  }
+
+  async function persistSeoFinal(options: { allowRegistered?: boolean } = {}) {
     if (!launchItemId || !seoFinal) {
       throw new Error(
         "상품출시 진행관리에서 선택해 들어온 상품 연결정보가 없습니다.",
       );
     }
-
-    const query = new URLSearchParams({ mode: "item", id: launchItemId });
-    const itemResponse = await requestJson<{
-      ok?: boolean;
-      item?: unknown;
-      message?: unknown;
-    }>(`${TRACKER_ITEM_ENDPOINT}?${query.toString()}`);
-    const item = record(itemResponse.item);
-    if (!text(item.id)) {
-      throw new Error(
-        "상품출시 진행관리 서버 저장본에서 선택 상품을 찾지 못했습니다.",
-      );
-    }
+    const item = await readLaunchItem();
     const products = Object.values(record(item.shoplingProducts)).map(record);
-    if (products.some((product) => text(product.goodsKey))) {
+    if (
+      options.allowRegistered !== true &&
+      products.some((product) => text(product.goodsKey))
+    ) {
       throw new Error(
         "이미 등록된 Shopling goods_key가 있어 중복 등록을 차단했습니다.",
       );
@@ -277,6 +313,85 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
         },
       }),
     });
+  }
+
+  async function pollMallSeo(requestId: string) {
+    for (let poll = 0; poll < 120; poll += 1) {
+      await wait(poll === 0 ? 1500 : 5000);
+      const result = await readDirectApplyResult(requestId);
+      const status = text(result.status);
+      const phase = text(result.phase);
+      if (status === "pending" || phase === "queued" || phase === "in_progress") {
+        setMessage("SEO 상품명 재고 29개를 쇼핑몰별 상품명에 반영 중입니다.");
+        continue;
+      }
+      if (status === "success") {
+        const summary = record(result.summary);
+        const successCount = Number(summary.title_apply_success_count ?? 0);
+        if (summary.direct_apply_completed !== true || successCount < seoFinal.mallTitles.length) {
+          throw new Error("쇼핑몰별 상품명 반영 결과가 완전 성공으로 확인되지 않았습니다.");
+        }
+        await requestJson<{ ok?: boolean }>(TRACKER_ITEM_ENDPOINT, {
+          method: "PATCH",
+          body: JSON.stringify({
+            operation: "patch_item",
+            itemId: launchItemId,
+            patch: {
+              mallSeoApply: {
+                status: "success",
+                requestId,
+                itemCount: seoFinal.mallTitles.length,
+                message: "SEO Cloud 쇼핑몰별 상품명 29개 반영 완료",
+                completedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              updatedBy: "SEO Cloud 쇼핑몰별 상품명",
+            },
+          }),
+        });
+        setMessage("쇼핑몰별 상품명 29개와 공통 검색어 10개 반영이 완료되었습니다.");
+        return;
+      }
+      if (status === "error") {
+        throw new Error(text(result.message) || "쇼핑몰별 상품명 반영에 실패했습니다.");
+      }
+    }
+    throw new Error("쇼핑몰별 상품명 반영이 장시간 진행 중입니다. 잠시 후 상태를 확인하세요.");
+  }
+
+  async function repairMallTitles() {
+    if (busy || !ready || !launchItemId) return;
+    const confirmed = window.confirm(
+      `현재 등록된 6개 goods_key에 SEO Cloud 쇼핑몰별 상품명 ${seoFinal.mallTitles.length}개와 검색어 10개를 실제 반영할까요?`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError("");
+    setMessage("SEO 상품명 재고 29개를 선택 상품에 저장 중입니다.");
+    try {
+      await persistSeoFinal({ allowRegistered: true });
+      const started = await requestJson<{
+        ok?: boolean;
+        requestId?: unknown;
+        message?: unknown;
+      }>(SHOPLING_MALL_SEO_ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify({ itemId: launchItemId }),
+      });
+      const requestId = text(started.requestId);
+      if (!requestId) throw new Error("쇼핑몰별 상품명 작업 ID를 받지 못했습니다.");
+      setMessage("쇼핑몰별 상품명 실제 반영을 시작했습니다.");
+      await pollMallSeo(requestId);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "쇼핑몰별 상품명 반영을 완료하지 못했습니다.",
+      );
+      setMessage("");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pollUpload(jobId: string) {
@@ -299,8 +414,25 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
         continue;
       }
       if (status === "success") {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await wait(attempt === 0 ? 500 : 1500);
+          const item = await readLaunchItem();
+          const mallSeo = record(item.mallSeoApply);
+          const mallSeoStatus = text(mallSeo.status);
+          const requestId = text(mallSeo.requestId);
+          if (mallSeoStatus === "failed") {
+            throw new Error(
+              text(mallSeo.message) || "6채널 등록은 완료됐지만 쇼핑몰별 상품명 반영 시작에 실패했습니다.",
+            );
+          }
+          if (requestId && mallSeoStatus === "pending") {
+            setMessage("6채널 등록 완료 · 쇼핑몰별 상품명 29개 자동 반영을 이어서 확인 중입니다.");
+            await pollMallSeo(requestId);
+            return;
+          }
+        }
         setMessage(
-          "Shopling 6채널 실제 등록이 완료되었습니다. goods_key와 상품출시 진행관리 상태도 자동 반영되었습니다.",
+          "Shopling 6채널 등록은 완료됐습니다. 쇼핑몰별 상품명 자동 반영 상태를 확인하세요.",
         );
         return;
       }
@@ -328,18 +460,18 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
     }
     if (!ready) {
       setError(
-        "SEO FINAL이 아직 등록 기준을 충족하지 못했습니다. 상품명 6개와 검색어 10개를 먼저 확정하세요.",
+        "SEO FINAL이 아직 등록 기준을 충족하지 못했습니다. 상품명 6개, 쇼핑몰별 상품명 29개, 검색어 10개를 먼저 확정하세요.",
       );
       return;
     }
     const confirmed = window.confirm(
-      "현재 SEO FINAL 상품명과 검색어 10개를 확정 저장하고 Shopling에 도매1~소매2 상품 6개를 실제 등록할까요?\n\n이미 goods_key가 있는 상품은 중복 등록하지 않습니다.",
+      "현재 SEO FINAL과 쇼핑몰별 상품명 29개를 확정 저장하고 Shopling에 도매1~소매2 상품 6개를 실제 등록할까요?\n\n6개 등록 성공 후 29개 쇼핑몰 상품명과 검색어도 자동으로 이어집니다.\n이미 goods_key가 있는 상품은 중복 등록하지 않습니다.",
     );
     if (!confirmed) return;
 
     setBusy(true);
     try {
-      setMessage("선택 상품 1건의 SEO FINAL만 확인·저장 중입니다.");
+      setMessage("SEO FINAL과 쇼핑몰별 상품명 재고 29개를 저장 중입니다.");
       await persistSeoFinal();
       setMessage("기존 Shopling 상품 업로드 엔진을 호출하는 중입니다.");
       const started = await requestJson<{
@@ -374,10 +506,10 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
             SEO FINAL → REAL SHOPLING UPLOAD
           </div>
           <h2 className="mt-1 text-2xl font-black">
-            SEO 확정값으로 Shopling 6채널 실제 등록
+            SEO 확정값으로 Shopling 6채널 + 쇼핑몰별 상품명 실제 등록
           </h2>
           <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-            등록 직전에는 진행관리 전체 데이터를 읽지 않고 선택 상품 1건만 확인합니다. 카테고리·가격·옵션·바코드·상세페이지·이미지는 기존 Shopling 업로드 엔진을 그대로 재사용합니다.
+            카테고리·가격·옵션·바코드·상세페이지·이미지는 기존 Shopling 업로드 엔진을 재사용하고, SEO Cloud가 만든 29개 쇼핑몰별 상품명 재고와 검색어 10개를 각 mall_key에 자동 반영합니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -388,7 +520,10 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
             검색어 {seoFinal.searchKeywords.length}/10
           </span>
           <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-900">
-            Shopling 상품명 {Object.values(seoFinal.groupProductNames).filter(Boolean).length}/6
+            기준 상품명 {Object.values(seoFinal.groupProductNames).filter(Boolean).length}/6
+          </span>
+          <span className="rounded-full bg-violet-100 px-3 py-1 text-violet-900">
+            쇼핑몰별 상품명 {seoFinal.mallTitles.length}/{PRODUCT_GROUP_MARKET_REGISTRY.length}
           </span>
         </div>
       </div>
@@ -402,6 +537,13 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+        <div className="text-xs font-black text-violet-700">쇼핑몰별 상품명 재고</div>
+        <div className="mt-2 text-sm font-bold text-violet-950">
+          {seoFinal.mallTitles.length}개 · 각 상품그룹의 goods_key에 쇼핑몰 ID별로 1개씩 실제 반영
+        </div>
       </div>
 
       <div className="mt-4 rounded-2xl border border-cyan-200 bg-white p-4">
@@ -431,16 +573,26 @@ export default function SeoTitleCloudShoplingRunnerPanel() {
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-3xl text-xs leading-5 text-slate-500">
-          실제 외부 등록 작업입니다. 실행 전 중복 goods_key를 검사하며, 성공 시 상품출시 진행관리의 Shopling 업로드 단계가 자동 완료 처리됩니다.
+          신규 등록은 6개 기준상품 생성 후 29개 쇼핑몰별 상품명까지 자동으로 이어집니다. 이미 6개 goods_key가 생성된 상품은 오른쪽 후적용 버튼으로 상품명만 복구할 수 있습니다.
         </p>
-        <button
-          type="button"
-          onClick={() => void upload()}
-          disabled={busy || !ready || !launchItemId}
-          className="rounded-xl bg-emerald-700 px-6 py-3 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {busy ? "실제 등록 진행 중…" : "SEO 확정 → Shopling 6채널 실제등록"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void repairMallTitles()}
+            disabled={busy || !ready || !launchItemId}
+            className="rounded-xl border border-violet-300 bg-white px-5 py-3 text-sm font-black text-violet-800 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+          >
+            기존 6개에 쇼핑몰별 상품명 29개 후적용
+          </button>
+          <button
+            type="button"
+            onClick={() => void upload()}
+            disabled={busy || !ready || !launchItemId}
+            className="rounded-xl bg-emerald-700 px-6 py-3 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {busy ? "실제 등록 진행 중…" : "SEO 확정 → Shopling 전체 등록"}
+          </button>
+        </div>
       </div>
     </section>
   );
