@@ -16,10 +16,13 @@ on:
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "tests/reliabilityImprovementImpact.test.mjs"
+      - "tests/reliabilityAutofix.test.mjs"
+      - "scripts/reliability-autofix-worker.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
+      - ".github/workflows/reliability-safe-autofix.yml"
   push:
     branches: [main]
     paths:
@@ -36,10 +39,13 @@ on:
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "tests/reliabilityImprovementImpact.test.mjs"
+      - "tests/reliabilityAutofix.test.mjs"
+      - "scripts/reliability-autofix-worker.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
+      - ".github/workflows/reliability-safe-autofix.yml"
   workflow_dispatch:
 
 permissions:
@@ -48,7 +54,7 @@ permissions:
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,17 +73,22 @@ jobs:
           src/lib/reliability/reliabilityLearningAnalyzer.ts
           src/lib/reliability/reliabilityOpenAiClient.ts
           src/lib/reliability/reliabilityImpactEvaluator.ts
+          src/lib/reliability/reliabilityAutofixPolicy.ts
+          src/lib/reliability/reliabilityAutofixOpenAi.ts
+          src/lib/reliability/reliabilityGithubOidc.ts
           src/lib/reliabilityLearningModule.ts
           src/lib/opsWorkspace.ts
           src/app/page.tsx
           src/components/dashboard/ReliabilityLearningHomeCard.tsx
           src/app/api/integrations/reliability/events/route.ts
+          src/app/api/integrations/reliability/autofix/route.ts
           src/app/api/cron/reliability-learning/route.ts
           src/app/api/cron/product-decision-live-refresh/route.ts
           src/app/reliability/page.tsx
           tests/reliabilityLearningCore.test.mjs
           tests/reliabilityLearningAnalyzer.test.mjs
           tests/reliabilityImprovementImpact.test.mjs
+          tests/reliabilityAutofix.test.mjs
       - name: Verify dedicated OpenAI cost lane
         run: node scripts/check-openai-cost-attribution.mjs
       - name: Run permanent reliability regressions
@@ -86,3 +97,4 @@ jobs:
           tests/reliabilityLearningCore.test.mjs
           tests/reliabilityLearningAnalyzer.test.mjs
           tests/reliabilityImprovementImpact.test.mjs
+          tests/reliabilityAutofix.test.mjs
