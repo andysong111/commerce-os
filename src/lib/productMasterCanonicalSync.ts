@@ -194,6 +194,9 @@ export async function pushCanonicalProductMasterSnapshotFromTrackerState(
           counts.skuBarcodeChanges =
             Number(counts.skuBarcodeChanges || 0) +
             Number(object(remoteCounts).sku_barcode_history || 0);
+          counts.optionBarcodeIdentities =
+            Number(counts.optionBarcodeIdentities || 0) +
+            Number(object(remoteCounts).option_barcode_identities || 0);
         }
       }
     }
