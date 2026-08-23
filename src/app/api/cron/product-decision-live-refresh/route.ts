@@ -3,15 +3,35 @@ import {
   runProductDecisionLiveRefreshStep,
 } from "@/lib/productDecisionLiveRefresh";
 import { recoverLegacyShoplingFetchFailure } from "@/lib/productDecisionLiveRecovery";
+import { runReliabilityLearningAnalyzer } from "@/lib/reliability/reliabilityLearningAnalyzer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 function authorized(request: Request) {
   const expected = process.env.CRON_SECRET?.trim();
   const authorization = request.headers.get("authorization")?.trim();
   return Boolean(expected && authorization === `Bearer ${expected}`);
+}
+
+async function runReliabilityLearningBestEffort() {
+  try {
+    return await runReliabilityLearningAnalyzer();
+  } catch (error) {
+    return {
+      ok: false,
+      configured: true,
+      claimed: 0,
+      succeeded: 0,
+      failed: 1,
+      model: null,
+      message:
+        error instanceof Error
+          ? error.message
+          : "신뢰성 학습 분석 실행에 실패했습니다.",
+    };
+  }
 }
 
 export async function GET(request: Request) {
@@ -21,15 +41,18 @@ export async function GET(request: Request) {
       { status: 401, headers: { "cache-control": "no-store" } },
     );
   }
+
   if (!productDecisionLiveRefreshConfigured()) {
+    const reliabilityLearning = await runReliabilityLearningBestEffort();
     return Response.json(
       {
         ok: true,
         configured: false,
         processed: false,
         state: "IDLE",
+        reliabilityLearning,
         message:
-          "실시간 발주 계산 환경변수가 아직 준비되지 않아 작업을 실행하지 않았습니다.",
+          "실시간 발주 계산 환경변수가 아직 준비되지 않아 발주 계산은 실행하지 않았습니다.",
       },
       { headers: { "cache-control": "no-store" } },
     );
@@ -37,21 +60,26 @@ export async function GET(request: Request) {
 
   try {
     const recovery = await recoverLegacyShoplingFetchFailure();
+    const refresh = await runProductDecisionLiveRefreshStep();
+    const reliabilityLearning = await runReliabilityLearningBestEffort();
     return Response.json(
       {
         ok: true,
         configured: true,
         recovery,
-        ...(await runProductDecisionLiveRefreshStep()),
+        ...refresh,
+        reliabilityLearning,
       },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
+    const reliabilityLearning = await runReliabilityLearningBestEffort();
     return Response.json(
       {
         ok: false,
         configured: true,
         code: "PRODUCT_DECISION_LIVE_CRON_FAILED",
+        reliabilityLearning,
         message:
           error instanceof Error
             ? error.message
