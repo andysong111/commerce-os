@@ -36,9 +36,11 @@ test("GitHub 실행기는 OIDC 서명과 저장소·main·정확한 target workf
   assert.doesNotMatch(oidc, /GITHUB_TOKEN/);
 });
 
-test("계획기는 AI가 허용 파일 밖·새 운영파일·비밀정보·테스트 없는 수정을 만들면 차단한다", async () => {
+test("계획기는 허용 파일 밖·테스트만 변경·새 운영파일·비밀정보·테스트 없는 수정을 차단한다", async () => {
   const planner = await source("src/lib/reliability/reliabilityAutoImprovementPlanner.ts");
   assert.match(planner, /validateReliabilityAutoImprovementPaths/);
+  assert.match(planner, /hasRuntimeChange/);
+  assert.match(planner, /테스트만 바꾼 계획은 실제 개선으로 배포할 수 없습니다/);
   assert.match(planner, /새로운 운영 코드 파일을 만들 수 없습니다/);
   assert.match(planner, /재발 방지 테스트가 포함되지 않았습니다/);
   assert.match(planner, /BEGIN PRIVATE KEY/);
