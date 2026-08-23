@@ -1,0 +1,202 @@
+name: Reliability Safe Autofix
+
+on:
+  schedule:
+    - cron: "27 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+  id-token: write
+
+concurrency:
+  group: reliability-safe-autofix-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  safe-autofix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELIABILITY_AUTOFIX_ENDPOINT: https://commerce-os-ops-center.vercel.app/api/integrations/reliability/autofix
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Request short-lived GitHub OIDC identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=commerce-os-reliability-autofix")"
+          token="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value;if(!v)process.exit(2);process.stdout.write(v)})')"
+          echo "RELIABILITY_AUTOFIX_OIDC_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Claim one eligible low-risk improvement
+        id: claim
+        run: node scripts/reliability-autofix-worker.mjs claim
+
+      - name: Generate and apply bounded AI patch
+        if: steps.claim.outputs.has_job == 'true'
+        id: patch
+        run: node scripts/reliability-autofix-worker.mjs generate
+
+      - name: Install dependencies
+        if: steps.claim.outputs.has_job == 'true'
+        run: npm ci
+
+      - name: Full repository tests
+        if: steps.claim.outputs.has_job == 'true'
+        run: npm test
+
+      - name: Production build safety gate
+        if: steps.claim.outputs.has_job == 'true'
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
+        run: npm run build
+
+      - name: Commit bounded change and open PR
+        if: steps.claim.outputs.has_job == 'true'
+        id: pr
+        shell: bash
+        env:
+          JOB_ID: ${{ steps.claim.outputs.job_id }}
+          PATCH_SUMMARY: ${{ steps.patch.outputs.summary }}
+        run: |
+          set -euo pipefail
+          short_id="${JOB_ID:0:8}"
+          branch="reliability/autofix-${short_id}-${GITHUB_RUN_ID}"
+          git config user.name "commerce-os-reliability-bot"
+          git config user.email "commerce-os-reliability-bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add src tests
+          git commit -m "fix(reliability): auto-fix ${short_id}"
+          git push --set-upstream origin "$branch"
+          head_sha="$(git rev-parse HEAD)"
+          pr_url="$(gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "fix(reliability): safe autofix ${short_id}" \
+            --body "자동 자기개선 후보를 낮은 위험 경계 안에서 수정했습니다.\n\n- 원인: 반복 운영 오류 학습\n- 수정: ${PATCH_SUMMARY}\n- 안전장치: 금지 경로 차단, 회귀 테스트 필수, 전체 테스트+빌드, Vercel Preview 확인 후에만 자동 병합\n- 자동 생성 run: ${GITHUB_RUN_ID}")"
+          pr_number="${pr_url##*/}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch independent CI checks on autofix branch
+        if: steps.claim.outputs.has_job == 'true'
+        env:
+          BRANCH: ${{ steps.pr.outputs.branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run reliability-learning-core.yml --ref "$BRANCH"
+
+      - name: Wait for independent CI and Vercel Preview
+        if: steps.claim.outputs.has_job == 'true'
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            vercel="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status" --jq '[.statuses[] | select(.context=="Vercel")][0].state // "pending"')"
+            checks="$(gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs" --jq '[.check_runs[] | select(.name=="build-and-test" or .name=="regression") | .conclusion]')"
+            ci_ok="$(printf '%s' "$checks" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.length>=2&&a.every(v=>v==="success")?"yes":"no")})')"
+            ci_bad="$(printf '%s' "$checks" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);process.stdout.write(a.some(v=>["failure","cancelled","timed_out","action_required"].includes(v))?"yes":"no")})')"
+            if [[ "$vercel" == "failure" || "$vercel" == "error" || "$ci_bad" == "yes" ]]; then
+              echo "Independent validation failed: vercel=$vercel checks=$checks"
+              exit 1
+            fi
+            if [[ "$vercel" == "success" && "$ci_ok" == "yes" ]]; then
+              echo "Independent CI and Vercel Preview passed."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for independent CI/Preview"
+          exit 1
+
+      - name: Merge validated low-risk PR
+        if: steps.claim.outputs.has_job == 'true'
+        id: merge
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" \
+            -f merge_method=squash \
+            -f sha="$HEAD_SHA")"
+          merged="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).merged?"true":"false"))')"
+          merge_sha="$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).sha||""))')"
+          [[ "$merged" == "true" && -n "$merge_sha" ]]
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm Production deployment
+        if: steps.claim.outputs.has_job == 'true'
+        env:
+          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            state="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${MERGE_SHA}/status" --jq '[.statuses[] | select(.context=="Vercel")][0].state // "pending"')"
+            if [[ "$state" == "success" ]]; then
+              echo "Production Vercel deployment passed."
+              exit 0
+            fi
+            if [[ "$state" == "failure" || "$state" == "error" ]]; then
+              echo "Production Vercel deployment failed."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Timed out waiting for Production deployment"
+          exit 1
+
+      - name: Record deployed improvement
+        if: steps.claim.outputs.has_job == 'true' && success()
+        env:
+          AUTOFIX_STATUS: deployed
+          AUTOFIX_BRANCH: ${{ steps.pr.outputs.branch }}
+          AUTOFIX_PR: ${{ steps.pr.outputs.pr_number }}
+          AUTOFIX_COMMIT: ${{ steps.pr.outputs.head_sha }}
+          AUTOFIX_MERGE: ${{ steps.merge.outputs.merge_sha }}
+          AUTOFIX_SUMMARY: ${{ steps.patch.outputs.summary }}
+          AUTOFIX_CHANGED_PATHS: ${{ steps.patch.outputs.changed_paths }}
+        run: node scripts/reliability-autofix-worker.mjs finish
+
+      - name: Close failed PR and return job to bounded retry
+        if: failure() && steps.claim.outputs.has_job == 'true'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          AUTOFIX_STATUS: failed
+          AUTOFIX_BRANCH: ${{ steps.pr.outputs.branch }}
+          AUTOFIX_PR: ${{ steps.pr.outputs.pr_number }}
+          AUTOFIX_COMMIT: ${{ steps.pr.outputs.head_sha }}
+          AUTOFIX_SUMMARY: ${{ steps.patch.outputs.summary }}
+          AUTOFIX_CHANGED_PATHS: ${{ steps.patch.outputs.changed_paths }}
+          AUTOFIX_ERROR: "자동수정 검증·Preview·병합·Production 확인 단계 중 하나가 실패했습니다. 최대 3회까지만 재시도합니다."
+        shell: bash
+        run: |
+          if [[ -n "${PR_NUMBER:-}" ]]; then
+            gh pr close "$PR_NUMBER" --delete-branch || true
+          fi
+          node scripts/reliability-autofix-worker.mjs finish || true
