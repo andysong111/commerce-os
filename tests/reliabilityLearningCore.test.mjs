@@ -110,6 +110,83 @@ test("지원하지 않는 상태는 저장하지 않고 기능 카드와 통제�
   assert.match(page, /원문 입력·고객 이메일·이미지는 저장하지 않음/);
 });
 
+test("통제실은 인증된 운영자 확인 뒤에만 service-role 데이터 읽기를 시작한다", async () => {
+  const dashboard = await readFile(
+    new URL("../src/lib/reliability/reliabilityDashboard.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(dashboard, /getOpsCurrentUser/);
+  assert.match(dashboard, /isShoplingPriceAdjustmentOperatorEmail/);
+  assert.match(dashboard, /login_required&next=%2Freliability/);
+  const authIndex = dashboard.indexOf("const current = await getOpsCurrentUser()");
+  const snapshotIndex = dashboard.indexOf("return loadSnapshot();");
+  assert.ok(authIndex >= 0 && snapshotIndex > authIndex);
+});
+
+test("OPS 자동 브리지는 선택 소스 부재·부분실패·민감 오류를 안전하게 처리한다", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202608230901_reliability_ops_automatic_bridges.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(migration, /when 'partial_failure' then 'failed'/);
+  assert.match(migration, /when 'partial' then 'failed'/);
+  assert.match(
+    migration,
+    /to_regclass\('public\.keyword_engine_elon_lab_stage_results'\) is not null/,
+  );
+  assert.match(migration, /public\.redact_reliability_text/);
+  assert.doesNotMatch(
+    migration,
+    /drop trigger if exists bridge_keyword_stage_to_reliability on public\.keyword_engine_elon_lab_stage_results;\ncreate trigger/,
+  );
+});
+
+test("recovered 신호는 실패 재발횟수를 올리지 않고 ingest RPC는 service-role 전용이다", async () => {
+  const hardening = await readFile(
+    new URL(
+      "../supabase/migrations/202608231715_reliability_core_security_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(hardening, /v_status='recovered'/);
+  assert.match(hardening, /v_signature is not null and v_failure_like/);
+  assert.match(
+    hardening,
+    /revoke all on function public\.ingest_reliability_event\(jsonb\) from public, anon, authenticated/,
+  );
+  assert.match(
+    hardening,
+    /grant execute on function public\.ingest_reliability_event\(jsonb\) to service_role/,
+  );
+});
+
+test("학습 분석 큐는 service-role 전용이며 중단된 running lease를 회수한다", async () => {
+  const hardening = await readFile(
+    new URL(
+      "../supabase/migrations/202608231716_reliability_queue_and_bridge_hardening.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    hardening,
+    /q\.status='running'.*q\.locked_at.*interval '10 minutes'/s,
+  );
+  assert.match(
+    hardening,
+    /revoke all on function public\.claim_reliability_learning_analysis\(integer\) from public, anon, authenticated/,
+  );
+  assert.match(
+    hardening,
+    /grant execute on function public\.complete_reliability_learning_analysis\(uuid,text,jsonb\) to service_role/,
+  );
+  assert.match(hardening, /public\.redact_reliability_text/);
+});
+
 test("학습 분석은 전용 OpenAI 비용 lane과 기존 staggered cron wakeup을 재사용한다", async () => {
   const [vercelSource, cronRoute, openAiClient, costGuard] = await Promise.all([
     readFile(new URL("../vercel.json", import.meta.url), "utf8"),
