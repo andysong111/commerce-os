@@ -1,5 +1,8 @@
 import { unstable_cache } from "next/cache";
+import { redirect } from "next/navigation";
+import { isShoplingPriceAdjustmentOperatorEmail } from "@/lib/shoplingPriceAdjustmentAuth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getOpsCurrentUser } from "@/lib/supabase/currentUser";
 
 export type ReliabilityIncidentRow = {
   id: string;
@@ -276,6 +279,13 @@ const loadSnapshot = unstable_cache(
 );
 
 export async function loadReliabilityDashboard() {
+  const current = await getOpsCurrentUser();
+  if (!current.user) {
+    redirect("/login?error=login_required&next=%2Freliability");
+  }
+  if (!isShoplingPriceAdjustmentOperatorEmail(current.user.email)) {
+    redirect("/");
+  }
   return loadSnapshot();
 }
 
