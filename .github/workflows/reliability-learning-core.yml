@@ -8,9 +8,11 @@ on:
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
       - "src/app/api/cron/reliability-learning/**"
+      - "src/app/api/cron/product-decision-live-refresh/route.ts"
       - "src/lib/opsModuleRegistry.ts"
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
+      - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
@@ -22,9 +24,11 @@ on:
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
       - "src/app/api/cron/reliability-learning/**"
+      - "src/app/api/cron/product-decision-live-refresh/route.ts"
       - "src/lib/opsModuleRegistry.ts"
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
+      - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
       - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
@@ -53,12 +57,16 @@ jobs:
           src/lib/reliability/reliabilityDashboard.ts
           src/lib/reliability/reliabilityLearningPolicy.ts
           src/lib/reliability/reliabilityLearningAnalyzer.ts
+          src/lib/reliability/reliabilityOpenAiClient.ts
           src/lib/reliabilityLearningModule.ts
           src/app/api/integrations/reliability/events/route.ts
           src/app/api/cron/reliability-learning/route.ts
+          src/app/api/cron/product-decision-live-refresh/route.ts
           src/app/reliability/page.tsx
           tests/reliabilityLearningCore.test.mjs
           tests/reliabilityLearningAnalyzer.test.mjs
+      - name: Verify dedicated OpenAI cost lane
+        run: node scripts/check-openai-cost-attribution.mjs
       - name: Run permanent reliability regressions
         run: >-
           node --experimental-strip-types --test
