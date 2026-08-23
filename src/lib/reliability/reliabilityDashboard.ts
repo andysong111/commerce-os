@@ -61,6 +61,20 @@ export type ReliabilityRecoveryQueueRow = {
   created_at: string;
 };
 
+export type ReliabilityAnalysisQueueRow = {
+  id: string;
+  learning_case_id: string;
+  incident_id: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  model: string | null;
+  last_error: string | null;
+  not_before: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ReliabilityEventRow = {
   id: string;
   source_system: string;
@@ -86,6 +100,8 @@ export type ReliabilityDashboardData = {
     criticalOrHighIncidents: number;
     learningCandidates: number;
     regressionProposals: number;
+    analysisBacklog: number;
+    analysisFailures: number;
     queuedRecoveries: number;
     approvalRequired: number;
     aiSaurusEvents: number;
@@ -93,6 +109,7 @@ export type ReliabilityDashboardData = {
   incidents: ReliabilityIncidentRow[];
   learningCases: ReliabilityLearningCaseRow[];
   regressionCases: ReliabilityRegressionCaseRow[];
+  analysisQueue: ReliabilityAnalysisQueueRow[];
   recoveryQueue: ReliabilityRecoveryQueueRow[];
   recentEvents: ReliabilityEventRow[];
 };
@@ -106,6 +123,7 @@ const loadSnapshot = unstable_cache(
       incidentsResult,
       learningResult,
       regressionResult,
+      analysisResult,
       recoveryResult,
       eventsResult,
       totalEventsResult,
@@ -114,6 +132,8 @@ const loadSnapshot = unstable_cache(
       criticalIncidentsResult,
       learningCountResult,
       regressionCountResult,
+      analysisBacklogResult,
+      analysisFailureResult,
       queuedRecoveryResult,
       approvalRecoveryResult,
       aiSaurusEventsResult,
@@ -136,6 +156,13 @@ const loadSnapshot = unstable_cache(
         .from("reliability_regression_cases")
         .select(
           "id,incident_id,source_repo,test_path,test_name,protected_invariant,status,workflow_name,commit_sha,updated_at",
+        )
+        .order("updated_at", { ascending: false })
+        .limit(40),
+      admin
+        .from("reliability_learning_analysis_queue")
+        .select(
+          "id,learning_case_id,incident_id,status,attempts,max_attempts,model,last_error,not_before,created_at,updated_at",
         )
         .order("updated_at", { ascending: false })
         .limit(40),
@@ -175,6 +202,14 @@ const loadSnapshot = unstable_cache(
         .select("id", { count: "exact", head: true })
         .eq("status", "proposed"),
       admin
+        .from("reliability_learning_analysis_queue")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["pending", "running", "failed"]),
+      admin
+        .from("reliability_learning_analysis_queue")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["failed", "dead_letter"]),
+      admin
         .from("reliability_recovery_queue")
         .select("id", { count: "exact", head: true })
         .eq("status", "queued"),
@@ -192,6 +227,7 @@ const loadSnapshot = unstable_cache(
       incidentsResult,
       learningResult,
       regressionResult,
+      analysisResult,
       recoveryResult,
       eventsResult,
       totalEventsResult,
@@ -200,6 +236,8 @@ const loadSnapshot = unstable_cache(
       criticalIncidentsResult,
       learningCountResult,
       regressionCountResult,
+      analysisBacklogResult,
+      analysisFailureResult,
       queuedRecoveryResult,
       approvalRecoveryResult,
       aiSaurusEventsResult,
@@ -219,6 +257,8 @@ const loadSnapshot = unstable_cache(
           (highIncidentsResult.count ?? 0) + (criticalIncidentsResult.count ?? 0),
         learningCandidates: learningCountResult.count ?? 0,
         regressionProposals: regressionCountResult.count ?? 0,
+        analysisBacklog: analysisBacklogResult.count ?? 0,
+        analysisFailures: analysisFailureResult.count ?? 0,
         queuedRecoveries: queuedRecoveryResult.count ?? 0,
         approvalRequired: approvalRecoveryResult.count ?? 0,
         aiSaurusEvents: aiSaurusEventsResult.count ?? 0,
@@ -226,11 +266,12 @@ const loadSnapshot = unstable_cache(
       incidents: rows<ReliabilityIncidentRow>(incidentsResult.data),
       learningCases: rows<ReliabilityLearningCaseRow>(learningResult.data),
       regressionCases: rows<ReliabilityRegressionCaseRow>(regressionResult.data),
+      analysisQueue: rows<ReliabilityAnalysisQueueRow>(analysisResult.data),
       recoveryQueue: rows<ReliabilityRecoveryQueueRow>(recoveryResult.data),
       recentEvents: rows<ReliabilityEventRow>(eventsResult.data),
     };
   },
-  ["reliability-learning-dashboard-v1"],
+  ["reliability-learning-dashboard-v2"],
   { revalidate: 15 },
 );
 
@@ -252,6 +293,8 @@ function empty(configured: boolean, error: string): ReliabilityDashboardData {
       criticalOrHighIncidents: 0,
       learningCandidates: 0,
       regressionProposals: 0,
+      analysisBacklog: 0,
+      analysisFailures: 0,
       queuedRecoveries: 0,
       approvalRequired: 0,
       aiSaurusEvents: 0,
@@ -259,6 +302,7 @@ function empty(configured: boolean, error: string): ReliabilityDashboardData {
     incidents: [],
     learningCases: [],
     regressionCases: [],
+    analysisQueue: [],
     recoveryQueue: [],
     recentEvents: [],
   };
