@@ -1,0 +1,33 @@
+name: Reliability Auto Improvement Validate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Verify OpenAI cost attribution
+        run: node scripts/check-openai-cost-attribution.mjs
+      - name: Run reliability regressions
+        run: >-
+          node --experimental-strip-types --test
+          tests/reliabilityLearningCore.test.mjs
+          tests/reliabilityLearningAnalyzer.test.mjs
+          tests/reliabilityImprovementImpact.test.mjs
+          tests/reliabilityAutoImprovement.test.mjs
+      - name: Build Ops Center
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://auto-improvement-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_auto_improvement_build_check
+        run: npm run build
