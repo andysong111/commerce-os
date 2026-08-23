@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260815-bidirectional-purchase-metadata-v1-20260824-option-barcode-no-registry-v1";
+  "20260824-seo-bulk-parallel-v1-option-barcode-no-registry-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -34,11 +34,11 @@ export default async function ProductLaunchTrackerPage({
         <div>
           <strong className="block text-sm text-violet-950">SEO 대량등록 클라우드 연결</strong>
           <span className="mt-1 block text-xs leading-5 text-violet-800">
-            목록에서 상품 한 개를 선택한 뒤 ‘선택 상품 SEO 대량등록 클라우드 열기’를 누르면 저장된 1688 링크를 불러와 고유 상품명 재고를 제조하거나 기존 클라우드 재고를 확인합니다.
+            목록에서 상품을 여러 개 선택한 뒤 ‘SEO 대량등록 클라우드 열기’를 누르면 선택상품을 병렬 분석해 상품별 FINAL 검색어 10개와 쇼핑몰별 상품명을 만들고, 같은 화면에서 Shopling 일괄 대량등록까지 실행합니다.
           </span>
         </div>
-        <a href="/shopling-seo-dispatch" className="rounded-lg bg-violet-700 px-4 py-2 text-center text-sm font-black text-white">
-          샵플링 SEO 출고센터
+        <a href="/seo-bulk-cloud" className="rounded-lg bg-violet-700 px-4 py-2 text-center text-sm font-black text-white">
+          SEO 대량등록 클라우드
         </a>
       </div>
 
