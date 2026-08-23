@@ -136,8 +136,11 @@ test("GitHub Worker는 생성 코드와 쓰기 권한을 분리하고 CI·Previe
   assert.match(workflow, /pull-requests: write/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /Production build safety gate/);
-  assert.match(workflow, /Wait for independent CI and Vercel Preview/);
+  assert.match(workflow, /Wait for independent CI, unchanged main, and Vercel Preview/);
   assert.match(workflow, /Confirm Production deployment/);
+  assert.match(workflow, /Abort if main changed after analysis/);
+  assert.match(workflow, /Merge only the exact code combination that passed validation/);
+  assert.match(workflow, /Record merge before any long Production wait/);
   assert.doesNotMatch(workflow, /secrets\.OPENAI_API_KEY/);
   assert.doesNotMatch(workflow, /secrets\.SUPABASE/);
   assert.match(oidc, /commerce-os-reliability-autofix/);
