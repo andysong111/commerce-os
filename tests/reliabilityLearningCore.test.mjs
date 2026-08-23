@@ -98,16 +98,17 @@ test("지원하지 않는 상태는 저장하지 않고 기능 카드와 통제�
     /지원하지 않는 신뢰성 이벤트 값/,
   );
 
-  const [registry, moduleSource, page] = await Promise.all([
+  const [registry, moduleSource, page, layout] = await Promise.all([
     readFile(new URL("../src/lib/opsModuleRegistry.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/lib/reliabilityLearningModule.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/app/reliability/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/app/reliability/layout.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(registry, /reliabilityLearningModule/);
   assert.match(moduleSource, /route: "\/reliability"/);
   assert.match(moduleSource, /고위험 자동수정 차단/);
   assert.match(page, /통합 신뢰성·자기개선 코어/);
-  assert.match(page, /원문 입력·고객 이메일·이미지는 저장하지 않음/);
+  assert.match(layout, /원문 입력·고객 이메일·이미지는 저장하지 않음/);
 });
 
 test("통제실은 인증된 운영자 확인 뒤에만 service-role 데이터 읽기를 시작한다", async () => {
