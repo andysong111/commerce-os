@@ -76,6 +76,7 @@ jobs:
         env:
           JOB_ID: ${{ steps.claim.outputs.job_id }}
           PATCH_SUMMARY: ${{ steps.patch.outputs.summary }}
+          CHANGED_PATHS: ${{ steps.patch.outputs.changed_paths }}
         run: |
           set -euo pipefail
           short_id="${JOB_ID:0:8}"
@@ -83,7 +84,14 @@ jobs:
           git config user.name "commerce-os-reliability-bot"
           git config user.email "commerce-os-reliability-bot@users.noreply.github.com"
           git checkout -b "$branch"
-          git add src tests
+          printf '%s' "$CHANGED_PATHS" | node -e '
+            const {spawnSync}=require("node:child_process");
+            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+              const paths=JSON.parse(s);
+              const r=spawnSync("git",["add","--",...paths],{stdio:"inherit"});
+              process.exit(r.status||0);
+            });'
+          git diff --cached --check
           git commit -m "fix(reliability): auto-fix ${short_id}"
           git push --set-upstream origin "$branch"
           head_sha="$(git rev-parse HEAD)"
