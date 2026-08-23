@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
+import { attachOptionBarcodeNosToChangedItems } from "@/lib/productLaunchOptionBarcodeRegistry";
+import { withProductLaunchListSnapshot } from "@/lib/productLaunchTrackerListSnapshot";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchState,
   resolveProductLaunchIdentity,
+  writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
 import {
   setProductLaunchNormalizedReadEnabled,
@@ -23,7 +26,7 @@ export async function syncProductLaunchNormalizedAfterMutation(
   const config = getProductLaunchAdminConfig();
   if (!config.ok) return;
 
-  const row = (await readProductLaunchState(
+  let row = (await readProductLaunchState(
     config.value,
     identity.value.userId,
   )) as StoredRow | null;
@@ -34,11 +37,27 @@ export async function syncProductLaunchNormalizedAfterMutation(
     : [];
   const operation = text(asRecord(input).operation);
 
+  let state = row.state_payload as ProductLaunchTrackerState;
+  if (changedIds.length && operation !== "delete_items" && operation !== "update_policy") {
+    state = await attachOptionBarcodeNosToChangedItems(
+      config.value,
+      identity.value.userId,
+      state,
+      changedIds,
+    );
+    state = withProductLaunchListSnapshot(state);
+    row = (await writeProductLaunchState(
+      config.value,
+      identity.value,
+      state,
+    )) as StoredRow;
+  }
+
   if (!changedIds.length || operation === "update_policy") {
     await syncProductLaunchNormalizedFull(
       config.value,
       identity.value,
-      row.state_payload as ProductLaunchTrackerState,
+      state,
       row.updated_at,
     );
     return;
@@ -47,7 +66,7 @@ export async function syncProductLaunchNormalizedAfterMutation(
   const result = await syncProductLaunchNormalizedChangedItems(
     config.value,
     identity.value,
-    row.state_payload as ProductLaunchTrackerState,
+    state,
     row.updated_at,
     changedIds,
   );
@@ -55,7 +74,7 @@ export async function syncProductLaunchNormalizedAfterMutation(
     await syncProductLaunchNormalizedFull(
       config.value,
       identity.value,
-      row.state_payload as ProductLaunchTrackerState,
+      state,
       row.updated_at,
     );
   }

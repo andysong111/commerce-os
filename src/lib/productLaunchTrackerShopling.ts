@@ -10,20 +10,12 @@ export const PRODUCT_LAUNCH_CHANNELS = [
 ] as const;
 
 export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
-  "a023",
-  "a140",
-  "a144",
-  "a005",
-  "a145",
-  "a002",
-  "a009",
-  "a126",
-  "a147",
-  "a148",
-  "a149",
+  "a023", "a140", "a144", "a005", "a145", "a002",
+  "a009", "a126", "a147", "a148", "a149",
 ] as const;
 
 export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
+const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
 
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
@@ -60,10 +52,7 @@ export type ProductLaunchShoplingPayload = {
   siteSearch: string;
   seoFinal: ProductLaunchSeoFinal | null;
   detailHtml: string;
-  images: {
-    main: string;
-    additional: string[];
-  };
+  images: { main: string; additional: string[] };
   fixedFields: {
     prodTp: string;
     taxTp: string;
@@ -75,10 +64,7 @@ export type ProductLaunchShoplingPayload = {
     deliveryType: string;
     deliveryCost: number;
   };
-  goodsNotice: {
-    code: string;
-    attributes: Record<string, string>;
-  };
+  goodsNotice: { code: string; attributes: Record<string, string> };
   channels: Array<{
     key: string;
     label: string;
@@ -93,6 +79,7 @@ export type ProductLaunchShoplingPayload = {
       optionName: string;
       saleOption: string;
       barcode: string;
+      optionBarcodeNo: string;
       additionalAmountKrw: number;
       finalSalePriceKrw: number;
     }>;
@@ -112,9 +99,7 @@ export function roundUpShoplingPriceKrw(
   return Math.ceil(number / normalizedUnit) * normalizedUnit;
 }
 
-export function resolveProductLaunchBasePurchasePriceKrw(
-  baseSalePriceKrw: unknown,
-) {
+export function resolveProductLaunchBasePurchasePriceKrw(baseSalePriceKrw: unknown) {
   const salePrice = Number(baseSalePriceKrw);
   if (!Number.isFinite(salePrice) || salePrice <= 0) return 0;
   return roundUpShoplingPriceKrw(salePrice / 2);
@@ -151,6 +136,7 @@ export function buildProductLaunchShoplingPayload(
         rawOptions.length === 1
           ? singleOptionBarcode
           : normalizeCode(option.barcode),
+      optionBarcodeNo: text(option.optionBarcodeNo).toUpperCase(),
       baseSalePriceKrw: nonNegativeInteger(option.baseSalePriceKrw),
       unitCostKrw: nonNegativeInteger(option.unitCostKrw),
       index,
@@ -168,9 +154,7 @@ export function buildProductLaunchShoplingPayload(
   if (!options.length) errors.push("발주·입고 옵션가격이 없습니다.");
 
   if (seoFinal) {
-    if (!seoFinal.productName) {
-      errors.push("SEO FINAL 공통 상품명이 없습니다.");
-    }
+    if (!seoFinal.productName) errors.push("SEO FINAL 공통 상품명이 없습니다.");
     if (seoFinal.searchKeywords.length !== 10) {
       errors.push("SEO FINAL 검색어는 중복 없이 정확히 10개여야 합니다.");
     }
@@ -182,31 +166,36 @@ export function buildProductLaunchShoplingPayload(
   }
 
   const seenBarcodes = new Set<string>();
+  const seenOptionBarcodeNos = new Set<string>();
   for (const option of options) {
     const name = option.saleOption || `${option.index + 1}번째 옵션`;
     if (!option.saleOption) errors.push(`${option.index + 1}번째 옵션값이 없습니다.`);
-    if (!option.barcode) errors.push(`${name} 바코드가 없습니다.`);
+    if (!option.barcode) errors.push(`${name} B코드가 없습니다.`);
+    if (!OPTION_BARCODE_NO_PATTERN.test(option.optionBarcodeNo)) {
+      errors.push(`${name} 옵션바코드NO가 없습니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
+    }
     if (option.baseSalePriceKrw <= 0) errors.push(`${name} 기준 판매가가 없습니다.`);
     if (option.unitCostKrw <= 0) errors.push(`${name} 원가가 없습니다.`);
     if (option.barcode) {
-      if (seenBarcodes.has(option.barcode)) {
-        errors.push(`옵션 바코드 ${option.barcode}가 중복되었습니다.`);
-      }
+      if (seenBarcodes.has(option.barcode)) errors.push(`옵션 B코드 ${option.barcode}가 중복되었습니다.`);
       seenBarcodes.add(option.barcode);
+    }
+    if (option.optionBarcodeNo) {
+      if (seenOptionBarcodeNos.has(option.optionBarcodeNo)) {
+        errors.push(`옵션바코드NO ${option.optionBarcodeNo}가 중복되었습니다.`);
+      }
+      seenOptionBarcodeNos.add(option.optionBarcodeNo);
     }
   }
   const optionNames = new Set(options.map((option) => option.optionName));
   if (optionNames.size > 1) {
     errors.push("현재 샵플링 자동등록은 한 종류의 옵션명만 지원합니다.");
   }
-  if (errors.length) {
-    throw new Error([...new Set(errors)].join("\n"));
-  }
+  if (errors.length) throw new Error([...new Set(errors)].join("\n"));
 
   const multipliers = asRecord(policy.channelMultipliers);
   const listPriceMultiplier = positiveNumber(policy.listPriceMultiplier, 1.5);
-  const shippingNoticeHtml =
-    text(policy.shippingNoticeHtml) || DEFAULT_SHIPPING_NOTICE_HTML;
+  const shippingNoticeHtml = text(policy.shippingNoticeHtml) || DEFAULT_SHIPPING_NOTICE_HTML;
   const goodsNoticeValue = text(policy.goodsNoticeValue) || "상세설명 참고";
   const goodsNoticeAttributes = Object.fromEntries(
     PRODUCT_NOTICE_ATTRIBUTE_CODES.map((code) => [code, goodsNoticeValue]),
@@ -224,9 +213,7 @@ export function buildProductLaunchShoplingPayload(
         option.baseSalePriceKrw * multiplier,
       ),
     }));
-    const salePrice = Math.min(
-      ...pricedOptions.map((option) => option.finalSalePriceKrw),
-    );
+    const salePrice = Math.min(...pricedOptions.map((option) => option.finalSalePriceKrw));
     const orgPrice = resolveProductLaunchBasePurchasePriceKrw(salePrice);
     const seoChannelName = seoFinal
       ? seoGroupProductName(seoFinal, channel.key, channel.label)
@@ -243,18 +230,14 @@ export function buildProductLaunchShoplingPayload(
           : "",
       orgPrice,
       salePrice,
-      listPrice: roundUpShoplingPriceKrw(
-        salePrice * listPriceMultiplier,
-      ),
+      listPrice: roundUpShoplingPriceKrw(salePrice * listPriceMultiplier),
       options: pricedOptions.map((option) => ({
         optionName: option.optionName,
         saleOption: option.saleOption,
         barcode: option.barcode,
+        optionBarcodeNo: option.optionBarcodeNo,
         finalSalePriceKrw: option.finalSalePriceKrw,
-        additionalAmountKrw: Math.max(
-          0,
-          option.finalSalePriceKrw - salePrice,
-        ),
+        additionalAmountKrw: Math.max(0, option.finalSalePriceKrw - salePrice),
       })),
     };
   });
@@ -307,9 +290,7 @@ function normalizeSeoFinal(value: unknown): ProductLaunchSeoFinal | null {
       .map(([key, productName]) => [key, text(productName)] as const)
       .filter(([, productName]) => Boolean(productName)),
   );
-  const searchKeywords = [
-    ...new Set(stringList(source.searchKeywords)),
-  ];
+  const searchKeywords = [...new Set(stringList(source.searchKeywords))];
   return {
     productName: text(source.productName),
     groupProductNames,

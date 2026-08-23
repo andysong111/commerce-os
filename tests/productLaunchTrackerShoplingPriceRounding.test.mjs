@@ -21,6 +21,7 @@ function item() {
         optionName: "옵션",
         saleOption: "단품",
         barcode: "BTEST-1",
+        optionBarcodeNo: "OB000000000999",
         baseSalePriceKrw: 1050,
         unitCostKrw: 577,
       },
@@ -72,6 +73,7 @@ test("실제 상품등록 payload는 채널별 기준 판매가의 절반을 기
   assert.equal(wholesale1.salePrice, 1160);
   assert.equal(wholesale1.orgPrice, 580);
   assert.equal(wholesale1.listPrice, 1740);
+  assert.equal(wholesale1.options[0].optionBarcodeNo, "OB000000000999");
   assert.equal(wholesale1.options[0].finalSalePriceKrw, 1160);
   assert.equal(wholesale1.options[0].additionalAmountKrw, 0);
 

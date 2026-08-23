@@ -15,7 +15,7 @@ import {
 } from "../src/lib/productLaunchTrackerShopling.ts";
 
 function readyItem() {
-  return createLaunchItem(
+  const item = createLaunchItem(
     {
       modelNumber: "AAA500",
       productName: "테스트 상품",
@@ -48,6 +48,13 @@ function readyItem() {
     },
     () => "one",
   );
+  item.orderOptions = item.orderOptions.map((option, index) => ({
+    ...option,
+    optionBarcodeNo: `OB${String(index + 101).padStart(12, "0")}`,
+    optionBarcodeIdentityKey: `B:${option.barcode}`,
+    optionBarcodeIdentityKind: "B_CODE",
+  }));
+  return item;
 }
 
 function seoFinal() {
@@ -143,6 +150,10 @@ test("서버 실행 payload도 화면 미리보기와 동일한 가격·코드�
   assert.deepEqual(
     serverPayload.channels[5].options.map(({ additionalAmountKrw }) => additionalAmountKrw),
     [0, 2800, 7000],
+  );
+  assert.deepEqual(
+    serverPayload.channels[0].options.map(({ optionBarcodeNo }) => optionBarcodeNo),
+    ["OB000000000101", "OB000000000102", "OB000000000103"],
   );
   assert.equal(serverPayload.siteSearch, "");
   assert.equal(serverPayload.seoFinal, null);

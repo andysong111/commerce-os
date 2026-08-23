@@ -32,6 +32,7 @@ function baseItem(overrides = {}) {
         optionName: "옵션",
         saleOption: "단품",
         barcode: "",
+        optionBarcodeNo: "OB000000000101",
         baseSalePriceKrw: 1000,
         unitCostKrw: 500,
       },
@@ -40,7 +41,7 @@ function baseItem(overrides = {}) {
   };
 }
 
-test("옵션이 하나면 기준바코드를 바코드·옵션자체관리코드용 옵션 코드로 사용한다", () => {
+test("단일 옵션은 B코드를 옵션자체관리코드로 쓰고 옵션바코드NO는 별도 유지한다", () => {
   const payload = buildProductLaunchShoplingPayload(
     baseItem(),
     policy,
@@ -49,12 +50,15 @@ test("옵션이 하나면 기준바코드를 바코드·옵션자체관리코드
   assert.equal(payload.channels.length, 6);
   assert.ok(
     payload.channels.every(
-      (channel) => channel.options.length === 1 && channel.options[0].barcode === "BAA1-1",
+      (channel) =>
+        channel.options.length === 1 &&
+        channel.options[0].barcode === "BAA1-1" &&
+        channel.options[0].optionBarcodeNo === "OB000000000101",
     ),
   );
 });
 
-test("옵션이 여러 개면 각 옵션별 위치코드를 유지하고 기준바코드로 덮어쓰지 않는다", () => {
+test("옵션이 여러 개면 각 B코드와 옵션바코드NO를 독립적으로 유지한다", () => {
   const payload = buildProductLaunchShoplingPayload(
     baseItem({
       barcode: "MAIN-DO-NOT-OVERRIDE",
@@ -63,6 +67,7 @@ test("옵션이 여러 개면 각 옵션별 위치코드를 유지하고 기준�
           optionName: "색상",
           saleOption: "화이트",
           barcode: "BAA1-1",
+          optionBarcodeNo: "OB000000000101",
           baseSalePriceKrw: 1000,
           unitCostKrw: 500,
         },
@@ -70,6 +75,7 @@ test("옵션이 여러 개면 각 옵션별 위치코드를 유지하고 기준�
           optionName: "색상",
           saleOption: "블랙",
           barcode: "BAA1-2",
+          optionBarcodeNo: "OB000000000102",
           baseSalePriceKrw: 1200,
           unitCostKrw: 600,
         },
@@ -82,9 +88,22 @@ test("옵션이 여러 개면 각 옵션별 위치코드를 유지하고 기준�
     payload.channels[0].options.map((option) => option.barcode),
     ["BAA1-1", "BAA1-2"],
   );
+  assert.deepEqual(
+    payload.channels[0].options.map((option) => option.optionBarcodeNo),
+    ["OB000000000101", "OB000000000102"],
+  );
 });
 
-test("브라우저 저장 데이터도 단일 옵션의 기준바코드와 옵션 바코드를 동일하게 보정한다", () => {
+test("옵션바코드NO가 없으면 Shopling 등록 payload를 차단한다", () => {
+  const broken = baseItem();
+  broken.orderOptions[0].optionBarcodeNo = "";
+  assert.throws(
+    () => buildProductLaunchShoplingPayload(broken, policy, "request-missing-no"),
+    /옵션바코드NO/,
+  );
+});
+
+test("브라우저 저장 데이터의 단일 옵션 B코드 동기화는 그대로 유지한다", () => {
   const result = syncSingleOptionBarcodes({
     items: [
       {

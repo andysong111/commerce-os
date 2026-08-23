@@ -3,17 +3,19 @@ import {
   sameModelOrderOptions,
 } from "./lib/model-bcode-order-options.mjs";
 
-const OPTIMIZED_API = "/api/product-launch-tracker/optimized";
+const OPTIMIZED_API = "/api/product-launch-tracker/normalized-optimized";
 const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
+const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
 const RECONCILE_DELAYS = [40, 160, 420, 900, 1_600];
 
 let renderSerial = 0;
 let renderTimers = [];
 let completedKey = "";
 
+ensureOptionBarcodeHeader();
 scheduleReconcile();
 
 document.addEventListener(
@@ -22,6 +24,7 @@ document.addEventListener(
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.closest("button[data-action='detail']")) return;
     completedKey = "";
+    ensureOptionBarcodeHeader();
     scheduleReconcile();
   },
   true,
@@ -31,6 +34,21 @@ detailDialog?.addEventListener("close", () => {
   completedKey = "";
   clearTimers();
 });
+
+function ensureOptionBarcodeHeader() {
+  const headerRow = document.querySelector(".option-table thead tr");
+  if (!headerRow || headerRow.querySelector("[data-option-barcode-no-header]")) return;
+  const cells = [...headerRow.children];
+  const bcodeIndex = cells.findIndex((cell) => /바코드|위치코드/.test(cell.textContent || ""));
+  const header = document.createElement("th");
+  header.dataset.optionBarcodeNoHeader = "true";
+  header.textContent = "옵션바코드 NO";
+  if (bcodeIndex >= 0 && cells[bcodeIndex]?.nextSibling) {
+    headerRow.insertBefore(header, cells[bcodeIndex].nextSibling);
+  } else {
+    headerRow.append(header);
+  }
+}
 
 function scheduleReconcile() {
   clearTimers();
@@ -53,9 +71,7 @@ function clearTimers() {
 async function reconcileCurrentItem(serial) {
   if (!detailDialog?.open || !detailForm) return;
   const itemId = String(detailForm.elements?.id?.value ?? "").trim();
-  const modelNumber = String(
-    detailForm.elements?.modelNumber?.value ?? "",
-  )
+  const modelNumber = String(detailForm.elements?.modelNumber?.value ?? "")
     .normalize("NFKC")
     .trim()
     .toUpperCase()
@@ -66,9 +82,7 @@ async function reconcileCurrentItem(serial) {
 
   try {
     const [itemBody, authorityBody] = await Promise.all([
-      requestJson(
-        `${OPTIMIZED_API}?${new URLSearchParams({ mode: "item", id: itemId }).toString()}`,
-      ),
+      readItem(itemId),
       requestJson(
         `${MODEL_OPTIONS_API}?${new URLSearchParams({ modelNumber }).toString()}`,
       ),
@@ -88,7 +102,13 @@ async function reconcileCurrentItem(serial) {
     }
 
     const nextOptions = reconcileModelOrderOptions(item.orderOptions, authority);
-    if (!sameModelOrderOptions(item.orderOptions, nextOptions)) {
+    const changed = !sameModelOrderOptions(item.orderOptions, nextOptions);
+    const missingOptionBarcodeNo = nextOptions.some(
+      (option) => !OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+    );
+    const needsServerWrite = changed || missingOptionBarcodeNo;
+    let displayOptions = nextOptions;
+    if (needsServerWrite) {
       await requestJson(OPTIMIZED_API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -96,29 +116,45 @@ async function reconcileCurrentItem(serial) {
           operation: "patch_item",
           itemId,
           patch: { orderOptions: nextOptions },
-          updatedBy: "모델 B-code 기준 자동정리",
+          updatedBy: missingOptionBarcodeNo
+            ? "옵션바코드NO 원장 자동발급"
+            : "모델 B-code·옵션바코드NO 기준 자동정리",
         }),
       });
+      const refreshed = await readItem(itemId);
+      if (Array.isArray(refreshed?.item?.orderOptions)) {
+        displayOptions = refreshed.item.orderOptions;
+      }
+    } else {
+      // Preserve the established B-code authority rendering path when no server rewrite is needed.
+      renderOptionTable(nextOptions);
+      renderChinaOptionPanel(nextOptions);
     }
     if (serial !== renderSerial || !detailDialog?.open) return;
 
-    renderOptionTable(nextOptions);
-    renderChinaOptionPanel(nextOptions);
+    ensureOptionBarcodeHeader();
+    if (needsServerWrite) {
+      renderOptionTable(displayOptions);
+      renderChinaOptionPanel(displayOptions);
+    }
     const syncStatus = document.querySelector("#china-sync-status");
     if (syncStatus) {
-      syncStatus.textContent = `${nextOptions.length}개 연결 · 모델 B-code 검증`;
+      syncStatus.textContent = `${displayOptions.length}개 연결 · B-code/옵션바코드NO 검증`;
       syncStatus.dataset.tone = "success";
     }
+    const assignedCount = displayOptions.filter((option) =>
+      OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+    ).length;
     setGuardStatus(
-      `${modelNumber}에 실제 연결된 B-code ${nextOptions.length}개만 표시합니다. 발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합을 사용합니다.`,
-      "saved",
+      `발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합으로 유지합니다. ${modelNumber}의 B-code ${displayOptions.length}개와 옵션바코드NO ${assignedCount}개를 원장 기준으로 표시합니다. 동일 B-code는 동일 옵션바코드NO를 사용합니다.`,
+      assignedCount === displayOptions.length ? "saved" : "error",
     );
     completedKey = key;
   } catch (error) {
     setGuardStatus(
       error instanceof Error
         ? error.message
-        : "모델별 실제 B-code를 확인하지 못했습니다.",
+        : "모델별 B-code·옵션바코드NO를 확인하지 못했습니다.",
       "error",
     );
   }
@@ -126,6 +162,11 @@ async function reconcileCurrentItem(serial) {
 
 function renderOptionTable(options) {
   if (!optionTableBody) return;
+  ensureOptionBarcodeHeader();
+  if (!options.length) {
+    optionTableBody.innerHTML = `<tr><td colspan="7" class="option-empty">발주·입고 데이터가 아직 연결되지 않았습니다.</td></tr>`;
+    return;
+  }
   optionTableBody.innerHTML = options
     .map(
       (option, index) => `
@@ -133,6 +174,7 @@ function renderOptionTable(options) {
           <td><input data-field="optionName" value="${escapeAttribute(option.optionName || "옵션")}" placeholder="옵션" /></td>
           <td><input data-field="saleOption" value="${escapeAttribute(option.saleOption || "단품")}" placeholder="블랙" /></td>
           <td><input data-field="barcode" value="${escapeAttribute(option.barcode)}" placeholder="BAA1-1" /></td>
+          <td><input data-field="optionBarcodeNo" value="${escapeAttribute(option.optionBarcodeNo)}" placeholder="저장 시 자동발급" readonly title="Commerce OS 옵션바코드 원장 자동발급값" /></td>
           <td><input data-field="baseSalePriceKrw" type="number" min="0" step="1" value="${Number(option.baseSalePriceKrw) || ""}" /></td>
           <td><input data-field="unitCostKrw" type="number" min="0" step="1" value="${Number(option.unitCostKrw) || ""}" /></td>
           <td><button class="option-remove" type="button" data-action="remove-option">×</button></td>
@@ -142,9 +184,7 @@ function renderOptionTable(options) {
 }
 
 function ensureChinaOptionPanel() {
-  const section = detailForm?.querySelector(
-    "#optimized-china-product-links-section",
-  );
+  const section = detailForm?.querySelector("#optimized-china-product-links-section");
   if (!section) return null;
   let panel = section.querySelector("#optimized-china-order-map-wrap");
   if (!panel) {
@@ -179,12 +219,16 @@ function renderChinaOptionPanel(options) {
 }
 
 function setGuardStatus(message, tone = "") {
-  const status = detailForm?.querySelector(
-    "#optimized-china-order-map-status",
-  );
+  const status = detailForm?.querySelector("#optimized-china-order-map-status");
   if (!status) return;
   status.textContent = message;
   status.dataset.tone = tone;
+}
+
+function readItem(itemId) {
+  return requestJson(
+    `${OPTIMIZED_API}?${new URLSearchParams({ mode: "item", id: itemId }).toString()}`,
+  );
 }
 
 async function requestJson(url, init = {}) {
