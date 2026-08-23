@@ -13,14 +13,14 @@ const SURFACES: ReliabilityAutoImprovementSurface[] = [
     id: "ai_saurus_server_finalization_retry_v1",
     repository: "andysong111/commerce-os-detail-page-saas",
     allowedPaths: [
-      "src/app/api/saas/jobs/[jobId]/finalize/route.ts",
-      "src/lib/saasServerFinalizer.ts",
+      "src/config/saasServerFinalizationRetryPolicy.json",
       "src/lib/saasServerFinalizerRetry.test.ts",
     ],
     validationWorkflow: "reliability-auto-improvement-validate.yml",
-    maxFiles: 3,
-    maxChangedCharacters: 45_000,
-    userDescription: "AI-Saurus 최종 저장 단계의 일시적 실패를 안전하게 다시 시도하는 범위",
+    maxFiles: 2,
+    maxChangedCharacters: 20_000,
+    userDescription:
+      "AI-Saurus 최종 저장 실패의 재시도 횟수·간격을 정해진 범위 안에서 조정하는 데이터형 안전구역",
   },
 ];
 
@@ -89,6 +89,6 @@ export function reliabilityAutoImprovementSafetySummary() {
       userDescription: surface.userDescription,
     })),
     principle:
-      "등록된 저위험 파일만 자동수정하며 가격·재고·주문·결제·권한·DB·배포설정은 자동으로 변경하지 않습니다.",
+      "AI는 등록된 데이터형 저위험 정책과 재발방지 테스트만 자동수정하며 가격·재고·주문·결제·권한·DB·배포설정과 서비스 권한 코드는 자동으로 변경하지 않습니다.",
   };
 }
