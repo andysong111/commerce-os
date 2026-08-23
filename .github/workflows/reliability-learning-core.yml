@@ -7,9 +7,12 @@ on:
       - "src/lib/reliabilityLearningModule.ts"
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
+      - "src/app/api/cron/reliability-learning/**"
       - "src/lib/opsModuleRegistry.ts"
       - "tests/reliabilityLearningCore.test.mjs"
+      - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "supabase/migrations/*reliability*.sql"
+      - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
   push:
     branches: [main]
@@ -18,9 +21,12 @@ on:
       - "src/lib/reliabilityLearningModule.ts"
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
+      - "src/app/api/cron/reliability-learning/**"
       - "src/lib/opsModuleRegistry.ts"
       - "tests/reliabilityLearningCore.test.mjs"
+      - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "supabase/migrations/*reliability*.sql"
+      - "vercel.json"
       - ".github/workflows/reliability-learning-core.yml"
   workflow_dispatch:
 
@@ -45,11 +51,16 @@ jobs:
           src/lib/reliability/reliabilityIngestAuth.ts
           src/lib/reliability/reliabilityStore.ts
           src/lib/reliability/reliabilityDashboard.ts
+          src/lib/reliability/reliabilityLearningPolicy.ts
+          src/lib/reliability/reliabilityLearningAnalyzer.ts
           src/lib/reliabilityLearningModule.ts
           src/app/api/integrations/reliability/events/route.ts
+          src/app/api/cron/reliability-learning/route.ts
           src/app/reliability/page.tsx
           tests/reliabilityLearningCore.test.mjs
+          tests/reliabilityLearningAnalyzer.test.mjs
       - name: Run permanent reliability regressions
         run: >-
           node --experimental-strip-types --test
           tests/reliabilityLearningCore.test.mjs
+          tests/reliabilityLearningAnalyzer.test.mjs
