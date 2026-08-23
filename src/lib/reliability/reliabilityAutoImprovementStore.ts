@@ -1,5 +1,4 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { redactReliabilityText } from "@/lib/reliability/reliabilityEvent";
 
 export type ReliabilityAutoImprovementJob = {
   id: string;
@@ -101,27 +100,6 @@ async function rpc(
   return result.data;
 }
 
-async function recordActivity(
-  admin: AdminClient,
-  input: {
-    jobId: string;
-    eventType: string;
-    fromStatus?: string | null;
-    toStatus?: string | null;
-    summary: string;
-    metadata?: Record<string, unknown>;
-  },
-) {
-  await rpc(admin, "record_reliability_auto_improvement_activity", {
-    p_job_id: input.jobId,
-    p_event_type: input.eventType,
-    p_from_status: input.fromStatus ?? null,
-    p_to_status: input.toStatus ?? null,
-    p_summary: input.summary,
-    p_metadata: input.metadata ?? {},
-  });
-}
-
 export async function claimReliabilityAutoImprovementJob(
   repository: string,
   runner: string,
@@ -154,139 +132,31 @@ export async function saveReliabilityAutoImprovementPlan(input: {
   }
 }
 
-async function markRegressionApplied(input: {
-  improvementId: string;
-  targetRepo: string;
-  mergeSha: string;
-  validation: Record<string, unknown>;
-}) {
-  const admin = await adminClient();
-  const testPath = String(input.validation.test_path ?? "").slice(0, 500);
-  const testName = String(
-    input.validation.test_name ?? "자동개선 재발 방지 확인",
-  ).slice(0, 500);
-  const result = await rpc(admin, "finalize_reliability_auto_improvement_regression", {
-    p_improvement_id: input.improvementId,
-    p_target_repo: input.targetRepo,
-    p_merge_sha: input.mergeSha,
-    p_test_path: testPath,
-    p_test_name: testName,
-    p_validation: input.validation,
-  });
-  if (!result) throw new Error("자동개선 GitHub 반영 근거를 저장하지 못했습니다.");
-}
-
-async function markRegressionRolledBack(improvementId: string) {
-  const admin = await adminClient();
-  await rpc(admin, "mark_reliability_auto_improvement_regression_failed", {
-    p_improvement_id: improvementId,
-  });
-}
-
-const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  ready: ["patch_created", "failed"],
-  patch_created: ["validating", "failed"],
-  validating: ["preview_passed", "failed"],
-  preview_passed: ["merged", "failed"],
-  merged: ["production_verified", "rolled_back", "failed"],
-};
-
 export async function reportReliabilityAutoImprovement(
   repository: string,
   input: ReliabilityAutoImprovementReport,
 ) {
   const admin = await adminClient();
-  const currentResult = await admin
-    .from("reliability_auto_improvement_jobs")
-    .select("*")
-    .eq("id", input.jobId)
-    .eq("target_repo", repository)
-    .eq("lease_token", input.leaseToken)
-    .maybeSingle();
-  if (currentResult.error || !currentResult.data) {
-    throw new Error("자동개선 작업 또는 실행 권한을 찾지 못했습니다.");
-  }
-  const current = object(currentResult.data);
-  const currentStatus = String(current.status ?? "");
-  if (!(ALLOWED_TRANSITIONS[currentStatus] ?? []).includes(input.status)) {
-    throw new Error(`허용되지 않는 자동개선 상태 변경입니다: ${currentStatus} → ${input.status}`);
-  }
-
-  const terminalFailure = input.status === "failed";
-  const attemptCount = Number(current.attempt_count ?? 0);
-  const maxAttempts = Number(current.max_attempts ?? 3);
-  const storedStatus =
-    terminalFailure && attemptCount >= maxAttempts ? "blocked" : input.status;
-  const update: Record<string, unknown> = {
-    status: storedStatus,
-    updated_at: new Date().toISOString(),
-  };
-  if (input.branchName) update.branch_name = input.branchName.slice(0, 300);
-  if (input.prNumber && Number.isInteger(input.prNumber)) update.pr_number = input.prNumber;
-  if (input.headSha) update.head_sha = input.headSha.slice(0, 80);
-  if (input.mergeSha) update.merge_sha = input.mergeSha.slice(0, 80);
-  if (input.previewUrl) update.preview_url = input.previewUrl.slice(0, 1_000);
-  if (input.productionUrl) update.production_url = input.productionUrl.slice(0, 1_000);
-  if (input.validation) update.validation = input.validation;
-  if (input.error) update.last_error = redactReliabilityText(input.error, 1_500);
-  if (terminalFailure) {
-    update.not_before = new Date(Date.now() + 30 * 60_000).toISOString();
-    update.lease_token = null;
-    update.lease_runner = null;
-    update.lease_expires_at = null;
-  }
-  if (["production_verified", "rolled_back"].includes(input.status)) {
-    update.lease_token = null;
-    update.lease_runner = null;
-    update.lease_expires_at = null;
-  }
-
-  const updated = await admin
-    .from("reliability_auto_improvement_jobs")
-    .update(update)
-    .eq("id", input.jobId)
-    .eq("lease_token", input.leaseToken)
-    .select("id,improvement_id,target_repo,validation")
-    .maybeSingle();
-  if (updated.error || !updated.data) {
-    throw new Error("자동개선 진행 상태를 저장하지 못했습니다.");
-  }
-  const updatedRow = object(updated.data);
-
-  await recordActivity(admin, {
-    jobId: input.jobId,
-    eventType: input.status,
-    fromStatus: currentStatus,
-    toStatus: storedStatus,
-    summary:
-      input.status === "production_verified"
-        ? "테스트와 미리보기를 통과한 수정이 실제 서비스에 반영됐습니다."
-        : input.status === "rolled_back"
-          ? "운영 검증 실패로 자동으로 이전 상태로 되돌렸습니다."
-          : input.status === "failed"
-            ? "안전 검증을 통과하지 못해 실제 서비스에는 반영하지 않았습니다."
-            : "자동개선 다음 단계를 통과했습니다.",
-    metadata: {
-      prNumber: input.prNumber ?? null,
-      headSha: input.headSha ?? null,
-      mergeSha: input.mergeSha ?? null,
-    },
+  const result = await rpc(admin, "report_reliability_auto_improvement_stage", {
+    p_target_repo: repository,
+    p_job_id: input.jobId,
+    p_lease_token: input.leaseToken,
+    p_status: input.status,
+    p_branch_name: input.branchName ?? null,
+    p_pr_number: input.prNumber ?? null,
+    p_head_sha: input.headSha ?? null,
+    p_merge_sha: input.mergeSha ?? null,
+    p_preview_url: input.previewUrl ?? null,
+    p_production_url: input.productionUrl ?? null,
+    p_validation: input.validation ?? null,
+    p_error: input.error ?? null,
   });
-
-  const improvementId = String(updatedRow.improvement_id ?? "");
-  if (!improvementId) throw new Error("자동개선 항목 연결이 비어 있습니다.");
-
-  if (input.status === "production_verified") {
-    if (!input.mergeSha) throw new Error("실제 서비스 반영 커밋이 비어 있습니다.");
-    await markRegressionApplied({
-      improvementId,
-      targetRepo: repository,
-      mergeSha: input.mergeSha,
-      validation: input.validation ?? object(updatedRow.validation),
-    });
-  } else if (input.status === "rolled_back") {
-    await markRegressionRolledBack(improvementId);
+  const payload = object(result);
+  if (payload.ok !== true) {
+    throw new Error("자동개선 진행 상태를 원자적으로 저장하지 못했습니다.");
   }
-
-  return { ok: true, status: storedStatus };
+  return {
+    ok: true,
+    status: String(payload.status ?? input.status),
+  };
 }
