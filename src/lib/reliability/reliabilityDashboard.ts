@@ -324,8 +324,7 @@ const loadSnapshot = unstable_cache(
       admin
         .from("reliability_improvements")
         .select("id", { count: "exact", head: true })
-        .eq("application_mode", "existing_policy")
-        .not("applied_at", "is", null),
+        .eq("application_mode", "existing_policy"),
       admin
         .from("reliability_improvements")
         .select("id", { count: "exact", head: true })
