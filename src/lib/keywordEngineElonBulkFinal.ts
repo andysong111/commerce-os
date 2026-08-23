@@ -216,7 +216,7 @@ export async function generateKeywordElonBulkFinal(
   });
   const blockedKeys = filtered.decisions
     .filter((row) => row.blocked === true)
-    .map((row) => row.key || row.keyword || "")
+    .map((row) => row.searchKey)
     .filter(Boolean);
   const output = buildKeywordElonSeoModelPackage(
     {
