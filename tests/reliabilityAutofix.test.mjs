@@ -100,27 +100,37 @@ test("AI 제안도 경로 안전 경계를 다시 통과해야 하고 새 소스
   );
 });
 
-test("DB queue는 저위험 후보만 자동 등록하고 service-role로 잠긴다", async () => {
-  const migration = await source(
-    "supabase/migrations/202608241100_reliability_autofix_queue.sql",
-  );
+test("DB queue는 저위험 후보만 자동 등록하고 불명확한 중단은 재배포하지 않는다", async () => {
+  const [migration, staleGuard] = await Promise.all([
+    source("supabase/migrations/202608241100_reliability_autofix_queue.sql"),
+    source("supabase/migrations/202608241101_reliability_autofix_stale_claim_guard.sql"),
+  ]);
   assert.match(migration, /i\.risk_level = 'low'/);
   assert.match(migration, /i\.confidence >= 0\.65/);
   assert.match(migration, /i\.safe_action in \('retry','resume_checkpoint','revalidate','quarantine'\)/);
   assert.match(migration, /for update of j skip locked/);
-  assert.match(migration, /interval '45 minutes'/);
   assert.match(migration, /attempts < j\.max_attempts/);
   assert.match(migration, /revoke all on table public\.reliability_autofix_jobs from public, anon, authenticated/);
   assert.match(migration, /grant execute on function public\.claim_reliability_autofix_job\(text,text\) to service_role/);
+  assert.match(staleGuard, /interval '90 minutes'/);
+  assert.match(staleGuard, /status = 'approval_required'/);
+  assert.match(staleGuard, /automatic replay blocked/);
+  assert.doesNotMatch(staleGuard, /stale claim recovered/);
 });
 
-test("GitHub Worker는 장기 비밀키 없이 OIDC·CI·Preview를 통과한 경우만 자동 병합한다", async () => {
+test("GitHub Worker는 생성 코드와 쓰기 권한을 분리하고 CI·Preview 뒤에만 병합한다", async () => {
   const [workflow, oidc, route, worker] = await Promise.all([
     source(".github/workflows/reliability-safe-autofix.yml"),
     source("src/lib/reliability/reliabilityGithubOidc.ts"),
     source("src/app/api/integrations/reliability/autofix/route.ts"),
     source("scripts/reliability-autofix-worker.mjs"),
   ]);
+  assert.match(workflow, /prepare:/);
+  assert.match(workflow, /validate:/);
+  assert.match(workflow, /publish:/);
+  assert.match(workflow, /merge:/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /credential-free validation job/);
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /contents: write/);
   assert.match(workflow, /pull-requests: write/);
@@ -131,12 +141,15 @@ test("GitHub Worker는 장기 비밀키 없이 OIDC·CI·Preview를 통과한 �
   assert.doesNotMatch(workflow, /secrets\.OPENAI_API_KEY/);
   assert.doesNotMatch(workflow, /secrets\.SUPABASE/);
   assert.match(oidc, /commerce-os-reliability-autofix/);
-  assert.match(oidc, /refs\/heads\/main/);
-  assert.match(oidc, /Reliability Safe Autofix/);
+  assert.match(oidc, /repository_id/);
+  assert.match(oidc, /workflow_ref/);
+  assert.match(oidc, /reliability-safe-autofix\.yml@refs\/heads\/main/);
   assert.match(route, /verifyReliabilityGithubOidc/);
   assert.match(route, /loadClaimedJob/);
-  assert.match(worker, /Source autofix must include a regression test change/);
-  assert.match(worker, /changed\.length > 4 \|\| lineBudget > 260/);
+  assert.match(worker, /npm test actually executes/);
+  assert.match(worker, /Autofix cannot reduce test assertions/);
+  assert.match(worker, /Autofix cannot introduce new capability/);
+  assert.match(worker, /changed\.length>4\|\|lineBudget>260/);
 });
 
 test("AI 자동수정 프롬프트는 업무 핵심 쓰기와 검증 약화를 명시적으로 금지한다", async () => {
