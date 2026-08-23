@@ -8,6 +8,7 @@ const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
+const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
 const RECONCILE_DELAYS = [40, 160, 420, 900, 1_600];
 
 let renderSerial = 0;
@@ -102,8 +103,12 @@ async function reconcileCurrentItem(serial) {
 
     const nextOptions = reconcileModelOrderOptions(item.orderOptions, authority);
     const changed = !sameModelOrderOptions(item.orderOptions, nextOptions);
+    const missingOptionBarcodeNo = nextOptions.some(
+      (option) => !OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+    );
+    const needsServerWrite = changed || missingOptionBarcodeNo;
     let displayOptions = nextOptions;
-    if (changed) {
+    if (needsServerWrite) {
       await requestJson(OPTIMIZED_API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -111,7 +116,9 @@ async function reconcileCurrentItem(serial) {
           operation: "patch_item",
           itemId,
           patch: { orderOptions: nextOptions },
-          updatedBy: "모델 B-code·옵션바코드NO 기준 자동정리",
+          updatedBy: missingOptionBarcodeNo
+            ? "옵션바코드NO 원장 자동발급"
+            : "모델 B-code·옵션바코드NO 기준 자동정리",
         }),
       });
       const refreshed = await readItem(itemId);
@@ -126,7 +133,7 @@ async function reconcileCurrentItem(serial) {
     if (serial !== renderSerial || !detailDialog?.open) return;
 
     ensureOptionBarcodeHeader();
-    if (changed) {
+    if (needsServerWrite) {
       renderOptionTable(displayOptions);
       renderChinaOptionPanel(displayOptions);
     }
@@ -135,7 +142,9 @@ async function reconcileCurrentItem(serial) {
       syncStatus.textContent = `${displayOptions.length}개 연결 · B-code/옵션바코드NO 검증`;
       syncStatus.dataset.tone = "success";
     }
-    const assignedCount = displayOptions.filter((option) => option.optionBarcodeNo).length;
+    const assignedCount = displayOptions.filter((option) =>
+      OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+    ).length;
     setGuardStatus(
       `발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합으로 유지합니다. ${modelNumber}의 B-code ${displayOptions.length}개와 옵션바코드NO ${assignedCount}개를 원장 기준으로 표시합니다. 동일 B-code는 동일 옵션바코드NO를 사용합니다.`,
       assignedCount === displayOptions.length ? "saved" : "error",
