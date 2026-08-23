@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260824-option-barcode-no-registry-v1";
+  "20260815-bidirectional-purchase-metadata-v1-20260824-option-barcode-no-registry-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
