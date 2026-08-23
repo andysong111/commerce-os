@@ -33,27 +33,11 @@ async function failPlanning(input: {
     input.error instanceof Error ? input.error.message : String(input.error ?? "unknown error"),
     1_500,
   );
-  await admin
-    .from("reliability_auto_improvement_jobs")
-    .update({
-      status: blocked ? "blocked" : "failed",
-      not_before: new Date(Date.now() + 30 * 60_000).toISOString(),
-      lease_token: null,
-      lease_runner: null,
-      lease_expires_at: null,
-      last_error: message,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.jobId)
-    .eq("lease_token", input.leaseToken);
-  await admin.from("reliability_auto_improvement_activity").insert({
-    job_id: input.jobId,
-    event_type: "planning_failed",
-    from_status: "planning",
-    to_status: blocked ? "blocked" : "failed",
-    summary: blocked
-      ? "자동수정 계획이 반복해서 안전검사를 통과하지 못해 자동 반영을 중단했습니다."
-      : "자동수정 계획이 안전검사를 통과하지 못해 실제 서비스에는 반영하지 않았습니다.",
+  await admin.rpc("fail_reliability_auto_improvement_planning", {
+    p_job_id: input.jobId,
+    p_lease_token: input.leaseToken,
+    p_blocked: blocked,
+    p_error: message,
   });
 }
 
