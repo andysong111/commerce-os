@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260815-bidirectional-purchase-metadata-v1-seo-bulk-cloud-v3-perf-primary-link-health-v1-20260823-seo-cloud-popup-audit-status-v1";
+  "20260824-option-barcode-no-registry-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -46,7 +46,7 @@ export default async function ProductLaunchTrackerPage({
         <div>
           <strong className="block text-sm text-slate-950">상품마스터 기준정보 동기화</strong>
           <span className="mt-1 block text-xs leading-5 text-slate-500">
-            저장된 출시상품·옵션 바코드·샵플링 goods_key와 최근 확정 입고원가를 독립 상품마스터로 보냅니다.
+            저장된 출시상품·B-code·옵션바코드NO·샵플링 goods_key와 최근 확정 입고원가를 독립 상품마스터로 보냅니다.
           </span>
         </div>
         <ProductMasterSyncButton />
