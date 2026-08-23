@@ -5,7 +5,7 @@ export const keywordEngineElonLabModule: CommerceModule = {
   title: "SEO 대량등록 클라우드",
   navigationLabel: "SEO 대량등록 클라우드",
   description:
-    "상품출시 진행관리에서 여러 상품의 1688 중국 원본 링크를 받아, 기존 V6 API HUB 지식iN·카페·블로그·웹문서 Evidence Market Mine과 SearchAd·Search Trend 검증을 그대로 거친 뒤 FINAL 검색어·쇼핑몰별 상품명을 병렬 생성하고 Shopling에 일괄 대량등록합니다.",
+    "상품출시 진행관리에서 여러 상품을 선택해 1688 중국 원본 링크를 받아, 기존 V6 API HUB 지식iN·카페·블로그·웹문서 Evidence Market Mine과 SearchAd·Search Trend 검증을 그대로 거친 뒤 FINAL 검색어·쇼핑몰별 상품명을 병렬 생성하고 Shopling에 일괄 대량등록합니다.",
   status: "available",
   route: "/seo-bulk-cloud",
   category: "상품 등록 자동화",
