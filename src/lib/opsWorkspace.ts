@@ -104,9 +104,27 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
     label: "시스템·점검",
     shortLabel: "시스템·점검",
     iconLabel: "점",
-    description: "실패 이력, 외부 엔진 연결, 환경변수와 내부 운영 정보를 점검합니다.",
-    moduleIds: ["engine-runner-history", "engine-env-setup", "detail-page-cost-admin"],
-    searchTerms: ["오류", "실패", "이력", "점검", "환경변수", "설정", "원가", "관리자"],
+    description: "자기개선 상태, 반복 오류, 실패 이력, 외부 엔진 연결, 환경변수와 내부 운영 정보를 점검합니다.",
+    moduleIds: [
+      "reliability-learning-core",
+      "engine-runner-history",
+      "engine-env-setup",
+      "detail-page-cost-admin",
+    ],
+    searchTerms: [
+      "자기개선",
+      "신뢰성",
+      "학습",
+      "회귀",
+      "오류",
+      "실패",
+      "이력",
+      "점검",
+      "환경변수",
+      "설정",
+      "원가",
+      "관리자",
+    ],
   },
 ] as const;
 
@@ -188,9 +206,20 @@ const COMMAND_INTENTS: readonly (OpsCommandIntent & { patterns: readonly RegExp[
     patterns: [/상세페이지/, /상세.*이미지/, /이미지.*제작/],
   },
   {
+    label: "자기개선 점검",
+    reason: "자기개선·신뢰성·학습·회귀 관련 표현을 인식했습니다.",
+    moduleIds: ["reliability-learning-core", "engine-runner-history"],
+    patterns: [/자기개선/, /신뢰성/, /학습.*오류/, /회귀/, /재발.*방지/],
+  },
+  {
     label: "오류·실패 점검",
     reason: "오류·실패·이력 확인 관련 표현을 인식했습니다.",
-    moduleIds: ["detail-page-ai-review", "engine-runner-history", "engine-env-setup"],
+    moduleIds: [
+      "reliability-learning-core",
+      "detail-page-ai-review",
+      "engine-runner-history",
+      "engine-env-setup",
+    ],
     patterns: [/오류/, /실패/, /에러/, /이력/, /환경변수/, /연결.*확인/],
   },
 ] as const;
