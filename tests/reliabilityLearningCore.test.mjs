@@ -218,3 +218,25 @@ test("학습 분석은 전용 OpenAI 비용 lane과 기존 staggered cron wakeup
   assert.match(costGuard, /reliabilityOpenAiClient/);
   assert.match(costGuard, /RELIABILITY_OPENAI_API_KEY/);
 });
+
+test("자기개선 기능카드는 메인 대시보드와 시스템·점검 업무영역에 항상 노출된다", async () => {
+  const [dashboardPage, homeCard, workspace] = await Promise.all([
+    readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../src/components/dashboard/ReliabilityLearningHomeCard.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(new URL("../src/lib/opsWorkspace.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboardPage, /ReliabilityLearningHomeCard/);
+  assert.match(dashboardPage, /!selectedGroupId \? <ReliabilityLearningHomeCard \/>/);
+  assert.match(homeCard, /Commerce OS 통합 신뢰성·자기개선 코어/);
+  assert.match(homeCard, /href="\/reliability"/);
+  assert.match(homeCard, /AI-Saurus 자동 수집/);
+  assert.match(workspace, /id: "system-check"[\s\S]*"reliability-learning-core"/);
+  assert.match(workspace, /자기개선·신뢰성·학습·회귀/);
+});
