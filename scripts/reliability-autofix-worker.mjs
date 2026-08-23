@@ -18,6 +18,28 @@ const FORBIDDEN = [
   "order", "secret", "credential", "permission", "role", "admin.ts", "middleware",
 ];
 
+const CAPABILITY_TOKENS = [
+  "child_process",
+  "node:child_process",
+  "exec(",
+  "execfile(",
+  "spawn(",
+  "eval(",
+  "new function(",
+  "process.env",
+  "node:fs",
+  "node:http",
+  "node:https",
+  "node:net",
+  "node:tls",
+  "node:dns",
+  "fetch(",
+  "authorization",
+  "bearer ",
+  "github_token",
+  "actions_id_token",
+];
+
 function safePath(raw) {
   const path = String(raw || "").replaceAll("\\", "/").replace(/^\.\//, "");
   if (!path || path.startsWith("/") || path.includes("../")) return false;
@@ -123,18 +145,28 @@ function countOccurrences(haystack, needle) {
   return count;
 }
 
+function assertNoNewCapabilities(oldText, newText, path) {
+  const before = oldText.toLowerCase();
+  const after = newText.toLowerCase();
+  for (const token of CAPABILITY_TOKENS) {
+    if (countOccurrences(after, token) > countOccurrences(before, token)) {
+      throw new Error(`Autofix cannot introduce new capability '${token}' in ${path}`);
+    }
+  }
+}
+
 function applyProposal(proposal, context) {
   const edits = proposal?.edits;
   if (!Array.isArray(edits) || edits.length < 1 || edits.length > 6) {
     throw new Error("Unsafe autofix edit count");
   }
   const contextPaths = new Set(context.map((item) => item.path));
-  const touched = new Set();
   for (const edit of edits) {
     const path = String(edit.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
     const oldText = String(edit.old_text ?? "");
     const newText = String(edit.new_text ?? "");
     if (!safePath(path) || !newText) throw new Error(`Unsafe autofix path: ${path}`);
+    assertNoNewCapabilities(oldText, newText, path);
     const absolute = resolve(ROOT, path);
     if (!absolute.startsWith(`${resolve(ROOT)}/`)) throw new Error(`Path escape: ${path}`);
 
@@ -154,7 +186,6 @@ function applyProposal(proposal, context) {
       }
       writeFileSync(absolute, current.replace(oldText, newText), "utf8");
     }
-    touched.add(path);
   }
 
   execFileSync("git", ["diff", "--check"], { stdio: "inherit" });
