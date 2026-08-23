@@ -1,8 +1,10 @@
-const SEO_LEDGER_ROUTE = "/keyword-engine-elon-lab";
+const SEO_BULK_ROUTE = "/seo-bulk-cloud";
+const SEO_BULK_BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const NORMALIZED_ITEM_API = "/api/product-launch-tracker/normalized-optimized";
 const BUTTON_ID = "seo-title-ledger-handoff-button";
 const DATA_GROUP_ID = "bulk-action-group-data";
 const MAX_INSTALL_ATTEMPTS = 40;
+const MAX_BATCH_ITEMS = 50;
 let installAttempt = 0;
 let installTimer = null;
 let healthPanelScheduled = false;
@@ -59,16 +61,8 @@ function normalizedItemFields(raw) {
       itemPayload.trackerRowNumber ??
       0,
     ) || 0,
-    modelNumber: text(
-      item.modelNumber ||
-      item.model_number ||
-      itemPayload.modelNumber,
-    ),
-    productName: text(
-      item.productName ||
-      item.product_name ||
-      itemPayload.productName,
-    ),
+    modelNumber: text(item.modelNumber || item.model_number || itemPayload.modelNumber),
+    productName: text(item.productName || item.product_name || itemPayload.productName),
     sourceUrl: sourceUrlFromItem({ ...itemPayload, ...item }),
   };
 }
@@ -87,6 +81,22 @@ async function readSelectedItem(itemId) {
   return normalizedItemFields(body.item);
 }
 
+async function mapLimit(values, limit, worker) {
+  const results = new Array(values.length);
+  let cursor = 0;
+  async function runner() {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(values[index], index);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, values.length) }, () => runner()),
+  );
+  return results;
+}
+
 function showMessage(message) {
   if (typeof window.showToast === "function") {
     window.showToast(message);
@@ -97,55 +107,65 @@ function showMessage(message) {
 
 function updateButton(button) {
   const selectedCount = readSelectedItemIds().length;
-  const nextText = selectedCount === 1
-    ? "선택 상품 SEO 대량등록 클라우드 열기"
-    : `SEO 대량등록 클라우드 열기${selectedCount ? ` (${selectedCount})` : ""}`;
+  const nextText = selectedCount
+    ? `SEO 대량등록 클라우드 열기 (${selectedCount})`
+    : "SEO 대량등록 클라우드 열기";
   if (button.textContent !== nextText) button.textContent = nextText;
-  const nextCount = String(selectedCount);
-  if (button.dataset.selectedCount !== nextCount) {
-    button.dataset.selectedCount = nextCount;
-  }
+  button.dataset.selectedCount = String(selectedCount);
 }
 
-async function openLedger(button) {
+async function openBulkCloud(button) {
   const selectedIds = readSelectedItemIds();
-  if (selectedIds.length !== 1) {
-    showMessage("SEO 대량등록 클라우드는 상품 한 개씩 원장을 생성합니다. 상품을 정확히 1개 선택하세요.");
+  if (!selectedIds.length) {
+    showMessage("SEO 대량등록 클라우드에서 처리할 상품을 1개 이상 선택하세요.");
+    return;
+  }
+  if (selectedIds.length > MAX_BATCH_ITEMS) {
+    showMessage(`한 배치에서 최대 ${MAX_BATCH_ITEMS}개까지 처리합니다. 현재 ${selectedIds.length}개가 선택되었습니다.`);
     return;
   }
 
   button.disabled = true;
   const original = button.textContent;
-  button.textContent = "상품 링크 확인 중…";
+  button.textContent = `${selectedIds.length}개 상품 확인 중…`;
   try {
-    const item = await readSelectedItem(selectedIds[0]);
-    if (!item.sourceUrl) {
+    const items = await mapLimit(selectedIds, 8, readSelectedItem);
+    const missingLinks = items.filter((item) => !item.sourceUrl);
+    if (missingLinks.length) {
+      const labels = missingLinks
+        .slice(0, 5)
+        .map((item) => item.modelNumber || item.productName || item.id)
+        .join(", ");
       throw new Error(
-        `${item.modelNumber || item.productName || "선택 상품"}: 1688 상품 링크가 없습니다. 상품 상세의 중국 상품 링크를 먼저 확인하세요.`,
+        `${missingLinks.length}개 상품에 1688 링크가 없습니다: ${labels}${missingLinks.length > 5 ? " 외" : ""}`,
       );
     }
-    const query = new URLSearchParams({
-      launchItemId: item.id || selectedIds[0],
-      trackerRowNumber: item.trackerRowNumber ? String(item.trackerRowNumber) : "",
-      modelNumber: item.modelNumber,
-      productName: item.productName,
-      sourceUrl: item.sourceUrl,
-    });
-    const target = `${SEO_LEDGER_ROUTE}?${query.toString()}`;
+
+    const batchId = globalThis.crypto?.randomUUID?.() || `seo-bulk-${Date.now()}`;
+    const batch = {
+      version: 1,
+      batchId,
+      createdAt: new Date().toISOString(),
+      autoStart: true,
+      items,
+    };
+    window.localStorage.setItem(SEO_BULK_BATCH_STORAGE_KEY, JSON.stringify(batch));
+    const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({ batchId }).toString()}`;
     const opened = window.open(target, "_blank");
     if (!opened) {
-      throw new Error("SEO 대량등록 클라우드 새 탭이 차단됐습니다. Ops Center의 팝업을 허용해 주세요.");
+      window.location.assign(target);
+      return;
     }
     try {
       opened.opener = null;
     } catch {
-      // The new tab can still operate when the browser blocks opener changes.
+      // New tab still works when opener changes are blocked.
     }
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "SEO 대량등록 클라우드로 이동하지 못했습니다.");
   } finally {
     button.disabled = false;
-    button.textContent = original || "선택 상품 SEO 대량등록 클라우드 열기";
+    button.textContent = original || "SEO 대량등록 클라우드 열기";
     updateButton(button);
   }
 }
@@ -162,7 +182,7 @@ function installButton() {
     button.id = BUTTON_ID;
     button.type = "button";
     button.className = "button seo-title-ledger-button";
-    button.addEventListener("click", () => void openLedger(button));
+    button.addEventListener("click", () => void openBulkCloud(button));
   }
   if (button.parentElement !== destination) destination.append(button);
   if (!button.disabled) updateButton(button);

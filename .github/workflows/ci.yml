@@ -141,6 +141,7 @@ jobs:
           tests/productLaunchTrackerRows.test.mjs
           tests/productLaunchTrackerBarcodeMapping.test.mjs
           tests/productLaunchTrackerFlowConnection.test.mjs
+          tests/seoBulkCloudParallel.test.mjs
       - name: Build
         run: npm run build
         env:

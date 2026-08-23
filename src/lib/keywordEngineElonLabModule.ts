@@ -5,17 +5,20 @@ export const keywordEngineElonLabModule: CommerceModule = {
   title: "SEO 대량등록 클라우드",
   navigationLabel: "SEO 대량등록 클라우드",
   description:
-    "1688 중국 원본 링크 하나에서 상품 정체성·모델명·검색어를 확정하고, API HUB 지식iN·카페·블로그·웹문서 Evidence Market Mine과 SearchAd·Search Trend 검증을 거친 뒤 도매·소매 SEO 전략에 맞춘 중복 없는 쇼핑몰별 상품명을 대량 제조해 Supabase 클라우드 재고로 축적합니다.",
+    "상품출시 진행관리에서 여러 상품을 선택해 1688 중국 원본 링크를 받아, 기존 V6 API HUB 지식iN·카페·블로그·웹문서 Evidence Market Mine과 SearchAd·Search Trend 검증을 그대로 거친 뒤 FINAL 검색어·쇼핑몰별 상품명을 병렬 생성하고 Shopling에 일괄 대량등록합니다.",
   status: "available",
-  route: "/keyword-engine-elon-lab",
+  route: "/seo-bulk-cloud",
   category: "상품 등록 자동화",
-  inputType: "1688 중국 상품 링크, 상품출시 진행관리 연결상품",
-  outputType: "링크 기반 모델명, 공통 검색어 10개, 50bytes 이하 쇼핑몰별 상품명 재고, 잔여 등록 가능 회차",
+  inputType:
+    "상품출시 진행관리에서 선택한 1~50개 상품, 1688 중국 원본 링크",
+  outputType:
+    "상품별 FINAL 검색어 10개, 도매·소매 기준 상품명 6개, 쇼핑몰별 상품명 29개, Shopling 일괄등록 결과",
   historySupport: true,
   externalProject: false,
   note:
-    "기존 V6 Evidence Market Mine·Search Trend 검증 계약을 유지하면서 내부적으로 영구 상품명 원장·재고 구조를 추가합니다. STEP 1~4 검증 결과를 바탕으로 한 번 사용하거나 예약된 제목을 재발급하지 않으며, 실제 Shopling 등록은 별도 ‘SEO 상품명 클라우드 · 샵플링 등록 실행기’에서만 수행합니다.",
-  helperNote: "1688 링크 → 모델명·검색어 확정 → 고유 상품명 대량 제조 → 클라우드 재고 축적",
+    "기본 운영 화면은 FINAL RESULT와 Shopling 일괄등록만 노출합니다. 기존 STEP 1~5·Evidence Market Mine·Search Trend·원장·진단 화면은 고급 상세에서만 펼칩니다. 생성은 최대 3개 상품씩 병렬 실행하고 각 상품 결과를 상품출시 진행관리에 즉시 저장합니다. 기존 상세 엔진은 /keyword-engine-elon-lab 에서 계속 사용할 수 있습니다.",
+  helperNote:
+    "여러 상품 선택 → V6 병렬 FINAL RESULT 생성 → 상품별 검색어 확인 → Shopling 일괄 대량등록",
   actionLabel: "SEO 대량등록 클라우드 열기",
-  safetyBadge: "제조·재고관리 / 외부전송 분리",
+  safetyBadge: "병렬 3개 · 기존 중복 goods_key 차단 유지",
 };
