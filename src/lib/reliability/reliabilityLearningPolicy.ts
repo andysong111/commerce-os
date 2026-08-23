@@ -54,7 +54,7 @@ export type ReliabilityLearningAnalysis = {
   escalation_reason: string;
 };
 
-type OpenAiResponsePayload = {
+export type OpenAiResponsePayload = {
   output_text?: unknown;
   output?: Array<{
     content?: Array<{ type?: unknown; text?: unknown }>;
@@ -140,6 +140,21 @@ function outputText(payload: OpenAiResponsePayload) {
   return parts.join("").trim();
 }
 
+export function reliabilityOpenAiIncompleteReason(
+  payload: OpenAiResponsePayload,
+): string | null {
+  const status = text(payload.status, 80).toLowerCase();
+  const reason = text(payload.incomplete_details?.reason, 160).toLowerCase();
+  if (status !== "incomplete" && !reason) return null;
+  return reason || "incomplete";
+}
+
+export function isReliabilityOpenAiOutputLimitIncomplete(
+  payload: OpenAiResponsePayload,
+) {
+  return reliabilityOpenAiIncompleteReason(payload) === "max_output_tokens";
+}
+
 export function reliabilityLearningAnalysisSchema() {
   return {
     type: "object",
@@ -191,6 +206,7 @@ export function reliabilityLearningSystemPrompt() {
     "가격·재고·주문·결제·사용자 권한·인증·비밀키·DB 스키마·대량 데이터·프로덕션 코드 변경은 자동 행동으로 제안하지 않는다.",
     "high 또는 critical 위험 사건은 safe_automatic_action을 반드시 none으로 한다.",
     "코드 자동 수정, PR 생성, 병합 또는 배포 승인을 수행하지 않는다. 분석 결과만 구조화한다.",
+    "각 서술 필드는 핵심 판단 한두 문장으로 제한하고 중복 설명을 피한다.",
     "모든 필드를 한국어로 짧고 구체적으로 작성한다.",
   ].join("\n");
 }
@@ -237,12 +253,11 @@ export function parseReliabilityLearningAnalysis(
   payload: OpenAiResponsePayload,
   riskLevel: string,
 ): ReliabilityLearningAnalysis {
-  const status = text(payload.status, 80).toLowerCase();
-  const incompleteReason = text(payload.incomplete_details?.reason, 160);
-  if (status === "incomplete" || incompleteReason) {
+  const incompleteReason = reliabilityOpenAiIncompleteReason(payload);
+  if (incompleteReason) {
     throw new Error(
       `OpenAI 신뢰성 분석 응답이 완성되지 않았습니다${
-        incompleteReason ? `: ${incompleteReason}` : "."
+        incompleteReason !== "incomplete" ? `: ${incompleteReason}` : "."
       }`,
     );
   }
