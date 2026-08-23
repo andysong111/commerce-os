@@ -109,3 +109,35 @@ test("지원하지 않는 상태는 저장하지 않고 기능 카드와 통제�
   assert.match(page, /통합 신뢰성·자기개선 코어/);
   assert.match(page, /원문 입력·고객 이메일·이미지는 저장하지 않음/);
 });
+
+test("학습 분석은 전용 OpenAI 비용 lane과 기존 staggered cron wakeup을 재사용한다", async () => {
+  const [vercelSource, cronRoute, openAiClient, costGuard] = await Promise.all([
+    readFile(new URL("../vercel.json", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../src/app/api/cron/product-decision-live-refresh/route.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/lib/reliability/reliabilityOpenAiClient.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../scripts/check-openai-cost-attribution.mjs", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  const vercel = JSON.parse(vercelSource);
+  assert.equal(
+    vercel.crons.some((cron) => cron.path === "/api/cron/reliability-learning"),
+    false,
+  );
+  assert.match(cronRoute, /runReliabilityLearningAnalyzer/);
+  assert.match(cronRoute, /maxDuration = 120/);
+  assert.match(openAiClient, /RELIABILITY_OPENAI_API_KEY/);
+  assert.doesNotMatch(openAiClient, /process\.env\.OPENAI_API_KEY/);
+  assert.match(costGuard, /reliabilityOpenAiClient/);
+  assert.match(costGuard, /RELIABILITY_OPENAI_API_KEY/);
+});
