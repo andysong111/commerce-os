@@ -46,6 +46,7 @@ jobs:
           tests/productLaunchTrackerControlPlaneV2.test.mjs
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
+          tests/productLaunchTrackerUploadClaim.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/productLaunchTrackerSingleRowAdd.test.mjs
           tests/productLaunchTrackerTableOps.test.mjs
