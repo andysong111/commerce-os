@@ -150,6 +150,7 @@ test("GitHub Worker는 생성 코드와 쓰기 권한을 분리하고 CI·Previe
   assert.match(route, /verifyReliabilityGithubOidc/);
   assert.match(route, /loadClaimedJob/);
   assert.match(worker, /npm test actually executes/);
+  assert.match(worker, /test-only proposals are not deployable improvements/);
   assert.match(worker, /Autofix cannot reduce test assertions/);
   assert.match(worker, /Autofix cannot introduce new capability/);
   assert.match(worker, /changed\.length>4\|\|lineBudget>260/);
