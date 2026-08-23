@@ -5,6 +5,7 @@ on:
     paths:
       - 'public/product-launch-tracker-app/**'
       - 'src/app/api/product-launch-tracker/**'
+      - 'src/app/seo-title-cloud-shopling-runner/**'
       - 'src/app/detail-page-ai-review/**'
       - 'src/app/api/shopling-categories/**'
       - 'src/app/shopling-category-review-queue/**'
@@ -18,10 +19,12 @@ on:
       - 'src/lib/extendedModuleRegistry.ts'
       - 'src/lib/opsWorkspace.ts'
       - 'src/lib/productLaunchTracker*.ts'
+      - 'src/lib/productLaunchShoplingMallSeo.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/*product_launch*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
+      - 'tests/productLaunchShoplingMallSeo.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -47,6 +50,7 @@ jobs:
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerShoplingPriceRounding.test.mjs
+          tests/productLaunchShoplingMallSeo.test.mjs
           tests/productLaunchTrackerUploadClaim.test.mjs
           tests/productLaunchTrackerCategoryCancel.test.mjs
           tests/productLaunchTrackerSingleRowAdd.test.mjs
