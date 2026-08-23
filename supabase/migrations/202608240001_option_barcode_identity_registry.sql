@@ -94,3 +94,136 @@ $$;
 
 revoke all on function public.resolve_option_barcode_nos(jsonb) from public, anon, authenticated;
 grant execute on function public.resolve_option_barcode_nos(jsonb) to service_role;
+
+-- Existing options receive deterministic identity keys. B-code duplicates intentionally share one row.
+with identities as (
+  select distinct
+    case
+      when btrim(o.barcode) <> '' then
+        'B:' || upper(regexp_replace(o.barcode, '\s+', '', 'g'))
+      else
+        'OPTION:' || o.owner_id::text || ':' || o.item_id || ':' || o.option_id
+    end as identity_key,
+    case when btrim(o.barcode) <> '' then 'B_CODE' else 'OPTION' end as identity_kind,
+    case
+      when btrim(o.barcode) <> '' then upper(regexp_replace(o.barcode, '\s+', '', 'g'))
+      else ''
+    end as primary_b_code
+  from public.product_launch_options o
+), missing as (
+  select i.*
+  from identities i
+  left join public.option_barcode_registry r using (identity_key)
+  where r.identity_key is null
+  order by i.identity_key
+)
+insert into public.option_barcode_registry (
+  identity_key,
+  option_barcode_no,
+  identity_kind,
+  primary_b_code,
+  composition
+)
+select
+  identity_key,
+  'OB' || lpad(nextval('public.option_barcode_no_seq')::text, 12, '0'),
+  identity_kind,
+  primary_b_code,
+  '[]'::jsonb
+from missing
+on conflict (identity_key) do nothing;
+
+with mapping as (
+  select
+    o.owner_id,
+    o.item_id,
+    o.option_id,
+    case
+      when btrim(o.barcode) <> '' then
+        'B:' || upper(regexp_replace(o.barcode, '\s+', '', 'g'))
+      else
+        'OPTION:' || o.owner_id::text || ':' || o.item_id || ':' || o.option_id
+    end as identity_key,
+    case when btrim(o.barcode) <> '' then 'B_CODE' else 'OPTION' end as identity_kind
+  from public.product_launch_options o
+)
+update public.product_launch_options o
+set
+  option_barcode_identity_key = m.identity_key,
+  option_barcode_no = r.option_barcode_no,
+  option_payload = coalesce(o.option_payload, '{}'::jsonb) || jsonb_build_object(
+    'optionBarcodeNo', r.option_barcode_no,
+    'optionBarcodeIdentityKey', m.identity_key,
+    'optionBarcodeIdentityKind', m.identity_kind
+  ),
+  updated_at = now()
+from mapping m
+join public.option_barcode_registry r on r.identity_key = m.identity_key
+where m.owner_id = o.owner_id
+  and m.item_id = o.item_id
+  and m.option_id = o.option_id;
+
+update public.product_launch_items i
+set
+  option_barcode_nos = coalesce(x.nos, '{}'::text[]),
+  updated_at = now()
+from (
+  select
+    owner_id,
+    item_id,
+    array_agg(option_barcode_no order by option_index)
+      filter (where option_barcode_no <> '') as nos
+  from public.product_launch_options
+  group by owner_id, item_id
+) x
+where x.owner_id = i.owner_id
+  and x.item_id = i.item_id;
+
+-- Keep the legacy JSON authority in sync so existing detail screens receive the identities immediately.
+update public.product_launch_tracker_states s
+set
+  state_payload = jsonb_set(
+    s.state_payload,
+    '{items}',
+    coalesce((
+      select jsonb_agg(
+        case
+          when jsonb_typeof(item.value->'orderOptions') = 'array' then
+            jsonb_set(
+              item.value,
+              '{orderOptions}',
+              coalesce((
+                select jsonb_agg(
+                  opt.value || jsonb_build_object(
+                    'optionBarcodeNo', coalesce(po.option_barcode_no, ''),
+                    'optionBarcodeIdentityKey', coalesce(po.option_barcode_identity_key, ''),
+                    'optionBarcodeIdentityKind', case
+                      when coalesce(po.option_barcode_identity_key, '') like 'B:%' then 'B_CODE'
+                      when coalesce(po.option_barcode_identity_key, '') like 'SET:%' then 'SET'
+                      else 'OPTION'
+                    end
+                  )
+                  order by opt.ordinality
+                )
+                from jsonb_array_elements(item.value->'orderOptions')
+                  with ordinality opt(value, ordinality)
+                left join public.product_launch_options po
+                  on po.owner_id = s.owner_id
+                 and po.item_id = item.value->>'id'
+                 and po.option_id = coalesce(
+                   nullif(opt.value->>'id', ''),
+                   'option-' || opt.ordinality::text
+                 )
+              ), '[]'::jsonb),
+              true
+            )
+          else item.value
+        end
+        order by item.ordinality
+      )
+      from jsonb_array_elements(coalesce(s.state_payload->'items', '[]'::jsonb))
+        with ordinality item(value, ordinality)
+    ), '[]'::jsonb),
+    true
+  ),
+  updated_at = now();
