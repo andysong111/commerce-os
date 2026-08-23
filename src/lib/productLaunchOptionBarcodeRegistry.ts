@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import type { ProductLaunchTrackerState } from "@/lib/productLaunchTrackerOptimized";
 
 type UnknownRecord = Record<string, unknown>;
@@ -55,7 +54,11 @@ export function buildOptionBarcodeIdentity(input: {
 
   if (composition.length) {
     const canonical = JSON.stringify(composition);
-    const digest = createHash("sha256").update(canonical).digest("hex").slice(0, 32).toUpperCase();
+    const digest = createHash("sha256")
+      .update(canonical)
+      .digest("hex")
+      .slice(0, 32)
+      .toUpperCase();
     return {
       identityKey: `SET:${digest}`,
       identityKind: "SET",
@@ -139,10 +142,7 @@ export async function attachOptionBarcodeNosToChangedItems(
     `${config.supabaseUrl}/rest/v1/rpc/resolve_option_barcode_nos`,
     {
       method: "POST",
-      headers: {
-        ...createSupabaseAdminHeaders(config.secretKey),
-        "Content-Type": "application/json",
-      },
+      headers: createRegistryAdminHeaders(config.secretKey),
       body: JSON.stringify({ p_requests: [...requests.values()] }),
       cache: "no-store",
     },
@@ -188,6 +188,18 @@ export async function attachOptionBarcodeNosToChangedItems(
 
   state.items = items;
   return state;
+}
+
+function createRegistryAdminHeaders(secretKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: secretKey,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  if (!secretKey.startsWith("sb_secret_")) {
+    headers.Authorization = `Bearer ${secretKey}`;
+  }
+  return headers;
 }
 
 function text(value: unknown) {
