@@ -5,6 +5,9 @@ on:
     paths:
       - "src/lib/reliability/**"
       - "src/lib/reliabilityLearningModule.ts"
+      - "src/lib/opsWorkspace.ts"
+      - "src/app/page.tsx"
+      - "src/components/dashboard/ReliabilityLearningHomeCard.tsx"
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
       - "src/app/api/cron/reliability-learning/**"
@@ -21,6 +24,9 @@ on:
     paths:
       - "src/lib/reliability/**"
       - "src/lib/reliabilityLearningModule.ts"
+      - "src/lib/opsWorkspace.ts"
+      - "src/app/page.tsx"
+      - "src/components/dashboard/ReliabilityLearningHomeCard.tsx"
       - "src/app/reliability/**"
       - "src/app/api/integrations/reliability/**"
       - "src/app/api/cron/reliability-learning/**"
@@ -59,6 +65,9 @@ jobs:
           src/lib/reliability/reliabilityLearningAnalyzer.ts
           src/lib/reliability/reliabilityOpenAiClient.ts
           src/lib/reliabilityLearningModule.ts
+          src/lib/opsWorkspace.ts
+          src/app/page.tsx
+          src/components/dashboard/ReliabilityLearningHomeCard.tsx
           src/app/api/integrations/reliability/events/route.ts
           src/app/api/cron/reliability-learning/route.ts
           src/app/api/cron/product-decision-live-refresh/route.ts
