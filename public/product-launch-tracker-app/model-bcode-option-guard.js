@@ -101,8 +101,9 @@ async function reconcileCurrentItem(serial) {
     }
 
     const nextOptions = reconcileModelOrderOptions(item.orderOptions, authority);
+    const changed = !sameModelOrderOptions(item.orderOptions, nextOptions);
     let displayOptions = nextOptions;
-    if (!sameModelOrderOptions(item.orderOptions, nextOptions)) {
+    if (changed) {
       await requestJson(OPTIMIZED_API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -117,12 +118,18 @@ async function reconcileCurrentItem(serial) {
       if (Array.isArray(refreshed?.item?.orderOptions)) {
         displayOptions = refreshed.item.orderOptions;
       }
+    } else {
+      // Preserve the established B-code authority rendering path when no server rewrite is needed.
+      renderOptionTable(nextOptions);
+      renderChinaOptionPanel(nextOptions);
     }
     if (serial !== renderSerial || !detailDialog?.open) return;
 
     ensureOptionBarcodeHeader();
-    renderOptionTable(displayOptions);
-    renderChinaOptionPanel(displayOptions);
+    if (changed) {
+      renderOptionTable(displayOptions);
+      renderChinaOptionPanel(displayOptions);
+    }
     const syncStatus = document.querySelector("#china-sync-status");
     if (syncStatus) {
       syncStatus.textContent = `${displayOptions.length}개 연결 · B-code/옵션바코드NO 검증`;
@@ -130,7 +137,7 @@ async function reconcileCurrentItem(serial) {
     }
     const assignedCount = displayOptions.filter((option) => option.optionBarcodeNo).length;
     setGuardStatus(
-      `${modelNumber}의 B-code ${displayOptions.length}개와 옵션바코드NO ${assignedCount}개를 원장 기준으로 표시합니다. 동일 B-code는 동일 옵션바코드NO를 사용합니다.`,
+      `발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합으로 유지합니다. ${modelNumber}의 B-code ${displayOptions.length}개와 옵션바코드NO ${assignedCount}개를 원장 기준으로 표시합니다. 동일 B-code는 동일 옵션바코드NO를 사용합니다.`,
       assignedCount === displayOptions.length ? "saved" : "error",
     );
     completedKey = key;
