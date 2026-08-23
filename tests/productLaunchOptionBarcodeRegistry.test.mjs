@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
@@ -80,4 +81,19 @@ test("세트 구성은 입력 순서와 무관하게 같은 identity를 만들�
   assert.equal(setA.identityKind, "SET");
   assert.equal(setA.identityKey, setB.identityKey);
   assert.notEqual(setA.identityKey, differentQuantity.identityKey);
+});
+
+test("옵션바코드 RPC 신규 identity 삽입은 output 변수명과 충돌하지 않는 PK constraint를 명시한다", async () => {
+  const migration = await readFile(
+    new URL(
+      "../supabase/migrations/202608240004_fix_option_barcode_registry_rpc_conflict.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    migration,
+    /on conflict on constraint option_barcode_registry_pkey do nothing/i,
+  );
+  assert.doesNotMatch(migration, /on conflict \(identity_key\) do nothing/i);
 });
