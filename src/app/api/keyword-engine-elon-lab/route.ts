@@ -97,7 +97,7 @@ function readiness() {
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 7,
+    version: 6,
     marketRecall: "evidence-first",
     ...readiness(),
   });
