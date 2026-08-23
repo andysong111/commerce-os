@@ -144,21 +144,25 @@ test("운영 Cron은 학습 분석 뒤에 개선 효과를 best-effort로 갱신
   assert.match(evaluator, /적용된 개선/);
 });
 
-test("통제실은 수집·분석·개선안·실제반영·효과검증을 쉬운 문장으로 구분한다", async () => {
+test("통제실은 비개발자가 이해할 문장과 접힌 전문가 정보를 사용한다", async () => {
   const [page, dashboard] = await Promise.all([
     source("src/app/reliability/page.tsx"),
     source("src/lib/reliability/reliabilityDashboard.ts"),
   ]);
 
-  assert.match(page, /데이터가 실제 개선으로 이어지는 단계/);
-  assert.match(page, /자동 수집/);
-  assert.match(page, /원인 분석/);
-  assert.match(page, /개선안 생성/);
-  assert.match(page, /실제 반영/);
-  assert.match(page, /효과 검증/);
-  assert.match(page, /학습 완료와 실제 반영은 다릅니다/);
-  assert.match(page, /실제로 무엇이 바뀌고 있나/);
-  assert.match(page, /문제 → 학습 내용 → 반영 방식 → 효과 측정/);
+  assert.match(page, /배운 것이 실제 개선으로 이어지는 과정/);
+  assert.match(page, /사용 기록 모으기/);
+  assert.match(page, /문제 이유 찾기/);
+  assert.match(page, /고칠 방법 정리/);
+  assert.match(page, /실제 서비스에 적용/);
+  assert.match(page, /좋아졌는지 확인/);
+  assert.match(page, /단순히 데이터를 모았다고 좋아졌다고 표시하지 않습니다/);
+  assert.match(page, /지금 무엇이 바뀌고 있나/);
+  assert.match(page, /궁금한 항목만 펼치면/);
+  assert.match(page, /전문가용 정보 펼쳐보기/);
+  assert.match(page, /전문가용 기술 정보 펼쳐보기/);
+  assert.match(page, /<details key=\{item\.id\}/);
+  assert.match(page, /평소 운영에는 보지 않아도 됩니다/);
   assert.match(dashboard, /reliability_improvements/);
   assert.match(dashboard, /improvementsApplied/);
   assert.match(dashboard, /improvementsVerified/);
