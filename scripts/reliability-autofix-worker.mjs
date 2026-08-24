@@ -10,6 +10,10 @@ const TOKEN = process.env.RELIABILITY_AUTOFIX_OIDC_TOKEN || "";
 const REPOSITORY = process.env.GITHUB_REPOSITORY || "";
 const JOB_FILE = process.env.RELIABILITY_AUTOFIX_JOB_FILE || "/tmp/reliability-autofix-job.json";
 const PROPOSAL_FILE = process.env.RELIABILITY_AUTOFIX_PROPOSAL_FILE || "/tmp/reliability-autofix-proposal.json";
+const MISSING_REGRESSION_TEST_MESSAGE =
+  "Source autofix must include a regression test that npm test actually executes";
+const REGRESSION_TEST_REVISION_FEEDBACK =
+  "이전 제안은 서비스 소스 코드를 수정했지만 npm test가 실제 실행하는 회귀 테스트를 포함하지 않았습니다. 같은 문제를 재현하고 수정 후 통과하는 실행 가능한 회귀 테스트를 반드시 포함한 완전한 대체 제안을 작성하세요. 위험 경계나 수정 범위를 넓히지 마세요.";
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -31,6 +35,13 @@ const TEST_WEAKENING_TOKENS = [
   ".skip(", ".todo(", ".only(", "test.skip", "it.skip", "describe.skip",
   "test.todo", "it.todo", "test.only", "it.only", "describe.only",
 ];
+
+class MissingExecutedRegressionTestError extends Error {
+  constructor() {
+    super(MISSING_REGRESSION_TEST_MESSAGE);
+    this.name = "MissingExecutedRegressionTestError";
+  }
+}
 
 function safePath(raw) {
   const path = String(raw || "").replaceAll("\\", "/").replace(/^\.\//, "");
@@ -117,12 +128,36 @@ function isExecutedTestPath(path){
   if(testScript.includes("vitest run") && /\.test\.[cm]?[jt]sx?$/i.test(path)) return true;
   return testScript.includes(lower) || testScript.includes(basename(lower));
 }
+function proposalPath(edit) {
+  return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
+}
+function preflightProposal(edits) {
+  for (const edit of edits) {
+    const path = proposalPath(edit);
+    const oldText = String(edit?.old_text ?? "");
+    const newText = String(edit?.new_text ?? "");
+    if (!safePath(path) || !newText) throw new Error(`Unsafe autofix path: ${path}`);
+    if (!oldText && (!isExecutedTestPath(path) || existsSync(resolve(ROOT, path)))) {
+      throw new Error(`New files must be executable regression tests: ${path}`);
+    }
+  }
+  const sourceProposed = edits.some((edit) => {
+    const path = proposalPath(edit);
+    return path.startsWith("src/") && !path.includes(".test.");
+  });
+  if (!sourceProposed) {
+    throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
+  }
+  const executedTestProposed = edits.some((edit) => isExecutedTestPath(proposalPath(edit)));
+  if (!executedTestProposed) throw new MissingExecutedRegressionTestError();
+}
 function applyProposal(proposal, context) {
   const edits=proposal?.edits; if(!Array.isArray(edits)||edits.length<1||edits.length>6)throw new Error("Unsafe autofix edit count");
+  preflightProposal(edits);
   const contextPaths=new Set(context.map(item=>item.path));
-  for(const edit of edits){ const path=String(edit.path||"").replaceAll("\\","/").replace(/^\.\//,""); const oldText=String(edit.old_text??""); const newText=String(edit.new_text??"");
-    if(!safePath(path)||!newText)throw new Error(`Unsafe autofix path: ${path}`); assertNoNewCapabilities(oldText,newText,path); assertNoTestWeakening(oldText,newText,path); const absolute=resolve(ROOT,path); if(!absolute.startsWith(`${resolve(ROOT)}/`))throw new Error(`Path escape: ${path}`);
-    if(!oldText){ if(!isExecutedTestPath(path)||existsSync(absolute))throw new Error(`New files must be executable regression tests: ${path}`); mkdirSync(dirname(absolute),{recursive:true}); writeFileSync(absolute,newText,"utf8"); }
+  for(const edit of edits){ const path=proposalPath(edit); const oldText=String(edit.old_text??""); const newText=String(edit.new_text??"");
+    assertNoNewCapabilities(oldText,newText,path); assertNoTestWeakening(oldText,newText,path); const absolute=resolve(ROOT,path); if(!absolute.startsWith(`${resolve(ROOT)}/`))throw new Error(`Path escape: ${path}`);
+    if(!oldText){ mkdirSync(dirname(absolute),{recursive:true}); writeFileSync(absolute,newText,"utf8"); }
     else { if(!contextPaths.has(path)||!existsSync(absolute))throw new Error(`Edit path was not provided as trusted context: ${path}`); const current=readFileSync(absolute,"utf8"); if(countOccurrences(current,oldText)!==1)throw new Error(`old_text must match exactly once: ${path}`); writeFileSync(absolute,current.replace(oldText,newText),"utf8"); }
   }
   execFileSync("git",["diff","--check"],{stdio:"inherit"}); const numstat=execFileSync("git",["diff","--numstat"],{encoding:"utf8"}).trim(); if(!numstat)throw new Error("Autofix proposal produced no diff");
@@ -130,10 +165,32 @@ function applyProposal(proposal, context) {
   if(changed.length>4||lineBudget>260)throw new Error(`Autofix diff exceeds safety budget: files=${changed.length}, lines=${lineBudget}`);
   const sourceChanged=changed.some(path=>path.startsWith("src/")&&!path.includes(".test.")); const executedTestChanged=changed.some(isExecutedTestPath);
   if(!sourceChanged)throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
-  if(!executedTestChanged)throw new Error("Source autofix must include a regression test that npm test actually executes");
+  if(!executedTestChanged)throw new MissingExecutedRegressionTestError();
   return changed;
 }
 async function claim(){ const payload=await api({action:"claim"}); if(!payload.job){output("has_job","false");return;} if(payload.job.target_repo!==REPOSITORY)throw new Error("Claimed job repository mismatch"); writeFileSync(JOB_FILE,JSON.stringify(payload.job,null,2)); output("has_job","true"); output("job_id",payload.job.job_id); output("improvement_id",payload.job.improvement_id); }
-async function generate(){ const job=readJob(); const context=collectContext(job); const payload=await api({action:"generate",job_id:job.job_id,files:context}); const proposal=payload.proposal; writeFileSync(PROPOSAL_FILE,JSON.stringify(proposal,null,2)); const changed=applyProposal(proposal,context); output("changed_paths",JSON.stringify(changed)); output("summary",String(proposal.summary||"AI low-risk reliability fix").slice(0,500)); }
+async function generate(){
+  const job=readJob();
+  const context=collectContext(job);
+  let payload=await api({action:"generate",job_id:job.job_id,files:context});
+  let proposal=payload.proposal;
+  let changed;
+  try {
+    changed=applyProposal(proposal,context);
+  } catch (error) {
+    if (!(error instanceof MissingExecutedRegressionTestError)) throw error;
+    payload=await api({
+      action:"generate",
+      job_id:job.job_id,
+      files:context,
+      revision_feedback:REGRESSION_TEST_REVISION_FEEDBACK,
+    });
+    proposal=payload.proposal;
+    changed=applyProposal(proposal,context);
+  }
+  writeFileSync(PROPOSAL_FILE,JSON.stringify(proposal,null,2));
+  output("changed_paths",JSON.stringify(changed));
+  output("summary",String(proposal.summary||"AI low-risk reliability fix").slice(0,500));
+}
 async function finish(){ const job=readJob(); const status=process.env.AUTOFIX_STATUS||"failed"; const changedPaths=process.env.AUTOFIX_CHANGED_PATHS?JSON.parse(process.env.AUTOFIX_CHANGED_PATHS):[]; await api({action:"finish",job_id:job.job_id,status,branch_name:process.env.AUTOFIX_BRANCH||null,pr_number:process.env.AUTOFIX_PR?Number(process.env.AUTOFIX_PR):null,commit_sha:process.env.AUTOFIX_COMMIT||null,merge_sha:process.env.AUTOFIX_MERGE||null,patch_summary:process.env.AUTOFIX_SUMMARY||null,changed_paths:changedPaths,error:process.env.AUTOFIX_ERROR||null}); }
 const command=process.argv[2]; if(command==="claim")await claim(); else if(command==="generate")await generate(); else if(command==="finish")await finish(); else throw new Error(`Unknown command: ${command}`);
