@@ -15,7 +15,9 @@ const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 42_000;
 const DEFAULT_MODEL = "gpt-5-mini";
 const SCORE_CHUNK_SIZE = 12;
-const SCORE_CONCURRENCY = 1;
+// Keep each OpenAI request small, but process bounded waves in parallel so a
+// 500-keyword scoring request cannot spend many minutes inside one Vercel invocation.
+const SCORE_CONCURRENCY = 8;
 
 type OpenAiPayload = {
   status?: unknown;
