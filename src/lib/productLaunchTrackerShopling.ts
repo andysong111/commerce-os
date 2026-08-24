@@ -15,7 +15,7 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
 ] as const;
 
 export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
-const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
+const OPTION_BARCODE_NO_PATTERN = /^\d{12}$/;
 
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
@@ -136,7 +136,7 @@ export function buildProductLaunchShoplingPayload(
         rawOptions.length === 1
           ? singleOptionBarcode
           : normalizeCode(option.barcode),
-      optionBarcodeNo: text(option.optionBarcodeNo).toUpperCase(),
+      optionBarcodeNo: text(option.optionBarcodeNo),
       baseSalePriceKrw: nonNegativeInteger(option.baseSalePriceKrw),
       unitCostKrw: nonNegativeInteger(option.unitCostKrw),
       index,
@@ -172,7 +172,7 @@ export function buildProductLaunchShoplingPayload(
     if (!option.saleOption) errors.push(`${option.index + 1}번째 옵션값이 없습니다.`);
     if (!option.barcode) errors.push(`${name} B코드가 없습니다.`);
     if (!OPTION_BARCODE_NO_PATTERN.test(option.optionBarcodeNo)) {
-      errors.push(`${name} 옵션바코드NO가 없습니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
+      errors.push(`${name} 옵션바코드NO는 숫자 12자리여야 합니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
     }
     if (option.baseSalePriceKrw <= 0) errors.push(`${name} 기준 판매가가 없습니다.`);
     if (option.unitCostKrw <= 0) errors.push(`${name} 원가가 없습니다.`);
