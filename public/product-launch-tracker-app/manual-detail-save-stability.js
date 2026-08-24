@@ -1,8 +1,7 @@
 const OPTIMIZED_API_PATH = "/api/product-launch-tracker/optimized";
 const SUCCESS_MESSAGE = "저장이 완료되었습니다.";
-const CONCURRENT_UPDATE_CODE = "PRODUCT_LAUNCH_TRACKER_CONCURRENT_UPDATE";
-const RETRY_DELAYS_MS = [180, 420];
 const SAVE_ARM_WINDOW_MS = 2_000;
+const MANUAL_SAVE_UPDATED_BY = "승준 · 상품출시진행관리 수동 저장";
 const EDITABLE_ITEM_KEYS = [
   "workBatch",
   "warehouseLocation",
@@ -73,21 +72,10 @@ function installOptimizedMutationGuard() {
     detailSaveArmedUntil = 0;
 
     const stabilizedPayload = buildPartialMutation(originalPayload);
-    const stabilizedInit = {
+    return nativeFetch(input, {
       ...init,
       body: JSON.stringify(stabilizedPayload),
-    };
-
-    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
-      const response = await nativeFetch(input, stabilizedInit);
-      if (response.status !== 409 || attempt >= RETRY_DELAYS_MS.length) return response;
-
-      const body = await response.clone().json().catch(() => ({}));
-      if (body?.code !== CONCURRENT_UPDATE_CODE) return response;
-      await sleep(RETRY_DELAYS_MS[attempt]);
-    }
-
-    return nativeFetch(input, stabilizedInit);
+    });
   };
 }
 
@@ -126,7 +114,7 @@ function buildPartialMutation(payload) {
     operation: "patch_item",
     itemId: String(payload.itemId || item.id || "").trim(),
     patch,
-    updatedBy: "승준 · 상품출시진행관리 수동 저장",
+    updatedBy: MANUAL_SAVE_UPDATED_BY,
   };
 }
 
@@ -229,8 +217,4 @@ function parseJsonBody(value) {
 
 function isRecord(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
