@@ -1,3 +1,5 @@
+import "./manual-detail-save-stability.js";
+
 const dialogForms = ["#detail-form", "#policy-form", "#add-form"];
 
 for (const selector of dialogForms) {
