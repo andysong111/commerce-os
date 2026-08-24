@@ -1,5 +1,5 @@
 const OPTIMIZED_PATH = "/api/product-launch-tracker/optimized";
-const OPTION_BARCODE_PATTERN = /^OB\d{12}$/;
+const OPTION_BARCODE_PATTERN = /^\d{12}$/;
 const DETAIL_BUTTON_SELECTOR = "button[data-action='detail']";
 const VERIFY_DELAYS = [90, 260, 700];
 
@@ -83,7 +83,6 @@ function prepareDetailLoading(itemId, generation) {
   if (save instanceof HTMLButtonElement) save.disabled = true;
 
   if (dialog && !dialog.open) {
-    // The base app opens the dialog immediately after this capture-phase hook.
     dialog.dataset.loadingItemId = itemId;
   }
   watchDetailReady(itemId, generation, 0);
@@ -242,7 +241,7 @@ function findMatchingOption(options, expected, index) {
 
 function firstValidOptionBarcode(...values) {
   for (const value of values) {
-    const normalized = String(value || "").trim().toUpperCase();
+    const normalized = String(value || "").trim();
     if (OPTION_BARCODE_PATTERN.test(normalized)) return normalized;
   }
   return "";
@@ -302,8 +301,8 @@ function compareEditableItem(expected, actual) {
         return { ok: false, message: `옵션 ${index + 1}의 ${field} 저장값이 다릅니다.` };
       }
     }
-    const expectedBarcodeNo = String(left.optionBarcodeNo || "").trim().toUpperCase();
-    const actualBarcodeNo = String(right.optionBarcodeNo || "").trim().toUpperCase();
+    const expectedBarcodeNo = String(left.optionBarcodeNo || "").trim();
+    const actualBarcodeNo = String(right.optionBarcodeNo || "").trim();
     if (
       OPTION_BARCODE_PATTERN.test(expectedBarcodeNo) &&
       expectedBarcodeNo !== actualBarcodeNo
