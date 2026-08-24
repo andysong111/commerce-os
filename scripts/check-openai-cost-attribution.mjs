@@ -7,7 +7,7 @@ const laneRules = [
   [/shoplingCategory/, "SHOPLING_CATEGORY_OPENAI_API_KEY"],
   [/productLaunchAiTitleTerms|api\/product-launch-ai-title-terms\//, "PRODUCT_TITLE_OPENAI_API_KEY"],
   [/opsAiHelp|api\/ops-ai-help\//, "OPS_AI_HELP_OPENAI_API_KEY"],
-  [/reliabilityOpenAiClient/, "RELIABILITY_OPENAI_API_KEY"],
+  [/reliabilityOpenAiClient|reliabilityAutofixOpenAi/, "RELIABILITY_OPENAI_API_KEY"],
 ];
 
 const multiLaneRules = [
@@ -64,7 +64,10 @@ for (const file of await walk("src")) {
     continue;
   }
   const envName = rule[1];
-  if (!source.includes(envName)) {
+  const inheritedReliabilityLane =
+    envName === "RELIABILITY_OPENAI_API_KEY" &&
+    source.includes("reliabilityOpenAiConfiguration");
+  if (!source.includes(envName) && !inheritedReliabilityLane) {
     failures.push(`${normalized}: expected dedicated key ${envName}`);
     continue;
   }
