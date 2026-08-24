@@ -141,6 +141,7 @@ test("GitHub Worker는 생성 코드와 쓰기 권한을 분리하고 CI·Previe
   assert.match(workflow, /Abort if main changed after analysis/);
   assert.match(workflow, /Merge only the exact code combination that passed validation/);
   assert.match(workflow, /Record merge before any long Production wait/);
+  assert.match(workflow, /main changed; regenerate against the new base/);
   assert.doesNotMatch(workflow, /secrets\.OPENAI_API_KEY/);
   assert.doesNotMatch(workflow, /secrets\.SUPABASE/);
   assert.match(oidc, /commerce-os-reliability-autofix/);
