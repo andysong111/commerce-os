@@ -162,5 +162,5 @@ test("AI 자동수정 프롬프트는 업무 핵심 쓰기와 검증 약화를 �
   assert.match(policy, /가격, 재고, 발주, 주문, 결제, 크레딧, 인증, 권한, 비밀키, DB 스키마/);
   assert.match(policy, /테스트를 삭제\/skip하지 않는다/);
   assert.match(policy, /새 외부 의존성을 추가하지 않는다/);
-  assert.match(policy, /재발 방지 테스트를 함께 추가/);
+  assert.match(policy, /실제 실행 회귀 테스트를 반드시/);
 });
