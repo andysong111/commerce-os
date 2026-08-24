@@ -15,7 +15,9 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
 ] as const;
 
 export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
-const OPTION_BARCODE_NO_PATTERN = /^\d{12}$/;
+// Production registry values are numeric-only. The optional OB prefix is accepted only
+// as a short transition guard for stale browser/test payloads; the Shopling worker strips it.
+const OPTION_BARCODE_NO_PATTERN = /^(?:OB)?\d{12}$/;
 
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
@@ -136,7 +138,7 @@ export function buildProductLaunchShoplingPayload(
         rawOptions.length === 1
           ? singleOptionBarcode
           : normalizeCode(option.barcode),
-      optionBarcodeNo: text(option.optionBarcodeNo),
+      optionBarcodeNo: text(option.optionBarcodeNo).toUpperCase(),
       baseSalePriceKrw: nonNegativeInteger(option.baseSalePriceKrw),
       unitCostKrw: nonNegativeInteger(option.unitCostKrw),
       index,
@@ -181,10 +183,11 @@ export function buildProductLaunchShoplingPayload(
       seenBarcodes.add(option.barcode);
     }
     if (option.optionBarcodeNo) {
-      if (seenOptionBarcodeNos.has(option.optionBarcodeNo)) {
-        errors.push(`옵션바코드NO ${option.optionBarcodeNo}가 중복되었습니다.`);
+      const comparableNo = option.optionBarcodeNo.replace(/^OB/, "");
+      if (seenOptionBarcodeNos.has(comparableNo)) {
+        errors.push(`옵션바코드NO ${comparableNo}가 중복되었습니다.`);
       }
-      seenOptionBarcodeNos.add(option.optionBarcodeNo);
+      seenOptionBarcodeNos.add(comparableNo);
     }
   }
   const optionNames = new Set(options.map((option) => option.optionName));
