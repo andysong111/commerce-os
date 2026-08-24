@@ -103,19 +103,10 @@ function collectContext(job) {
   return selected;
 }
 function countOccurrences(haystack, needle) { if(!needle)return 0; let count=0,index=0; while((index=haystack.indexOf(needle,index))>=0){count+=1;index+=needle.length;} return count; }
-function assertNoNewCapabilities(oldText,newText,path){
-  const before=oldText.toLowerCase(),after=newText.toLowerCase();
-  for(const token of CAPABILITY_TOKENS){
-    const beforeCount=countOccurrences(before,token);
-    const afterCount=countOccurrences(after,token);
-    if(beforeCount===0&&afterCount>0) throw new Error(`Autofix cannot introduce new capability '${token}' in ${path}`);
-    if(beforeCount>0&&afterCount>beforeCount+2) throw new Error(`Autofix cannot excessively expand capability '${token}' in ${path}`);
-  }
-}
 function isTestLike(path){ return path.startsWith("tests/") || path.includes(".test."); }
-function assertNoTestWeakening(oldText,newText,path){
+function assertNoTestWeakening(beforeText,afterText,path){
   if(!isTestLike(path)) return;
-  const before=oldText.toLowerCase(),after=newText.toLowerCase();
+  const before=beforeText.toLowerCase(),after=afterText.toLowerCase();
   for(const token of TEST_ASSERTION_TOKENS){ if(countOccurrences(after,token)<countOccurrences(before,token)) throw new Error(`Autofix cannot reduce test assertions '${token}' in ${path}`); }
   for(const token of TEST_WEAKENING_TOKENS){ if(countOccurrences(after,token)>countOccurrences(before,token)) throw new Error(`Autofix cannot weaken test execution '${token}' in ${path}`); }
 }
@@ -151,14 +142,73 @@ function preflightProposal(edits) {
   const executedTestProposed = edits.some((edit) => isExecutedTestPath(proposalPath(edit)));
   if (!executedTestProposed) throw new MissingExecutedRegressionTestError();
 }
+function planProposalFiles(edits, context) {
+  const contextPaths = new Set(context.map((item) => item.path));
+  const planned = new Map();
+  for (const edit of edits) {
+    const path = proposalPath(edit);
+    const oldText = String(edit.old_text ?? "");
+    const newText = String(edit.new_text ?? "");
+    const absolute = resolve(ROOT, path);
+    if (!absolute.startsWith(`${resolve(ROOT)}/`)) throw new Error(`Path escape: ${path}`);
+    let state = planned.get(path);
+    if (!state) {
+      const exists = existsSync(absolute);
+      if (oldText && (!contextPaths.has(path) || !exists)) {
+        throw new Error(`Edit path was not provided as trusted context: ${path}`);
+      }
+      state = {
+        path,
+        absolute,
+        original: exists ? readFileSync(absolute, "utf8") : "",
+        current: exists ? readFileSync(absolute, "utf8") : "",
+      };
+      planned.set(path, state);
+    }
+    if (!oldText) {
+      if (state.current) throw new Error(`New test file can only be created once: ${path}`);
+      state.current = newText;
+    } else {
+      if (countOccurrences(state.current, oldText) !== 1) {
+        throw new Error(`old_text must match exactly once: ${path}`);
+      }
+      state.current = state.current.replace(oldText, newText);
+    }
+  }
+  return planned;
+}
+function assertProposalCapabilityBudget(planned) {
+  const positiveExpansion = new Map(CAPABILITY_TOKENS.map((token) => [token, 0]));
+  for (const state of planned.values()) {
+    const before = state.original.toLowerCase();
+    const after = state.current.toLowerCase();
+    for (const token of CAPABILITY_TOKENS) {
+      const beforeCount = countOccurrences(before, token);
+      const afterCount = countOccurrences(after, token);
+      if (beforeCount === 0 && afterCount > 0) {
+        throw new Error(`Autofix cannot introduce new capability '${token}' in ${state.path}`);
+      }
+      positiveExpansion.set(
+        token,
+        positiveExpansion.get(token) + Math.max(0, afterCount - beforeCount),
+      );
+    }
+    assertNoTestWeakening(state.original, state.current, state.path);
+  }
+  for (const [token, expansion] of positiveExpansion) {
+    if (expansion > 2) {
+      throw new Error(`Autofix cannot excessively expand capability '${token}' across the proposal`);
+    }
+  }
+}
 function applyProposal(proposal, context) {
   const edits=proposal?.edits; if(!Array.isArray(edits)||edits.length<1||edits.length>6)throw new Error("Unsafe autofix edit count");
   preflightProposal(edits);
-  const contextPaths=new Set(context.map(item=>item.path));
-  for(const edit of edits){ const path=proposalPath(edit); const oldText=String(edit.old_text??""); const newText=String(edit.new_text??"");
-    assertNoNewCapabilities(oldText,newText,path); assertNoTestWeakening(oldText,newText,path); const absolute=resolve(ROOT,path); if(!absolute.startsWith(`${resolve(ROOT)}/`))throw new Error(`Path escape: ${path}`);
-    if(!oldText){ mkdirSync(dirname(absolute),{recursive:true}); writeFileSync(absolute,newText,"utf8"); }
-    else { if(!contextPaths.has(path)||!existsSync(absolute))throw new Error(`Edit path was not provided as trusted context: ${path}`); const current=readFileSync(absolute,"utf8"); if(countOccurrences(current,oldText)!==1)throw new Error(`old_text must match exactly once: ${path}`); writeFileSync(absolute,current.replace(oldText,newText),"utf8"); }
+  const planned = planProposalFiles(edits, context);
+  assertProposalCapabilityBudget(planned);
+  for (const state of planned.values()) {
+    mkdirSync(dirname(state.absolute), { recursive: true });
+    writeFileSync(state.absolute, state.current, "utf8");
   }
   execFileSync("git",["diff","--check"],{stdio:"inherit"}); const numstat=execFileSync("git",["diff","--numstat"],{encoding:"utf8"}).trim(); if(!numstat)throw new Error("Autofix proposal produced no diff");
   const changed=[]; let lineBudget=0; for(const line of numstat.split("\n")){ const [aRaw,dRaw,path]=line.split("\t"); if(!safePath(path))throw new Error(`Diff touched forbidden path: ${path}`); const a=Number(aRaw),d=Number(dRaw); if(!Number.isFinite(a)||!Number.isFinite(d))throw new Error(`Binary or uncountable diff is forbidden: ${path}`); lineBudget+=a+d; changed.push(path); }
