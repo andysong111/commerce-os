@@ -153,16 +153,12 @@ function planProposalFiles(edits, context) {
     if (!absolute.startsWith(`${resolve(ROOT)}/`)) throw new Error(`Path escape: ${path}`);
     let state = planned.get(path);
     if (!state) {
-      const exists = existsSync(absolute);
-      if (oldText && (!contextPaths.has(path) || !exists)) {
+      const existed = existsSync(absolute);
+      if (oldText && (!contextPaths.has(path) || !existed)) {
         throw new Error(`Edit path was not provided as trusted context: ${path}`);
       }
-      state = {
-        path,
-        absolute,
-        original: exists ? readFileSync(absolute, "utf8") : "",
-        current: exists ? readFileSync(absolute, "utf8") : "",
-      };
+      const original = existed ? readFileSync(absolute, "utf8") : "";
+      state = { path, absolute, existed, original, current: original };
       planned.set(path, state);
     }
     if (!oldText) {
@@ -188,10 +184,7 @@ function assertProposalCapabilityBudget(planned) {
       if (beforeCount === 0 && afterCount > 0) {
         throw new Error(`Autofix cannot introduce new capability '${token}' in ${state.path}`);
       }
-      positiveExpansion.set(
-        token,
-        positiveExpansion.get(token) + Math.max(0, afterCount - beforeCount),
-      );
+      positiveExpansion.set(token, positiveExpansion.get(token) + Math.max(0, afterCount - beforeCount));
     }
     assertNoTestWeakening(state.original, state.current, state.path);
   }
@@ -205,17 +198,25 @@ function applyProposal(proposal, context) {
   const edits=proposal?.edits; if(!Array.isArray(edits)||edits.length<1||edits.length>6)throw new Error("Unsafe autofix edit count");
   preflightProposal(edits);
   const planned = planProposalFiles(edits, context);
+  const changedStates = [...planned.values()].filter((state) => state.original !== state.current);
+  const sourceChangedBeforeWrite = changedStates.some((state) => state.path.startsWith("src/") && !state.path.includes(".test."));
+  if (!sourceChangedBeforeWrite) {
+    throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
+  }
+  const executedTestChangedBeforeWrite = changedStates.some((state) => isExecutedTestPath(state.path));
+  if (!executedTestChangedBeforeWrite) throw new MissingExecutedRegressionTestError();
   assertProposalCapabilityBudget(planned);
-  for (const state of planned.values()) {
+  for (const state of changedStates) {
     mkdirSync(dirname(state.absolute), { recursive: true });
     writeFileSync(state.absolute, state.current, "utf8");
+    if (!state.existed) execFileSync("git", ["add", "-N", "--", state.path]);
   }
   execFileSync("git",["diff","--check"],{stdio:"inherit"}); const numstat=execFileSync("git",["diff","--numstat"],{encoding:"utf8"}).trim(); if(!numstat)throw new Error("Autofix proposal produced no diff");
   const changed=[]; let lineBudget=0; for(const line of numstat.split("\n")){ const [aRaw,dRaw,path]=line.split("\t"); if(!safePath(path))throw new Error(`Diff touched forbidden path: ${path}`); const a=Number(aRaw),d=Number(dRaw); if(!Number.isFinite(a)||!Number.isFinite(d))throw new Error(`Binary or uncountable diff is forbidden: ${path}`); lineBudget+=a+d; changed.push(path); }
   if(changed.length>4||lineBudget>260)throw new Error(`Autofix diff exceeds safety budget: files=${changed.length}, lines=${lineBudget}`);
   const sourceChanged=changed.some(path=>path.startsWith("src/")&&!path.includes(".test.")); const executedTestChanged=changed.some(isExecutedTestPath);
-  if(!sourceChanged)throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
-  if(!executedTestChanged)throw new MissingExecutedRegressionTestError();
+  if(!sourceChanged)throw new Error("Autofix diff lost the required service source change");
+  if(!executedTestChanged)throw new Error("Autofix diff lost the required executable regression test");
   return changed;
 }
 async function claim(){ const payload=await api({action:"claim"}); if(!payload.job){output("has_job","false");return;} if(payload.job.target_repo!==REPOSITORY)throw new Error("Claimed job repository mismatch"); writeFileSync(JOB_FILE,JSON.stringify(payload.job,null,2)); output("has_job","true"); output("job_id",payload.job.job_id); output("improvement_id",payload.job.improvement_id); }
