@@ -16,7 +16,7 @@ on:
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "tests/reliabilityImprovementImpact.test.mjs"
-      - "tests/reliabilityAutofix.test.mjs"
+      - "tests/reliabilityAutofix*.test.mjs"
       - "scripts/reliability-autofix-worker.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
@@ -39,7 +39,7 @@ on:
       - "tests/reliabilityLearningCore.test.mjs"
       - "tests/reliabilityLearningAnalyzer.test.mjs"
       - "tests/reliabilityImprovementImpact.test.mjs"
-      - "tests/reliabilityAutofix.test.mjs"
+      - "tests/reliabilityAutofix*.test.mjs"
       - "scripts/reliability-autofix-worker.mjs"
       - "scripts/check-openai-cost-attribution.mjs"
       - "supabase/migrations/*reliability*.sql"
@@ -88,7 +88,7 @@ jobs:
           tests/reliabilityLearningCore.test.mjs
           tests/reliabilityLearningAnalyzer.test.mjs
           tests/reliabilityImprovementImpact.test.mjs
-          tests/reliabilityAutofix.test.mjs
+          tests/reliabilityAutofix*.test.mjs
       - name: Verify dedicated OpenAI cost lane
         run: node scripts/check-openai-cost-attribution.mjs
       - name: Run permanent reliability regressions
@@ -97,4 +97,4 @@ jobs:
           tests/reliabilityLearningCore.test.mjs
           tests/reliabilityLearningAnalyzer.test.mjs
           tests/reliabilityImprovementImpact.test.mjs
-          tests/reliabilityAutofix.test.mjs
+          tests/reliabilityAutofix*.test.mjs
