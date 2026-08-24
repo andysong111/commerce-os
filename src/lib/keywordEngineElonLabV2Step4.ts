@@ -292,15 +292,22 @@ async function classifySemanticRisks(
     };
   }
 
-  const decisions: AiRiskDecision[] = [];
-  const warnings: string[] = [];
+  const batches: Array<{ batchNumber: number; keywords: string[] }> = [];
   for (let index = 0; index < keywords.length; index += AI_RISK_BATCH_SIZE) {
-    const batchNumber = Math.floor(index / AI_RISK_BATCH_SIZE) + 1;
-    const batch = keywords.slice(index, index + AI_RISK_BATCH_SIZE);
-    const result = await classifySemanticRiskBatch(identity, batch, apiKey, batchNumber);
-    decisions.push(...result.decisions);
-    if (result.warning) warnings.push(result.warning);
+    batches.push({
+      batchNumber: Math.floor(index / AI_RISK_BATCH_SIZE) + 1,
+      keywords: keywords.slice(index, index + AI_RISK_BATCH_SIZE),
+    });
   }
+  // STEP 4 accepts at most 120 candidates, so this is bounded to two parallel
+  // OpenAI calls and avoids a ~70s serial tail inside one Vercel invocation.
+  const results = await Promise.all(
+    batches.map((batch) =>
+      classifySemanticRiskBatch(identity, batch.keywords, apiKey, batch.batchNumber),
+    ),
+  );
+  const decisions = results.flatMap((result) => result.decisions);
+  const warnings = results.map((result) => result.warning).filter(Boolean);
   return {
     decisions,
     warning: [...new Set(warnings)].join(" | "),
