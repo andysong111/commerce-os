@@ -2,6 +2,7 @@ import {
   reconcileModelOrderOptions,
   sameModelOrderOptions,
 } from "./lib/model-bcode-order-options.mjs";
+import { alignOptionTable } from "./option-barcode-column-alignment.js";
 
 const OPTIMIZED_API = "/api/product-launch-tracker/normalized-optimized";
 const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
@@ -9,13 +10,16 @@ const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
 const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
-const RECONCILE_DELAYS = [40, 160, 420, 900, 1_600];
+const RECONCILE_DELAYS = [90, 520, 1_500];
+const MAX_ERROR_RETRIES = 2;
 
 let renderSerial = 0;
 let renderTimers = [];
 let completedKey = "";
+let inFlightKey = "";
+let errorRetryCount = 0;
 
-ensureOptionBarcodeHeader();
+alignOptionTable();
 scheduleReconcile();
 
 document.addEventListener(
@@ -24,7 +28,9 @@ document.addEventListener(
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.closest("button[data-action='detail']")) return;
     completedKey = "";
-    ensureOptionBarcodeHeader();
+    inFlightKey = "";
+    errorRetryCount = 0;
+    alignOptionTable();
     scheduleReconcile();
   },
   true,
@@ -32,23 +38,10 @@ document.addEventListener(
 
 detailDialog?.addEventListener("close", () => {
   completedKey = "";
+  inFlightKey = "";
+  errorRetryCount = 0;
   clearTimers();
 });
-
-function ensureOptionBarcodeHeader() {
-  const headerRow = document.querySelector(".option-table thead tr");
-  if (!headerRow || headerRow.querySelector("[data-option-barcode-no-header]")) return;
-  const cells = [...headerRow.children];
-  const bcodeIndex = cells.findIndex((cell) => /바코드|위치코드/.test(cell.textContent || ""));
-  const header = document.createElement("th");
-  header.dataset.optionBarcodeNoHeader = "true";
-  header.textContent = "옵션바코드 NO";
-  if (bcodeIndex >= 0 && cells[bcodeIndex]?.nextSibling) {
-    headerRow.insertBefore(header, cells[bcodeIndex].nextSibling);
-  } else {
-    headerRow.append(header);
-  }
-}
 
 function scheduleReconcile() {
   clearTimers();
@@ -61,6 +54,17 @@ function scheduleReconcile() {
       }, delay),
     );
   }
+}
+
+function scheduleErrorRetry(serial) {
+  if (serial !== renderSerial || errorRetryCount >= MAX_ERROR_RETRIES) return;
+  errorRetryCount += 1;
+  renderTimers.push(
+    window.setTimeout(() => {
+      if (serial !== renderSerial) return;
+      void reconcileCurrentItem(serial);
+    }, 700 * errorRetryCount),
+  );
 }
 
 function clearTimers() {
@@ -78,7 +82,8 @@ async function reconcileCurrentItem(serial) {
     .replace(/\s+/g, "");
   if (!itemId || !/^AAA\d{3,}$/.test(modelNumber)) return;
   const key = `${itemId}:${modelNumber}`;
-  if (completedKey === key) return;
+  if (completedKey === key || inFlightKey) return;
+  inFlightKey = key;
 
   try {
     const [itemBody, authorityBody] = await Promise.all([
@@ -88,6 +93,8 @@ async function reconcileCurrentItem(serial) {
       ),
     ]);
     if (serial !== renderSerial || !detailDialog?.open) return;
+    if (String(detailForm.elements?.id?.value ?? "").trim() !== itemId) return;
+
     const item = itemBody?.item;
     const authority = Array.isArray(authorityBody?.options)
       ? authorityBody.options
@@ -98,6 +105,7 @@ async function reconcileCurrentItem(serial) {
           `${modelNumber}의 실제 B-code 기준정보를 확인하지 못했습니다. 기존 옵션을 유지합니다.`,
         "error",
       );
+      scheduleErrorRetry(serial);
       return;
     }
 
@@ -106,9 +114,9 @@ async function reconcileCurrentItem(serial) {
     const missingOptionBarcodeNo = nextOptions.some(
       (option) => !OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
     );
-    const needsServerWrite = changed || missingOptionBarcodeNo;
     let displayOptions = nextOptions;
-    if (needsServerWrite) {
+
+    if (changed || missingOptionBarcodeNo) {
       await requestJson(OPTIMIZED_API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -125,18 +133,13 @@ async function reconcileCurrentItem(serial) {
       if (Array.isArray(refreshed?.item?.orderOptions)) {
         displayOptions = refreshed.item.orderOptions;
       }
-    } else {
-      // Preserve the established B-code authority rendering path when no server rewrite is needed.
-      renderOptionTable(nextOptions);
-      renderChinaOptionPanel(nextOptions);
     }
-    if (serial !== renderSerial || !detailDialog?.open) return;
 
-    ensureOptionBarcodeHeader();
-    if (needsServerWrite) {
-      renderOptionTable(displayOptions);
-      renderChinaOptionPanel(displayOptions);
-    }
+    if (serial !== renderSerial || !detailDialog?.open) return;
+    if (String(detailForm.elements?.id?.value ?? "").trim() !== itemId) return;
+
+    renderOptionTable(displayOptions);
+    renderChinaOptionPanel(displayOptions);
     const syncStatus = document.querySelector("#china-sync-status");
     if (syncStatus) {
       syncStatus.textContent = `${displayOptions.length}개 연결 · B-code/옵션바코드NO 검증`;
@@ -150,6 +153,7 @@ async function reconcileCurrentItem(serial) {
       assignedCount === displayOptions.length ? "saved" : "error",
     );
     completedKey = key;
+    errorRetryCount = 0;
   } catch (error) {
     setGuardStatus(
       error instanceof Error
@@ -157,14 +161,17 @@ async function reconcileCurrentItem(serial) {
         : "모델별 B-code·옵션바코드NO를 확인하지 못했습니다.",
       "error",
     );
+    scheduleErrorRetry(serial);
+  } finally {
+    if (inFlightKey === key) inFlightKey = "";
   }
 }
 
 function renderOptionTable(options) {
   if (!optionTableBody) return;
-  ensureOptionBarcodeHeader();
   if (!options.length) {
     optionTableBody.innerHTML = `<tr><td colspan="7" class="option-empty">발주·입고 데이터가 아직 연결되지 않았습니다.</td></tr>`;
+    alignOptionTable();
     return;
   }
   optionTableBody.innerHTML = options
@@ -181,6 +188,7 @@ function renderOptionTable(options) {
         </tr>`,
     )
     .join("");
+  alignOptionTable();
 }
 
 function ensureChinaOptionPanel() {
