@@ -11,8 +11,8 @@ import {
 } from "@/lib/reliability/reliabilityAutofixPolicy";
 import { reliabilityOpenAiConfiguration } from "@/lib/reliability/reliabilityOpenAiClient";
 
-const AUTOFIX_TIMEOUT_MS = 75_000;
-const AUTOFIX_OUTPUT_TOKENS = 9_000;
+const AUTOFIX_TIMEOUT_MS = 95_000;
+const AUTOFIX_OUTPUT_TOKENS = 6_500;
 
 type ResponsesPayload = {
   output_text?: unknown;
