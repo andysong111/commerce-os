@@ -92,7 +92,15 @@ function collectContext(job) {
   return selected;
 }
 function countOccurrences(haystack, needle) { if(!needle)return 0; let count=0,index=0; while((index=haystack.indexOf(needle,index))>=0){count+=1;index+=needle.length;} return count; }
-function assertNoNewCapabilities(oldText,newText,path){ const before=oldText.toLowerCase(),after=newText.toLowerCase(); for(const token of CAPABILITY_TOKENS){ if(countOccurrences(after,token)>countOccurrences(before,token)) throw new Error(`Autofix cannot introduce new capability '${token}' in ${path}`); } }
+function assertNoNewCapabilities(oldText,newText,path){
+  const before=oldText.toLowerCase(),after=newText.toLowerCase();
+  for(const token of CAPABILITY_TOKENS){
+    const beforeCount=countOccurrences(before,token);
+    const afterCount=countOccurrences(after,token);
+    if(beforeCount===0&&afterCount>0) throw new Error(`Autofix cannot introduce new capability '${token}' in ${path}`);
+    if(beforeCount>0&&afterCount>beforeCount+2) throw new Error(`Autofix cannot excessively expand capability '${token}' in ${path}`);
+  }
+}
 function isTestLike(path){ return path.startsWith("tests/") || path.includes(".test."); }
 function assertNoTestWeakening(oldText,newText,path){
   if(!isTestLike(path)) return;
