@@ -2,6 +2,7 @@ const OPTIMIZED_API_PATH = "/api/product-launch-tracker/optimized";
 const SUCCESS_MESSAGE = "저장이 완료되었습니다.";
 const CONCURRENT_UPDATE_CODE = "PRODUCT_LAUNCH_TRACKER_CONCURRENT_UPDATE";
 const RETRY_DELAYS_MS = [180, 420];
+const SAVE_ARM_WINDOW_MS = 2_000;
 const EDITABLE_ITEM_KEYS = [
   "workBatch",
   "warehouseLocation",
@@ -16,6 +17,8 @@ const EDITABLE_ITEM_KEYS = [
   "detailPageAsset",
   "stages",
 ];
+
+let detailSaveArmedUntil = 0;
 
 installManualDetailSaveStability();
 
@@ -37,6 +40,8 @@ function prepareDetailStageBeforeSubmit() {
     (event) => {
       const submitter = event.submitter;
       if (!(submitter instanceof HTMLButtonElement) || submitter.value !== "save") return;
+
+      detailSaveArmedUntil = performance.now() + SAVE_ARM_WINDOW_MS;
       if (!hasCompleteManualDetailAsset(readFormAsset(form))) return;
 
       const stageStatus = form.querySelector('[name="stage.detailPage.status"]');
@@ -57,9 +62,15 @@ function installOptimizedMutationGuard() {
     }
 
     const originalPayload = parseJsonBody(init?.body);
-    if (originalPayload?.operation !== "replace_item" || !isRecord(originalPayload.item)) {
+    const armed = performance.now() <= detailSaveArmedUntil;
+    if (
+      !armed ||
+      originalPayload?.operation !== "replace_item" ||
+      !isRecord(originalPayload.item)
+    ) {
       return nativeFetch(input, init);
     }
+    detailSaveArmedUntil = 0;
 
     const stabilizedPayload = buildPartialMutation(originalPayload);
     const stabilizedInit = {
