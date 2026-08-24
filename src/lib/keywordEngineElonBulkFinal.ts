@@ -6,6 +6,7 @@ import {
   type KeywordElonDiscovery,
   type KeywordElonIdentity,
   type KeywordElonSourceDraft,
+  type KeywordElonTitleResult,
 } from "@/lib/keywordEngineElonLabV2";
 import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import {
@@ -74,6 +75,17 @@ export type KeywordElonBulkFinalResult = {
     }>;
   };
   warnings: string[];
+};
+
+export type KeywordElonBulkComposeInput = KeywordElonBulkFinalInput & {
+  source: KeywordElonSourceDraft;
+  collectionMode: "1688_server" | "tracker_fallback";
+  identity: KeywordElonIdentity;
+  candidates: KeywordElonCandidate[];
+  allowedKeys: string[];
+  blockedKeys: string[];
+  finalMaterialCount: number;
+  titleResult: KeywordElonTitleResult;
 };
 
 function text(value: unknown) {
@@ -146,13 +158,84 @@ async function collectSource(input: KeywordElonBulkFinalInput) {
   return { source: trackerFallbackSource(input), mode: "tracker_fallback" as const };
 }
 
+export async function collectKeywordElonBulkSource(input: KeywordElonBulkFinalInput) {
+  if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
+  if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
+  return collectSource(input);
+}
+
+export function composeKeywordElonBulkFinal(
+  input: KeywordElonBulkComposeInput,
+): KeywordElonBulkFinalResult {
+  if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
+  if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
+  if (!input.candidates.length) throw new Error("FINAL RESULT를 만들 후보 키워드가 없습니다.");
+  if (!input.allowedKeys.length) throw new Error("금지키워드 제거 후 사용할 SEO 재료가 없습니다.");
+
+  const output = buildKeywordElonSeoModelPackage(
+    {
+      identity: input.identity,
+      candidates: input.candidates,
+      allowedKeys: unique(input.allowedKeys),
+      blockedKeys: unique(input.blockedKeys),
+      customBlockedTerms: unique(input.customBlockedTerms ?? []),
+      titleResult: input.titleResult,
+    },
+    PRODUCT_GROUP_MARKET_REGISTRY,
+  );
+
+  if (output.commonSearchKeywords.length !== 10) {
+    throw new Error(
+      `FINAL 검색어가 10개가 아닙니다. 현재 ${output.commonSearchKeywords.length}개`,
+    );
+  }
+  if (output.mallTitles.length !== 29) {
+    throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${output.mallTitles.length}개`);
+  }
+
+  const groupProductNames: Record<string, string> = {};
+  for (const [key, label] of SHOPLING_GROUPS) {
+    const title = output.mallTitles.find((row) => row.productGroup === label)?.title;
+    if (!title) throw new Error(`${label} 기준 상품명을 만들지 못했습니다.`);
+    groupProductNames[key] = title;
+  }
+
+  const generatedAt = new Date().toISOString();
+  return {
+    launchItemId: input.launchItemId,
+    modelNumber: input.modelNumber,
+    productName: input.productName,
+    sourceUrl: input.sourceUrl,
+    collectionMode: input.collectionMode,
+    sourceWarnings: input.source.warnings ?? [],
+    identity: input.identity,
+    candidateCount: input.candidates.length,
+    finalMaterialCount: Math.max(0, Math.floor(input.finalMaterialCount || input.allowedKeys.length)),
+    seoFinal: {
+      productName: output.modelName,
+      groupProductNames,
+      searchKeywords: [...output.commonSearchKeywords],
+      searchLine: output.commonSearchKeywords.join(","),
+      source: "seo-bulk-cloud",
+      sourceUrl: input.sourceUrl,
+      offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
+      generatedAt,
+      mallTitles: output.mallTitles.map((row) => ({
+        productGroup: row.productGroup,
+        marketName: row.marketName,
+        mallKey: row.mallKey,
+        accountIdLabel: row.accountIdLabel,
+        title: row.title,
+      })),
+    },
+    warnings: [...output.warnings, ...(input.source.warnings ?? [])],
+  };
+}
+
 export async function generateKeywordElonBulkFinal(
   input: KeywordElonBulkFinalInput,
 ): Promise<KeywordElonBulkFinalResult> {
-  if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
-  if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
-
-  const collected = await collectSource(input);
+  const collected = await collectKeywordElonBulkSource(input);
   const source = collected.source;
   const identity = await analyzeKeywordElonIdentity(source);
 
@@ -218,62 +301,16 @@ export async function generateKeywordElonBulkFinal(
     .filter((row) => row.blocked === true)
     .map((row) => row.searchKey)
     .filter(Boolean);
-  const output = buildKeywordElonSeoModelPackage(
-    {
-      identity,
-      candidates,
-      allowedKeys: filtered.allowedKeys,
-      blockedKeys,
-      customBlockedTerms: unique(input.customBlockedTerms ?? []),
-      titleResult,
-    },
-    PRODUCT_GROUP_MARKET_REGISTRY,
-  );
 
-  if (output.commonSearchKeywords.length !== 10) {
-    throw new Error(
-      `FINAL 검색어가 10개가 아닙니다. 현재 ${output.commonSearchKeywords.length}개`,
-    );
-  }
-  if (output.mallTitles.length !== 29) {
-    throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${output.mallTitles.length}개`);
-  }
-
-  const groupProductNames: Record<string, string> = {};
-  for (const [key, label] of SHOPLING_GROUPS) {
-    const title = output.mallTitles.find((row) => row.productGroup === label)?.title;
-    if (!title) throw new Error(`${label} 기준 상품명을 만들지 못했습니다.`);
-    groupProductNames[key] = title;
-  }
-
-  const generatedAt = new Date().toISOString();
-  return {
-    launchItemId: input.launchItemId,
-    modelNumber: input.modelNumber,
-    productName: input.productName,
-    sourceUrl: input.sourceUrl,
+  return composeKeywordElonBulkFinal({
+    ...input,
+    source,
     collectionMode: collected.mode,
-    sourceWarnings: source.warnings ?? [],
     identity,
-    candidateCount: candidates.length,
+    candidates,
+    allowedKeys: filtered.allowedKeys,
+    blockedKeys,
     finalMaterialCount: filtered.allowedCount,
-    seoFinal: {
-      productName: output.modelName,
-      groupProductNames,
-      searchKeywords: [...output.commonSearchKeywords],
-      searchLine: output.commonSearchKeywords.join(","),
-      source: "seo-bulk-cloud",
-      sourceUrl: input.sourceUrl,
-      offerId: source.offerId || parse1688OfferId(input.sourceUrl),
-      generatedAt,
-      mallTitles: output.mallTitles.map((row) => ({
-        productGroup: row.productGroup,
-        marketName: row.marketName,
-        mallKey: row.mallKey,
-        accountIdLabel: row.accountIdLabel,
-        title: row.title,
-      })),
-    },
-    warnings: [...output.warnings, ...(source.warnings ?? [])],
-  };
+    titleResult,
+  });
 }

@@ -3,6 +3,25 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+  compactKeywordElonKey,
+  uniqueKeywordElonCanonical,
+  type KeywordElonCandidate,
+  type KeywordElonDiscovery,
+  type KeywordElonIdentity,
+  type KeywordElonSourceDraft,
+  type KeywordElonTitleResult,
+} from "@/lib/keywordEngineElonLabV2";
+import {
+  mergeKeywordElonCandidates,
+  mergeKeywordElonDiscovery,
+} from "@/lib/keywordEngineElonLabV2Merge";
+import {
+  normalizeKeywordElonSelectionThresholds,
+  selectKeywordElonStep4Union,
+} from "@/lib/keywordEngineElonLabV2Selection";
+
 const BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const CUSTOM_BLOCKED_STORAGE_KEY =
   "keywordEngineElonLab.step4.customBlockedTerms.v1";
@@ -78,6 +97,22 @@ type BatchRow = HandoffItem & {
   shoplingError: string;
   jobId: string;
 };
+type Step4FilterResult = {
+  allowedCount: number;
+  removedCount: number;
+  allowedKeys: string[];
+  removedKeys: string[];
+  decisions: unknown[];
+  warnings?: string[];
+};
+
+type ExpansionResponse = UnknownRecord & {
+  ok?: boolean;
+  discovery?: KeywordElonDiscovery;
+  seedKeywords?: string[];
+  round?: number;
+  newCandidateCount?: number;
+};
 
 function record(value: unknown): UnknownRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -86,11 +121,52 @@ function record(value: unknown): UnknownRecord {
 }
 
 function text(value: unknown) {
-  return String(value ?? "").trim();
+  return typeof value === "string" ? value.trim() : String(value ?? "").trim();
 }
 
 function stringList(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
+}
+
+function readableError(value: unknown, depth = 0): string {
+  if (depth > 3 || value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => readableError(entry, depth + 1))
+      .filter(Boolean)
+      .join(" · ")
+      .slice(0, 700);
+  }
+  if (typeof value === "object") {
+    const row = value as UnknownRecord;
+    for (const key of ["message", "error", "details", "reason", "code", "digest"]) {
+      const message = readableError(row[key], depth + 1);
+      if (message) {
+        const code = key !== "code" ? readableError(row.code, depth + 1) : "";
+        return code && !message.includes(code) ? `${code}: ${message}` : message;
+      }
+    }
+    try {
+      return JSON.stringify(value).slice(0, 700);
+    } catch {
+      return "서버가 해석할 수 없는 오류 객체를 반환했습니다.";
+    }
+  }
+  return "";
+}
+
+function requireObject<T>(value: unknown, label: string): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} 응답 형식이 올바르지 않습니다.`);
+  }
+  return value as T;
+}
+
+function requireCandidates(value: unknown, label: string) {
+  if (!Array.isArray(value)) throw new Error(`${label} 후보 응답이 없습니다.`);
+  return value as KeywordElonCandidate[];
 }
 
 function wait(milliseconds: number) {
@@ -108,11 +184,31 @@ async function requestJson<T extends UnknownRecord>(url: string, init?: RequestI
     credentials: "same-origin",
     cache: "no-store",
   });
-  const body = (await response.json().catch(() => ({}))) as T;
+  const raw = await response.text();
+  let parsed: unknown = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    if (!response.ok) {
+      throw new Error(
+        `HTTP ${response.status} · ${raw.replace(/\s+/g, " ").trim().slice(0, 500) || "비정상 응답"}`,
+      );
+    }
+    throw new Error(`서버가 JSON이 아닌 응답을 반환했습니다. HTTP ${response.status}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`서버 응답 형식이 올바르지 않습니다. HTTP ${response.status}`);
+  }
+  const body = parsed as T;
   if (!response.ok || body.ok !== true) {
-    throw new Error(
-      text(body.message) || text(body.error) || `요청 실패 · HTTP ${response.status}`,
-    );
+    const stage = text(body.errorStage);
+    const detail =
+      readableError(body.message) ||
+      readableError(body.error) ||
+      readableError(body.details) ||
+      raw.replace(/\s+/g, " ").trim().slice(0, 500) ||
+      `요청 실패 · HTTP ${response.status}`;
+    throw new Error(stage && !detail.startsWith("[") ? `[${stage}] ${detail}` : detail);
   }
   return body;
 }
@@ -211,6 +307,31 @@ function optionTextFromItem(item: UnknownRecord | null) {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function seedRows(candidates: KeywordElonCandidate[]) {
+  return uniqueKeywordElonCanonical(
+    candidates
+      .filter(
+        (row) =>
+          row.safetyPass && row.qualityScore >= KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+      )
+      .sort(
+        (a, b) =>
+          b.qualityScore - a.qualityScore ||
+          (b.totalSearch ?? -1) - (a.totalSearch ?? -1),
+      )
+      .map((row) => row.searchKeyword || row.searchKey || row.keyword),
+    8,
+  );
+}
+
+function blockedKeysFromFilter(result: Step4FilterResult) {
+  return (Array.isArray(result.decisions) ? result.decisions : [])
+    .map(record)
+    .filter((row) => row.blocked === true)
+    .map((row) => text(row.searchKey) || text(row.keyword))
+    .filter(Boolean);
 }
 
 function statusClass(status: GenerationStatus | ShoplingStatus) {
@@ -352,48 +473,257 @@ export default function SeoBulkCloudClient() {
       setGenerating(true);
       setGlobalError("");
       setGlobalMessage(
-        `${targets.length}개 상품 FINAL RESULT를 최대 ${GENERATION_CONCURRENCY}개씩 병렬 생성합니다.`,
+        `${targets.length}개 상품을 최대 ${GENERATION_CONCURRENCY}개씩 병렬 처리합니다. 각 상품 내부 STEP은 기존 엔진처럼 분할 실행합니다.`,
       );
       const customBlockedTerms = readCustomBlockedTerms();
       await mapLimit(targets, GENERATION_CONCURRENCY, async (row) => {
         updateRow(row.id, {
           generationStatus: "running",
-          generationMessage: "STEP 1~4 + 상품명/검색어 생성 중…",
+          generationMessage: "원본 준비 중…",
           generationError: "",
         });
         try {
           const item = row.item ?? (await reloadItem(row.id));
-          const resultBody = await requestJson<{
+          const itemInput = {
+            launchItemId: row.id,
+            modelNumber: row.modelNumber,
+            productName: row.productName,
+            sourceUrl: row.sourceUrl,
+            optionText: optionTextFromItem(item),
+            supportingText: [
+              text(item.shoplingCategory),
+              text(item.productName),
+              text(item.modelNumber),
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          };
+
+          updateRow(row.id, { generationMessage: "원본 준비 · 1688 수집/상품정보 fallback 확인 중…" });
+          const collected = await requestJson<{
             ok?: boolean;
-            result?: unknown;
-            message?: unknown;
+            source?: unknown;
+            collectionMode?: unknown;
             error?: unknown;
           }>(KEYWORD_API, {
             method: "POST",
             body: JSON.stringify({
-              action: "generate_bulk_final",
-              item: {
-                launchItemId: row.id,
-                modelNumber: row.modelNumber,
-                productName: row.productName,
-                sourceUrl: row.sourceUrl,
-                optionText: optionTextFromItem(item),
-                supportingText: [
-                  text(item.shoplingCategory),
-                  text(item.productName),
-                  text(item.modelNumber),
-                ]
-                  .filter(Boolean)
-                  .join(" · "),
-              },
+              action: "collect_bulk_source",
+              item: itemInput,
               customBlockedTerms,
             }),
           });
-          const result = record(resultBody.result);
-          const seoFinal = normalizeSeoFinal(result.seoFinal);
-          if (!seoFinal || seoFinal.searchKeywords.length !== 10) {
-            throw new Error("FINAL RESULT 저장 전 검색어 10개 검증에 실패했습니다.");
+          const source = requireObject<KeywordElonSourceDraft>(collected.source, "원본 수집");
+          const collectionMode =
+            text(collected.collectionMode) === "1688_server"
+              ? "1688_server"
+              : "tracker_fallback";
+          updateRow(row.id, {
+            collectionMode,
+            generationMessage: "STEP 1 · 상품 정체성 분석 중…",
+          });
+
+          const identityBody = await requestJson<{
+            ok?: boolean;
+            identity?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({ action: "analyze_identity", source }),
+          });
+          const identity = requireObject<KeywordElonIdentity>(
+            identityBody.identity,
+            "STEP 1 정체성",
+          );
+
+          updateRow(row.id, { generationMessage: "STEP 2 · 시장어 후보 발굴 중…" });
+          const discoveryBody = await requestJson<{
+            ok?: boolean;
+            discovery?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "discover_keywords",
+              source,
+              identity,
+            }),
+          });
+          let discovery = requireObject<KeywordElonDiscovery>(
+            discoveryBody.discovery,
+            "STEP 2 시장어 발굴",
+          );
+
+          updateRow(row.id, {
+            generationMessage: `STEP 2 · 후보 ${discovery.candidates.length}개 점수화 중…`,
+          });
+          const firstScoredBody = await requestJson<{
+            ok?: boolean;
+            candidates?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "score_keywords",
+              source,
+              identity,
+              discovery,
+            }),
+          });
+          let candidates = requireCandidates(
+            firstScoredBody.candidates,
+            "STEP 2 점수화",
+          );
+          updateRow(row.id, { candidateCount: candidates.length });
+
+          for (let round = 1; round <= 3; round += 1) {
+            const seeds = seedRows(candidates);
+            if (!seeds.length) break;
+            updateRow(row.id, {
+              generationMessage: `STEP 3 · round ${round}/3 확장 중…`,
+            });
+            const expanded = await requestJson<ExpansionResponse>(KEYWORD_API, {
+              method: "POST",
+              body: JSON.stringify({
+                action: "expand_from_passing",
+                identity,
+                seedKeywords: seeds,
+                existingDiscovery: discovery,
+                existingCandidates: candidates,
+                round,
+              }),
+            });
+            const expandedDiscovery = requireObject<KeywordElonDiscovery>(
+              expanded.discovery,
+              `STEP 3 round ${round} 확장`,
+            );
+            if (!Number(expanded.newCandidateCount) || !expandedDiscovery.candidates.length) {
+              continue;
+            }
+            updateRow(row.id, {
+              generationMessage: `STEP 3 · round ${round}/3 신규 후보 ${expandedDiscovery.candidates.length}개 점수화 중…`,
+            });
+            const roundScoredBody = await requestJson<{
+              ok?: boolean;
+              candidates?: unknown;
+              error?: unknown;
+            }>(KEYWORD_API, {
+              method: "POST",
+              body: JSON.stringify({
+                action: "score_keywords",
+                source,
+                identity,
+                discovery: expandedDiscovery,
+              }),
+            });
+            const roundCandidates = requireCandidates(
+              roundScoredBody.candidates,
+              `STEP 3 round ${round} 점수화`,
+            );
+            candidates = mergeKeywordElonCandidates(candidates, roundCandidates);
+            discovery = mergeKeywordElonDiscovery(discovery, expandedDiscovery);
+            updateRow(row.id, { candidateCount: candidates.length });
           }
+
+          const thresholds = normalizeKeywordElonSelectionThresholds();
+          const finalCandidates = selectKeywordElonStep4Union(candidates, thresholds);
+          if (!finalCandidates.length) {
+            throw new Error("STEP 4에 전달할 월검색량/정확성 통과 후보가 없습니다.");
+          }
+
+          updateRow(row.id, {
+            generationMessage: `STEP 4 · 금지키워드 검사 중 (${finalCandidates.length}개)…`,
+          });
+          const filterBody = await requestJson<{
+            ok?: boolean;
+            result?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "filter_prohibited_keywords",
+              identity,
+              candidates: finalCandidates,
+              customBlockedTerms,
+            }),
+          });
+          const filterResult = requireObject<Step4FilterResult>(
+            filterBody.result,
+            "STEP 4 금지키워드",
+          );
+          const allowedKeys = stringList(filterResult.allowedKeys);
+          const allowedSet = new Set(allowedKeys);
+          const allowedCandidates = finalCandidates.filter((candidate) =>
+            allowedSet.has(
+              compactKeywordElonKey(
+                candidate.searchKeyword || candidate.searchKey || candidate.keyword,
+              ),
+            ),
+          );
+          if (!allowedCandidates.length) {
+            throw new Error("금지키워드 제거 후 사용할 SEO 재료가 없습니다.");
+          }
+          const finalMaterialCount =
+            Math.max(0, Math.floor(Number(filterResult.allowedCount) || 0)) ||
+            allowedCandidates.length;
+          updateRow(row.id, {
+            finalMaterialCount,
+            generationMessage: "FINAL · 상품명 생성 중…",
+          });
+
+          const titleBody = await requestJson<{
+            ok?: boolean;
+            titleResult?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "generate_title",
+              source,
+              identity,
+              candidates: allowedCandidates,
+              cutoff: 0,
+            }),
+          });
+          const titleResult = requireObject<KeywordElonTitleResult>(
+            titleBody.titleResult,
+            "FINAL 상품명",
+          );
+
+          updateRow(row.id, { generationMessage: "FINAL · 검색어 10개/쇼핑몰 29개 조립 중…" });
+          const composedBody = await requestJson<{
+            ok?: boolean;
+            result?: unknown;
+            error?: unknown;
+          }>(KEYWORD_API, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "compose_bulk_final",
+              item: itemInput,
+              source,
+              collectionMode,
+              identity,
+              candidates,
+              allowedKeys,
+              blockedKeys: blockedKeysFromFilter(filterResult),
+              finalMaterialCount,
+              titleResult,
+              customBlockedTerms,
+            }),
+          });
+          const result = record(composedBody.result);
+          const seoFinal = normalizeSeoFinal(result.seoFinal);
+          if (
+            !seoFinal ||
+            seoFinal.searchKeywords.length !== 10 ||
+            seoFinal.mallTitles.length !== 29
+          ) {
+            throw new Error(
+              `FINAL RESULT 검증 실패 · 검색어 ${seoFinal?.searchKeywords.length ?? 0}/10 · 쇼핑몰명 ${seoFinal?.mallTitles.length ?? 0}/29`,
+            );
+          }
+
+          updateRow(row.id, { generationMessage: "FINAL · 상품출시 원장에 저장 중…" });
           await requestJson<{ ok?: boolean; message?: unknown }>(NORMALIZED_API, {
             method: "PATCH",
             body: JSON.stringify({
@@ -409,10 +739,14 @@ export default function SeoBulkCloudClient() {
             generationStatus: "ready",
             generationMessage: "FINAL RESULT 저장 완료",
             generationError: "",
-            collectionMode: text(result.collectionMode),
-            candidateCount: Number(result.candidateCount) || 0,
-            finalMaterialCount: Number(result.finalMaterialCount) || 0,
-            warnings: stringList(result.warnings),
+            collectionMode: text(result.collectionMode) || collectionMode,
+            candidateCount: Number(result.candidateCount) || candidates.length,
+            finalMaterialCount:
+              Number(result.finalMaterialCount) || finalMaterialCount,
+            warnings: [
+              ...stringList(result.warnings),
+              ...stringList(filterResult.warnings),
+            ],
             seoFinal,
           });
         } catch (error) {
@@ -420,7 +754,7 @@ export default function SeoBulkCloudClient() {
             generationStatus: "error",
             generationMessage: "",
             generationError:
-              error instanceof Error ? error.message : "FINAL RESULT 생성 실패",
+              error instanceof Error ? error.message : readableError(error) || "FINAL RESULT 생성 실패",
           });
         }
       });
@@ -482,7 +816,7 @@ export default function SeoBulkCloudClient() {
           return;
         }
         if (status === "failed" || status === "partial_failure") {
-          throw new Error(text(job.error_message) || `Shopling 등록 ${status}`);
+          throw new Error(readableError(job.error_message) || `Shopling 등록 ${status}`);
         }
       }
       throw new Error("Shopling 등록 결과 대기 시간이 초과되었습니다.");
@@ -523,7 +857,8 @@ export default function SeoBulkCloudClient() {
           });
           await pollShoplingJob(row, jobId);
         } catch (error) {
-          const detail = error instanceof Error ? error.message : "Shopling 등록 실패";
+          const detail =
+            error instanceof Error ? error.message : readableError(error) || "Shopling 등록 실패";
           const already = /이미 등록|goods_key|중복 등록/.test(detail);
           updateRow(row.id, {
             shoplingStatus: already ? "already_registered" : "failed",
@@ -540,6 +875,10 @@ export default function SeoBulkCloudClient() {
 
   const readyRows = useMemo(
     () => rows.filter((row) => row.generationStatus === "ready" && row.seoFinal),
+    [rows],
+  );
+  const retryRows = useMemo(
+    () => rows.filter((row) => row.generationStatus !== "ready" && row.item && row.sourceUrl),
     [rows],
   );
   const registerableRows = useMemo(
@@ -567,9 +906,9 @@ export default function SeoBulkCloudClient() {
             </p>
             <h1 className="mt-2 text-3xl font-black">SEO 대량등록 클라우드</h1>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              상품출시 진행관리에서 여러 상품을 선택하면 동시에 FINAL RESULT를 생성하고,
-              확정된 상품들을 한 번에 Shopling에 등록합니다. 기본 화면에는 최종 검색어와
-              실행상태만 남기고 세부 근거는 접어두었습니다.
+              상품출시 진행관리에서 여러 상품을 선택하면 상품끼리는 병렬로 처리하고,
+              각 상품 내부 STEP은 기존 검증된 엔진처럼 분할 실행합니다. 기본 화면에는 최종
+              검색어와 실행상태만 남기고 세부 근거는 접어두었습니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -579,14 +918,6 @@ export default function SeoBulkCloudClient() {
             >
               상품출시 진행관리
             </Link>
-            <button
-              type="button"
-              disabled={generating || loading || !rows.length}
-              onClick={() => void generateRows(rows.filter((row) => row.item && row.sourceUrl))}
-              className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-40"
-            >
-              {generating ? "FINAL RESULT 생성 중…" : `FINAL RESULT 일괄 생성 (${rows.length})`}
-            </button>
             <button
               type="button"
               disabled={registering || generating || !registerableRows.length}
@@ -611,7 +942,7 @@ export default function SeoBulkCloudClient() {
             Shopling 완료 {completedRegistrations}/{rows.length}
           </span>
           <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-900">
-            SEO 병렬 {GENERATION_CONCURRENCY} · 등록 병렬 {REGISTRATION_CONCURRENCY}
+            SEO 상품 병렬 {GENERATION_CONCURRENCY} · 등록 병렬 {REGISTRATION_CONCURRENCY}
           </span>
         </div>
         {globalMessage ? (
@@ -652,7 +983,7 @@ export default function SeoBulkCloudClient() {
                   <p className="mt-2 text-xs font-semibold text-slate-500">{row.generationMessage}</p>
                 ) : null}
                 {row.generationError ? (
-                  <p className="mt-2 text-sm font-bold text-rose-700">{row.generationError}</p>
+                  <p className="mt-2 break-words text-sm font-bold text-rose-700">{row.generationError}</p>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2 text-[11px] font-black">
@@ -697,7 +1028,7 @@ export default function SeoBulkCloudClient() {
               <div className="mt-3 text-xs font-bold text-emerald-700">{row.shoplingMessage}</div>
             ) : null}
             {row.shoplingError ? (
-              <div className="mt-3 text-xs font-bold text-rose-700">{row.shoplingError}</div>
+              <div className="mt-3 break-words text-xs font-bold text-rose-700">{row.shoplingError}</div>
             ) : null}
 
             <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50">
@@ -731,6 +1062,11 @@ export default function SeoBulkCloudClient() {
                 ) : (
                   <div className="text-slate-500">FINAL RESULT가 아직 없습니다.</div>
                 )}
+                {row.warnings.length ? (
+                  <div className="mt-4 rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+                    {row.warnings.join(" · ")}
+                  </div>
+                ) : null}
                 <div className="mt-4 break-all text-xs text-slate-400">{row.sourceUrl}</div>
               </div>
             </details>
@@ -744,9 +1080,17 @@ export default function SeoBulkCloudClient() {
         </summary>
         <div className="border-t border-slate-200 p-5">
           <p className="text-sm leading-6 text-slate-600">
-            평소에는 위 FINAL RESULT와 일괄등록만 사용하면 됩니다. 상품 정체성·시장어·점수표·금지키워드·원장 재고를 직접 검토해야 할 때만 기존 세부 엔진을 엽니다.
+            평소에는 위 FINAL RESULT와 일괄등록만 사용하면 됩니다. 상품 정체성·시장어·점수표·금지키워드·원장 재고를 직접 검토하거나 실패 상품을 다시 실행해야 할 때만 이 영역을 엽니다.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={generating || !retryRows.length}
+              onClick={() => void generateRows(retryRows)}
+              className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-40"
+            >
+              {generating ? "FINAL RESULT 재실행 중…" : `미완료 FINAL RESULT 재실행 (${retryRows.length})`}
+            </button>
             <Link href="/keyword-engine-elon-lab" className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black">
               기존 STEP 1~5 세부 엔진
             </Link>

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { generateKeywordElonBulkFinal } from "@/lib/keywordEngineElonBulkFinal";
+import {
+  collectKeywordElonBulkSource,
+  composeKeywordElonBulkFinal,
+  generateKeywordElonBulkFinal,
+} from "@/lib/keywordEngineElonBulkFinal";
 import type {
   KeywordElonCandidate,
   KeywordElonDiscovery,
   KeywordElonIdentity,
   KeywordElonSourceDraft,
+  KeywordElonTitleResult,
 } from "@/lib/keywordEngineElonLabV2";
 import { keywordElonApiHubConfigured } from "@/lib/keywordEngineElonLabV2ApiHub";
 import { enrichKeywordElonDemand } from "@/lib/keywordEngineElonLabV2DemandEnrichment";
@@ -76,6 +81,29 @@ function candidatesFrom(value: unknown): KeywordElonCandidate[] {
   if (!Array.isArray(value)) throw new Error("candidates 입력이 없습니다.");
   return value.filter(isRecord) as unknown as KeywordElonCandidate[];
 }
+function titleResultFrom(value: unknown): KeywordElonTitleResult {
+  if (!isRecord(value)) throw new Error("titleResult 입력이 없습니다.");
+  const title = text(value.title);
+  if (!title) throw new Error("titleResult.title이 없습니다.");
+  return {
+    title,
+    usedKeywords: textArray(value.usedKeywords, 30),
+    byteLength: Math.max(0, Math.floor(Number(value.byteLength) || 0)),
+    model: text(value.model),
+    warning: text(value.warning),
+  };
+}
+function bulkItemFrom(value: unknown) {
+  const item = isRecord(value) ? value : {};
+  return {
+    launchItemId: text(item.launchItemId ?? item.id),
+    modelNumber: text(item.modelNumber),
+    productName: text(item.productName),
+    sourceUrl: text(item.sourceUrl),
+    optionText: text(item.optionText),
+    supportingText: text(item.supportingText),
+  };
+}
 function readiness() {
   return {
     openAiConfigured: Boolean(process.env.KEYWORD_ENGINE_OPENAI_API_KEY?.trim()),
@@ -91,6 +119,7 @@ function readiness() {
     step4FilterAvailable: true,
     oneClickToStep4Available: true,
     bulkParallelAvailable: true,
+    bulkSegmentedAvailable: true,
   };
 }
 
@@ -110,15 +139,40 @@ export async function POST(request: NextRequest) {
     if (!isRecord(body)) throw new Error("요청 본문이 올바르지 않습니다.");
     action = text(body.action) || "request";
 
+    if (action === "collect_bulk_source") {
+      const item = bulkItemFrom(body.item ?? body);
+      const collected = await collectKeywordElonBulkSource({
+        ...item,
+        customBlockedTerms: textArray(body.customBlockedTerms, 120),
+      });
+      return NextResponse.json({
+        ok: true,
+        action,
+        source: collected.source,
+        collectionMode: collected.mode,
+      });
+    }
+    if (action === "compose_bulk_final") {
+      const item = bulkItemFrom(body.item ?? body);
+      const mode = body.collectionMode === "1688_server" ? "1688_server" : "tracker_fallback";
+      const result = composeKeywordElonBulkFinal({
+        ...item,
+        customBlockedTerms: textArray(body.customBlockedTerms, 120),
+        source: sourceFrom(body.source),
+        collectionMode: mode,
+        identity: identityFrom(body.identity),
+        candidates: candidatesFrom(body.candidates),
+        allowedKeys: textArray(body.allowedKeys, 120),
+        blockedKeys: textArray(body.blockedKeys, 120),
+        finalMaterialCount: Math.max(0, Math.floor(Number(body.finalMaterialCount) || 0)),
+        titleResult: titleResultFrom(body.titleResult),
+      });
+      return NextResponse.json({ ok: true, action, result });
+    }
     if (action === "generate_bulk_final") {
-      const item = isRecord(body.item) ? body.item : body;
+      const item = bulkItemFrom(body.item ?? body);
       const result = await generateKeywordElonBulkFinal({
-        launchItemId: text(item.launchItemId ?? item.id),
-        modelNumber: text(item.modelNumber),
-        productName: text(item.productName),
-        sourceUrl: text(item.sourceUrl),
-        optionText: text(item.optionText),
-        supportingText: text(item.supportingText),
+        ...item,
         customBlockedTerms: textArray(body.customBlockedTerms, 120),
       });
       return NextResponse.json({ ok: true, action, result });
