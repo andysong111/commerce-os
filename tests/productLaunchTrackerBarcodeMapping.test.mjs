@@ -94,13 +94,20 @@ test("옵션이 여러 개면 각 B코드와 숫자 옵션바코드NO를 독립�
   );
 });
 
-test("옵션바코드NO는 숫자 12자리만 허용한다", () => {
+test("옵션바코드NO는 임의 영문 형식을 허용하지 않는다", () => {
   const broken = baseItem();
-  broken.orderOptions[0].optionBarcodeNo = "OB000000000101";
+  broken.orderOptions[0].optionBarcodeNo = "ABC000000101";
   assert.throws(
     () => buildProductLaunchShoplingPayload(broken, policy, "request-alpha-no"),
     /숫자 12자리/,
   );
+});
+
+test("전환기 OB prefix 입력은 임시 호환되지만 신규 원장은 숫자만 사용한다", () => {
+  const legacy = baseItem();
+  legacy.orderOptions[0].optionBarcodeNo = "OB000000000101";
+  const payload = buildProductLaunchShoplingPayload(legacy, policy, "request-legacy-prefix");
+  assert.equal(payload.channels[0].options[0].optionBarcodeNo, "OB000000000101");
 });
 
 test("옵션바코드NO가 없으면 Shopling 등록 payload를 차단한다", () => {
