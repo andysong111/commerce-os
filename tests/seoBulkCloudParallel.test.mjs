@@ -16,24 +16,43 @@ test("상품출시 진행관리 SEO handoff는 단건 제한 없이 최대 50개
   assert.doesNotMatch(handoff, /selectedIds\.length !== 1/);
 });
 
-test("SEO 대량등록 클라우드는 FINAL 생성과 Shopling 등록을 각각 병렬 3개로 실행한다", async () => {
+test("SEO 대량등록 클라우드는 상품끼리 3개 병렬, 상품 내부는 기존 STEP API로 분할 실행한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/SeoBulkCloudClient.tsx");
   assert.match(page, /GENERATION_CONCURRENCY = 3/);
   assert.match(page, /REGISTRATION_CONCURRENCY = 3/);
-  assert.match(page, /action: "generate_bulk_final"/);
+  for (const action of [
+    "collect_bulk_source",
+    "analyze_identity",
+    "discover_keywords",
+    "score_keywords",
+    "expand_from_passing",
+    "filter_prohibited_keywords",
+    "generate_title",
+    "compose_bulk_final",
+  ]) {
+    assert.match(page, new RegExp(`action: \\"${action}\\"`));
+  }
+  assert.doesNotMatch(page, /action: "generate_bulk_final"/);
+  assert.match(page, /readableError/);
   assert.match(page, /FINAL RESULT · 검색어 10개/);
   assert.match(page, /Shopling 일괄 대량등록/);
   assert.match(page, /상품명·쇼핑몰 29개·세부 실행정보 펼치기/);
   assert.match(page, /STEP 1~5 · 원장 · 진단 · 기존 세부 엔진 펼치기/);
+  assert.match(page, /미완료 FINAL RESULT 재실행/);
   assert.match(page, /operation: "patch_item"/);
   assert.match(page, /\/api\/product-launch-tracker\/shopling-upload/);
 });
 
-test("bulk final API는 기존 STEP 1~4 엔진과 10개 검색어·29개 상품명 계약을 재사용한다", async () => {
+test("bulk final API는 분할 source/compose와 기존 STEP 1~4 엔진 계약을 함께 유지한다", async () => {
   const route = await source("src/app/api/keyword-engine-elon-lab/route.ts");
   const engine = await source("src/lib/keywordEngineElonBulkFinal.ts");
+  assert.match(route, /action === "collect_bulk_source"/);
+  assert.match(route, /action === "compose_bulk_final"/);
   assert.match(route, /action === "generate_bulk_final"/);
   assert.match(route, /bulkParallelAvailable: true/);
+  assert.match(route, /bulkSegmentedAvailable: true/);
+  assert.match(engine, /collectKeywordElonBulkSource/);
+  assert.match(engine, /composeKeywordElonBulkFinal/);
   assert.match(engine, /collectKeywordElon1688Source/);
   assert.match(engine, /trackerFallbackSource/);
   assert.match(engine, /expandKeywordElonFromPassing/);
