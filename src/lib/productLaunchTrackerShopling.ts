@@ -15,7 +15,9 @@ export const PRODUCT_NOTICE_ATTRIBUTE_CODES = [
 ] as const;
 
 export const SHOPLING_PRICE_ROUND_UP_UNIT_KRW = 10;
-const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
+// Production registry values are numeric-only. The optional OB prefix is accepted only
+// as a short transition guard for stale browser/test payloads; the Shopling worker strips it.
+const OPTION_BARCODE_NO_PATTERN = /^(?:OB)?\d{12}$/;
 
 const DEFAULT_MULTIPLIERS = {
   wholesale1: 1,
@@ -172,7 +174,7 @@ export function buildProductLaunchShoplingPayload(
     if (!option.saleOption) errors.push(`${option.index + 1}번째 옵션값이 없습니다.`);
     if (!option.barcode) errors.push(`${name} B코드가 없습니다.`);
     if (!OPTION_BARCODE_NO_PATTERN.test(option.optionBarcodeNo)) {
-      errors.push(`${name} 옵션바코드NO가 없습니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
+      errors.push(`${name} 옵션바코드NO는 숫자 12자리여야 합니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
     }
     if (option.baseSalePriceKrw <= 0) errors.push(`${name} 기준 판매가가 없습니다.`);
     if (option.unitCostKrw <= 0) errors.push(`${name} 원가가 없습니다.`);
@@ -181,10 +183,11 @@ export function buildProductLaunchShoplingPayload(
       seenBarcodes.add(option.barcode);
     }
     if (option.optionBarcodeNo) {
-      if (seenOptionBarcodeNos.has(option.optionBarcodeNo)) {
-        errors.push(`옵션바코드NO ${option.optionBarcodeNo}가 중복되었습니다.`);
+      const comparableNo = option.optionBarcodeNo.replace(/^OB/, "");
+      if (seenOptionBarcodeNos.has(comparableNo)) {
+        errors.push(`옵션바코드NO ${comparableNo}가 중복되었습니다.`);
       }
-      seenOptionBarcodeNos.add(option.optionBarcodeNo);
+      seenOptionBarcodeNos.add(comparableNo);
     }
   }
   const optionNames = new Set(options.map((option) => option.optionName));

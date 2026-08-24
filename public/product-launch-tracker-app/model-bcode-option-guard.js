@@ -9,7 +9,7 @@ const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
-const OPTION_BARCODE_NO_PATTERN = /^OB\d{12}$/;
+const OPTION_BARCODE_NO_PATTERN = /^\d{12}$/;
 const RECONCILE_DELAYS = [90, 520, 1_500];
 const MAX_ERROR_RETRIES = 2;
 
@@ -181,7 +181,7 @@ function renderOptionTable(options) {
           <td><input data-field="optionName" value="${escapeAttribute(option.optionName || "옵션")}" placeholder="옵션" /></td>
           <td><input data-field="saleOption" value="${escapeAttribute(option.saleOption || "단품")}" placeholder="블랙" /></td>
           <td><input data-field="barcode" value="${escapeAttribute(option.barcode)}" placeholder="BAA1-1" /></td>
-          <td><input data-field="optionBarcodeNo" value="${escapeAttribute(option.optionBarcodeNo)}" placeholder="저장 시 자동발급" readonly title="Commerce OS 옵션바코드 원장 자동발급값" /></td>
+          <td><input data-field="optionBarcodeNo" inputmode="numeric" pattern="[0-9]*" value="${escapeAttribute(option.optionBarcodeNo)}" placeholder="숫자 12자리 자동발급" readonly title="Commerce OS 숫자 전용 옵션바코드 원장 자동발급값" /></td>
           <td><input data-field="baseSalePriceKrw" type="number" min="0" step="1" value="${Number(option.baseSalePriceKrw) || ""}" /></td>
           <td><input data-field="unitCostKrw" type="number" min="0" step="1" value="${Number(option.unitCostKrw) || ""}" /></td>
           <td><button class="option-remove" type="button" data-action="remove-option">×</button></td>

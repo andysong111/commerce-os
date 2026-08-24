@@ -159,7 +159,7 @@ export async function attachOptionBarcodeNosToChangedItems(
     const record = asRecord(row);
     const identityKey = text(record.identity_key ?? record.identityKey);
     const optionBarcodeNo = text(record.option_barcode_no ?? record.optionBarcodeNo);
-    if (identityKey && /^OB\d{12}$/.test(optionBarcodeNo)) {
+    if (identityKey && /^\d{12}$/.test(optionBarcodeNo)) {
       resolved.set(identityKey, optionBarcodeNo);
     }
   }
