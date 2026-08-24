@@ -13,6 +13,7 @@ const marketRecall = await readFile("src/lib/keywordEngineElonLabV2MarketRecall.
 const demandEnrichment = await readFile("src/lib/keywordEngineElonLabV2DemandEnrichment.ts", "utf8");
 const trend = await readFile("src/lib/keywordEngineElonLabV2Trend.ts", "utf8");
 const scoring = await readFile("src/lib/keywordEngineElonLabV2Scoring.ts", "utf8");
+const step4 = await readFile("src/lib/keywordEngineElonLabV2Step4.ts", "utf8");
 const domain = await readFile("src/lib/keywordEngineElonLabV2.ts", "utf8");
 const page = await readFile("src/app/keyword-engine-elon-lab/page.tsx", "utf8");
 const browserImport = await readFile("src/lib/keywordEngineElonLabBrowserImport.ts", "utf8");
@@ -136,11 +137,13 @@ test("demand enrichment prefers evidence terms and adds Search Trend", () => {
   assert.match(trend, /TREND_KEYWORD_LIMIT = 5/);
 });
 
-test("AI scoring remains adaptive demand-first and canonical search keys are enforced", () => {
+test("AI scoring remains adaptive demand-first and bounded for Vercel runtime", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /OPENAI_TIMEOUT_MS = 42_000/);
   assert.match(scoring, /SCORE_CHUNK_SIZE = 12/);
+  assert.match(scoring, /SCORE_CONCURRENCY = 8/);
+  assert.match(scoring, /Promise\.all\(wave\.map/);
   assert.match(scoring, /calculateKeywordElonQuality/);
   assert.match(scoring, /uniqueKeywordElonCanonical/);
   assert.match(scoring, /searchKeyword: key/);
@@ -149,6 +152,13 @@ test("AI scoring remains adaptive demand-first and canonical search keys are enf
   assert.match(domain, /demandScore\*0\.55|demandScore \* 0\.55/);
   assert.match(domain, /uniqueKeywordElonCanonical/);
   assert.match(domain, /trendScore\?: number/);
+});
+
+test("STEP4 AI risk batches are bounded and parallel instead of serial", () => {
+  assert.match(step4, /AI_RISK_BATCH_SIZE = 60/);
+  assert.match(step4, /const results = await Promise\.all/);
+  assert.match(step4, /batches\.map\(\(batch\) =>/);
+  assert.match(step4, /slice\(0, 120\)/);
 });
 
 test("V6 diagnostic UI exposes evidence mine, permissions, trend and canonical keywords", () => {
