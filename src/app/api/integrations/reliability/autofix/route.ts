@@ -193,7 +193,11 @@ export async function POST(request: Request) {
 
     if (action === "generate") {
       const job = await loadClaimedJob(jobId, identity.repository, identity.runId);
-      const proposal = await requestReliabilityAutofixProposal(job, parseFiles(body.files));
+      const proposal = await requestReliabilityAutofixProposal(
+        job,
+        parseFiles(body.files),
+        text(body.revision_feedback, 1_000),
+      );
       return Response.json(
         { ok: true, job_id: jobId, proposal },
         { headers: { "cache-control": "no-store" } },

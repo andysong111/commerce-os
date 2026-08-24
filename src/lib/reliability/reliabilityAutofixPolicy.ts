@@ -161,11 +161,12 @@ export function reliabilityAutofixSystemPrompt() {
     "가격, 재고, 발주, 주문, 결제, 크레딧, 인증, 권한, 비밀키, DB 스키마, GitHub Actions, Vercel 설정은 수정하지 않는다.",
     "동작을 우회하거나 검증을 약화하거나 테스트를 삭제/skip하지 않는다.",
     "새 외부 의존성을 추가하지 않는다. package 파일을 수정하지 않는다.",
-    "가능하면 기존 테스트 파일에 재발 방지 테스트를 함께 추가한다.",
+    "소스 코드를 수정한다면 그 재발을 막는 실제 실행 회귀 테스트를 반드시 같은 제안에 포함한다.",
+    "가능하면 기존 테스트 파일을 보강하고, 새 테스트가 꼭 필요할 때만 허용된 테스트 파일을 만든다.",
     "각 edit의 old_text는 제공된 파일에 정확히 한 번 존재하는 연속 문자열이어야 한다.",
-    "새 파일 생성이 꼭 필요하면 tests/ 아래 테스트 파일에만 old_text를 빈 문자열로 제안할 수 있다.",
+    "새 파일 생성이 꼭 필요하면 tests/ 또는 허용된 *.test.* 테스트 파일에만 old_text를 빈 문자열로 제안할 수 있다.",
     "최대 4개 파일, 가급적 220줄 이하 변경을 목표로 한다.",
-    "원인이 충분히 입증되지 않았거나 제공 문맥만으로 안전한 수정이 불가능하면 edits를 만들지 말아야 하지만 스키마상 최소 1개가 필요하므로, 그런 경우 소스 코드를 바꾸지 말고 기존 테스트에 실패를 재현하는 저위험 테스트만 추가한다.",
+    "안전한 소스 수정과 실제 실행 회귀 테스트를 함께 만들 수 없다면 위험한 우회 수정이나 검증 약화를 절대 제안하지 않는다.",
     "출력은 지정된 JSON 스키마만 사용한다.",
   ].join("\n");
 }
@@ -173,20 +174,32 @@ export function reliabilityAutofixSystemPrompt() {
 export function buildReliabilityAutofixPrompt(
   job: ReliabilityAutofixJob,
   files: ReliabilityAutofixContextFile[],
+  revisionFeedback = "",
 ) {
+  const feedback = text(revisionFeedback, 1_000).trim();
   return JSON.stringify(
     {
-      task: "반복 운영 오류를 재발 방지하는 최소 저위험 코드 수정과 회귀 테스트 제안",
+      task: "반복 운영 오류를 재발 방지하는 최소 저위험 코드 수정과 실행 가능한 회귀 테스트 제안",
       safety: {
         low_risk_only: true,
         no_business_writes: true,
         no_auth_or_secrets: true,
         no_database_schema: true,
         no_workflow_or_deployment_config: true,
+        executable_regression_test_required_with_source_change: true,
         ci_and_preview_required_before_merge: true,
       },
       incident: job,
       repository_context: files,
+      ...(feedback
+        ? {
+            revision_feedback: {
+              trusted_validator_feedback: feedback,
+              instruction:
+                "이전 제안을 부분 수정하지 말고, 안전한 소스 수정과 실제 실행 회귀 테스트가 함께 들어 있는 완전한 대체 제안을 다시 작성한다.",
+            },
+          }
+        : {}),
     },
     null,
     2,

@@ -43,6 +43,7 @@ export function reliabilityAutofixOpenAiConfigured() {
 export async function requestReliabilityAutofixProposal(
   job: ReliabilityAutofixJob,
   rawFiles: ReliabilityAutofixContextFile[],
+  revisionFeedback = "",
 ): Promise<ReliabilityAutofixProposal> {
   const base = reliabilityOpenAiConfiguration();
   if (!base) throw new Error("RELIABILITY_OPENAI_API_KEY가 설정되지 않았습니다.");
@@ -64,7 +65,7 @@ export async function requestReliabilityAutofixProposal(
     body: JSON.stringify({
       model,
       instructions: reliabilityAutofixSystemPrompt(),
-      input: buildReliabilityAutofixPrompt(job, files),
+      input: buildReliabilityAutofixPrompt(job, files, revisionFeedback),
       max_output_tokens: AUTOFIX_OUTPUT_TOKENS,
       store: false,
       text: {

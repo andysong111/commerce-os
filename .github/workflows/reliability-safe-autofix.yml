@@ -112,6 +112,8 @@ jobs:
           set -euo pipefail
           git apply --check /tmp/reliability-autofix-bundle/autofix.patch
           git apply /tmp/reliability-autofix-bundle/autofix.patch
+          cat /tmp/reliability-autofix-bundle/changed-paths.json | node -e '
+            const {spawnSync}=require("node:child_process"); let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const paths=JSON.parse(s);const r=spawnSync("git",["add","-N","--",...paths],{stdio:"inherit"});process.exit(r.status||0);});'
           expected="$(cat /tmp/reliability-autofix-bundle/changed-paths.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).slice().sort().join("\n")))')"
           actual="$(git diff --name-only | sort)"
           [[ "$expected" == "$actual" ]]
