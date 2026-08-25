@@ -25,6 +25,39 @@ test("열 순서는 선택 열을 첫 번째로 유지하고 누락 열을 복�
   assert.deepEqual(new Set(order), new Set(DEFAULT_TABLE_COLUMN_ORDER));
 });
 
+test("활성 상품출시 표는 상세페이지와 샵플링 업로드 두 단계만 유지한다", async () => {
+  const pruner = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/workflow-stage-pruner.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const loader = await readFile(
+    new URL(
+      "../public/product-launch-tracker-app/table-inline-ops-loader.js",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.ok(DEFAULT_TABLE_COLUMN_ORDER.includes("detailPage"));
+  assert.ok(DEFAULT_TABLE_COLUMN_ORDER.includes("shoplingUpload"));
+  for (const legacy of [
+    "priceKeyword",
+    "marketRegistration",
+    "orderMapping",
+    "inventoryReflection",
+  ]) {
+    assert.equal(DEFAULT_TABLE_COLUMN_ORDER.includes(legacy), false);
+    assert.match(pruner, new RegExp(legacy));
+  }
+  assert.match(loader, /workflow-stage-pruner\.js/);
+  assert.match(pruner, /status: "제외"/);
+  assert.match(pruner, /operation === "create_items"/);
+  assert.match(pruner, /operation === "replace_item"/);
+  assert.match(pruner, /rewriteProgressLabels/);
+});
+
 test("열 드래그 이동과 선택 열까지 고정 범위를 계산한다", () => {
   const moved = moveColumn(DEFAULT_TABLE_COLUMN_ORDER, "options", "modelNumber");
   assert.ok(moved.indexOf("options") < moved.indexOf("modelNumber"));

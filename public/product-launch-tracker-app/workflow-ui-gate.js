@@ -1,5 +1,6 @@
 import { installProductLaunchDetailStability } from "./detail-state-stability.js";
 import { installOptionBarcodeColumnAlignment } from "./option-barcode-column-alignment.js";
+import { installTwoStageProductLaunchWorkflow } from "./workflow-stage-pruner.js";
 
 const WORKFLOW_API = "/api/product-launch-tracker/optimized";
 const PROBE_TIMEOUT_MS = 4_500;
@@ -18,6 +19,7 @@ export function installWorkflowUiGate() {
   installed = true;
   installProductLaunchDetailStability();
   installOptionBarcodeColumnAlignment();
+  installTwoStageProductLaunchWorkflow();
   document.documentElement.dataset.opsWorkflowUi = "probing";
 
   const onVisible = () => {
