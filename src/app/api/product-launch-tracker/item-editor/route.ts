@@ -71,7 +71,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const legacyRequest = request.clone();
   const identity = await resolveProductLaunchIdentity(request);
   if (!identity.ok) return Response.json(identity.body, { status: identity.status });
   const config = getProductLaunchAdminConfig();
@@ -90,6 +89,11 @@ export async function PATCH(request: NextRequest) {
       { status: 400 },
     );
   }
+  const legacyRequest = new NextRequest(request.url, {
+    method: "PATCH",
+    headers: new Headers(request.headers),
+    body: JSON.stringify(input),
+  });
 
   const inputRecord = asRecord(input);
   if (text(inputRecord.operation) !== "patch_item") {
