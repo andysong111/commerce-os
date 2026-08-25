@@ -76,15 +76,27 @@ test("코드 교체는 이전 코드를 감사 메타데이터로 보존하고 �
   assert.equal(rotated.item.productName, "테스트상품");
 });
 
-test("샵플링 재등록 API는 중복 실패를 감지하면 새 코드를 원장에 저장·정규화 동기화한 뒤 payload를 만든다", async () => {
+test("샵플링 재등록 API는 기존 giant state를 먼저 쓰지 않고 새 코드 payload를 작업 원장에 담는다", async () => {
   const route = await readFile(
     new URL("../src/app/api/product-launch-tracker/shopling-upload/route.ts", import.meta.url),
     "utf8",
   );
   assert.match(route, /needsShoplingSelfCodeRotation\(item\)/);
   assert.match(route, /rotateShoplingSelfCodeForRetry/);
-  assert.match(route, /writeProductLaunchState/);
-  assert.match(route, /reconcileProductLaunchNormalizedAfterLegacyItems/);
+  assert.match(route, /retrySelfCode/);
   assert.match(route, /buildProductLaunchShoplingPayload\(\s*item,/);
   assert.match(route, /selfCodeRotated/);
+  assert.doesNotMatch(route, /writeProductLaunchState/);
+});
+
+test("샵플링 callback은 실제 사용한 새 자사상품코드를 legacy와 normalized 원장에 함께 확정한다", async () => {
+  const callback = await readFile(
+    new URL("../src/app/api/product-launch-tracker/upload-jobs/[jobId]/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(callback, /asRecord\(asRecord\(job\.payload\)\.retrySelfCode\)/);
+  assert.match(callback, /item\.selfCodeBase = retrySelfCodeBase/);
+  assert.match(callback, /item\.shoplingSelfCodeRetry/);
+  assert.match(callback, /writeProductLaunchState/);
+  assert.match(callback, /reconcileProductLaunchNormalizedAfterLegacyItems/);
 });
