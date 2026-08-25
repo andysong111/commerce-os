@@ -100,5 +100,7 @@ test("등록 실행기는 29개 상품명을 저장하고 신규 자동후적용
   assert.match(runner, /SHOPLING_MALL_SEO_ENDPOINT/);
   assert.match(callback, /startMallSeoApply/);
   assert.match(callback, /dispatchProductLaunchMallSeo/);
+  assert.match(callback, /reconcileProductLaunchNormalizedAfterLegacyItems/);
   assert.match(repairRoute, /dispatchProductLaunchMallSeo/);
+  assert.match(repairRoute, /reconcileProductLaunchNormalizedAfterLegacyItems/);
 });

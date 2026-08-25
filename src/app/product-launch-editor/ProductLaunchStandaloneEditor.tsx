@@ -67,6 +67,10 @@ function nonNegativeInteger(value: unknown) {
   return Math.max(0, Math.ceil(numeric));
 }
 
+function salePriceFromUnitCost(value: unknown) {
+  return nonNegativeInteger(value) * 2;
+}
+
 function normalizeBarcode(value: unknown) {
   return text(value).toUpperCase().replace(/\s+/g, "");
 }
@@ -294,6 +298,14 @@ export default function ProductLaunchStandaloneEditor({ itemId }: { itemId: stri
     setSuccess("");
   };
 
+  const updateUnitCost = (index: number, value: unknown) => {
+    const unitCostKrw = nonNegativeInteger(value);
+    updateOption(index, {
+      unitCostKrw,
+      baseSalePriceKrw: salePriceFromUnitCost(unitCostKrw),
+    });
+  };
+
   const addOption = () => {
     setOptions((current) => [
       ...current,
@@ -397,6 +409,7 @@ export default function ProductLaunchStandaloneEditor({ itemId }: { itemId: stri
               <h1 className="text-xl font-black">{form.modelNumber || "모델번호 없음"}</h1>
               <span className="text-sm font-semibold text-slate-500">{form.productName}</span>
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">단건 독립 저장</span>
+              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-black text-blue-700">원가 × 2 자동판매가</span>
             </div>
             <p className="mt-1 text-xs text-slate-500">목록/SEO/Shopling 로딩과 분리 · 마지막 서버 확인 {verifiedAt || "-"}</p>
           </div>
@@ -443,6 +456,7 @@ export default function ProductLaunchStandaloneEditor({ itemId }: { itemId: stri
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-black">옵션 · 기준판매가 · 원가</h2>
+            <p className="mt-1 text-xs text-slate-500">원가를 입력하거나 수정하면 기준판매가는 원가 × 2로 자동 계산됩니다. 자동 계산된 기준판매가는 언제든 직접 수정할 수 있습니다.</p>
             <p className="mt-1 text-xs text-slate-500">이 표의 값이 저장 요청의 직접 원천입니다. 저장 후 서버값을 다시 읽어 일치해야 성공 처리합니다.</p>
           </div>
           <button type="button" onClick={addOption} className="rounded-xl border border-blue-300 bg-white px-4 py-2 text-sm font-black text-blue-800">+ 옵션 추가</button>
@@ -470,7 +484,7 @@ export default function ProductLaunchStandaloneEditor({ itemId }: { itemId: stri
                   <td className="p-2"><input value={option.barcode} onChange={(event) => updateOption(index, { barcode: normalizeBarcode(event.target.value) })} className="w-full rounded-lg border border-slate-200 px-2 py-2 font-mono" /></td>
                   <td className="p-2"><input value={option.optionBarcodeNo || "저장 시 자동발급"} readOnly className="w-full rounded-lg border border-slate-200 bg-slate-100 px-2 py-2 font-mono text-slate-500" /></td>
                   <td className="p-2"><input type="number" min={0} step={1} value={option.baseSalePriceKrw || ""} onChange={(event) => updateOption(index, { baseSalePriceKrw: nonNegativeInteger(event.target.value) })} className="w-full rounded-lg border border-blue-300 bg-blue-50 px-2 py-2 text-right font-black" /></td>
-                  <td className="p-2"><input type="number" min={0} step={1} value={option.unitCostKrw || ""} onChange={(event) => updateOption(index, { unitCostKrw: nonNegativeInteger(event.target.value) })} className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-2 text-right font-black" /></td>
+                  <td className="p-2"><input type="number" min={0} step={1} value={option.unitCostKrw || ""} onChange={(event) => updateUnitCost(index, event.target.value)} className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-2 text-right font-black" /></td>
                   <td className="p-2 text-center"><button type="button" onClick={() => { setOptions((current) => current.filter((_, i) => i !== index)); setSuccess(""); }} className="rounded-lg bg-rose-50 px-2 py-2 text-xs font-black text-rose-700">삭제</button></td>
                 </tr>
               ))}
