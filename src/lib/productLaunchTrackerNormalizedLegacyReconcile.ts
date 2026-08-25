@@ -42,10 +42,10 @@ export async function reconcileProductLaunchNormalizedAfterLegacyItems(
       state,
       row.updated_at,
     );
-    return { synced: true, mode: "full" as const, ...full };
+    return { mode: "full" as const, ...full };
   }
 
-  return { synced: true, mode: "changed" as const, ...result };
+  return { mode: "changed" as const, ...result };
 }
 
 function text(value: unknown) {
