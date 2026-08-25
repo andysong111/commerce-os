@@ -3,7 +3,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 const EDITOR_API = "/api/product-launch-tracker/normalized-optimized";
-const AUTHORITATIVE_LEGACY_API = "/api/product-launch-tracker/optimized";
 const DIRECT_ITEM_API = "/api/product-launch-tracker/item-editor";
 
 export default function ProductLaunchEditorTransport({
@@ -24,10 +23,11 @@ export default function ProductLaunchEditorTransport({
       const method = String(
         init?.method || (input instanceof Request ? input.method : "GET"),
       ).toUpperCase();
-      const targetApi = method === "PATCH" || directReadback
-        ? DIRECT_ITEM_API
-        : AUTHORITATIVE_LEGACY_API;
-      const routed = routeEditorRequest(input, url, targetApi);
+      if (method !== "PATCH" && !directReadback) {
+        return originalFetch(input, init);
+      }
+
+      const routed = routeEditorRequest(input, url, DIRECT_ITEM_API);
       const response = await originalFetch(routed, init);
       if (method === "PATCH" && response.ok) directReadback = true;
       return response;
