@@ -51,6 +51,8 @@ class IncompatibleExecutedRegressionTestError extends Error {
   constructor(path, targetPath) {
     super(`${INCOMPATIBLE_TEST_HARNESS_MESSAGE}: ${path} -> ${targetPath}`);
     this.name = "IncompatibleExecutedRegressionTestError";
+    this.testPath = path;
+    this.targetPath = targetPath;
   }
 }
 
@@ -152,6 +154,45 @@ function assertExecutedTestHarnessCompatible(path, source) {
     if (!targetPath.startsWith("src/") || !sourceUsesUnresolvedAlias(targetPath)) continue;
     throw new IncompatibleExecutedRegressionTestError(path, targetPath);
   }
+}
+function contentReferencesHarnessTarget(content, targetPath) {
+  const normalized = String(targetPath || "").replaceAll("\\", "/");
+  if (!normalized.startsWith("src/")) return false;
+  const targetBase = basename(normalized);
+  const targetStem = targetBase.replace(/\.tsx?$/i, "");
+  const source = String(content || "");
+  return source.includes(normalized) || source.includes(targetBase) || source.includes(targetStem);
+}
+function enrichContextWithExistingHarness(context, targetPath) {
+  const harnesses = new Map();
+  const consider = (path, content) => {
+    if (!isExecutedTestPath(path) || !contentReferencesHarnessTarget(content, targetPath)) return;
+    try {
+      assertExecutedTestHarnessCompatible(path, content);
+    } catch {
+      return;
+    }
+    if (!harnesses.has(path)) harnesses.set(path, String(content || "").slice(0, 24_000));
+  };
+  for (const item of context) consider(item.path, item.content);
+  for (const absolute of walk(join(ROOT, "tests"))) {
+    const path = relative(ROOT, absolute).replaceAll("\\", "/");
+    if (!safePath(path)) continue;
+    consider(path, readFileSync(absolute, "utf8"));
+  }
+  const harnessPaths = [...harnesses.keys()].sort();
+  const merged = [];
+  let total = 0;
+  const push = (path, content) => {
+    if (merged.some((item) => item.path === path)) return;
+    const clipped = String(content || "").slice(0, 24_000);
+    if (!clipped || total + clipped.length > 138_000 || merged.length >= 16) return;
+    merged.push({ path, content: clipped });
+    total += clipped.length;
+  };
+  for (const path of harnessPaths) push(path, harnesses.get(path));
+  for (const item of context) push(item.path, item.content);
+  return { context: merged.length ? merged : context, harnessPaths };
 }
 function proposalPath(edit) {
   return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
@@ -265,21 +306,27 @@ async function generate(){
     changed=applyProposal(proposal,context);
   } catch (error) {
     let revisionFeedback;
+    let revisionContext=context;
     if (error instanceof MissingExecutedRegressionTestError) {
       revisionFeedback=REGRESSION_TEST_REVISION_FEEDBACK;
     } else if (error instanceof IncompatibleExecutedRegressionTestError) {
-      revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}`;
+      const enriched=enrichContextWithExistingHarness(context,error.targetPath);
+      revisionContext=enriched.context;
+      const harnessNote=enriched.harnessPaths.length
+        ? `\n검증된 기존 실행 하네스 후보: ${enriched.harnessPaths.join(", ")}. 이 중 하나를 보강하고 새 테스트 파일을 만들지 마세요.`
+        : "";
+      revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}${harnessNote}`;
     } else {
       throw error;
     }
     payload=await api({
       action:"generate",
       job_id:job.job_id,
-      files:context,
+      files:revisionContext,
       revision_feedback:revisionFeedback,
     });
     proposal=payload.proposal;
-    changed=applyProposal(proposal,context);
+    changed=applyProposal(proposal,revisionContext);
   }
   writeFileSync(PROPOSAL_FILE,JSON.stringify(proposal,null,2));
   output("changed_paths",JSON.stringify(changed));

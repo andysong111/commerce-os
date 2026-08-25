@@ -60,12 +60,17 @@ test("worker retries exactly once for a missing or alias-incompatible regression
 
   assert.match(worker, /class MissingExecutedRegressionTestError extends Error/);
   assert.match(worker, /class IncompatibleExecutedRegressionTestError extends Error/);
+  assert.match(worker, /this\.targetPath = targetPath/);
   assert.match(worker, /function directTypeScriptImports\(source\)/);
   assert.match(worker, /function sourceUsesUnresolvedAlias\(path\)/);
+  assert.match(worker, /function enrichContextWithExistingHarness\(context, targetPath\)/);
   assert.match(worker, /assertExecutedTestHarnessCompatible\(path, newText\)/);
   assert.match(worker, /error instanceof MissingExecutedRegressionTestError/);
   assert.match(worker, /error instanceof IncompatibleExecutedRegressionTestError/);
   assert.match(worker, /INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK/);
+  assert.match(worker, /검증된 기존 실행 하네스 후보/);
+  assert.match(worker, /files:revisionContext/);
+  assert.match(worker, /changed=applyProposal\(proposal,revisionContext\)/);
   assert.match(worker, /revision_feedback:revisionFeedback/);
   assert.match(worker, /preflightProposal\(edits\)/);
   assert.match(worker, /if \(!executedTestProposed\) throw new MissingExecutedRegressionTestError\(\)/);
@@ -89,5 +94,8 @@ test("alias harness guard covers the Shopling failure shape from the first close
   assert.match(existingHarness, /replace\(/);
   assert.match(worker, /\.tsx\?/);
   assert.match(worker, /targetPath\.startsWith\("src\/"\)/);
+  assert.match(worker, /walk\(join\(ROOT, "tests"\)\)/);
+  assert.match(worker, /contentReferencesHarnessTarget/);
+  assert.match(worker, /harnessPaths\.join\(", "\)/);
   assert.match(worker, /provided existing.*transpile\/load|기존 실행 테스트.*transpile\/load/i);
 });
