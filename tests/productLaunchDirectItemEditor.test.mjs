@@ -6,14 +6,14 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("독립 상품 편집기는 최초 조회는 authoritative legacy, 저장/검증은 direct item API를 사용한다", async () => {
+test("독립 상품 편집기는 최초 조회는 normalized authority, 저장/검증은 direct item API를 사용한다", async () => {
   const page = await source("src/app/product-launch-editor/page.tsx");
   const transport = await source("src/app/product-launch-editor/ProductLaunchEditorTransport.tsx");
   assert.match(page, /ProductLaunchEditorTransport/);
-  assert.match(transport, /normalized-optimized/);
-  assert.match(transport, /AUTHORITATIVE_LEGACY_API = "\/api\/product-launch-tracker\/optimized"/);
+  assert.match(transport, /EDITOR_API = "\/api\/product-launch-tracker\/normalized-optimized"/);
   assert.match(transport, /DIRECT_ITEM_API = "\/api\/product-launch-tracker\/item-editor"/);
-  assert.match(transport, /method === "PATCH" \|\| directReadback/);
+  assert.match(transport, /method !== "PATCH" && !directReadback/);
+  assert.doesNotMatch(transport, /AUTHORITATIVE_LEGACY_API/);
   assert.match(transport, /window\.fetch = routedFetch/);
 });
 
@@ -34,4 +34,12 @@ test("direct item API는 기준판매가와 원가를 option 정규화 행에 �
   assert.match(route, /base_sale_price_krw: nonNegativeInteger\(option\.baseSalePriceKrw\)/);
   assert.match(route, /unit_cost_krw: nonNegativeInteger\(option\.unitCostKrw\)/);
   assert.match(route, /option_payload: cloneRecord\(option\)/);
+});
+
+test("옵션 바코드 mirror trigger는 부모 상품 updated_at을 덮어쓰지 않는다", async () => {
+  const migration = await source(
+    "supabase/migrations/202608250001_preserve_product_launch_item_updated_at_on_option_barcode_refresh.sql",
+  );
+  assert.match(migration, /set option_barcode_nos =/i);
+  assert.doesNotMatch(migration, /updated_at\s*=\s*now\(\)/i);
 });
