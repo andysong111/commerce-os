@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { dispatchProductLaunchMallSeo } from "@/lib/productLaunchShoplingMallSeo";
+import { reconcileProductLaunchNormalizedAfterLegacyItems } from "@/lib/productLaunchTrackerNormalizedLegacyReconcile";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchState,
@@ -83,6 +84,11 @@ export async function POST(request: NextRequest) {
       config.value,
       identity.value,
       { ...state, items, savedAt: now },
+    );
+    await reconcileProductLaunchNormalizedAfterLegacyItems(
+      config.value,
+      identity.value,
+      [itemId],
     );
 
     return Response.json({
