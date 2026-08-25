@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ProductLaunchEditorTransport from "./ProductLaunchEditorTransport";
 import ProductLaunchStandaloneEditor from "./ProductLaunchStandaloneEditor";
 
 export default async function ProductLaunchEditorPage({
@@ -26,5 +27,9 @@ export default async function ProductLaunchEditorPage({
     );
   }
 
-  return <ProductLaunchStandaloneEditor itemId={itemId.slice(0, 180)} />;
+  return (
+    <ProductLaunchEditorTransport>
+      <ProductLaunchStandaloneEditor itemId={itemId.slice(0, 180)} />
+    </ProductLaunchEditorTransport>
+  );
 }
