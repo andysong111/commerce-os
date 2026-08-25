@@ -19,15 +19,15 @@ on:
       - 'src/lib/extendedModuleRegistry.ts'
       - 'src/lib/opsWorkspace.ts'
       - 'src/lib/productLaunchTracker*.ts'
-      - 'src/lib/productLaunchShoplingMallSeo.ts'
+      - 'src/lib/productLaunchShopling*.ts'
       - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/*product_launch*.sql'
       - 'supabase/migrations/*option_barcode*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
+      - 'tests/productLaunchShopling*.test.mjs'
       - 'tests/productLaunchOptionBarcodeRegistry.test.mjs'
-      - 'tests/productLaunchShoplingMallSeo.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -53,6 +53,7 @@ jobs:
           tests/productLaunchTrackerSorting.test.mjs
           tests/productLaunchTrackerShopling.test.mjs
           tests/productLaunchTrackerShoplingPriceRounding.test.mjs
+          tests/productLaunchShoplingRetry.test.mjs
           tests/productLaunchOptionBarcodeRegistry.test.mjs
           tests/productLaunchShoplingMallSeo.test.mjs
           tests/productLaunchTrackerUploadClaim.test.mjs
