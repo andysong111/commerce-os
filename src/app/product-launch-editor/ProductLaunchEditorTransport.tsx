@@ -14,20 +14,33 @@ export default function ProductLaunchEditorTransport({
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
+    let directReadback = false;
 
-    const routedFetch: typeof window.fetch = (input, init) => {
-      if (typeof input === "string" && input.startsWith(LEGACY_EDITOR_API)) {
-        return originalFetch(
-          `${DIRECT_ITEM_API}${input.slice(LEGACY_EDITOR_API.length)}`,
-          init,
-        );
+    const routedFetch: typeof window.fetch = async (input, init) => {
+      const isEditorApiString =
+        typeof input === "string" && input.startsWith(LEGACY_EDITOR_API);
+      const isEditorApiUrl =
+        input instanceof URL &&
+        input.origin === window.location.origin &&
+        input.pathname === LEGACY_EDITOR_API;
+      if (!isEditorApiString && !isEditorApiUrl) return originalFetch(input, init);
+
+      const method = String(init?.method || "GET").toUpperCase();
+      if (method !== "PATCH" && !directReadback) {
+        return originalFetch(input, init);
       }
-      if (input instanceof URL && input.origin === window.location.origin && input.pathname === LEGACY_EDITOR_API) {
-        const routed = new URL(input.toString());
-        routed.pathname = DIRECT_ITEM_API;
-        return originalFetch(routed, init);
-      }
-      return originalFetch(input, init);
+
+      const routed =
+        typeof input === "string"
+          ? `${DIRECT_ITEM_API}${input.slice(LEGACY_EDITOR_API.length)}`
+          : (() => {
+              const next = new URL(input.toString());
+              next.pathname = DIRECT_ITEM_API;
+              return next;
+            })();
+      const response = await originalFetch(routed, init);
+      if (method === "PATCH" && response.ok) directReadback = true;
+      return response;
     };
 
     window.fetch = routedFetch;
