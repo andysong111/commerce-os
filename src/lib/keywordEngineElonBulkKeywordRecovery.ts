@@ -194,10 +194,20 @@ function asCandidates(keywords: string[]): KeywordElonCandidate[] {
     relevance: 90,
     shoppingIntent: 82,
     specificity: 78,
-    qualityScore: 84,
-    totalSearch: null,
-    safetyPass: true,
     titleEligible: true,
+    rationale: "SEO 대량등록 FINAL 검색어 부족 자동복구 후보",
+    sourceTags: ["bulk_keyword_recovery"],
+    totalSearch: null,
+    pcSearch: null,
+    mobileSearch: null,
+    compIdx: null,
+    plAvgDepth: null,
+    demandScore: 15,
+    competitionOpportunity: 55,
+    qualityScore: 84,
+    safetyPass: true,
+    safetyReason: "STEP4 재검증 전 복구 후보",
+    dataConfidence: "low",
   }));
 }
 
