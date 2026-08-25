@@ -1,3 +1,4 @@
+import "./standalone-detail-editor-link.js";
 import { installProductLaunchDetailStability } from "./detail-state-stability.js";
 import { installOptionBarcodeColumnAlignment } from "./option-barcode-column-alignment.js";
 import { installTwoStageProductLaunchWorkflow } from "./workflow-stage-pruner.js";
