@@ -51,6 +51,7 @@ test("bulk final API는 분할 source/compose와 기존 STEP 1~4 엔진 계약�
   assert.match(route, /action === "generate_bulk_final"/);
   assert.match(route, /bulkParallelAvailable: true/);
   assert.match(route, /bulkSegmentedAvailable: true/);
+  assert.match(route, /bulkAutoRecoveryAvailable: true/);
   assert.match(engine, /collectKeywordElonBulkSource/);
   assert.match(engine, /composeKeywordElonBulkFinal/);
   assert.match(engine, /collectKeywordElon1688Source/);
@@ -59,8 +60,33 @@ test("bulk final API는 분할 source/compose와 기존 STEP 1~4 엔진 계약�
   assert.match(engine, /selectKeywordElonStep4Union/);
   assert.match(engine, /filterKeywordElonProhibitedKeywords/);
   assert.match(engine, /buildKeywordElonSeoModelPackage/);
-  assert.match(engine, /commonSearchKeywords\.length !== 10/);
-  assert.match(engine, /mallTitles\.length !== 29/);
+  assert.match(engine, /supplementalSearchKeywords/);
+  assert.match(engine, /searchKeywords\.length !== 10/);
+  assert.match(engine, /output\.mallTitles\.length !== 29/);
+});
+
+test("검색어 부족은 AI+결정형 후보를 STEP4 안전필터에 통과시켜 정확히 10개로 보충한다", async () => {
+  const route = await source("src/app/api/keyword-engine-elon-lab/route.ts");
+  const recovery = await source("src/lib/keywordEngineElonBulkKeywordRecovery.ts");
+  assert.match(route, /generateSafeBulkKeywordSupplements/);
+  assert.match(route, /FINAL 검색어가 10개가 아닙니다/);
+  assert.match(route, /supplementalSearchKeywords/);
+  assert.match(recovery, /KEYWORD_ENGINE_OPENAI_API_KEY/);
+  assert.match(recovery, /브랜드명·상표명/);
+  assert.match(recovery, /의료기기·치료·진단/);
+  assert.match(recovery, /filterKeywordElonProhibitedKeywords/);
+  assert.match(recovery, /deterministicSeeds/);
+});
+
+test("aborted/failed fetch와 5xx는 키워드 API에 한해서 자동 재시도한다", async () => {
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+  const recovery = await source("src/app/seo-bulk-cloud/SeoBulkFetchRecovery.tsx");
+  assert.match(page, /SeoBulkFetchRecovery/);
+  assert.match(recovery, /\/api\/keyword-engine-elon-lab/);
+  assert.match(recovery, /RETRY_DELAYS_MS = \[0, 700, 1_800, 4_200\]/);
+  assert.match(recovery, /408, 425, 429, 500, 502, 503, 504/);
+  assert.match(recovery, /commerceSeoBulkRecoveringFetch/);
+  assert.doesNotMatch(recovery, /shopling-upload/);
 });
 
 test("OPS 기능카드는 단순화된 대량 클라우드를 기본 진입점으로 사용한다", async () => {
