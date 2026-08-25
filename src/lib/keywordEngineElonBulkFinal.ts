@@ -86,6 +86,7 @@ export type KeywordElonBulkComposeInput = KeywordElonBulkFinalInput & {
   blockedKeys: string[];
   finalMaterialCount: number;
   titleResult: KeywordElonTitleResult;
+  supplementalSearchKeywords?: string[];
 };
 
 function text(value: unknown) {
@@ -164,6 +165,23 @@ export async function collectKeywordElonBulkSource(input: KeywordElonBulkFinalIn
   return collectSource(input);
 }
 
+function recoveredSearchKeywords(
+  baseKeywords: string[],
+  supplementalKeywords: string[],
+  blockedKeys: string[],
+  customBlockedTerms: string[],
+) {
+  const blocked = new Set(
+    [...blockedKeys, ...customBlockedTerms]
+      .map((value) => compactKeywordElonKey(value))
+      .filter(Boolean),
+  );
+  const additions = supplementalKeywords
+    .map((value) => compactKeywordElonKey(value))
+    .filter((key) => key.length >= 2 && !blocked.has(key));
+  return unique([...baseKeywords, ...additions], 10);
+}
+
 export function composeKeywordElonBulkFinal(
   input: KeywordElonBulkComposeInput,
 ): KeywordElonBulkFinalResult {
@@ -184,9 +202,15 @@ export function composeKeywordElonBulkFinal(
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
 
-  if (output.commonSearchKeywords.length !== 10) {
+  const searchKeywords = recoveredSearchKeywords(
+    [...output.commonSearchKeywords],
+    input.supplementalSearchKeywords ?? [],
+    input.blockedKeys,
+    input.customBlockedTerms ?? [],
+  );
+  if (searchKeywords.length !== 10) {
     throw new Error(
-      `FINAL 검색어가 10개가 아닙니다. 현재 ${output.commonSearchKeywords.length}개`,
+      `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
     );
   }
   if (output.mallTitles.length !== 29) {
@@ -201,6 +225,7 @@ export function composeKeywordElonBulkFinal(
   }
 
   const generatedAt = new Date().toISOString();
+  const recoveredCount = Math.max(0, searchKeywords.length - output.commonSearchKeywords.length);
   return {
     launchItemId: input.launchItemId,
     modelNumber: input.modelNumber,
@@ -214,8 +239,8 @@ export function composeKeywordElonBulkFinal(
     seoFinal: {
       productName: output.modelName,
       groupProductNames,
-      searchKeywords: [...output.commonSearchKeywords],
-      searchLine: output.commonSearchKeywords.join(","),
+      searchKeywords,
+      searchLine: searchKeywords.join(","),
       source: "seo-bulk-cloud",
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
@@ -228,7 +253,11 @@ export function composeKeywordElonBulkFinal(
         title: row.title,
       })),
     },
-    warnings: [...output.warnings, ...(input.source.warnings ?? [])],
+    warnings: [
+      ...output.warnings,
+      ...(input.source.warnings ?? []),
+      ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`] : []),
+    ],
   };
 }
 
