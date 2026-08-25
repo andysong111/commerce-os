@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -73,4 +74,17 @@ test("코드 교체는 이전 코드를 감사 메타데이터로 보존하고 �
     rotatedAt: "2026-08-25T12:00:00.000Z",
   });
   assert.equal(rotated.item.productName, "테스트상품");
+});
+
+test("샵플링 재등록 API는 중복 실패를 감지하면 새 코드를 원장에 저장·정규화 동기화한 뒤 payload를 만든다", async () => {
+  const route = await readFile(
+    new URL("../src/app/api/product-launch-tracker/shopling-upload/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(route, /needsShoplingSelfCodeRotation\(item\)/);
+  assert.match(route, /rotateShoplingSelfCodeForRetry/);
+  assert.match(route, /writeProductLaunchState/);
+  assert.match(route, /reconcileProductLaunchNormalizedAfterLegacyItems/);
+  assert.match(route, /buildProductLaunchShoplingPayload\(\s*item,/);
+  assert.match(route, /selfCodeRotated/);
 });
