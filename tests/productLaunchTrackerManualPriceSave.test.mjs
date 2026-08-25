@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import test from "node:test";
+
+import { applyProductLaunchTrackerMutation } from "../src/lib/productLaunchTrackerOptimized.ts";
+
+const stability = await readFile(
+  new URL("../public/product-launch-tracker-app/manual-detail-save-stability.js", import.meta.url),
+  "utf8",
+);
+const page = await readFile(
+  new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
+  "utf8",
+);
+
+test("상품상세 수동 기준판매가·원가는 patch_item으로 그대로 저장된다", () => {
+  const state = {
+    schemaVersion: 3,
+    savedAt: "2026-08-25T00:00:00.000Z",
+    items: [
+      {
+        id: "launch-price-test",
+        modelNumber: "AAA481",
+        productName: "스트라이프 버킷햇",
+        barcode: "BEH2-1",
+        orderOptions: [
+          {
+            id: "option-beh2-1",
+            optionName: "옵션",
+            saleOption: "단품",
+            barcode: "BEH2-1",
+            optionBarcodeNo: "000000000641",
+            baseSalePriceKrw: 0,
+            unitCostKrw: 0,
+          },
+        ],
+        stages: {},
+      },
+    ],
+  };
+
+  const mutation = applyProductLaunchTrackerMutation(state, {
+    operation: "patch_item",
+    itemId: "launch-price-test",
+    patch: {
+      orderOptions: [
+        {
+          id: "option-beh2-1",
+          optionName: "옵션",
+          saleOption: "단품",
+          barcode: "BEH2-1",
+          optionBarcodeNo: "000000000641",
+          baseSalePriceKrw: 2660,
+          unitCostKrw: 1330,
+        },
+      ],
+    },
+    updatedBy: "manual-price-test",
+  });
+
+  const option = mutation.state.items[0].orderOptions[0];
+  assert.equal(option.baseSalePriceKrw, 2660);
+  assert.equal(option.unitCostKrw, 1330);
+  assert.equal(option.barcode, "BEH2-1");
+  assert.deepEqual(mutation.changedIds, ["launch-price-test"]);
+});
+
+test("수동 저장 안정화 계층은 화면 가격값을 강제 포함하고 서버 재조회 검증 후에만 성공한다", () => {
+  assert.match(stability, /readDomOrderOptions/);
+  assert.match(stability, /baseSalePriceKrw: nonNegativeInteger\(read\("baseSalePriceKrw"\)\)/);
+  assert.match(stability, /unitCostKrw: nonNegativeInteger\(read\("unitCostKrw"\)\)/);
+  assert.match(stability, /patch\.orderOptions = domOptions\.map/);
+  assert.match(stability, /verifyPersistedOptions/);
+  assert.match(stability, /compareOrderOptions/);
+  assert.match(stability, /기준판매가가 서버 저장본과 다릅니다/);
+  assert.match(stability, /원가가 서버 저장본과 다릅니다/);
+  assert.match(stability, /상품출시진행관리 수동 가격 재확인/);
+  assert.match(stability, /저장 확인 실패/);
+});
+
+test("저장 성공은 화면 중앙의 명확한 완료 팝업으로 표시한다", () => {
+  assert.match(stability, /manual-detail-save-popup/);
+  assert.match(stability, /✓ 저장 완료/);
+  assert.match(stability, /기준판매가·원가 .*서버 반영 확인/);
+  assert.match(stability, /z-index: 2147483647/);
+  assert.match(page, /manual-price-verify-v1/);
+});
+
+test("수동 저장 브라우저 모듈은 문법 검사를 통과한다", () => {
+  const checked = spawnSync(
+    process.execPath,
+    ["--check", "public/product-launch-tracker-app/manual-detail-save-stability.js"],
+    { encoding: "utf8" },
+  );
+  assert.equal(checked.status, 0, checked.stderr || checked.stdout);
+});
