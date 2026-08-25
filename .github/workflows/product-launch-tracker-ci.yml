@@ -63,6 +63,7 @@ jobs:
           tests/productLaunchTrackerChinaLinkHealth.test.mjs
           tests/productLaunchTrackerChinaOrderMappingActiveUi.test.mjs
           tests/productLaunchTrackerModelBcodeAuthority.test.mjs
+          tests/productLaunchTrackerManualPriceSave.test.mjs
           tests/productLaunchTrackerNormalizedCutover.test.mjs
           tests/detailPageAssetStorageRetry.test.mjs
           tests/detailPageManualDecision.test.mjs
