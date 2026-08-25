@@ -6,16 +6,18 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("독립 상품 편집기는 대형 legacy JSON API 대신 direct item API로 전송한다", async () => {
+test("독립 상품 편집기는 최초 조회는 authoritative legacy, 저장/검증은 direct item API를 사용한다", async () => {
   const page = await source("src/app/product-launch-editor/page.tsx");
   const transport = await source("src/app/product-launch-editor/ProductLaunchEditorTransport.tsx");
   assert.match(page, /ProductLaunchEditorTransport/);
   assert.match(transport, /normalized-optimized/);
-  assert.match(transport, /\/api\/product-launch-tracker\/item-editor/);
+  assert.match(transport, /AUTHORITATIVE_LEGACY_API = "\/api\/product-launch-tracker\/optimized"/);
+  assert.match(transport, /DIRECT_ITEM_API = "\/api\/product-launch-tracker\/item-editor"/);
+  assert.match(transport, /method === "PATCH" \|\| directReadback/);
   assert.match(transport, /window\.fetch = routedFetch/);
 });
 
-test("direct item API는 정규화 item/options를 먼저 저장하고 legacy mirror는 응답 밖에서 실행한다", async () => {
+test("direct item API는 정규화 item\/options를 먼저 저장하고 legacy mirror는 응답 밖에서 실행한다", async () => {
   const route = await source("src/app/api/product-launch-tracker/item-editor/route.ts");
   assert.match(route, /readProductLaunchNormalizedItem/);
   assert.match(route, /applyProductLaunchTrackerMutation/);
