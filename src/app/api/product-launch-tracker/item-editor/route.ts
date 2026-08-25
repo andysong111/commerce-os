@@ -6,6 +6,7 @@ import {
   readResponseJson,
   resolveProductLaunchIdentity,
 } from "@/lib/productLaunchTrackerServer";
+import { reconcileProductLaunchNormalizedAfterLegacyItems } from "@/lib/productLaunchTrackerNormalizedLegacyReconcile";
 import {
   readProductLaunchNormalizedItem,
   readProductLaunchNormalizedWorkspace,
@@ -162,7 +163,12 @@ export async function PATCH(request: NextRequest) {
           beforeSummary,
           afterSummary,
         ),
-        mirrorToLegacy(legacyRequest),
+        mirrorToLegacy(
+          legacyRequest,
+          config.value,
+          identity.value,
+          itemId,
+        ),
       ]);
     });
 
@@ -335,12 +341,24 @@ async function refreshWorkspaceRollup(
   }
 }
 
-async function mirrorToLegacy(request: NextRequest) {
+async function mirrorToLegacy(
+  request: NextRequest,
+  config: Config,
+  identity: Identity,
+  itemId: string,
+) {
   try {
     const response = await legacyPatch(request);
-    if (response.ok) return;
-    const body = await response.clone().json().catch(() => null as unknown);
-    console.error("[product-launch-direct-item] legacy mirror failed", body);
+    if (!response.ok) {
+      const body = await response.clone().json().catch(() => null as unknown);
+      console.error("[product-launch-direct-item] legacy mirror failed", body);
+      return;
+    }
+    await reconcileProductLaunchNormalizedAfterLegacyItems(
+      config,
+      identity,
+      [itemId],
+    );
   } catch (error) {
     console.error("[product-launch-direct-item] legacy mirror failed", error);
   }
