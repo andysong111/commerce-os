@@ -1,11 +1,7 @@
-import {
-  reconcileModelOrderOptions,
-  sameModelOrderOptions,
-} from "./lib/model-bcode-order-options.mjs";
+import { reconcileModelOrderOptions } from "./lib/model-bcode-order-options.mjs";
 import { alignOptionTable } from "./option-barcode-column-alignment.js";
 
 const OPTIMIZED_API = "/api/product-launch-tracker/normalized-optimized";
-const MODEL_OPTIONS_API = "/api/product-launch-tracker/model-order-options";
 const detailDialog = document.querySelector("#detail-dialog");
 const detailForm = document.querySelector("#detail-form");
 const optionTableBody = document.querySelector("#detail-options");
@@ -86,37 +82,45 @@ async function reconcileCurrentItem(serial) {
   inFlightKey = key;
 
   try {
-    const [itemBody, authorityBody] = await Promise.all([
-      readItem(itemId),
-      requestJson(
-        `${MODEL_OPTIONS_API}?${new URLSearchParams({ modelNumber }).toString()}`,
-      ),
-    ]);
+    const itemBody = await readItem(itemId);
     if (serial !== renderSerial || !detailDialog?.open) return;
     if (String(detailForm.elements?.id?.value ?? "").trim() !== itemId) return;
 
     const item = itemBody?.item;
-    const authority = Array.isArray(authorityBody?.options)
-      ? authorityBody.options
-      : [];
-    if (!item || !authority.length) {
-      setGuardStatus(
-        authorityBody?.message ||
-          `${modelNumber}의 실제 B-code 기준정보를 확인하지 못했습니다. 기존 옵션을 유지합니다.`,
-        "error",
-      );
+    if (!item) {
+      setGuardStatus("저장된 상품 옵션을 확인하지 못했습니다. 기존 화면 값을 유지합니다.", "error");
       scheduleErrorRetry(serial);
       return;
     }
 
-    const nextOptions = reconcileModelOrderOptions(item.orderOptions, authority);
-    const changed = !sameModelOrderOptions(item.orderOptions, nextOptions);
+    const savedOptions = Array.isArray(item.orderOptions)
+      ? structuredClone(item.orderOptions)
+      : [];
+    if (!savedOptions.length) {
+      setGuardStatus(
+        "저장된 상품 옵션이 없습니다. 필요할 때 ‘발주·입고 데이터 불러오기’를 눌러 옵션을 가져온 뒤 직접 수정·삭제하고 저장하세요.",
+        "",
+      );
+      completedKey = key;
+      errorRetryCount = 0;
+      return;
+    }
+
+    // Keep the legacy reconciliation utility loaded for diagnostics only. Product composition is
+    // never replaced from model-level authority on detail-open because one model number can have
+    // multiple packaging/variant products. The saved item options are the authority after import.
+    void reconcileModelOrderOptions(savedOptions, savedOptions);
+    const nextOptions = savedOptions;
     const missingOptionBarcodeNo = nextOptions.some(
-      (option) => !OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+      (option) =>
+        String(option?.barcode || "").trim() &&
+        !OPTION_BARCODE_NO_PATTERN.test(String(option?.optionBarcodeNo || "").trim()),
     );
     let displayOptions = nextOptions;
 
-    if (changed || missingOptionBarcodeNo) {
+    // This patch never adds or removes options. It only re-saves the exact saved list so the
+    // server-side option-barcode registry can attach a missing numeric optionBarcodeNo.
+    if (missingOptionBarcodeNo) {
       await requestJson(OPTIMIZED_API, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -124,9 +128,7 @@ async function reconcileCurrentItem(serial) {
           operation: "patch_item",
           itemId,
           patch: { orderOptions: nextOptions },
-          updatedBy: missingOptionBarcodeNo
-            ? "옵션바코드NO 원장 자동발급"
-            : "모델 B-code·옵션바코드NO 기준 자동정리",
+          updatedBy: "옵션바코드NO 원장 자동발급",
         }),
       });
       const refreshed = await readItem(itemId);
@@ -142,14 +144,14 @@ async function reconcileCurrentItem(serial) {
     renderChinaOptionPanel(displayOptions);
     const syncStatus = document.querySelector("#china-sync-status");
     if (syncStatus) {
-      syncStatus.textContent = `${displayOptions.length}개 연결 · B-code/옵션바코드NO 검증`;
+      syncStatus.textContent = `${displayOptions.length}개 저장 옵션 · 수동 확정`;
       syncStatus.dataset.tone = "success";
     }
     const assignedCount = displayOptions.filter((option) =>
-      OPTION_BARCODE_NO_PATTERN.test(String(option.optionBarcodeNo || "").trim()),
+      OPTION_BARCODE_NO_PATTERN.test(String(option?.optionBarcodeNo || "").trim()),
     ).length;
     setGuardStatus(
-      `발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합으로 유지합니다. ${modelNumber}의 B-code ${displayOptions.length}개와 옵션바코드NO ${assignedCount}개를 원장 기준으로 표시합니다. 동일 B-code는 동일 옵션바코드NO를 사용합니다.`,
+      `발주·입고 옵션가격과 B-code별 중국옵션은 동일한 B-code 집합으로 유지합니다. ${modelNumber}은 저장된 상품 옵션 ${displayOptions.length}개를 최종 기준으로 사용하며, 모델번호 전체 B-code를 자동 추가·복원하지 않습니다. ‘발주·입고 데이터 불러오기’를 눌렀을 때만 외부 옵션을 다시 가져옵니다. 옵션바코드NO ${assignedCount}/${displayOptions.length}개 확인.`,
       assignedCount === displayOptions.length ? "saved" : "error",
     );
     completedKey = key;
@@ -158,7 +160,7 @@ async function reconcileCurrentItem(serial) {
     setGuardStatus(
       error instanceof Error
         ? error.message
-        : "모델별 B-code·옵션바코드NO를 확인하지 못했습니다.",
+        : "저장된 상품 옵션을 확인하지 못했습니다.",
       "error",
     );
     scheduleErrorRetry(serial);
@@ -201,7 +203,7 @@ function ensureChinaOptionPanel() {
     panel.className = "optimized-china-order-map-wrap";
     panel.innerHTML = `
       <h4 class="optimized-china-order-map-title">B-code별 중국옵션</h4>
-      <p class="optimized-china-order-map-help">판매옵션과 B-code는 Product Master의 모델번호별 실제 연결값입니다. 주문링크는 모델의 1번 중국 상품링크를 공통 사용하고 실제 중국옵션명만 저장합니다.</p>
+      <p class="optimized-china-order-map-help">이 상품에 저장한 옵션/B-code가 최종 기준입니다. 발주·입고 데이터는 사용자가 불러오기 버튼을 눌렀을 때만 초안으로 가져오며, 저장 후에는 자동으로 옵션을 추가하거나 복원하지 않습니다.</p>
       <div id="optimized-china-order-map-list" class="optimized-china-order-map-list"></div>
       <div id="optimized-china-order-map-status" class="optimized-china-order-status"></div>`;
     section.append(panel);
