@@ -6,6 +6,7 @@ import {
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
 } from "@/lib/shoplingCanonicalPricePolicy";
 import { dispatchShoplingPriceModifyActions } from "@/lib/shoplingPriceModifyRunner";
+import { reconcileProductLaunchNormalizedAfterLegacyItems } from "@/lib/productLaunchTrackerNormalizedLegacyReconcile";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
@@ -372,10 +373,16 @@ async function applyResultToTrackerState(
     items,
     savedAt: completedAt,
   };
+  const identity = { userId: ownerId, email: ownerEmail };
   await writeProductLaunchState(
     config,
-    { userId: ownerId, email: ownerEmail },
+    identity,
     nextState,
+  );
+  await reconcileProductLaunchNormalizedAfterLegacyItems(
+    config,
+    identity,
+    [itemId],
   );
 }
 
