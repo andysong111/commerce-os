@@ -3,6 +3,13 @@ const tableHead = document.querySelector("#launch-table-head");
 const tableBody = document.querySelector("#launch-table-body");
 const suppressedTargets = new Set([tableHead, tableBody].filter(Boolean));
 
+try {
+  const workflowStages = await import("./workflow-stage-pruner.js");
+  workflowStages.installTwoStageProductLaunchWorkflow?.();
+} catch (error) {
+  console.error("Product launch two-stage workflow pruner failed", error);
+}
+
 window.MutationObserver = class TableOpsImportMutationObserver extends NativeMutationObserver {
   observe(target, options) {
     if (suppressedTargets.has(target)) return;
