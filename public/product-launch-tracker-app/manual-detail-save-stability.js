@@ -148,10 +148,14 @@ function buildPartialMutation(payload) {
   const domOptions = readDomOrderOptions();
   if (domOptions.length) {
     const sourceOptions = Array.isArray(item.orderOptions) ? item.orderOptions : [];
-    patch.orderOptions = domOptions.map((option, index) => ({
-      ...(isRecord(sourceOptions[index]) ? sourceOptions[index] : {}),
-      ...option,
-    }));
+    patch.orderOptions = domOptions.map((option, index) => {
+      const sourceOption = isRecord(sourceOptions[index]) ? sourceOptions[index] : {};
+      return {
+        ...sourceOption,
+        ...option,
+        id: String(sourceOption.id || option.id || `option-${index + 1}`).trim(),
+      };
+    });
   }
 
   const asset = normalizeManualDetailAsset(patch.detailPageAsset);
@@ -195,7 +199,7 @@ function readDomOrderOptions() {
     };
     const optionBarcodeNo = read("optionBarcodeNo");
     return {
-      id: String(row.dataset.optionId || `option-${index + 1}`).trim(),
+      id: String(row.dataset.optionId || "").trim(),
       optionName: read("optionName") || "옵션",
       saleOption: read("saleOption"),
       barcode: read("barcode").toUpperCase().replace(/\s+/g, ""),
