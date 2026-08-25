@@ -13,6 +13,10 @@ const page = await readFile(
   new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
   "utf8",
 );
+const standaloneEditor = await readFile(
+  new URL("../src/app/product-launch-editor/ProductLaunchStandaloneEditor.tsx", import.meta.url),
+  "utf8",
+);
 
 test("상품상세 수동 기준판매가·원가는 patch_item으로 그대로 저장된다", () => {
   const state = {
@@ -64,6 +68,15 @@ test("상품상세 수동 기준판매가·원가는 patch_item으로 그대로 
   assert.equal(option.unitCostKrw, 1330);
   assert.equal(option.barcode, "BEH2-1");
   assert.deepEqual(mutation.changedIds, ["launch-price-test"]);
+});
+
+test("독립 편집기에서 원가 입력은 기준판매가 x2를 기본값으로 만들고 판매가는 계속 수동 수정할 수 있다", () => {
+  assert.match(standaloneEditor, /function salePriceFromUnitCost\(value: unknown\)/);
+  assert.match(standaloneEditor, /return nonNegativeInteger\(value\) \* 2/);
+  assert.match(standaloneEditor, /baseSalePriceKrw: salePriceFromUnitCost\(unitCostKrw\)/);
+  assert.match(standaloneEditor, /onChange=\{\(event\) => updateUnitCost\(index, event\.target\.value\)\}/);
+  assert.match(standaloneEditor, /onChange=\{\(event\) => updateOption\(index, \{ baseSalePriceKrw:/);
+  assert.match(standaloneEditor, /자동 계산된 기준판매가는 언제든 직접 수정할 수 있습니다/);
 });
 
 test("수동 저장 안정화 계층은 화면 가격값을 강제 포함하고 서버 재조회 검증 후에만 성공한다", () => {
