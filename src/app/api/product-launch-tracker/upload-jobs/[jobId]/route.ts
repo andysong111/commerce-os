@@ -327,6 +327,25 @@ async function applyResultToTrackerState(
   if (itemIndex < 0) throw new Error("등록 결과를 반영할 출시 상품을 찾지 못했습니다.");
 
   const item = { ...items[itemIndex] };
+  const retrySelfCode = asRecord(asRecord(job.payload).retrySelfCode);
+  const retrySelfCodeBase = String(retrySelfCode.selfCodeBase ?? "")
+    .trim()
+    .toUpperCase();
+  if (retrySelfCodeBase) {
+    const previousSelfCodeBase = String(item.selfCodeBase ?? "")
+      .trim()
+      .toUpperCase();
+    item.selfCodeBase = retrySelfCodeBase;
+    item.shoplingSelfCodeRetry = {
+      ...retrySelfCode,
+      previousSelfCodeBase:
+        String(retrySelfCode.previousSelfCodeBase ?? "").trim().toUpperCase() ||
+        previousSelfCodeBase,
+      selfCodeBase: retrySelfCodeBase,
+      persistedAt: completedAt,
+    };
+  }
+
   const products = { ...asRecord(item.shoplingProducts) };
   for (const row of input.rows) {
     const channelKey =
