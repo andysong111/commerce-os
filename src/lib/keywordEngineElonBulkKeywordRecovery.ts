@@ -1,5 +1,6 @@
 import {
   compactKeywordElonKey,
+  keywordElonUtf8Bytes,
   normalizeKeywordElonText,
   type KeywordElonCandidate,
   type KeywordElonIdentity,
@@ -11,6 +12,7 @@ const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 35_000;
 const DEFAULT_MODEL = "gpt-5-mini";
 const TARGET_CANDIDATES = 18;
+const SEARCH_TERM_BYTE_LIMIT = 30;
 
 type OpenAiPayload = {
   output_text?: unknown;
@@ -52,7 +54,11 @@ function uniqueKeys(values: unknown[], limit = 40) {
   const seen = new Set<string>();
   for (const value of values) {
     const key = compactKeywordElonKey(value);
-    if (key.length < 2 || key.length > 18 || seen.has(key)) continue;
+    if (
+      key.length < 2
+      || keywordElonUtf8Bytes(key) > SEARCH_TERM_BYTE_LIMIT
+      || seen.has(key)
+    ) continue;
     seen.add(key);
     out.push(key);
     if (out.length >= limit) break;
@@ -131,6 +137,7 @@ async function aiSeeds(input: RecoveryInput) {
                 "원본에 없는 효능·인증·재질·규격·대상을 상상하지 않는다.",
                 "색상·수량·모델번호처럼 검색 가치가 낮은 변형어만으로 채우지 않는다.",
                 "각 검색어는 한국어 중심의 짧은 상품 검색어로 만들고 서로 의미가 겹치지 않게 한다.",
+                "각 검색어는 UTF-8 30bytes 이하가 되도록 짧게 만든다.",
                 `가능하면 ${TARGET_CANDIDATES}개의 서로 다른 후보를 반환한다.`,
               ].join("\n"),
             }],
