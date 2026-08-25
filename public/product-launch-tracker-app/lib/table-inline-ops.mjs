@@ -8,11 +8,7 @@ export const TABLE_COLUMN_DEFINITIONS = [
   { key: "options", label: "옵션" },
   { key: "readiness", label: "등록 준비" },
   { key: "detailPage", label: "상세페이지" },
-  { key: "priceKeyword", label: "가격·키워드" },
   { key: "shoplingUpload", label: "샵플링 업로드" },
-  { key: "marketRegistration", label: "마켓 등록" },
-  { key: "orderMapping", label: "주문 매핑" },
-  { key: "inventoryReflection", label: "재고 반영" },
   { key: "nextStage", label: "다음 작업" },
   { key: "manage", label: "관리" },
 ];
