@@ -6,7 +6,6 @@ import {
 } from "./lib/product-launch-flow-handoff.mjs";
 
 const TRACKER_STORAGE_KEY = "commerce-os-product-launch-tracker:v2";
-const TRACKER_STATE_ENDPOINT = "/api/product-launch-tracker/state";
 const previewDialog = document.querySelector("#preview-dialog");
 const detailForm = document.querySelector("#detail-form");
 const previewActions = previewDialog?.querySelector(".dialog-actions");
@@ -108,7 +107,6 @@ async function startHandoff(itemId, button) {
   const originalText = button.textContent;
   button.textContent = "연결 중...";
   try {
-    const trackerState = markPriceKeywordInProgress(itemId);
     localStorage.setItem(
       PRODUCT_LAUNCH_SIMPLE_SESSION_KEY,
       JSON.stringify(payload.session),
@@ -117,7 +115,8 @@ async function startHandoff(itemId, button) {
       PRODUCT_LAUNCH_TRACKER_HANDOFF_KEY,
       JSON.stringify(payload.handoff),
     );
-    if (trackerState) await saveTrackerState(trackerState);
+    // 가격·키워드는 더 이상 상품출시진행관리의 활성 단계가 아니다.
+    // 과거처럼 전체 tracker state를 PUT하지 않고 전용 플로우 세션만 넘긴다.
     window.location.assign("/product-launch-flow");
   } catch (error) {
     console.error(error);
@@ -129,44 +128,6 @@ async function startHandoff(itemId, button) {
         ? error.message
         : "상품출시플로우 연결을 시작하지 못했습니다.",
     );
-  }
-}
-
-function markPriceKeywordInProgress(itemId) {
-  const state = readTrackerState();
-  if (!state) return null;
-  const items = Array.isArray(state.items) ? state.items : [];
-  const item = items.find((candidate) => String(candidate?.id ?? "") === itemId);
-  if (!item) return state;
-
-  const now = new Date().toISOString();
-  item.stages = item.stages && typeof item.stages === "object" ? item.stages : {};
-  item.stages.priceKeyword = {
-    ...(item.stages.priceKeyword ?? {}),
-    status: "진행 중",
-    completedAt: null,
-    note: "등록된 goods_key 6개로 상품명·검색어 작업을 시작했습니다.",
-  };
-  item.updatedAt = now;
-  item.updatedBy = "상품출시플로우 연결";
-  state.savedAt = now;
-  localStorage.setItem(TRACKER_STORAGE_KEY, JSON.stringify(state));
-  return state;
-}
-
-async function saveTrackerState(state) {
-  const response = await fetch(TRACKER_STATE_ENDPOINT, {
-    method: "PUT",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ state }),
-    credentials: "same-origin",
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body?.ok !== true) {
-    throw new Error(body?.message || "진행관리 상태를 서버에 저장하지 못했습니다.");
   }
 }
 
