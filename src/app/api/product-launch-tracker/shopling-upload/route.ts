@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
-import { reconcileProductLaunchNormalizedAfterLegacyItems } from "@/lib/productLaunchTrackerNormalizedLegacyReconcile";
 import {
   needsShoplingSelfCodeRotation,
   rotateShoplingSelfCodeForRetry,
@@ -15,7 +14,6 @@ import {
   readProductLaunchState,
   readResponseJson,
   resolveProductLaunchIdentity,
-  writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
 
 const JOB_TABLE = "product_launch_upload_jobs";
@@ -52,7 +50,7 @@ export async function POST(request: NextRequest) {
       identity.value.userId,
     );
     const state = asRecord(stateRow?.state_payload);
-    let items = Array.isArray(state.items) ? [...state.items] : [];
+    const items = Array.isArray(state.items) ? [...state.items] : [];
     const itemIndex = items.findIndex(
       (candidate) => asRecord(candidate).id === input.itemId,
     );
@@ -86,39 +84,45 @@ export async function POST(request: NextRequest) {
     }
 
     let selfCodeRotation:
-      | { previousSelfCodeBase: string; selfCodeBase: string }
+      | {
+          previousSelfCodeBase: string;
+          selfCodeBase: string;
+          rotatedAt: string;
+        }
       | null = null;
     if (needsShoplingSelfCodeRotation(item)) {
+      const rotatedAt = new Date().toISOString();
       const rotated = rotateShoplingSelfCodeForRetry({
         item,
         allItems: items,
+        now: rotatedAt,
       });
       item = rotated.item;
-      items[itemIndex] = item;
       selfCodeRotation = {
         previousSelfCodeBase: rotated.previousSelfCodeBase,
         selfCodeBase: rotated.selfCodeBase,
+        rotatedAt,
       };
-      const rotatedAt = String(item.updatedAt ?? new Date().toISOString());
-      await writeProductLaunchState(
-        config.value,
-        identity.value,
-        { ...state, items, savedAt: rotatedAt },
-      );
-      await reconcileProductLaunchNormalizedAfterLegacyItems(
-        config.value,
-        identity.value,
-        [input.itemId],
-      );
     }
 
     const jobId = randomUUID();
     const requestId = `product-launch-${Date.now()}-${jobId.slice(0, 8)}`;
-    const payload = buildProductLaunchShoplingPayload(
+    const basePayload = buildProductLaunchShoplingPayload(
       item,
       state.policy,
       requestId,
     );
+    const payload = selfCodeRotation
+      ? {
+          ...basePayload,
+          retrySelfCode: {
+            previousSelfCodeBase: selfCodeRotation.previousSelfCodeBase,
+            selfCodeBase: selfCodeRotation.selfCodeBase,
+            reason: "SHOPLING_SELF_CODE_DUPLICATE",
+            rotatedAt: selfCodeRotation.rotatedAt,
+          },
+        }
+      : basePayload;
     const now = new Date().toISOString();
     const jobRow = {
       id: jobId,
@@ -174,7 +178,7 @@ export async function POST(request: NextRequest) {
       previousSelfCodeBase: selfCodeRotation?.previousSelfCodeBase ?? "",
       selfCodeBase: selfCodeRotation?.selfCodeBase ?? String(item.selfCodeBase ?? ""),
       message: selfCodeRotation
-        ? `샵플링 자사상품코드 중복을 감지해 ${selfCodeRotation.selfCodeBase}로 새로 발급한 뒤 6채널 재등록을 시작했습니다.`
+        ? `샵플링 자사상품코드 중복을 감지해 ${selfCodeRotation.selfCodeBase}로 새 코드를 사용해 6채널 재등록을 시작했습니다.`
         : "샵플링 6채널 등록 작업을 시작했습니다.",
     });
   } catch (error) {
