@@ -1,7 +1,7 @@
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
-  "20260815-bidirectional-purchase-metadata-v1-20260824-option-barcode-no-registry-v1-seo-bulk-cloud-v3-perf-seo-bulk-parallel-v1-detail-stability-v1-numeric-option-barcode-v1";
+  "20260815-bidirectional-purchase-metadata-v1-20260824-option-barcode-no-registry-v1-seo-bulk-cloud-v3-perf-seo-bulk-parallel-v1-detail-stability-v1-numeric-option-barcode-v1-two-stage-workflow-v1";
 
 export default async function ProductLaunchTrackerPage({
   searchParams,
@@ -23,7 +23,7 @@ export default async function ProductLaunchTrackerPage({
       <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
         <strong className="block text-sm">백그라운드 자동화 · 상품마스터와 분리 운영</strong>
         <span className="mt-1 block text-xs leading-5">
-          중앙 가격정책과 상세페이지 오류 판정은 등록·생성 서버 후처리에서 실행됩니다. 상품마스터 화면은 이를 확인하기 위해 전체 출시원장을 주기적으로 반복 조회하지 않습니다.
+          활성 출시 단계는 상세페이지와 샵플링 업로드 두 단계만 사용합니다. 가격정책·SEO·마켓 후속처리는 각 전용 엔진에서 독립적으로 실행됩니다.
         </span>
         <span className="mt-1 block text-xs opacity-80">
           상품마스터 조회와 자동화 실행을 분리해 한쪽의 지연이 다른 쪽의 화면 사용을 막지 않도록 운영합니다.
