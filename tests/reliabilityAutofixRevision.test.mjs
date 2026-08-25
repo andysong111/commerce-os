@@ -51,7 +51,7 @@ test("validator feedback is bounded and asks for a complete replacement proposal
   assert.match(parsed.revision_feedback.instruction, /완전한 대체 제안/);
 });
 
-test("worker retries exactly once only for the missing-regression-test validator error", async () => {
+test("worker retries exactly once for a missing or alias-incompatible regression harness", async () => {
   const [worker, route, openai] = await Promise.all([
     source("scripts/reliability-autofix-worker.mjs"),
     source("src/app/api/integrations/reliability/autofix/route.ts"),
@@ -59,12 +59,35 @@ test("worker retries exactly once only for the missing-regression-test validator
   ]);
 
   assert.match(worker, /class MissingExecutedRegressionTestError extends Error/);
-  assert.match(worker, /if \(!\(error instanceof MissingExecutedRegressionTestError\)\) throw error/);
-  assert.match(worker, /revision_feedback:REGRESSION_TEST_REVISION_FEEDBACK/);
+  assert.match(worker, /class IncompatibleExecutedRegressionTestError extends Error/);
+  assert.match(worker, /function directTypeScriptImports\(source\)/);
+  assert.match(worker, /function sourceUsesUnresolvedAlias\(path\)/);
+  assert.match(worker, /assertExecutedTestHarnessCompatible\(path, newText\)/);
+  assert.match(worker, /error instanceof MissingExecutedRegressionTestError/);
+  assert.match(worker, /error instanceof IncompatibleExecutedRegressionTestError/);
+  assert.match(worker, /INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK/);
+  assert.match(worker, /revision_feedback:revisionFeedback/);
   assert.match(worker, /preflightProposal\(edits\)/);
   assert.match(worker, /if \(!executedTestProposed\) throw new MissingExecutedRegressionTestError\(\)/);
   assert.doesNotMatch(worker, /for\s*\([^)]*revision/i);
   assert.doesNotMatch(worker, /while\s*\([^)]*revision/i);
   assert.match(route, /text\(body\.revision_feedback, 1_000\)/);
   assert.match(openai, /buildReliabilityAutofixPrompt\(job, files, revisionFeedback\)/);
+});
+
+test("alias harness guard covers the Shopling failure shape from the first closed-loop run", async () => {
+  const [worker, shoplingSource, existingHarness] = await Promise.all([
+    source("scripts/reliability-autofix-worker.mjs"),
+    source("src/lib/shopling/shoplingReadClient.ts"),
+    source("tests/shoplingReadClient.test.mjs"),
+  ]);
+
+  assert.match(shoplingSource, /from "@\/lib\/shopling\/simpleXml"/);
+  assert.match(shoplingSource, /from "@\/lib\/shopling\/shoplingTlsTransport"/);
+  assert.match(existingHarness, /loadShoplingClient/);
+  assert.match(existingHarness, /transpileModule/);
+  assert.match(existingHarness, /replace\(/);
+  assert.match(worker, /\.tsx\?/);
+  assert.match(worker, /targetPath\.startsWith\("src\/"\)/);
+  assert.match(worker, /provided existing.*transpile\/load|기존 실행 테스트.*transpile\/load/i);
 });
