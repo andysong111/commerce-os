@@ -14,6 +14,10 @@ const MISSING_REGRESSION_TEST_MESSAGE =
   "Source autofix must include a regression test that npm test actually executes";
 const REGRESSION_TEST_REVISION_FEEDBACK =
   "이전 제안은 서비스 소스 코드를 수정했지만 npm test가 실제 실행하는 회귀 테스트를 포함하지 않았습니다. 같은 문제를 재현하고 수정 후 통과하는 실행 가능한 회귀 테스트를 반드시 포함한 완전한 대체 제안을 작성하세요. 위험 경계나 수정 범위를 넓히지 마세요.";
+const INCOMPATIBLE_TEST_HARNESS_MESSAGE =
+  "Regression test directly imports a TypeScript source that uses unresolved @/ aliases";
+const INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK =
+  "이전 제안의 회귀 테스트가 npm test의 Node 실행환경에서 직접 로드할 수 없는 TypeScript 소스를 import했습니다. 특히 대상 소스가 @/ 경로 별칭을 사용하면 새 .mjs/.ts 테스트에서 그 소스를 직접 import하지 마세요. 제공된 기존 실행 테스트 중 같은 소스를 이미 transpile/load하는 테스트를 보강하고, 그 테스트의 기존 fixture 형식과 helper를 그대로 재사용한 완전한 대체 제안을 작성하세요. 위험 경계나 수정 범위는 넓히지 마세요.";
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -40,6 +44,13 @@ class MissingExecutedRegressionTestError extends Error {
   constructor() {
     super(MISSING_REGRESSION_TEST_MESSAGE);
     this.name = "MissingExecutedRegressionTestError";
+  }
+}
+
+class IncompatibleExecutedRegressionTestError extends Error {
+  constructor(path, targetPath) {
+    super(`${INCOMPATIBLE_TEST_HARNESS_MESSAGE}: ${path} -> ${targetPath}`);
+    this.name = "IncompatibleExecutedRegressionTestError";
   }
 }
 
@@ -119,6 +130,29 @@ function isExecutedTestPath(path){
   if(testScript.includes("vitest run") && /\.test\.[cm]?[jt]sx?$/i.test(path)) return true;
   return testScript.includes(lower) || testScript.includes(basename(lower));
 }
+function directTypeScriptImports(source) {
+  const imports = new Set();
+  const pattern = /(?:from\s+|import\s*\(\s*|import\s+)["']([^"']+\.tsx?)["']/g;
+  for (const match of String(source || "").matchAll(pattern)) imports.add(match[1]);
+  return [...imports];
+}
+function sourceUsesUnresolvedAlias(path) {
+  const absolute = resolve(ROOT, path);
+  if (!absolute.startsWith(`${resolve(ROOT)}/`) || !existsSync(absolute)) return false;
+  const source = readFileSync(absolute, "utf8");
+  return /(?:from\s+["']@\/|import\s*\(\s*["']@\/|^\s*import\s+["']@\/)/m.test(source);
+}
+function assertExecutedTestHarnessCompatible(path, source) {
+  if (!isExecutedTestPath(path)) return;
+  for (const specifier of directTypeScriptImports(source)) {
+    if (!specifier.startsWith(".")) continue;
+    const targetAbsolute = resolve(ROOT, dirname(path), specifier);
+    if (!targetAbsolute.startsWith(`${resolve(ROOT)}/`)) continue;
+    const targetPath = relative(ROOT, targetAbsolute).replaceAll("\\", "/");
+    if (!targetPath.startsWith("src/") || !sourceUsesUnresolvedAlias(targetPath)) continue;
+    throw new IncompatibleExecutedRegressionTestError(path, targetPath);
+  }
+}
 function proposalPath(edit) {
   return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
@@ -131,6 +165,7 @@ function preflightProposal(edits) {
     if (!oldText && (!isExecutedTestPath(path) || existsSync(resolve(ROOT, path)))) {
       throw new Error(`New files must be executable regression tests: ${path}`);
     }
+    assertExecutedTestHarnessCompatible(path, newText);
   }
   const sourceProposed = edits.some((edit) => {
     const path = proposalPath(edit);
@@ -229,12 +264,19 @@ async function generate(){
   try {
     changed=applyProposal(proposal,context);
   } catch (error) {
-    if (!(error instanceof MissingExecutedRegressionTestError)) throw error;
+    let revisionFeedback;
+    if (error instanceof MissingExecutedRegressionTestError) {
+      revisionFeedback=REGRESSION_TEST_REVISION_FEEDBACK;
+    } else if (error instanceof IncompatibleExecutedRegressionTestError) {
+      revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}`;
+    } else {
+      throw error;
+    }
     payload=await api({
       action:"generate",
       job_id:job.job_id,
       files:context,
-      revision_feedback:REGRESSION_TEST_REVISION_FEEDBACK,
+      revision_feedback:revisionFeedback,
     });
     proposal=payload.proposal;
     changed=applyProposal(proposal,context);
