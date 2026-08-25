@@ -5,6 +5,7 @@ import {
   composeKeywordElonBulkFinal,
   generateKeywordElonBulkFinal,
 } from "@/lib/keywordEngineElonBulkFinal";
+import { generateSafeBulkKeywordSupplements } from "@/lib/keywordEngineElonBulkKeywordRecovery";
 import type {
   KeywordElonCandidate,
   KeywordElonDiscovery,
@@ -120,6 +121,7 @@ function readiness() {
     oneClickToStep4Available: true,
     bulkParallelAvailable: true,
     bulkSegmentedAvailable: true,
+    bulkAutoRecoveryAvailable: true,
   };
 }
 
@@ -154,19 +156,42 @@ export async function POST(request: NextRequest) {
     }
     if (action === "compose_bulk_final") {
       const item = bulkItemFrom(body.item ?? body);
-      const mode = body.collectionMode === "1688_server" ? "1688_server" : "tracker_fallback";
-      const result = composeKeywordElonBulkFinal({
+      const source = sourceFrom(body.source);
+      const identity = identityFrom(body.identity);
+      const customBlockedTerms = textArray(body.customBlockedTerms, 120);
+      const composeInput = {
         ...item,
-        customBlockedTerms: textArray(body.customBlockedTerms, 120),
-        source: sourceFrom(body.source),
-        collectionMode: mode,
-        identity: identityFrom(body.identity),
+        customBlockedTerms,
+        source,
+        collectionMode:
+          body.collectionMode === "1688_server"
+            ? ("1688_server" as const)
+            : ("tracker_fallback" as const),
+        identity,
         candidates: candidatesFrom(body.candidates),
         allowedKeys: textArray(body.allowedKeys, 120),
         blockedKeys: textArray(body.blockedKeys, 120),
         finalMaterialCount: Math.max(0, Math.floor(Number(body.finalMaterialCount) || 0)),
         titleResult: titleResultFrom(body.titleResult),
-      });
+      };
+
+      let result;
+      try {
+        result = composeKeywordElonBulkFinal(composeInput);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/FINAL 검색어가 10개가 아닙니다/.test(message)) throw error;
+        const supplementalSearchKeywords = await generateSafeBulkKeywordSupplements({
+          identity,
+          source,
+          productName: item.productName,
+          customBlockedTerms,
+        });
+        result = composeKeywordElonBulkFinal({
+          ...composeInput,
+          supplementalSearchKeywords,
+        });
+      }
       return NextResponse.json({ ok: true, action, result });
     }
     if (action === "generate_bulk_final") {
