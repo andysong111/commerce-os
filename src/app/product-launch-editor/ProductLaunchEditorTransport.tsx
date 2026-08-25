@@ -2,7 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
-const LEGACY_EDITOR_API = "/api/product-launch-tracker/normalized-optimized";
+const EDITOR_API = "/api/product-launch-tracker/normalized-optimized";
+const AUTHORITATIVE_LEGACY_API = "/api/product-launch-tracker/optimized";
 const DIRECT_ITEM_API = "/api/product-launch-tracker/item-editor";
 
 export default function ProductLaunchEditorTransport({
@@ -17,27 +18,16 @@ export default function ProductLaunchEditorTransport({
     let directReadback = false;
 
     const routedFetch: typeof window.fetch = async (input, init) => {
-      const isEditorApiString =
-        typeof input === "string" && input.startsWith(LEGACY_EDITOR_API);
-      const isEditorApiUrl =
-        input instanceof URL &&
-        input.origin === window.location.origin &&
-        input.pathname === LEGACY_EDITOR_API;
-      if (!isEditorApiString && !isEditorApiUrl) return originalFetch(input, init);
+      const url = requestUrl(input);
+      if (!url || url.pathname !== EDITOR_API) return originalFetch(input, init);
 
-      const method = String(init?.method || "GET").toUpperCase();
-      if (method !== "PATCH" && !directReadback) {
-        return originalFetch(input, init);
-      }
-
-      const routed =
-        typeof input === "string"
-          ? `${DIRECT_ITEM_API}${input.slice(LEGACY_EDITOR_API.length)}`
-          : (() => {
-              const next = new URL(input.toString());
-              next.pathname = DIRECT_ITEM_API;
-              return next;
-            })();
+      const method = String(
+        init?.method || (input instanceof Request ? input.method : "GET"),
+      ).toUpperCase();
+      const targetApi = method === "PATCH" || directReadback
+        ? DIRECT_ITEM_API
+        : AUTHORITATIVE_LEGACY_API;
+      const routed = routeEditorRequest(input, url, targetApi);
       const response = await originalFetch(routed, init);
       if (method === "PATCH" && response.ok) directReadback = true;
       return response;
@@ -60,4 +50,27 @@ export default function ProductLaunchEditorTransport({
   }
 
   return children;
+}
+
+function requestUrl(input: RequestInfo | URL) {
+  try {
+    if (typeof input === "string") return new URL(input, window.location.origin);
+    if (input instanceof URL) return new URL(input.toString());
+    if (input instanceof Request) return new URL(input.url);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function routeEditorRequest(
+  input: RequestInfo | URL,
+  url: URL,
+  targetPath: string,
+): RequestInfo | URL {
+  const nextUrl = new URL(url.toString());
+  nextUrl.pathname = targetPath;
+  if (input instanceof Request) return new Request(nextUrl, input);
+  if (input instanceof URL) return nextUrl;
+  return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
 }
