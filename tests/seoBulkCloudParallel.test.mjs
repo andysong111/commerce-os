@@ -78,13 +78,17 @@ test("검색어 부족은 AI+결정형 후보를 STEP4 안전필터에 통과시
   assert.match(recovery, /deterministicSeeds/);
 });
 
-test("aborted/failed fetch와 5xx는 키워드 API에 한해서 자동 재시도한다", async () => {
+test("aborted/failed fetch와 일시적 5xx는 키워드 API에서만 제한 병렬로 자동 재시도한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const recovery = await source("src/app/seo-bulk-cloud/SeoBulkFetchRecovery.tsx");
   assert.match(page, /SeoBulkFetchRecovery/);
   assert.match(recovery, /\/api\/keyword-engine-elon-lab/);
-  assert.match(recovery, /RETRY_DELAYS_MS = \[0, 700, 1_800, 4_200\]/);
-  assert.match(recovery, /408, 425, 429, 500, 502, 503, 504/);
+  assert.match(recovery, /RETRY_DELAYS_MS = \[0, 800, 2_000, 4_500, 8_000, 14_000, 22_000\]/);
+  assert.match(recovery, /408, 425, 429, 502, 503, 504/);
+  assert.match(recovery, /MAX_CONCURRENT_KEYWORD_REQUESTS = 2/);
+  assert.match(recovery, /TRANSIENT_500_PATTERN/);
+  assert.match(recovery, /operation was aborted/);
+  assert.match(recovery, /isRetryableResponse/);
   assert.match(recovery, /commerceSeoBulkRecoveringFetch/);
   assert.doesNotMatch(recovery, /shopling-upload/);
 });
