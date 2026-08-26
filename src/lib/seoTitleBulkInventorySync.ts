@@ -8,6 +8,10 @@ import {
   type SeoTitleProductGroup,
 } from "@/lib/seoTitleInventoryGenerator";
 import {
+  fillSeoTitleInventoryShortages,
+  type SeoTitleFallbackCandidate,
+} from "@/lib/seoTitleInventoryFallback";
+import {
   findSeoTitleLedgerByKey,
   insertSeoTitleInventory,
   listSeoTitleInventoryFingerprints,
@@ -19,10 +23,7 @@ import {
   keywordElonSeoCanonical,
   keywordElonSeoUtf8Bytes,
 } from "@/lib/keywordEngineElonLabSeoOutput";
-import {
-  parse1688OfferId,
-  validate1688Url,
-} from "@/lib/keywordEngineElonLabV2";
+import { parse1688OfferId } from "@/lib/keywordEngineElonLabV2";
 import { readProductLaunchNormalizedItem } from "@/lib/productLaunchTrackerNormalizedStore";
 import {
   readProductLaunchError,
@@ -61,6 +62,7 @@ export type SeoBulkInventorySyncResult = {
   currentAssignmentCount?: number;
   insertedInventoryCount?: number;
   availableCount?: number;
+  inventoryCount?: number;
   status?: string;
 };
 
@@ -144,18 +146,47 @@ function neutralKeywordMaterials(keywords: string[]): SeoTitleKeywordMaterial[] 
   }));
 }
 
-function currentGroupCounts(
+function groupCounts(
   rows: Array<{ product_group: string; status: string }>,
+  statuses: string[],
 ) {
+  const allowedStatuses = new Set(statuses);
   const counts = Object.fromEntries(GROUPS.map((group) => [group, 0])) as Record<
     SeoTitleProductGroup,
     number
   >;
   for (const row of rows) {
-    if (!["available", "reserved"].includes(row.status)) continue;
+    if (!allowedStatuses.has(row.status)) continue;
     if (isGroup(row.product_group)) counts[row.product_group] += 1;
   }
   return counts;
+}
+
+function verifiedExtraMaterials(
+  item: UnknownRecord,
+  seoFinal: UnknownRecord,
+  assignments: CurrentAssignment[],
+) {
+  const options = Array.isArray(item.orderOptions) ? item.orderOptions.map(record) : [];
+  return stringArray([
+    text(item.productName),
+    text(item.shoplingCategory),
+    ...options.flatMap((option) => [
+      text(option.saleOption),
+      text(option.chinaOption),
+      text(option.optionName),
+    ]),
+    ...Object.values(record(seoFinal.groupProductNames)).map(text),
+    ...assignments.map((row) => row.title),
+  ], 160);
+}
+
+function sourceMode(seoFinal: UnknownRecord, sourceUrl: string) {
+  const source = text(seoFinal.source);
+  if (source.endsWith(":legacy_internal")) return "legacy_internal";
+  if (source.endsWith(":tracker_fallback")) return "tracker_fallback";
+  if (source.endsWith(":1688_server")) return "1688_server";
+  return sourceUrl ? "1688_or_legacy_existing" : "legacy_internal";
 }
 
 async function upsertCurrentAssignments(
@@ -188,6 +219,7 @@ async function upsertCurrentAssignments(
       currentAssignment: true,
       marketName: row.marketName,
       pendingRegistration: !fullGoodsKeys,
+      qualityTier: "A",
     },
   }));
   const result: UnknownRecord[] = [];
@@ -237,7 +269,7 @@ export async function syncSeoTitleBulkInventoryForItem(
   const modelName = text(seoFinal.productName);
   const searchKeywords = stringArray(seoFinal.searchKeywords, 10);
   const mallTitles = Array.isArray(seoFinal.mallTitles) ? seoFinal.mallTitles : [];
-  if (!modelName || searchKeywords.length !== 10 || !mallTitles.length) {
+  if (!modelName || searchKeywords.length !== 10 || mallTitles.length !== 29) {
     return {
       itemId: normalizedId,
       synced: false,
@@ -256,21 +288,13 @@ export async function syncSeoTitleBulkInventoryForItem(
 
   const links = stringArray(item.chinaProductLinks, 5);
   const sourceUrl = text(seoFinal.sourceUrl) || links[0] || "";
-  if (!validate1688Url(sourceUrl)) {
-    return {
-      itemId: normalizedId,
-      synced: false,
-      reason: "source_url_not_ready",
-      modelNumber: text(item.modelNumber),
-    };
-  }
-
   const now = new Date().toISOString();
   const goodsKeys = goodsKeysByGroup(item);
   const fullGoodsKeys = GROUPS.every((group) => Boolean(goodsKeys[group]));
   const assignments = currentAssignments(seoFinal, goodsKeys);
   const ledgerKey = `launch:${normalizedId}`;
   const existingLedger = await findSeoTitleLedgerByKey(context, ledgerKey);
+  const extraMaterials = verifiedExtraMaterials(item, seoFinal, assignments);
   const ledger = await upsertSeoTitleLedger(context, {
     ledger_key: ledgerKey,
     launch_item_id: normalizedId,
@@ -284,18 +308,27 @@ export async function syncSeoTitleBulkInventoryForItem(
     common_search_line: searchKeywords.join(","),
     source_payload: {
       source: "seo-bulk-cloud",
+      sourceMode: sourceMode(seoFinal, sourceUrl),
       seoFinal,
       launchContext: {
         itemId: normalizedId,
         trackerRowNumber: Number(item.trackerRowNumber) || null,
         modelNumber: text(item.modelNumber),
       },
+      verifiedExtraMaterials: extraMaterials,
       inventoryPolicy: {
         currentFinalTitlesAreConsumed: fullGoodsKeys,
         targetRounds: SEO_TITLE_DEFAULT_ROUNDS,
+        fixedTargetRequired: true,
+        fallbackOrder: [
+          "semantic_intent",
+          "fact_combination",
+          "synonym_structure",
+          "verified_word_order",
+        ],
       },
     },
-    engine_revision: "seo-bulk-cloud-inventory-v2",
+    engine_revision: "seo-bulk-cloud-inventory-v3-fixed145",
     target_inventory_count: SEO_TITLE_FULL_MARKET_SIZE * SEO_TITLE_DEFAULT_ROUNDS,
     status: "generating",
     last_generated_at: now,
@@ -313,23 +346,31 @@ export async function syncSeoTitleBulkInventoryForItem(
     context,
     ledger.ledger_id,
   );
-  const counts = currentGroupCounts(fingerprints);
+  const counts = groupCounts(
+    fingerprints,
+    ["available", "reserved", "used", "review"],
+  );
   const generationBatch = Math.max(
     0,
     ...fingerprints.map((row) => Number(row.generation_batch) || 0),
   ) + 1;
-  const extraMaterials = [
-    ...Object.values(record(seoFinal.groupProductNames)).map(text),
-    ...assignments.map((row) => row.title),
-  ].filter(Boolean);
+  const keywordMaterials = neutralKeywordMaterials(searchKeywords);
 
   const generation = generateSeoTitleInventory({
     modelName,
-    searchKeywords: neutralKeywordMaterials(searchKeywords),
+    searchKeywords: keywordMaterials,
     extraMaterials,
     rounds: SEO_TITLE_DEFAULT_ROUNDS,
     existingTitleFingerprints: fingerprints.map((row) => row.title_fingerprint),
     existingSemanticFingerprints: fingerprints.map((row) => row.semantic_fingerprint),
+  });
+  const guaranteed = fillSeoTitleInventoryShortages({
+    modelName,
+    searchKeywords: keywordMaterials,
+    extraMaterials,
+    rounds: SEO_TITLE_DEFAULT_ROUNDS,
+    baseCandidates: generation.candidates as unknown as SeoTitleFallbackCandidate[],
+    existingTitleFingerprints: fingerprints.map((row) => row.title_fingerprint),
   });
 
   const missingByGroup = Object.fromEntries(
@@ -342,7 +383,7 @@ export async function syncSeoTitleBulkInventoryForItem(
     ]),
   ) as Record<SeoTitleProductGroup, number>;
   const selectedByGroup = new Map<SeoTitleProductGroup, number>();
-  const selected = generation.candidates.filter((candidate) => {
+  const selected = guaranteed.candidates.filter((candidate) => {
     const used = selectedByGroup.get(candidate.productGroup) ?? 0;
     if (used >= missingByGroup[candidate.productGroup]) return false;
     selectedByGroup.set(candidate.productGroup, used + 1);
@@ -362,7 +403,12 @@ export async function syncSeoTitleBulkInventoryForItem(
       status: "available",
       metadata: {
         ...candidate.metadata,
-        source: "seo-bulk-cloud-inventory-v2",
+        source: "seo-bulk-cloud-inventory-v3-fixed145",
+        qualityTier: candidate.metadata.strategy.includes("_D_")
+          ? "D"
+          : candidate.metadata.strategy.includes("_C_")
+            ? "C"
+            : "B",
       },
     })),
   );
@@ -371,7 +417,14 @@ export async function syncSeoTitleBulkInventoryForItem(
     context,
     ledger.ledger_id,
   );
-  const finalCounts = currentGroupCounts(finalFingerprints);
+  const finalCounts = groupCounts(
+    finalFingerprints,
+    ["available", "reserved", "used", "review"],
+  );
+  const availableCounts = groupCounts(
+    finalFingerprints,
+    ["available", "reserved"],
+  );
   const shortages = GROUPS.filter(
     (group) =>
       finalCounts[group] <
@@ -392,8 +445,13 @@ export async function syncSeoTitleBulkInventoryForItem(
     fullGoodsKeys,
     currentAssignmentCount: assignments.length,
     insertedInventoryCount: inserted.length,
-    availableCount: GROUPS.reduce((sum, group) => sum + finalCounts[group], 0),
+    availableCount: GROUPS.reduce((sum, group) => sum + availableCounts[group], 0),
+    inventoryCount: GROUPS.reduce((sum, group) => sum + finalCounts[group], 0),
     status,
-    reason: existingLedger ? "updated" : "created",
+    reason: shortages.length
+      ? `fixed_145_shortage:${shortages.join(",")}`
+      : existingLedger
+        ? "updated"
+        : "created",
   };
 }
