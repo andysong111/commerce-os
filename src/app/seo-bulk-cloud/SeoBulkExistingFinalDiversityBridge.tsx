@@ -196,7 +196,13 @@ async function repairItem(itemId: string) {
     identity: identityForItem(item, seoFinal),
     searchKeywords: searchDetails(searchKeywords),
   });
-  const repaired = diversity.rows.map(({ modelPosition: _modelPosition, ...row }) => row);
+  const repaired: MallTitle[] = diversity.rows.map((row) => ({
+    productGroup: row.productGroup,
+    marketName: row.marketName,
+    mallKey: row.mallKey,
+    accountIdLabel: row.accountIdLabel,
+    title: row.title,
+  }));
   if (!diversity.adjustedCount || sameTitles(mallTitles, repaired)) return false;
 
   const groupTitles: Record<string, string> = {};
