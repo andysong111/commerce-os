@@ -53,10 +53,8 @@ function sourceUrlFromItem(item) {
 function normalizedItemFields(raw) {
   const item = record(raw);
   const itemPayload = record(item.item_payload ?? item.itemPayload);
-  const id = text(item.id || item.item_id || itemPayload.id || itemPayload.itemId);
-  const sourceUrl = sourceUrlFromItem({ ...itemPayload, ...item });
   return {
-    id,
+    id: text(item.id || item.item_id || itemPayload.id || itemPayload.itemId),
     trackerRowNumber: Number(
       item.trackerRowNumber ??
       item.tracker_row_number ??
@@ -65,8 +63,7 @@ function normalizedItemFields(raw) {
     ) || 0,
     modelNumber: text(item.modelNumber || item.model_number || itemPayload.modelNumber),
     productName: text(item.productName || item.product_name || itemPayload.productName),
-    sourceUrl: sourceUrl || `legacy://product-launch/${encodeURIComponent(id || "unknown")}`,
-    sourceMode: sourceUrl ? "1688_full" : "legacy_fallback",
+    sourceUrl: sourceUrlFromItem({ ...itemPayload, ...item }),
   };
 }
 
@@ -159,6 +156,17 @@ async function openBulkCloud(button) {
   button.textContent = `${selectedIds.length}개 상품 확인 중…`;
   try {
     const items = await mapLimit(selectedIds, 8, readSelectedItem);
+    const missingLinks = items.filter((item) => !item.sourceUrl);
+    if (missingLinks.length) {
+      const labels = missingLinks
+        .slice(0, 5)
+        .map((item) => item.modelNumber || item.productName || item.id)
+        .join(", ");
+      throw new Error(
+        `${missingLinks.length}개 상품에 1688 링크가 없습니다: ${labels}${missingLinks.length > 5 ? " 외" : ""}`,
+      );
+    }
+
     const previousBatch = readPendingBatch();
     const mergedItems = mergePendingItems(previousBatch?.items, items);
     if (mergedItems.length > MAX_BATCH_ITEMS) {
@@ -171,14 +179,12 @@ async function openBulkCloud(button) {
       text(previousBatch?.batchId) ||
       globalThis.crypto?.randomUUID?.() ||
       `seo-bulk-${Date.now()}`;
-    const legacyCount = mergedItems.filter((item) => item.sourceMode === "legacy_fallback").length;
     const batch = {
-      version: 2,
+      version: 1,
       batchId,
       createdAt: text(previousBatch?.createdAt) || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       autoStart: true,
-      legacyFallbackCount: legacyCount,
       items: mergedItems,
     };
     window.localStorage.setItem(SEO_BULK_BATCH_STORAGE_KEY, JSON.stringify(batch));

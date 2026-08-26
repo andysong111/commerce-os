@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import {
+  generateSeoTitleInventory,
   SEO_TITLE_DEFAULT_ROUNDS,
   SEO_TITLE_FULL_MARKET_SIZE,
   SEO_TITLE_GROUP_QUOTAS,
@@ -7,7 +8,6 @@ import {
   type SeoTitleKeywordMaterial,
   type SeoTitleProductGroup,
 } from "@/lib/seoTitleInventoryGenerator";
-import { generateGuaranteedSeoTitleInventory } from "@/lib/seoTitleInventoryGuaranteed";
 import {
   findSeoTitleLedgerByKey,
   insertSeoTitleInventory,
@@ -106,17 +106,13 @@ function resolveLedgerKey(input: {
   if (input.launchItemId) return `launch:${input.launchItemId}`;
   if (input.offerId) return `offer:${input.offerId}`;
   if (input.modelNumber) return `model:${input.modelNumber.toLocaleLowerCase()}`;
-  if (input.sourceUrl) return `url:${input.sourceUrl}`;
-  throw new Error("상품명 재고를 식별할 출시상품 ID 또는 모델번호가 필요합니다.");
+  return `url:${input.sourceUrl}`;
 }
 
 function extraMaterials(sourcePayload: UnknownRecord, seoOutput: UnknownRecord) {
   const identity = record(sourcePayload.identity);
   const candidates = Array.isArray(sourcePayload.candidates)
     ? sourcePayload.candidates.map(record)
-    : [];
-  const factPool = Array.isArray(sourcePayload.factPool)
-    ? sourcePayload.factPool.map(record)
     : [];
   const allowedKeys = new Set(
     stringArray(sourcePayload.allowedKeys).map((value) =>
@@ -134,25 +130,19 @@ function extraMaterials(sourcePayload: UnknownRecord, seoOutput: UnknownRecord) 
     .map((candidate) =>
       text(candidate.searchKeyword || candidate.searchKey || candidate.keyword),
     );
-  const factTerms = factPool
-    .filter((fact) => fact.titleAllowed === true && ["A", "B"].includes(text(fact.confidence)))
-    .map((fact) => text(fact.value));
 
   return stringArray(
     [
       ...candidateTerms,
-      ...factTerms,
       ...stringArray(seoOutput.commonSearchKeywords, 10),
       identity.identityAnchor,
-      identity.koreanProductIdentity,
-      identity.coreProduct,
       ...stringArray(identity.primarySeeds, 30),
       ...stringArray(identity.conditionalSeeds, 30),
       ...stringArray(identity.functionModifiers, 30),
       ...stringArray(identity.designShapeModifiers, 30),
       ...stringArray(identity.specAttributes, 30),
     ],
-    160,
+    120,
   );
 }
 
@@ -174,7 +164,12 @@ function groupCounts(
     Object.keys(SEO_TITLE_GROUP_QUOTAS).map((group) => [group, 0]),
   ) as Record<SeoTitleProductGroup, number>;
   for (const row of rows) {
-    if (!["available", "reserved", "review", "used"].includes(row.status)) continue;
+    if (
+      row.status !== "available" &&
+      row.status !== "reserved"
+    ) {
+      continue;
+    }
     if (row.product_group in counts) {
       counts[row.product_group as SeoTitleProductGroup] += 1;
     }
@@ -239,15 +234,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const rawSourceUrl = text(input.sourceUrl);
-    const sourceUrl = validate1688Url(rawSourceUrl) ? rawSourceUrl : "";
-    const sourceMode = sourceUrl ? "1688_full" : "legacy_fallback";
+    const sourceUrl = text(input.sourceUrl);
+    if (!validate1688Url(sourceUrl)) {
+      throw new Error("1688 상품 링크가 필요합니다.");
+    }
     const seoOutput = record(input.seoOutput);
     const sourcePayload = record(input.sourcePayload);
     const modelName = text(seoOutput.modelName);
-    if (!modelName) throw new Error("상품 정체성을 나타내는 모델명이 필요합니다.");
+    if (!modelName) throw new Error("링크 기반 모델명이 필요합니다.");
     if (keywordElonSeoUtf8Bytes(modelName) > 36) {
-      throw new Error("모델명은 36bytes 이하여야 합니다.");
+      throw new Error("링크 기반 모델명은 36bytes 이하여야 합니다.");
     }
     const commonSearchKeywords = validateSearchKeywords(
       seoOutput.commonSearchKeywords,
@@ -263,7 +259,8 @@ export async function POST(request: NextRequest) {
     const launchItemId = text(input.launchItemId);
     const trackerRowNumber = integer(input.trackerRowNumber, 0) || null;
     const modelNumber = text(input.modelNumber);
-    const offerId = text(input.offerId) || (sourceUrl ? parse1688OfferId(sourceUrl) : "");
+    const offerId =
+      text(input.offerId) || parse1688OfferId(sourceUrl);
     const rounds = Math.max(
       1,
       Math.min(
@@ -277,22 +274,20 @@ export async function POST(request: NextRequest) {
       modelNumber,
       sourceUrl,
     });
-    const ledgerSourceUrl = sourceUrl || `legacy://seo-ledger/${encodeURIComponent(ledgerKey)}`;
     const existingLedger = await findSeoTitleLedgerByKey(context, ledgerKey);
     const saved = await upsertSeoTitleLedger(context, {
       ledger_key: ledgerKey,
       launch_item_id: launchItemId,
       tracker_row_number: trackerRowNumber,
       model_number: modelNumber,
-      source_url: ledgerSourceUrl,
+      source_url: sourceUrl,
       offer_id: offerId,
       model_name: modelName,
-      model_name_source: text(seoOutput.modelNameSource) || (sourceMode === "1688_full" ? "seo_final" : "legacy_fallback"),
+      model_name_source: text(seoOutput.modelNameSource),
       common_search_keywords: commonSearchKeywords,
       common_search_line: commonSearchLine,
       source_payload: {
         ...sourcePayload,
-        sourceMode,
         seoOutput: {
           ...seoOutput,
           modelName,
@@ -305,13 +300,8 @@ export async function POST(request: NextRequest) {
           trackerRowNumber,
           modelNumber,
         },
-        inventoryPolicy: {
-          fixedTargetCount: SEO_TITLE_FULL_MARKET_SIZE * rounds,
-          countAllNonRejectedTitlesTowardTarget: true,
-          fallbackOrder: ["semantic", "fact_combination", "synonym_structure", "word_order"],
-        },
       },
-      engine_revision: "seo-title-inventory-v3",
+      engine_revision: "seo-title-inventory-v1",
       target_inventory_count: SEO_TITLE_FULL_MARKET_SIZE * rounds,
       status: "generating",
       last_generated_at: new Date().toISOString(),
@@ -327,7 +317,7 @@ export async function POST(request: NextRequest) {
       0,
       ...fingerprints.map((row) => integer(row.generation_batch, 0)),
     ) + 1;
-    const generation = generateGuaranteedSeoTitleInventory({
+    const generation = generateSeoTitleInventory({
       modelName,
       searchKeywords: searchKeywordDetails,
       extraMaterials: extraMaterials(sourcePayload, seoOutput),
@@ -367,24 +357,16 @@ export async function POST(request: NextRequest) {
         quality_score: candidate.qualityScore,
         source_materials: candidate.sourceMaterials,
         status: "available",
-        metadata: {
-          ...candidate.metadata,
-          sourceMode,
-          source: "seo-title-inventory-v3",
-        },
+        metadata: candidate.metadata,
       })),
     );
 
-    const finalFingerprints = await listSeoTitleInventoryFingerprints(context, saved.ledger_id);
-    const finalByGroup = groupCounts(finalFingerprints);
-    const shortageGroups = (Object.keys(finalByGroup) as SeoTitleProductGroup[])
-      .filter((group) => finalByGroup[group] < SEO_TITLE_GROUP_QUOTAS[group] * rounds);
-    const inventoryCount = Object.values(finalByGroup).reduce((sum, value) => sum + value, 0);
+    const shortageGroups = (Object.keys(missingByGroup) as SeoTitleProductGroup[])
+      .filter((group) =>
+        (selectedByGroup.get(group) ?? 0) < missingByGroup[group],
+      );
     await patchSeoTitleLedger(context, saved.ledger_id, {
-      status:
-        shortageGroups.length || inventoryCount !== SEO_TITLE_FULL_MARKET_SIZE * rounds
-          ? "needs_review"
-          : "ready",
+      status: shortageGroups.length ? "needs_review" : "ready",
       target_inventory_count: SEO_TITLE_FULL_MARKET_SIZE * rounds,
       last_generated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -396,14 +378,10 @@ export async function POST(request: NextRequest) {
       action,
       created: !existingLedger,
       ledgerId: saved.ledger_id,
-      sourceMode,
       insertedCount: inserted.length,
-      inventoryCount,
       requestedRounds: rounds,
       missingByGroup,
       shortageGroups,
-      gradeCounts: generation.gradeCounts,
-      forcedFilledCount: generation.forcedFilledCount,
       generationWarnings: generation.warnings,
       detail,
     });
