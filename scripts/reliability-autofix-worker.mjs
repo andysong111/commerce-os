@@ -18,6 +18,10 @@ const INCOMPATIBLE_TEST_HARNESS_MESSAGE =
   "Regression test directly imports a TypeScript source that uses unresolved @/ aliases";
 const INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK =
   "이전 제안의 회귀 테스트가 npm test의 Node 실행환경에서 직접 로드할 수 없는 TypeScript 소스를 import했습니다. 특히 대상 소스가 @/ 경로 별칭을 사용하면 새 .mjs/.ts 테스트에서 그 소스를 직접 import하지 마세요. 제공된 기존 실행 테스트 중 같은 소스를 이미 transpile/load하는 테스트를 보강하고, 그 테스트의 기존 fixture 형식과 helper를 그대로 재사용한 완전한 대체 제안을 작성하세요. 위험 경계나 수정 범위는 넓히지 마세요.";
+const EDIT_ANCHOR_MISMATCH_MESSAGE =
+  "Proposal old_text must match exactly once in the trusted repository file";
+const EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK =
+  "이전 제안의 old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다. 해당 파일의 제공된 원문을 그대로 사용해 고유하게 한 번만 존재하는 충분히 긴 old_text를 선택하세요. old_text를 추측하거나 생략하거나 새 테스트 파일로 우회하지 말고, 동일한 저위험 수정 범위 안에서 완전한 대체 제안을 작성하세요.";
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -53,6 +57,15 @@ class IncompatibleExecutedRegressionTestError extends Error {
     this.name = "IncompatibleExecutedRegressionTestError";
     this.testPath = path;
     this.targetPath = targetPath;
+  }
+}
+
+class EditAnchorMismatchError extends Error {
+  constructor(path, occurrences) {
+    super(`${EDIT_ANCHOR_MISMATCH_MESSAGE}: ${path} occurrences=${occurrences}`);
+    this.name = "EditAnchorMismatchError";
+    this.path = path;
+    this.occurrences = occurrences;
   }
 }
 
@@ -194,6 +207,23 @@ function enrichContextWithExistingHarness(context, targetPath) {
   for (const item of context) push(item.path, item.content);
   return { context: merged.length ? merged : context, harnessPaths };
 }
+function enrichContextWithAnchorFile(context, path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  const absolute = resolve(ROOT, normalized);
+  if (!safePath(normalized) || !absolute.startsWith(`${resolve(ROOT)}/`) || !existsSync(absolute)) return context;
+  const merged = [];
+  let total = 0;
+  const push = (candidatePath, content) => {
+    if (merged.some((item) => item.path === candidatePath)) return;
+    const clipped = String(content || "").slice(0, 24_000);
+    if (!clipped || total + clipped.length > 138_000 || merged.length >= 16) return;
+    merged.push({ path: candidatePath, content: clipped });
+    total += clipped.length;
+  };
+  push(normalized, readFileSync(absolute, "utf8"));
+  for (const item of context) push(item.path, item.content);
+  return merged.length ? merged : context;
+}
 function proposalPath(edit) {
   return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
@@ -241,8 +271,9 @@ function planProposalFiles(edits, context) {
       if (state.current) throw new Error(`New test file can only be created once: ${path}`);
       state.current = newText;
     } else {
-      if (countOccurrences(state.current, oldText) !== 1) {
-        throw new Error(`old_text must match exactly once: ${path}`);
+      const occurrences = countOccurrences(state.current, oldText);
+      if (occurrences !== 1) {
+        throw new EditAnchorMismatchError(path, occurrences);
       }
       state.current = state.current.replace(oldText, newText);
     }
@@ -316,6 +347,9 @@ async function generate(){
         ? `\n검증된 기존 실행 하네스 후보: ${enriched.harnessPaths.join(", ")}. 이 중 하나를 보강하고 새 테스트 파일을 만들지 마세요.`
         : "";
       revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}${harnessNote}`;
+    } else if (error instanceof EditAnchorMismatchError) {
+      revisionContext=enrichContextWithAnchorFile(context,error.path);
+      revisionFeedback=`${EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK}\n검출된 anchor 오류: ${error.message}`;
     } else {
       throw error;
     }
