@@ -156,17 +156,6 @@ async function openBulkCloud(button) {
   button.textContent = `${selectedIds.length}개 상품 확인 중…`;
   try {
     const items = await mapLimit(selectedIds, 8, readSelectedItem);
-    const missingLinks = items.filter((item) => !item.sourceUrl);
-    if (missingLinks.length) {
-      const labels = missingLinks
-        .slice(0, 5)
-        .map((item) => item.modelNumber || item.productName || item.id)
-        .join(", ");
-      throw new Error(
-        `${missingLinks.length}개 상품에 1688 링크가 없습니다: ${labels}${missingLinks.length > 5 ? " 외" : ""}`,
-      );
-    }
-
     const previousBatch = readPendingBatch();
     const mergedItems = mergePendingItems(previousBatch?.items, items);
     if (mergedItems.length > MAX_BATCH_ITEMS) {
