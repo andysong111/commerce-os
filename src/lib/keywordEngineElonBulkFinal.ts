@@ -2,7 +2,6 @@ import {
   KEYWORD_ELON_V2_DEFAULT_CUTOFF,
   compactKeywordElonKey,
   parse1688OfferId,
-  validate1688Url,
   type KeywordElonCandidate,
   type KeywordElonDiscovery,
   type KeywordElonIdentity,
@@ -16,13 +15,6 @@ import {
 } from "@/lib/keywordEngineElonLabV2Merge";
 import { buildKeywordElonSeoModelPackage } from "@/lib/keywordEngineElonLabSeoModelOutput";
 import { diversifyKeywordElonMallTitles } from "@/lib/keywordEngineElonMallTitleDiversity";
-import { applyKeywordElonMarketSeoProfiles } from "@/lib/keywordEngineElonMarketSeoProfiles";
-import { selectBalancedKeywordElonSearchKeywords } from "@/lib/keywordEngineElonSearchKeywordBalance";
-import {
-  buildKeywordElonSeoFactPool,
-  factPoolTitleMaterials,
-  resolveKeywordElonSeoSourceMode,
-} from "@/lib/keywordEngineElonSeoFactPool";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import {
   analyzeKeywordElonIdentity,
@@ -145,44 +137,37 @@ function trackerFallbackSource(input: KeywordElonBulkFinalInput): KeywordElonSou
     .filter(Boolean)
     .join(" · ");
   return {
-    url: validate1688Url(input.sourceUrl) ? text(input.sourceUrl) : "",
-    offerId: validate1688Url(input.sourceUrl) ? parse1688OfferId(input.sourceUrl) : "",
+    url: text(input.sourceUrl),
+    offerId: parse1688OfferId(input.sourceUrl),
     autoStatus: "partial",
     chineseTitle: text(input.productName),
     optionText,
     supportingText,
-    warnings: [
-      validate1688Url(input.sourceUrl)
-        ? "BULK_TRACKER_SOURCE_FALLBACK"
-        : "BULK_LEGACY_SOURCE_FALLBACK",
-    ],
+    warnings: ["BULK_TRACKER_SOURCE_FALLBACK"],
     collectedAt: new Date().toISOString(),
   };
 }
 
 async function collectSource(input: KeywordElonBulkFinalInput) {
-  if (validate1688Url(input.sourceUrl)) {
-    try {
-      const source = await collectKeywordElon1688Source(input.sourceUrl);
-      if (source.chineseTitle.trim() || source.optionText.trim()) {
-        return { source, mode: "1688_server" as const };
-      }
-    } catch {
-      // Product Launch Tracker data is the deterministic fallback for cloud-blocked 1688 fetches.
+  try {
+    const source = await collectKeywordElon1688Source(input.sourceUrl);
+    if (source.chineseTitle.trim() || source.optionText.trim()) {
+      return { source, mode: "1688_server" as const };
     }
+  } catch {
+    // Product Launch Tracker data is the deterministic fallback for cloud-blocked 1688 fetches.
   }
   return { source: trackerFallbackSource(input), mode: "tracker_fallback" as const };
 }
 
 export async function collectKeywordElonBulkSource(input: KeywordElonBulkFinalInput) {
   if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
-  if (!text(input.productName) && !text(input.optionText) && !text(input.supportingText)) {
-    throw new Error("1688 링크가 없는 과거 상품을 복원할 상품 정보가 없습니다.");
-  }
+  if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
   return collectSource(input);
 }
 
-function blockedSupplementalKeywords(
+function recoveredSearchKeywords(
+  baseKeywords: string[],
   supplementalKeywords: string[],
   blockedKeys: string[],
   customBlockedTerms: string[],
@@ -192,15 +177,17 @@ function blockedSupplementalKeywords(
       .map((value) => compactKeywordElonKey(value))
       .filter(Boolean),
   );
-  return supplementalKeywords
+  const additions = supplementalKeywords
     .map((value) => compactKeywordElonKey(value))
     .filter((key) => key.length >= 2 && !blocked.has(key));
+  return unique([...baseKeywords, ...additions], 10);
 }
 
 export function composeKeywordElonBulkFinal(
   input: KeywordElonBulkComposeInput,
 ): KeywordElonBulkFinalResult {
   if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
+  if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
   if (!input.candidates.length) throw new Error("FINAL RESULT를 만들 후보 키워드가 없습니다.");
   if (!input.allowedKeys.length) throw new Error("금지키워드 제거 후 사용할 SEO 재료가 없습니다.");
 
@@ -215,24 +202,8 @@ export function composeKeywordElonBulkFinal(
     },
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
-  const factPool = buildKeywordElonSeoFactPool({
-    source: input.source,
-    identity: input.identity,
-    productName: input.productName,
-    optionText: input.optionText,
-    supportingText: input.supportingText,
-    searchKeywords: output.searchKeywordDetails,
-  });
-  const titleFacts = factPoolTitleMaterials(factPool);
-  const profiled = applyKeywordElonMarketSeoProfiles({
-    rows: output.mallTitles,
-    modelName: output.modelName,
-    identity: input.identity,
-    searchKeywords: output.searchKeywordDetails,
-    factMaterials: titleFacts,
-  });
   const diversity = diversifyKeywordElonMallTitles({
-    rows: profiled.rows,
+    rows: output.mallTitles,
     modelName: output.modelName,
     identity: input.identity,
     searchKeywords: output.searchKeywordDetails,
@@ -243,18 +214,12 @@ export function composeKeywordElonBulkFinal(
   });
   const mallTitles = diversity.rows;
 
-  const balanced = selectBalancedKeywordElonSearchKeywords({
-    identity: input.identity,
-    searchKeywordDetails: output.searchKeywordDetails,
-    baseKeywords: [...output.commonSearchKeywords],
-    supplementalKeywords: blockedSupplementalKeywords(
-      [...titleFacts, ...(input.supplementalSearchKeywords ?? [])],
-      input.blockedKeys,
-      input.customBlockedTerms ?? [],
-    ),
-    limit: 10,
-  });
-  const searchKeywords = balanced.keywords;
+  const searchKeywords = recoveredSearchKeywords(
+    [...output.commonSearchKeywords],
+    input.supplementalSearchKeywords ?? [],
+    input.blockedKeys,
+    input.customBlockedTerms ?? [],
+  );
   if (searchKeywords.length !== 10) {
     throw new Error(
       `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
@@ -272,14 +237,12 @@ export function composeKeywordElonBulkFinal(
   }
 
   const generatedAt = new Date().toISOString();
-  const validSourceUrl = validate1688Url(input.sourceUrl) ? input.sourceUrl : "";
-  const sourceMode = resolveKeywordElonSeoSourceMode({ sourceUrl: validSourceUrl });
-  const recoveredCount = Math.max(0, balanced.tierCounts.B);
+  const recoveredCount = Math.max(0, searchKeywords.length - output.commonSearchKeywords.length);
   return {
     launchItemId: input.launchItemId,
     modelNumber: input.modelNumber,
     productName: input.productName,
-    sourceUrl: validSourceUrl,
+    sourceUrl: input.sourceUrl,
     collectionMode: input.collectionMode,
     sourceWarnings: input.source.warnings ?? [],
     identity: input.identity,
@@ -291,8 +254,8 @@ export function composeKeywordElonBulkFinal(
       searchKeywords,
       searchLine: searchKeywords.join(","),
       source: "seo-bulk-cloud",
-      sourceUrl: validSourceUrl,
-      offerId: input.source.offerId || (validSourceUrl ? parse1688OfferId(validSourceUrl) : ""),
+      sourceUrl: input.sourceUrl,
+      offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
       mallTitles: mallTitles.map((row) => ({
         productGroup: row.productGroup,
@@ -304,13 +267,9 @@ export function composeKeywordElonBulkFinal(
     },
     warnings: [
       ...output.warnings,
-      ...profiled.warnings,
       ...diversity.warnings,
-      ...balanced.warnings,
       ...(input.source.warnings ?? []),
-      `SEO_SOURCE_MODE:${sourceMode}`,
-      `SEO_FACT_POOL:${titleFacts.length}`,
-      ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_TIER_B:${recoveredCount}`] : []),
+      ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`] : []),
     ],
   };
 }
