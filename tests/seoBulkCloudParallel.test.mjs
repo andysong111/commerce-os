@@ -99,3 +99,32 @@ test("OPS 기능카드는 단순화된 대량 클라우드를 기본 진입점�
   assert.match(moduleFile, /여러 상품을 선택/);
   assert.match(moduleFile, /Shopling 일괄 대량등록/);
 });
+
+test("SEO 대량등록 handoff는 두 번 나눠 선택해도 미등록 배치를 덮어쓰지 않고 합친다", async () => {
+  const handoff = await source("public/product-launch-tracker-app/seo-title-ledger-handoff.js");
+  assert.match(handoff, /readPendingBatch/);
+  assert.match(handoff, /mergePendingItems/);
+  assert.match(handoff, /previousBatch\?\.items/);
+  assert.match(handoff, /text\(previousBatch\?\.batchId\)/);
+  assert.match(handoff, /아직 Shopling 일괄등록하지 않은 기존 상품과 합치면/);
+  assert.doesNotMatch(handoff, /const batchId = globalThis\.crypto\?\.randomUUID\?\.\(\) \|\| `seo-bulk-/);
+});
+
+test("기등록 상품은 상품명 재고 29개를 예약한 뒤 새 자사상품코드로 force 추가등록하고 실패 시 원상복구한다", async () => {
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkInventoryReregisterBridge.tsx");
+  const finalize = await source("src/app/api/seo-title-dispatch/finalize/route.ts");
+  assert.match(page, /SeoBulkInventoryReregisterBridge/);
+  assert.match(bridge, /executionPlan\.length !== 29/);
+  assert.match(bridge, /상품명 재고 29개/);
+  assert.match(bridge, /newSelfCodeBase = nextSelfCode/);
+  assert.match(bridge, /force: true/);
+  assert.match(bridge, /shoplingRegistrationHistory/);
+  assert.match(bridge, /shoplingProducts: previousProducts/);
+  assert.match(bridge, /seoFinal: previousSeoFinal/);
+  assert.match(bridge, /selfCodeBase: previousSelfCodeBase/);
+  assert.match(bridge, /success: true/);
+  assert.match(bridge, /success: false/);
+  assert.match(finalize, /finalize_seo_title_reservation/);
+  assert.match(finalize, /inventoryConsumed: success/);
+});
