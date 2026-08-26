@@ -113,6 +113,7 @@ function groundedMaterials(
   identity: KeywordElonSeoIdentity,
   searchKeywords: KeywordElonSeoSearchKeyword[],
   modelName: string,
+  factMaterials: string[] = [],
 ) {
   const modelKey = keywordElonSeoCanonical(modelName);
   const rows: GroundedMaterial[] = searchKeywords.flatMap((row) => {
@@ -130,7 +131,10 @@ function groundedMaterials(
     }));
   });
 
-  const identityRows: Array<[unknown[] | undefined, GroundedMaterial["kind"]]> = [
+  const identityRows: Array<[
+    unknown[] | undefined,
+    GroundedMaterial["kind"],
+  ]> = [
     [identity.functionModifiers, "function"],
     [identity.conditionalSeeds, "context"],
     [identity.designShapeModifiers, "form"],
@@ -149,6 +153,24 @@ function groundedMaterials(
         kind,
       });
     }
+  }
+
+  // FACT POOL values are already restricted upstream to titleAllowed A/B facts.
+  // They are intentionally not assigned fake search demand; they enrich factual
+  // market-specific modifiers such as option, shape, material, size and bundle.
+  for (const value of factMaterials) {
+    const normalized = text(value);
+    if (!normalized) continue;
+    const kind = materialKind(normalized);
+    rows.push({
+      value: normalized,
+      relevance: 88,
+      specificity: kind === "spec" ? 94 : 86,
+      shoppingIntent: 70,
+      demandScore: 0,
+      qualityScore: 80,
+      kind,
+    });
   }
 
   return uniqueMaterials(rows).filter((row) => {
@@ -293,8 +315,14 @@ export function applyKeywordElonMarketSeoProfiles<T extends MallTitleRow>(input:
   modelName: string;
   identity: KeywordElonSeoIdentity;
   searchKeywords: KeywordElonSeoSearchKeyword[];
+  factMaterials?: string[];
 }): KeywordElonMarketSeoProfileResult<T> {
-  const materials = groundedMaterials(input.identity, input.searchKeywords, input.modelName);
+  const materials = groundedMaterials(
+    input.identity,
+    input.searchKeywords,
+    input.modelName,
+    input.factMaterials ?? [],
+  );
   const used = new Set<string>();
   const profileCounts: Record<KeywordElonMarketSeoProfile, number> = {
     B2B: 0,
