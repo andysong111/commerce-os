@@ -5,6 +5,7 @@ const BUTTON_ID = "seo-title-ledger-handoff-button";
 const DATA_GROUP_ID = "bulk-action-group-data";
 const MAX_INSTALL_ATTEMPTS = 40;
 const MAX_BATCH_ITEMS = 50;
+const ACTIVE_BATCH_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 let installAttempt = 0;
 let installTimer = null;
 let healthPanelScheduled = false;
@@ -105,6 +106,59 @@ function showMessage(message) {
   window.alert(message);
 }
 
+function readActiveBatch() {
+  try {
+    const raw = window.localStorage.getItem(SEO_BULK_BATCH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.batchId || !Array.isArray(parsed.items)) return null;
+    const createdAt = new Date(parsed.createdAt || parsed.updatedAt || 0).getTime();
+    if (!Number.isFinite(createdAt) || Date.now() - createdAt > ACTIVE_BATCH_MAX_AGE_MS) {
+      return null;
+    }
+    return {
+      ...parsed,
+      items: parsed.items.filter((item) => text(item?.id)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeBatchItems(existingItems, newItems) {
+  const merged = [];
+  const seen = new Set();
+  for (const item of [...existingItems, ...newItems]) {
+    const id = text(item?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+function buildAccumulatedBatch(items) {
+  const existing = readActiveBatch();
+  const mergedItems = mergeBatchItems(existing?.items || [], items);
+  if (mergedItems.length > MAX_BATCH_ITEMS) {
+    throw new Error(
+      `기존 대기 ${existing?.items?.length || 0}개와 새 선택 ${items.length}개를 합치면 ${mergedItems.length}개입니다. 한 배치 최대 ${MAX_BATCH_ITEMS}개까지 처리합니다.`,
+    );
+  }
+  const now = new Date().toISOString();
+  return {
+    version: 2,
+    batchId:
+      text(existing?.batchId) ||
+      globalThis.crypto?.randomUUID?.() ||
+      `seo-bulk-${Date.now()}`,
+    createdAt: text(existing?.createdAt) || now,
+    updatedAt: now,
+    autoStart: true,
+    items: mergedItems,
+  };
+}
+
 function updateButton(button) {
   const selectedCount = readSelectedItemIds().length;
   const nextText = selectedCount
@@ -141,16 +195,14 @@ async function openBulkCloud(button) {
       );
     }
 
-    const batchId = globalThis.crypto?.randomUUID?.() || `seo-bulk-${Date.now()}`;
-    const batch = {
-      version: 1,
-      batchId,
-      createdAt: new Date().toISOString(),
-      autoStart: true,
-      items,
-    };
+    const batch = buildAccumulatedBatch(items);
     window.localStorage.setItem(SEO_BULK_BATCH_STORAGE_KEY, JSON.stringify(batch));
-    const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({ batchId }).toString()}`;
+    window.dispatchEvent(
+      new CustomEvent("commerce-os:seo-bulk-batch-updated", {
+        detail: { batchId: batch.batchId, itemCount: batch.items.length },
+      }),
+    );
+    const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({ batchId: batch.batchId }).toString()}`;
     const opened = window.open(target, "_blank");
     if (!opened) {
       window.location.assign(target);
