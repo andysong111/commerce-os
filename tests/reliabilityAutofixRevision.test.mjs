@@ -51,7 +51,7 @@ test("validator feedback is bounded and asks for a complete replacement proposal
   assert.match(parsed.revision_feedback.instruction, /완전한 대체 제안/);
 });
 
-test("worker retries exactly once for a missing or alias-incompatible regression harness", async () => {
+test("worker retries exactly once for a missing, alias-incompatible, or malformed edit anchor proposal", async () => {
   const [worker, route, openai] = await Promise.all([
     source("scripts/reliability-autofix-worker.mjs"),
     source("src/app/api/integrations/reliability/autofix/route.ts"),
@@ -60,20 +60,28 @@ test("worker retries exactly once for a missing or alias-incompatible regression
 
   assert.match(worker, /class MissingExecutedRegressionTestError extends Error/);
   assert.match(worker, /class IncompatibleExecutedRegressionTestError extends Error/);
+  assert.match(worker, /class EditAnchorMismatchError extends Error/);
   assert.match(worker, /this\.targetPath = targetPath/);
+  assert.match(worker, /this\.occurrences = occurrences/);
   assert.match(worker, /function directTypeScriptImports\(source\)/);
   assert.match(worker, /function sourceUsesUnresolvedAlias\(path\)/);
   assert.match(worker, /function enrichContextWithExistingHarness\(context, targetPath\)/);
+  assert.match(worker, /function enrichContextWithAnchorFile\(context, path\)/);
   assert.match(worker, /assertExecutedTestHarnessCompatible\(path, newText\)/);
   assert.match(worker, /error instanceof MissingExecutedRegressionTestError/);
   assert.match(worker, /error instanceof IncompatibleExecutedRegressionTestError/);
+  assert.match(worker, /error instanceof EditAnchorMismatchError/);
   assert.match(worker, /INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK/);
+  assert.match(worker, /EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK/);
   assert.match(worker, /검증된 기존 실행 하네스 후보/);
+  assert.match(worker, /검출된 anchor 오류/);
   assert.match(worker, /files:revisionContext/);
   assert.match(worker, /changed=applyProposal\(proposal,revisionContext\)/);
   assert.match(worker, /revision_feedback:revisionFeedback/);
   assert.match(worker, /preflightProposal\(edits\)/);
   assert.match(worker, /if \(!executedTestProposed\) throw new MissingExecutedRegressionTestError\(\)/);
+  assert.match(worker, /const occurrences = countOccurrences\(state\.current, oldText\)/);
+  assert.match(worker, /throw new EditAnchorMismatchError\(path, occurrences\)/);
   assert.doesNotMatch(worker, /for\s*\([^)]*revision/i);
   assert.doesNotMatch(worker, /while\s*\([^)]*revision/i);
   assert.match(route, /text\(body\.revision_feedback, 1_000\)/);
@@ -98,4 +106,13 @@ test("alias harness guard covers the Shopling failure shape from the first close
   assert.match(worker, /contentReferencesHarnessTarget/);
   assert.match(worker, /harnessPaths\.join\(", "\)/);
   assert.match(worker, /provided existing.*transpile\/load|기존 실행 테스트.*transpile\/load/i);
+});
+
+test("exact edit anchor failures stay bounded and preserve the original trusted file first", async () => {
+  const worker = await source("scripts/reliability-autofix-worker.mjs");
+
+  assert.match(worker, /Proposal old_text must match exactly once in the trusted repository file/);
+  assert.match(worker, /push\(normalized, readFileSync\(absolute, "utf8"\)\)/);
+  assert.match(worker, /old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다/);
+  assert.match(worker, /동일한 저위험 수정 범위 안에서 완전한 대체 제안/);
 });
