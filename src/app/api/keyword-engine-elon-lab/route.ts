@@ -122,13 +122,16 @@ function readiness() {
     bulkParallelAvailable: true,
     bulkSegmentedAvailable: true,
     bulkAutoRecoveryAvailable: true,
+    bulkLegacyFallbackAvailable: true,
+    marketAwareTitlesAvailable: true,
+    fixed145InventoryAvailable: true,
   };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 6,
+    version: 7,
     marketRecall: "evidence-first",
     ...readiness(),
   });
@@ -159,14 +162,17 @@ export async function POST(request: NextRequest) {
       const source = sourceFrom(body.source);
       const identity = identityFrom(body.identity);
       const customBlockedTerms = textArray(body.customBlockedTerms, 120);
+      const collectionMode =
+        body.collectionMode === "1688_server"
+          ? ("1688_server" as const)
+          : body.collectionMode === "legacy_internal"
+            ? ("legacy_internal" as const)
+            : ("tracker_fallback" as const);
       const composeInput = {
         ...item,
         customBlockedTerms,
         source,
-        collectionMode:
-          body.collectionMode === "1688_server"
-            ? ("1688_server" as const)
-            : ("tracker_fallback" as const),
+        collectionMode,
         identity,
         candidates: candidatesFrom(body.candidates),
         allowedKeys: textArray(body.allowedKeys, 120),
