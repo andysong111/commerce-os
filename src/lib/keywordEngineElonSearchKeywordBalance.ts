@@ -36,10 +36,6 @@ const FORM_PATTERN = /(원형|사각|직사각|슬림|롱|미니|소형|대형|�
 const SPEC_PATTERN = /\d+(?:\.\d+)?(?:mm|cm|m|ml|l|g|kg|개|매|장|쌍|세트|입|호|인치)/i;
 const MAX_FALLBACK_KEYWORD_LENGTH = 20;
 
-function text(value: unknown) {
-  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
-}
-
 function compact(value: unknown) {
   return keywordElonSeoCanonical(value);
 }
