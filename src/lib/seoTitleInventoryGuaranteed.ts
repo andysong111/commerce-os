@@ -81,6 +81,21 @@ function blocked(value: unknown) {
   );
 }
 
+function sanitizeGenerationInput(
+  input: SeoTitleInventoryGenerationInput,
+): SeoTitleInventoryGenerationInput {
+  return {
+    ...input,
+    searchKeywords: (input.searchKeywords ?? [])
+      .filter((row) => !blocked(row.keyword))
+      .map((row) => ({
+        ...row,
+        sourceMaterials: (row.sourceMaterials ?? []).filter((value) => !blocked(value)),
+      })),
+    extraMaterials: (input.extraMaterials ?? []).filter((value) => !blocked(value)),
+  };
+}
+
 function modelOccurrenceCount(title: string, modelName: string) {
   const titleKey = keywordElonSeoCanonical(title);
   const modelKey = keywordElonSeoCanonical(modelName);
@@ -227,10 +242,11 @@ function withGrade(
 export function generateGuaranteedSeoTitleInventory(
   input: SeoTitleInventoryGenerationInput,
 ): GuaranteedSeoTitleInventoryResult {
-  const rounds = Math.max(1, Math.trunc(Number(input.rounds) || 5));
+  const safeInput = sanitizeGenerationInput(input);
+  const rounds = Math.max(1, Math.trunc(Number(safeInput.rounds) || 5));
   let strict: SeoTitleInventoryGenerationResult;
   try {
-    strict = generateSeoTitleInventory(input);
+    strict = generateSeoTitleInventory(safeInput);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/검증 재료가 없습니다/.test(message)) throw error;
@@ -263,18 +279,18 @@ export function generateGuaranteedSeoTitleInventory(
   const candidates: GuaranteedSeoTitleInventoryCandidate[] = strict.candidates.map((row) => withGrade(row));
   const titleFingerprints = new Set(
     [
-      ...(input.existingTitleFingerprints ?? []).map(keywordElonSeoCanonical),
+      ...(safeInput.existingTitleFingerprints ?? []).map(keywordElonSeoCanonical),
       ...candidates.map((row) => row.titleFingerprint),
     ].filter(Boolean),
   );
   const semanticFingerprints = new Set(
     [
-      ...(input.existingSemanticFingerprints ?? []).map(text),
+      ...(safeInput.existingSemanticFingerprints ?? []).map(text),
       ...candidates.map((row) => row.semanticFingerprint),
     ].filter(Boolean),
   );
   const semanticConcepts = new Set<string>();
-  const materials = buildFallbackMaterials(input);
+  const materials = buildFallbackMaterials(safeInput);
   const groupGenerated = Object.fromEntries(
     (Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[]).map((group) => [
       group,
@@ -296,8 +312,8 @@ export function generateGuaranteedSeoTitleInventory(
         ];
         for (const position of positions) {
           if (groupGenerated[group] >= target) return true;
-          const title = composeFallbackTitle(input.modelName, sequence, position);
-          if (!validTitle(title, input.modelName)) continue;
+          const title = composeFallbackTitle(safeInput.modelName, sequence, position);
+          if (!validTitle(title, safeInput.modelName)) continue;
           const titleFingerprint = keywordElonSeoCanonical(title);
           if (!titleFingerprint || titleFingerprints.has(titleFingerprint)) continue;
 
