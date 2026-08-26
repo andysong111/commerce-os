@@ -69,10 +69,10 @@ export async function POST(request: NextRequest) {
     const currentProducts = Object.values(
       asRecord(item.shoplingProducts),
     ).map(asRecord);
-    if (
-      !input.force &&
-      currentProducts.some((product) => String(product.goodsKey ?? "").trim())
-    ) {
+    const hasRegisteredProducts = currentProducts.some((product) =>
+      Boolean(String(product.goodsKey ?? "").trim()),
+    );
+    if (!input.force && hasRegisteredProducts) {
       return Response.json(
         {
           ok: false,
@@ -83,25 +83,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const intentionalRelaunch = input.force && hasRegisteredProducts;
+    const duplicateRetry = needsShoplingSelfCodeRotation(item);
+    const rotationReason = intentionalRelaunch
+      ? "SEO_TITLE_INVENTORY_RELAUNCH"
+      : "SHOPLING_SELF_CODE_DUPLICATE";
     let selfCodeRotation:
       | {
           previousSelfCodeBase: string;
           selfCodeBase: string;
           rotatedAt: string;
+          reason: string;
         }
       | null = null;
-    if (needsShoplingSelfCodeRotation(item)) {
+    if (intentionalRelaunch || duplicateRetry) {
       const rotatedAt = new Date().toISOString();
       const rotated = rotateShoplingSelfCodeForRetry({
         item,
         allItems: items,
         now: rotatedAt,
+        reason: rotationReason,
       });
       item = rotated.item;
       selfCodeRotation = {
         previousSelfCodeBase: rotated.previousSelfCodeBase,
         selfCodeBase: rotated.selfCodeBase,
         rotatedAt,
+        reason: rotationReason,
       };
     }
 
@@ -118,9 +126,12 @@ export async function POST(request: NextRequest) {
           retrySelfCode: {
             previousSelfCodeBase: selfCodeRotation.previousSelfCodeBase,
             selfCodeBase: selfCodeRotation.selfCodeBase,
-            reason: "SHOPLING_SELF_CODE_DUPLICATE",
+            reason: selfCodeRotation.reason,
             rotatedAt: selfCodeRotation.rotatedAt,
           },
+          registrationMode: intentionalRelaunch
+            ? "seo_title_inventory_relaunch"
+            : "standard",
         }
       : basePayload;
     const now = new Date().toISOString();
@@ -174,12 +185,15 @@ export async function POST(request: NextRequest) {
       jobId,
       requestId,
       actionsUrl: dispatch.actionsUrl,
+      intentionalRelaunch,
       selfCodeRotated: Boolean(selfCodeRotation),
       previousSelfCodeBase: selfCodeRotation?.previousSelfCodeBase ?? "",
       selfCodeBase: selfCodeRotation?.selfCodeBase ?? String(item.selfCodeBase ?? ""),
-      message: selfCodeRotation
-        ? `샵플링 자사상품코드 중복을 감지해 ${selfCodeRotation.selfCodeBase}로 새 코드를 사용해 6채널 재등록을 시작했습니다.`
-        : "샵플링 6채널 등록 작업을 시작했습니다.",
+      message: intentionalRelaunch
+        ? `기존 상품은 유지한 채 새 자사상품코드 ${selfCodeRotation?.selfCodeBase ?? ""}로 Shopling 6채널 추가등록을 시작했습니다.`
+        : selfCodeRotation
+          ? `샵플링 자사상품코드 중복을 감지해 ${selfCodeRotation.selfCodeBase}로 새 코드를 사용해 6채널 재등록을 시작했습니다.`
+          : "샵플링 6채널 등록 작업을 시작했습니다.",
     });
   } catch (error) {
     return Response.json(
