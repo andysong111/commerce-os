@@ -163,4 +163,6 @@ test("AI 자동수정 프롬프트는 업무 핵심 쓰기와 검증 약화를 �
   assert.match(policy, /테스트를 삭제\/skip하지 않는다/);
   assert.match(policy, /새 외부 의존성을 추가하지 않는다/);
   assert.match(policy, /실제 실행 회귀 테스트를 반드시/);
+  assert.match(policy, /기존에 없던 node:fs, node:http, node:https/);
+  assert.match(policy, /preserve_per_file_capability_budget: true/);
 });
