@@ -262,6 +262,25 @@ async function finalizeReservation(
   });
 }
 
+async function restoreBeforeExternalWrite(
+  rowId: string,
+  snapshot: UnknownRecord | null,
+) {
+  if (!snapshot) return;
+  await patchLaunchItem(
+    rowId,
+    {
+      seoFinal: clone(record(snapshot.seoFinal)),
+      selfCodeBase: text(snapshot.selfCodeBase),
+      shoplingProducts: clone(record(snapshot.shoplingProducts)),
+      registrationResetHistory: Array.isArray(snapshot.registrationResetHistory)
+        ? clone(snapshot.registrationResetHistory)
+        : [],
+    },
+    "SEO 상품명 재고 재등록 실패 복구",
+  ).catch(() => null);
+}
+
 export default function SeoBulkRelaunchBridge() {
   const [rows, setRows] = useState<RelaunchRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -360,6 +379,8 @@ export default function SeoBulkRelaunchBridge() {
       await mapLimit(rows, RELAUNCH_CONCURRENCY, async (row) => {
         let reservation: RelaunchReservation | null = null;
         let snapshot: UnknownRecord | null = null;
+        let prepared = false;
+        let externalWriteStarted = false;
         setProgress((current) => ({
           ...current,
           [row.id]: { status: "running", message: "상품명 재고 29개 예약 중" },
@@ -406,11 +427,15 @@ export default function SeoBulkRelaunchBridge() {
             { seoFinal, registrationResetHistory },
             "SEO 상품명 재고 재등록 준비",
           );
+          prepared = true;
 
           setProgress((current) => ({
             ...current,
             [row.id]: { status: "running", message: "새 자사상품코드로 Shopling 추가등록 중" },
           }));
+          // From this point onward a network error can hide a successfully dispatched external write.
+          // Treat any uncertain outcome as review-locked inventory instead of releasing it for reuse.
+          externalWriteStarted = true;
           const started = await requestJson<{
             ok?: boolean;
             jobId?: unknown;
@@ -424,6 +449,7 @@ export default function SeoBulkRelaunchBridge() {
 
           if (outcome.status === "success") {
             await finalizeReservation(reservation, true);
+            reservation = null;
             setProgress((current) => ({
               ...current,
               [row.id]: {
@@ -436,42 +462,46 @@ export default function SeoBulkRelaunchBridge() {
 
           if (outcome.status === "partial_failure") {
             await finalizeReservation(reservation, false);
+            reservation = null;
             setProgress((current) => ({
               ...current,
               [row.id]: {
                 status: "partial",
-                message: "일부 채널 등록됨 · 상품명 재고는 검토대기로 보존",
+                message: "일부 채널 등록됨 · 상품명 재고는 검토대기로 잠금",
               },
             }));
             return;
           }
 
+          // A terminal full failure is known not to have produced a usable full round.
+          // Return the reservation and restore the previous tracker view.
+          externalWriteStarted = false;
           await releaseReservation(reservation);
-          if (snapshot) {
-            await patchLaunchItem(
-              row.id,
-              {
-                seoFinal: clone(record(snapshot.seoFinal)),
-                selfCodeBase: text(snapshot.selfCodeBase),
-                shoplingProducts: clone(record(snapshot.shoplingProducts)),
-                registrationResetHistory: Array.isArray(snapshot.registrationResetHistory)
-                  ? clone(snapshot.registrationResetHistory)
-                  : [],
-              },
-              "SEO 상품명 재고 재등록 실패 복구",
-            ).catch(() => null);
-          }
+          reservation = null;
+          await restoreBeforeExternalWrite(row.id, snapshot);
+          prepared = false;
           throw new Error(text(outcome.job.error_message) || "Shopling 재등록에 실패했습니다.");
         } catch (rowError) {
-          if (reservation) await releaseReservation(reservation);
+          let safetySuffix = "";
+          if (reservation) {
+            if (externalWriteStarted) {
+              // Never put titles back into the available pool when Shopling may have accepted the job.
+              await finalizeReservation(reservation, false).catch(() => null);
+              safetySuffix = " · 외부 등록 결과 불명확: 상품명 재고를 검토대기로 잠금";
+            } else {
+              await releaseReservation(reservation);
+              if (prepared) await restoreBeforeExternalWrite(row.id, snapshot);
+            }
+          }
           setProgress((current) => ({
             ...current,
             [row.id]: {
               status: "failed",
-              message:
+              message: `${
                 rowError instanceof Error
                   ? rowError.message
-                  : "기등록 상품 재등록에 실패했습니다.",
+                  : "기등록 상품 재등록에 실패했습니다."
+              }${safetySuffix}`,
             },
           }));
         }
