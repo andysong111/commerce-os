@@ -234,7 +234,7 @@ test("공통 검색어 10개는 역할과 A/B tier를 기록하면서 10개를 �
   assert.ok(Object.values(result.roleCounts).filter((value) => value > 0).length >= 3);
 });
 
-test("검증 검색어가 5개뿐이어도 A/B FACT 조합으로 공통 검색어 10개를 끝까지 채운다", async () => {
+test("검증 검색어가 5개뿐이고 FACT도 최소여도 조합 fallback으로 공통 검색어 10개를 끝까지 채운다", async () => {
   const { module } = await tempImport(
     "src/lib/keywordEngineElonSearchKeywordBalance.ts",
     [[
@@ -244,12 +244,12 @@ test("검증 검색어가 5개뿐이어도 A/B FACT 조합으로 공통 검색�
   );
   const identity = {
     coreProduct: "지압스텝퍼",
-    koreanProductIdentity: "발바닥 지압스텝퍼",
-    identityAnchor: "발바닥 지압스텝퍼",
-    primarySeeds: ["발지압판"],
-    conditionalSeeds: ["실내용"],
-    functionModifiers: ["지압", "마사지"],
-    designShapeModifiers: ["보드형"],
+    koreanProductIdentity: "",
+    identityAnchor: "",
+    primarySeeds: [],
+    conditionalSeeds: [],
+    functionModifiers: [],
+    designShapeModifiers: [],
     specAttributes: [],
   };
   const details = SPARSE_KEYWORDS;
@@ -257,7 +257,7 @@ test("검증 검색어가 5개뿐이어도 A/B FACT 조합으로 공통 검색�
     identity,
     searchKeywordDetails: details,
     baseKeywords: details.map((row) => row.keyword),
-    supplementalKeywords: ["색상랜덤", "발바닥용", "홈트"],
+    supplementalKeywords: ["색상랜덤", "홈트"],
     limit: 10,
   });
 
