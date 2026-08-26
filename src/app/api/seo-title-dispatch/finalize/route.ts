@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
   const input = record(await request.json().catch(() => ({})));
   const dispatchId = text(input.dispatchId);
   const reservationId = text(input.reservationId);
+  const success = input.success !== false;
 
   if (!dispatchId || !reservationId) {
     return Response.json(
@@ -48,30 +49,32 @@ export async function POST(request: NextRequest) {
         p_owner_id: context.identity.userId,
         p_reservation_id: reservationId,
         p_dispatch_id: dispatchId,
-        p_success: true,
+        p_success: success,
       },
     );
     const now = new Date().toISOString();
     await Promise.all([
       patchSeoTitleDispatch(context, dispatchId, {
-        status: "success",
+        status: success ? "success" : "partial",
         completed_at: now,
         result_payload: {
           mode: "shopling_inventory_relaunch",
           externalWriteExecuted: true,
           inventoryFinalized: true,
+          inventoryDisposition: success ? "used" : "review",
           finalizedAt: now,
         },
       }),
       patchSeoTitleDispatchItems(context, dispatchId, {
-        status: "success",
-        error_message: "",
+        status: success ? "success" : "failed",
+        error_message: success ? "" : "Shopling 일부 채널 등록으로 상품명 재고 검토 필요",
       }),
     ]);
     return Response.json({
       ok: true,
       dispatchId,
       reservationId,
+      success,
       affected: Number(affected) || 0,
       finalizedAt: now,
     });
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest) {
         message:
           error instanceof Error
             ? error.message
-            : "샵플링 재등록 성공 후 상품명 재고를 사용완료 처리하지 못했습니다.",
+            : "Shopling 재등록 결과에 맞춰 상품명 재고 상태를 확정하지 못했습니다.",
       },
       { status: 400 },
     );
