@@ -14,6 +14,7 @@ import {
   mergeKeywordElonDiscovery,
 } from "@/lib/keywordEngineElonLabV2Merge";
 import { buildKeywordElonSeoModelPackage } from "@/lib/keywordEngineElonLabSeoModelOutput";
+import { diversifyKeywordElonMallTitles } from "@/lib/keywordEngineElonMallTitleDiversity";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import {
   analyzeKeywordElonIdentity,
@@ -201,6 +202,17 @@ export function composeKeywordElonBulkFinal(
     },
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
+  const diversity = diversifyKeywordElonMallTitles({
+    rows: output.mallTitles,
+    modelName: output.modelName,
+    identity: input.identity,
+    searchKeywords: output.searchKeywordDetails,
+    blockedTerms: unique([
+      ...input.blockedKeys,
+      ...(input.customBlockedTerms ?? []),
+    ]),
+  });
+  const mallTitles = diversity.rows;
 
   const searchKeywords = recoveredSearchKeywords(
     [...output.commonSearchKeywords],
@@ -213,13 +225,13 @@ export function composeKeywordElonBulkFinal(
       `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
     );
   }
-  if (output.mallTitles.length !== 29) {
-    throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${output.mallTitles.length}개`);
+  if (mallTitles.length !== 29) {
+    throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${mallTitles.length}개`);
   }
 
   const groupProductNames: Record<string, string> = {};
   for (const [key, label] of SHOPLING_GROUPS) {
-    const title = output.mallTitles.find((row) => row.productGroup === label)?.title;
+    const title = mallTitles.find((row) => row.productGroup === label)?.title;
     if (!title) throw new Error(`${label} 기준 상품명을 만들지 못했습니다.`);
     groupProductNames[key] = title;
   }
@@ -245,7 +257,7 @@ export function composeKeywordElonBulkFinal(
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
-      mallTitles: output.mallTitles.map((row) => ({
+      mallTitles: mallTitles.map((row) => ({
         productGroup: row.productGroup,
         marketName: row.marketName,
         mallKey: row.mallKey,
@@ -255,6 +267,7 @@ export function composeKeywordElonBulkFinal(
     },
     warnings: [
       ...output.warnings,
+      ...diversity.warnings,
       ...(input.source.warnings ?? []),
       ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`] : []),
     ],
