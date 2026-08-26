@@ -97,6 +97,32 @@ async function mapLimit(values, limit, worker) {
   return results;
 }
 
+function readPendingBatch() {
+  try {
+    const raw = window.localStorage.getItem(SEO_BULK_BATCH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.items)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function mergePendingItems(previousItems, nextItems) {
+  const merged = new Map();
+  for (const item of [...listOfRecords(previousItems), ...listOfRecords(nextItems)]) {
+    const id = text(item.id);
+    if (!id) continue;
+    merged.set(id, { ...record(merged.get(id)), ...item, id });
+  }
+  return [...merged.values()];
+}
+
+function listOfRecords(value) {
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
 function showMessage(message) {
   if (typeof window.showToast === "function") {
     window.showToast(message);
@@ -141,13 +167,25 @@ async function openBulkCloud(button) {
       );
     }
 
-    const batchId = globalThis.crypto?.randomUUID?.() || `seo-bulk-${Date.now()}`;
+    const previousBatch = readPendingBatch();
+    const mergedItems = mergePendingItems(previousBatch?.items, items);
+    if (mergedItems.length > MAX_BATCH_ITEMS) {
+      throw new Error(
+        `아직 Shopling 일괄등록하지 않은 기존 상품과 합치면 ${mergedItems.length}개가 됩니다. 한 대기 묶음은 최대 ${MAX_BATCH_ITEMS}개입니다.`,
+      );
+    }
+
+    const batchId =
+      text(previousBatch?.batchId) ||
+      globalThis.crypto?.randomUUID?.() ||
+      `seo-bulk-${Date.now()}`;
     const batch = {
       version: 1,
       batchId,
-      createdAt: new Date().toISOString(),
+      createdAt: text(previousBatch?.createdAt) || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       autoStart: true,
-      items,
+      items: mergedItems,
     };
     window.localStorage.setItem(SEO_BULK_BATCH_STORAGE_KEY, JSON.stringify(batch));
     const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({ batchId }).toString()}`;
