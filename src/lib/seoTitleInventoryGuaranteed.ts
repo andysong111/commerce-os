@@ -45,6 +45,8 @@ const BLOCKED_KEYS = [
   ...KEYWORD_ELON_SEO_NOISE_TERMS,
 ].map(keywordElonSeoCanonical).filter(Boolean);
 
+const MARKETPLACE_NAME_PATTERN = /(쿠팡|스마트스토어|네이버|옥션|지마켓|11번가|에이블리|롯데\s*on|롯데온|토스쇼핑|신세계몰|카카오톡\s*스토어|도매꾹|도매매|오너클랜|셀파|투비즈온|카페24|gs\s*shop|인큐텐)/i;
+
 const MODEL_POSITION: Record<SeoTitleProductGroup, "first" | "after_lead"> = {
   도매1: "first",
   도매2: "after_lead",
@@ -70,8 +72,13 @@ function clean(value: unknown) {
 }
 
 function blocked(value: unknown) {
-  const key = keywordElonSeoCanonical(value);
-  return !key || BLOCKED_KEYS.some((blockedKey) => blockedKey && key.includes(blockedKey));
+  const normalized = text(value);
+  const key = keywordElonSeoCanonical(normalized);
+  return (
+    !key ||
+    MARKETPLACE_NAME_PATTERN.test(normalized) ||
+    BLOCKED_KEYS.some((blockedKey) => blockedKey && key.includes(blockedKey))
+  );
 }
 
 function modelOccurrenceCount(title: string, modelName: string) {
@@ -146,6 +153,7 @@ function buildFallbackMaterials(input: SeoTitleInventoryGenerationInput) {
   ];
   for (const phrase of sourcePhrases) {
     const cleaned = clean(phrase);
+    if (MARKETPLACE_NAME_PATTERN.test(cleaned)) continue;
     for (const word of cleaned.split(/\s+/).filter(Boolean)) {
       if (keywordElonSeoCanonical(word).length >= 2) add(word, "fact_token");
     }
