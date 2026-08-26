@@ -5,12 +5,19 @@ on:
     paths:
       - 'src/lib/keywordEngineElonMallTitleDiversity.ts'
       - 'src/lib/keywordEngineElonBulkFinal.ts'
+      - 'src/lib/keywordEngineElonFactPool.ts'
+      - 'src/lib/keywordEngineElonMarketTitleComposer.ts'
+      - 'src/lib/seoTitleInventoryFallback.ts'
+      - 'src/lib/seoTitleBulkInventorySync.ts'
+      - 'src/app/api/keyword-engine-elon-lab/route.ts'
+      - 'public/product-launch-tracker-app/seo-title-ledger-handoff.js'
       - 'src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx'
       - 'src/app/seo-bulk-cloud/page.tsx'
       - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
       - 'supabase/migrations/*option_barcode*.sql'
       - 'tests/seoTitleDiversityAndBarcodeRepair.test.mjs'
       - 'tests/seoBulkCloudParallel.test.mjs'
+      - 'tests/seoCloudMarketFactPoolLegacyFallback.test.mjs'
       - '.github/workflows/seo-title-diversity-ci.yml'
   workflow_dispatch:
 
@@ -28,17 +35,24 @@ jobs:
           node-version: '22.13.0'
           cache: npm
       - run: npm ci
-      - name: Lint SEO diversity integration
+      - name: Lint SEO market and inventory integration
         run: >-
           npx eslint
           src/lib/keywordEngineElonMallTitleDiversity.ts
           src/lib/keywordEngineElonBulkFinal.ts
+          src/lib/keywordEngineElonFactPool.ts
+          src/lib/keywordEngineElonMarketTitleComposer.ts
+          src/lib/seoTitleInventoryFallback.ts
+          src/lib/seoTitleBulkInventorySync.ts
+          src/app/api/keyword-engine-elon-lab/route.ts
+          public/product-launch-tracker-app/seo-title-ledger-handoff.js
           src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx
-      - name: Run deterministic diversity and barcode regressions
+      - name: Run deterministic SEO regressions
         run: >-
           node --experimental-strip-types --test
           tests/seoTitleDiversityAndBarcodeRepair.test.mjs
           tests/seoBulkCloudParallel.test.mjs
+          tests/seoCloudMarketFactPoolLegacyFallback.test.mjs
       - name: Build
         run: npm run build
         env:
