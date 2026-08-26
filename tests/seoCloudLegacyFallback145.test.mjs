@@ -234,19 +234,58 @@ test("공통 검색어 10개는 역할과 A/B tier를 기록하면서 10개를 �
   assert.ok(Object.values(result.roleCounts).filter((value) => value > 0).length >= 3);
 });
 
+test("검증 검색어가 5개뿐이어도 A/B FACT 조합으로 공통 검색어 10개를 끝까지 채운다", async () => {
+  const { module } = await tempImport(
+    "src/lib/keywordEngineElonSearchKeywordBalance.ts",
+    [[
+      /from\s+["']@\/lib\/keywordEngineElonLabSeoOutput["']/,
+      `from ${JSON.stringify(outputModuleUrl)}`,
+    ]],
+  );
+  const identity = {
+    coreProduct: "지압스텝퍼",
+    koreanProductIdentity: "발바닥 지압스텝퍼",
+    identityAnchor: "발바닥 지압스텝퍼",
+    primarySeeds: ["발지압판"],
+    conditionalSeeds: ["실내용"],
+    functionModifiers: ["지압", "마사지"],
+    designShapeModifiers: ["보드형"],
+    specAttributes: [],
+  };
+  const details = SPARSE_KEYWORDS;
+  const result = module.selectBalancedKeywordElonSearchKeywords({
+    identity,
+    searchKeywordDetails: details,
+    baseKeywords: details.map((row) => row.keyword),
+    supplementalKeywords: ["색상랜덤", "발바닥용", "홈트"],
+    limit: 10,
+  });
+
+  assert.equal(result.keywords.length, 10, result.warnings.join("\n"));
+  assert.equal(new Set(result.keywords).size, 10);
+  assert.ok(result.tierCounts.B > 0);
+  assert.ok(result.warnings.some((warning) => warning.startsWith("SEO_SEARCH_KEYWORD_GROUNDED_FILL:")));
+  for (const keyword of result.keywords) {
+    assert.doesNotMatch(keyword, /\s/);
+    assert.ok(keyword.length <= 20, keyword);
+  }
+});
+
 test("상품출시 handoff와 재고 sync는 1688 없는 과거상품을 더 이상 차단하지 않는다", async () => {
-  const [handoff, bulkFinal, inventorySync, ledgerRoute, guaranteed] = await Promise.all([
+  const [handoff, bulkFinal, inventorySync, ledgerRoute, guaranteed, balance] = await Promise.all([
     readFile("public/product-launch-tracker-app/seo-title-ledger-handoff.js", "utf8"),
     readFile("src/lib/keywordEngineElonBulkFinal.ts", "utf8"),
     readFile("src/lib/seoTitleBulkInventorySync.ts", "utf8"),
     readFile("src/app/api/seo-title-ledger/route.ts", "utf8"),
     readFile("src/lib/seoTitleInventoryGuaranteed.ts", "utf8"),
+    readFile("src/lib/keywordEngineElonSearchKeywordBalance.ts", "utf8"),
   ]);
 
   assert.match(handoff, /legacy:\/\/product-launch\//);
   assert.doesNotMatch(handoff, /개 상품에 1688 링크가 없습니다/);
   assert.match(bulkFinal, /BULK_LEGACY_SOURCE_FALLBACK/);
   assert.match(bulkFinal, /factMaterials: titleFacts/);
+  assert.match(bulkFinal, /\.\.\.titleFacts/);
   assert.doesNotMatch(bulkFinal, /if \(!text\(input\.sourceUrl\)\) throw new Error\("1688 상품 링크가 없습니다/);
   assert.match(inventorySync, /generateGuaranteedSeoTitleInventory/);
   assert.match(inventorySync, /legacy:\/\/product-launch\//);
@@ -256,4 +295,6 @@ test("상품출시 handoff와 재고 sync는 1688 없는 과거상품을 더 이
   assert.doesNotMatch(ledgerRoute, /throw new Error\("1688 상품 링크가 필요합니다/);
   assert.match(guaranteed, /MARKETPLACE_NAME_PATTERN/);
   assert.match(guaranteed, /sanitizeGenerationInput/);
+  assert.match(balance, /addGroundedCombinationCandidates/);
+  assert.match(balance, /SEO_SEARCH_KEYWORD_GROUNDED_FILL/);
 });
