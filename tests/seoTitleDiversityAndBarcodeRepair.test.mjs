@@ -26,6 +26,22 @@ test("SEO 쇼핑몰 상품명 다양화는 검증된 키워드·상품 정체성
   assert.match(bulk, /\.\.\.diversity\.warnings/);
 });
 
+test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 중복 상품명을 자동 보정한다", async () => {
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+  const bridge = await source(
+    "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",
+  );
+
+  assert.match(page, /SeoBulkExistingFinalDiversityBridge/);
+  assert.match(bridge, /needsDiversityRepair/);
+  assert.match(bridge, /diversifyKeywordElonMallTitles/);
+  assert.match(bridge, /operation: "patch_item"/);
+  assert.match(bridge, /hasRegisteredGoodsKeys\(item\)/);
+  assert.match(bridge, /if \(!text\(item\.id\) \|\| hasRegisteredGoodsKeys\(item\)\) return false/);
+  assert.match(bridge, /window\.location\.reload\(\)/);
+  assert.match(bridge, /SEO 쇼핑몰 상품명 중복 자동보정/);
+});
+
 test("옵션바코드NO resolver는 RETURNS TABLE 변수와 충돌하지 않는 PK constraint를 사용한다", async () => {
   const migration = await source(
     "supabase/migrations/202608260001_fix_option_barcode_resolver_ambiguity.sql",
