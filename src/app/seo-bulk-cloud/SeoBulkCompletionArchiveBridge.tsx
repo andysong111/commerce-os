@@ -5,7 +5,7 @@ import { useLayoutEffect } from "react";
 const BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const INVENTORY_SYNC_API = "/api/seo-title-ledger/sync";
 const COMPLETE_GOODS_KEY_PATTERN = /goods[_ ]?key\s*(?:6\s*\/\s*6|6개\s*등록됨)/i;
-const HIDDEN_ATTRIBUTE = "data-seo-bulk-goods-key-complete";
+const COMPLETE_ATTRIBUTE = "data-seo-bulk-goods-key-complete";
 
 function readBatchItemIds() {
   try {
@@ -27,22 +27,18 @@ function readBatchItemIds() {
   }
 }
 
-function hideCompletedArticles() {
+function scanCompletedArticles() {
   const completed: string[] = [];
   for (const article of document.querySelectorAll<HTMLElement>("main article")) {
-    const text = article.textContent ?? "";
-    const shouldHide = COMPLETE_GOODS_KEY_PATTERN.test(text);
-    if (shouldHide) {
-      article.setAttribute(HIDDEN_ATTRIBUTE, "true");
-      article.style.display = "none";
-      const modelNumber = text.match(/AAA\d{3,}/i)?.[0]?.toUpperCase() ?? "completed";
+    const articleText = article.textContent ?? "";
+    const isComplete = COMPLETE_GOODS_KEY_PATTERN.test(articleText);
+    if (isComplete) {
+      article.setAttribute(COMPLETE_ATTRIBUTE, "true");
+      const modelNumber = articleText.match(/AAA\d{3,}/i)?.[0]?.toUpperCase() ?? "completed";
       completed.push(modelNumber);
       continue;
     }
-    if (article.getAttribute(HIDDEN_ATTRIBUTE) === "true") {
-      article.removeAttribute(HIDDEN_ATTRIBUTE);
-      article.style.removeProperty("display");
-    }
+    article.removeAttribute(COMPLETE_ATTRIBUTE);
   }
   return completed.sort().join(",");
 }
@@ -79,7 +75,7 @@ export default function SeoBulkCompletionArchiveBridge() {
     };
 
     const refresh = () => {
-      const signature = hideCompletedArticles();
+      const signature = scanCompletedArticles();
       if (signature && signature !== lastCompletedSignature) {
         lastCompletedSignature = signature;
         scheduleInventorySync(500);
