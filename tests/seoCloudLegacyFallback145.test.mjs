@@ -77,7 +77,13 @@ const SPARSE_FACTS = [
   "보드형",
   "홈트",
   "발관리",
+  // These are routing/market labels, not product facts, and must be rejected.
+  "쿠팡",
+  "스마트스토어",
+  "도매꾹",
 ];
+
+const MARKETPLACE_PATTERN = /쿠팡|스마트스토어|네이버|옥션|지마켓|11번가|에이블리|도매꾹|오너클랜/;
 
 test("키워드가 빈약한 과거상품도 검증 FACT와 어순 fallback으로 정확히 145개를 만든다", async () => {
   const { module } = await importGuaranteedGenerator();
@@ -99,10 +105,14 @@ test("키워드가 빈약한 과거상품도 검증 FACT와 어순 fallback으�
     assert.ok(new TextEncoder().encode(candidate.title).length <= 50, candidate.title);
     assert.equal(candidate.title.split("지압스텝퍼").length - 1, 1, candidate.title);
     assert.doesNotMatch(candidate.title, /프리미엄|베스트|최고|인기상품|추천상품/);
+    assert.doesNotMatch(candidate.title, MARKETPLACE_PATTERN, candidate.title);
+    for (const sourceMaterial of candidate.sourceMaterials) {
+      assert.doesNotMatch(sourceMaterial, MARKETPLACE_PATTERN, sourceMaterial);
+    }
   }
 });
 
-test("마켓별 SEO profile은 B2B·네이버·쿠팡·에이블리를 구분해 제목을 재조합한다", async () => {
+test("마켓별 SEO profile은 B2B·네이버·쿠팡·에이블리를 구분하고 A/B FACT를 직접 사용한다", async () => {
   const { module } = await tempImport(
     "src/lib/keywordEngineElonMarketSeoProfiles.ts",
     [[
@@ -155,6 +165,7 @@ test("마켓별 SEO profile은 B2B·네이버·쿠팡·에이블리를 구분해
     modelName: "청소브러시",
     identity,
     searchKeywords: keywords,
+    factMaterials: ["30cm", "색상랜덤", "파우치포함"],
   });
   assert.equal(result.rows.length, 4);
   assert.equal(result.profileCounts.B2B, 1);
@@ -162,6 +173,7 @@ test("마켓별 SEO profile은 B2B·네이버·쿠팡·에이블리를 구분해
   assert.equal(result.profileCounts.COUPANG, 1);
   assert.equal(result.profileCounts.ABLY, 1);
   assert.ok(new Set(result.rows.map((row) => row.title)).size >= 3);
+  assert.ok(result.rows.some((row) => /30cm|색상랜덤|파우치포함/.test(row.title)));
   for (const row of result.rows) {
     assert.ok(new TextEncoder().encode(row.title).length <= 50, row.title);
     assert.equal(row.title.split("청소브러시").length - 1, 1, row.title);
@@ -223,16 +235,18 @@ test("공통 검색어 10개는 역할과 A/B tier를 기록하면서 10개를 �
 });
 
 test("상품출시 handoff와 재고 sync는 1688 없는 과거상품을 더 이상 차단하지 않는다", async () => {
-  const [handoff, bulkFinal, inventorySync, ledgerRoute] = await Promise.all([
+  const [handoff, bulkFinal, inventorySync, ledgerRoute, guaranteed] = await Promise.all([
     readFile("public/product-launch-tracker-app/seo-title-ledger-handoff.js", "utf8"),
     readFile("src/lib/keywordEngineElonBulkFinal.ts", "utf8"),
     readFile("src/lib/seoTitleBulkInventorySync.ts", "utf8"),
     readFile("src/app/api/seo-title-ledger/route.ts", "utf8"),
+    readFile("src/lib/seoTitleInventoryGuaranteed.ts", "utf8"),
   ]);
 
   assert.match(handoff, /legacy:\/\/product-launch\//);
   assert.doesNotMatch(handoff, /개 상품에 1688 링크가 없습니다/);
   assert.match(bulkFinal, /BULK_LEGACY_SOURCE_FALLBACK/);
+  assert.match(bulkFinal, /factMaterials: titleFacts/);
   assert.doesNotMatch(bulkFinal, /if \(!text\(input\.sourceUrl\)\) throw new Error\("1688 상품 링크가 없습니다/);
   assert.match(inventorySync, /generateGuaranteedSeoTitleInventory/);
   assert.match(inventorySync, /legacy:\/\/product-launch\//);
@@ -240,4 +254,6 @@ test("상품출시 handoff와 재고 sync는 1688 없는 과거상품을 더 이
   assert.match(inventorySync, /"available", "reserved", "review", "used"/);
   assert.match(ledgerRoute, /generateGuaranteedSeoTitleInventory/);
   assert.doesNotMatch(ledgerRoute, /throw new Error\("1688 상품 링크가 필요합니다/);
+  assert.match(guaranteed, /MARKETPLACE_NAME_PATTERN/);
+  assert.match(guaranteed, /sanitizeGenerationInput/);
 });

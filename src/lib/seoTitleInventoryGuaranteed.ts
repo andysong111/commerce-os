@@ -45,6 +45,8 @@ const BLOCKED_KEYS = [
   ...KEYWORD_ELON_SEO_NOISE_TERMS,
 ].map(keywordElonSeoCanonical).filter(Boolean);
 
+const MARKETPLACE_NAME_PATTERN = /(쿠팡|스마트스토어|네이버|옥션|지마켓|11번가|에이블리|롯데\s*on|롯데온|토스쇼핑|신세계몰|카카오톡\s*스토어|도매꾹|도매매|오너클랜|셀파|투비즈온|카페24|gs\s*shop|인큐텐)/i;
+
 const MODEL_POSITION: Record<SeoTitleProductGroup, "first" | "after_lead"> = {
   도매1: "first",
   도매2: "after_lead",
@@ -70,8 +72,28 @@ function clean(value: unknown) {
 }
 
 function blocked(value: unknown) {
-  const key = keywordElonSeoCanonical(value);
-  return !key || BLOCKED_KEYS.some((blockedKey) => blockedKey && key.includes(blockedKey));
+  const normalized = text(value);
+  const key = keywordElonSeoCanonical(normalized);
+  return (
+    !key ||
+    MARKETPLACE_NAME_PATTERN.test(normalized) ||
+    BLOCKED_KEYS.some((blockedKey) => blockedKey && key.includes(blockedKey))
+  );
+}
+
+function sanitizeGenerationInput(
+  input: SeoTitleInventoryGenerationInput,
+): SeoTitleInventoryGenerationInput {
+  return {
+    ...input,
+    searchKeywords: (input.searchKeywords ?? [])
+      .filter((row) => !blocked(row.keyword))
+      .map((row) => ({
+        ...row,
+        sourceMaterials: (row.sourceMaterials ?? []).filter((value) => !blocked(value)),
+      })),
+    extraMaterials: (input.extraMaterials ?? []).filter((value) => !blocked(value)),
+  };
 }
 
 function modelOccurrenceCount(title: string, modelName: string) {
@@ -146,6 +168,7 @@ function buildFallbackMaterials(input: SeoTitleInventoryGenerationInput) {
   ];
   for (const phrase of sourcePhrases) {
     const cleaned = clean(phrase);
+    if (MARKETPLACE_NAME_PATTERN.test(cleaned)) continue;
     for (const word of cleaned.split(/\s+/).filter(Boolean)) {
       if (keywordElonSeoCanonical(word).length >= 2) add(word, "fact_token");
     }
@@ -219,10 +242,11 @@ function withGrade(
 export function generateGuaranteedSeoTitleInventory(
   input: SeoTitleInventoryGenerationInput,
 ): GuaranteedSeoTitleInventoryResult {
-  const rounds = Math.max(1, Math.trunc(Number(input.rounds) || 5));
+  const safeInput = sanitizeGenerationInput(input);
+  const rounds = Math.max(1, Math.trunc(Number(safeInput.rounds) || 5));
   let strict: SeoTitleInventoryGenerationResult;
   try {
-    strict = generateSeoTitleInventory(input);
+    strict = generateSeoTitleInventory(safeInput);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/검증 재료가 없습니다/.test(message)) throw error;
@@ -255,18 +279,18 @@ export function generateGuaranteedSeoTitleInventory(
   const candidates: GuaranteedSeoTitleInventoryCandidate[] = strict.candidates.map((row) => withGrade(row));
   const titleFingerprints = new Set(
     [
-      ...(input.existingTitleFingerprints ?? []).map(keywordElonSeoCanonical),
+      ...(safeInput.existingTitleFingerprints ?? []).map(keywordElonSeoCanonical),
       ...candidates.map((row) => row.titleFingerprint),
     ].filter(Boolean),
   );
   const semanticFingerprints = new Set(
     [
-      ...(input.existingSemanticFingerprints ?? []).map(text),
+      ...(safeInput.existingSemanticFingerprints ?? []).map(text),
       ...candidates.map((row) => row.semanticFingerprint),
     ].filter(Boolean),
   );
   const semanticConcepts = new Set<string>();
-  const materials = buildFallbackMaterials(input);
+  const materials = buildFallbackMaterials(safeInput);
   const groupGenerated = Object.fromEntries(
     (Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[]).map((group) => [
       group,
@@ -288,8 +312,8 @@ export function generateGuaranteedSeoTitleInventory(
         ];
         for (const position of positions) {
           if (groupGenerated[group] >= target) return true;
-          const title = composeFallbackTitle(input.modelName, sequence, position);
-          if (!validTitle(title, input.modelName)) continue;
+          const title = composeFallbackTitle(safeInput.modelName, sequence, position);
+          if (!validTitle(title, safeInput.modelName)) continue;
           const titleFingerprint = keywordElonSeoCanonical(title);
           if (!titleFingerprint || titleFingerprints.has(titleFingerprint)) continue;
 
