@@ -21,11 +21,18 @@ const INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK =
 const EDIT_ANCHOR_MISMATCH_MESSAGE =
   "Proposal old_text must match exactly once in the trusted repository file";
 const EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK =
-  "이전 제안의 old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다. 해당 파일의 제공된 원문을 그대로 사용해 고유하게 한 번만 존재하는 충분히 긴 old_text를 선택하세요. old_text를 추측하거나 생략하거나 새 테스트 파일로 우회하지 말고, 동일한 저위험 수정 범위 안에서 완전한 대체 제안을 작성하세요.";
+  "old_text는 최신 repository_context에서 문자·공백·줄바꿈까지 그대로 복사한, 정확히 한 번 존재하는 연속 문자열이어야 합니다. 같은 파일은 edits에 한 번만 넣고 여러 변경을 하나의 old_text/new_text로 합치세요. 추측·생략·요약하거나 새 파일로 우회하지 마세요.";
 const INVALID_EXECUTED_TEST_SYNTAX_MESSAGE =
   "Executable regression test is not valid JavaScript syntax";
 const INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK =
   "이전 제안의 실행 회귀 테스트가 Node 구문 검사에서 실패했습니다. 제공된 최신 테스트 파일 원문과 기존 하네스를 그대로 유지하면서 문법 오류를 수정한 완전한 대체 제안을 작성하세요. 특히 중첩 template literal/backtick은 올바르게 escape하거나 문자열 조립 방식으로 바꾸고, 테스트나 안전 경계를 약화하거나 수정 범위를 넓히지 마세요.";
+const CAPABILITY_BUDGET_REVISION_FEEDBACK =
+  "이전 제안은 해당 파일에 원래 없던 실행 capability를 추가해 안전 검증에서 차단되었습니다. node:fs, node:http, node:https, child_process, fetch, process.env 등 필요한 capability를 이미 사용하는 제공된 기존 실행 테스트를 보강하고 새 capability를 어떤 파일에도 도입하지 마세요. 같은 파일은 edits에 한 번만 포함하세요.";
+const DUPLICATE_EDIT_PATH_MESSAGE =
+  "Proposal must contain at most one edit per file";
+const DUPLICATE_EDIT_PATH_REVISION_FEEDBACK =
+  "같은 파일을 edits 배열에 두 번 이상 넣지 마세요. 한 파일의 여러 변경은 해당 파일 원문에서 정확히 한 번 존재하는 하나의 old_text와, 모든 변경을 반영한 하나의 new_text 블록으로 합친 완전한 대체 제안을 작성하세요.";
+const MAX_GENERATION_REVISIONS = 2;
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -79,6 +86,14 @@ class InvalidExecutedRegressionTestSyntaxError extends Error {
     this.name = "InvalidExecutedRegressionTestSyntaxError";
     this.path = path;
     this.detail = detail;
+  }
+}
+
+class DuplicateEditPathError extends Error {
+  constructor(path) {
+    super(`${DUPLICATE_EDIT_PATH_MESSAGE}: ${path}`);
+    this.name = "DuplicateEditPathError";
+    this.path = path;
   }
 }
 
@@ -237,12 +252,23 @@ function enrichContextWithAnchorFile(context, path) {
   for (const item of context) push(item.path, item.content);
   return merged.length ? merged : context;
 }
+function exactTestTailAnchor(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  const absolute = resolve(ROOT, normalized);
+  if (!isExecutedTestPath(normalized) || !safePath(normalized) || !absolute.startsWith(`${resolve(ROOT)}/`) || !existsSync(absolute)) return "";
+  const source = readFileSync(absolute, "utf8");
+  const tail = source.slice(-320);
+  return tail && countOccurrences(source, tail) === 1 ? tail : "";
+}
 function proposalPath(edit) {
   return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
 function preflightProposal(edits) {
+  const seenPaths = new Set();
   for (const edit of edits) {
     const path = proposalPath(edit);
+    if (seenPaths.has(path)) throw new DuplicateEditPathError(path);
+    seenPaths.add(path);
     const oldText = String(edit?.old_text ?? "");
     const newText = String(edit?.new_text ?? "");
     if (!safePath(path) || !newText) throw new Error(`Unsafe autofix path: ${path}`);
@@ -360,45 +386,66 @@ function applyProposal(proposal, context) {
   if(!executedTestChanged)throw new Error("Autofix diff lost the required executable regression test");
   return changed;
 }
+function revisionPlan(error, context) {
+  let revisionFeedback;
+  let revisionContext=context;
+  if (error instanceof MissingExecutedRegressionTestError) {
+    revisionFeedback=REGRESSION_TEST_REVISION_FEEDBACK;
+  } else if (error instanceof IncompatibleExecutedRegressionTestError) {
+    const enriched=enrichContextWithExistingHarness(context,error.targetPath);
+    revisionContext=enriched.context;
+    const harnessNote=enriched.harnessPaths.length
+      ? `\n검증된 기존 실행 하네스 후보: ${enriched.harnessPaths.join(", ")}. 이 중 하나를 보강하고 새 테스트 파일을 만들지 마세요.`
+      : "";
+    revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}${harnessNote}`;
+  } else if (error instanceof EditAnchorMismatchError) {
+    revisionContext=enrichContextWithAnchorFile(context,error.path);
+    const tail=exactTestTailAnchor(error.path);
+    const tailNote=tail
+      ? `\n이 실행 테스트에 새 회귀 테스트를 추가하는 경우 사용할 수 있는 정확한 파일 끝 anchor 후보:\n${tail}`
+      : "";
+    revisionFeedback=`${EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK}\n검출된 anchor 오류: ${error.message}${tailNote}`;
+  } else if (error instanceof InvalidExecutedRegressionTestSyntaxError) {
+    revisionContext=enrichContextWithAnchorFile(context,error.path);
+    revisionFeedback=`${INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK}\n검출된 구문 오류: ${error.message}`;
+  } else if (error instanceof DuplicateEditPathError) {
+    revisionContext=enrichContextWithAnchorFile(context,error.path);
+    revisionFeedback=`${DUPLICATE_EDIT_PATH_REVISION_FEEDBACK}\n검출된 중복 파일: ${error.path}`;
+  } else if (/Autofix cannot (?:introduce new capability|excessively expand capability)/.test(String(error?.message || ""))) {
+    revisionFeedback=`${CAPABILITY_BUDGET_REVISION_FEEDBACK}\n검출된 capability 오류: ${String(error.message).slice(0,300)}`;
+  } else {
+    return null;
+  }
+  return { context: revisionContext, feedback: String(revisionFeedback || "").slice(0, 980) };
+}
 async function claim(){ const payload=await api({action:"claim"}); if(!payload.job){output("has_job","false");return;} if(payload.job.target_repo!==REPOSITORY)throw new Error("Claimed job repository mismatch"); writeFileSync(JOB_FILE,JSON.stringify(payload.job,null,2)); output("has_job","true"); output("job_id",payload.job.job_id); output("improvement_id",payload.job.improvement_id); }
 async function generate(){
   const job=readJob();
-  const context=collectContext(job);
-  let payload=await api({action:"generate",job_id:job.job_id,files:context});
-  let proposal=payload.proposal;
+  const baseContext=collectContext(job);
+  let revisionContext=baseContext;
+  let revisionFeedback="";
+  let proposal;
   let changed;
-  try {
-    changed=applyProposal(proposal,context);
-  } catch (error) {
-    let revisionFeedback;
-    let revisionContext=context;
-    if (error instanceof MissingExecutedRegressionTestError) {
-      revisionFeedback=REGRESSION_TEST_REVISION_FEEDBACK;
-    } else if (error instanceof IncompatibleExecutedRegressionTestError) {
-      const enriched=enrichContextWithExistingHarness(context,error.targetPath);
-      revisionContext=enriched.context;
-      const harnessNote=enriched.harnessPaths.length
-        ? `\n검증된 기존 실행 하네스 후보: ${enriched.harnessPaths.join(", ")}. 이 중 하나를 보강하고 새 테스트 파일을 만들지 마세요.`
-        : "";
-      revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}${harnessNote}`;
-    } else if (error instanceof EditAnchorMismatchError) {
-      revisionContext=enrichContextWithAnchorFile(context,error.path);
-      revisionFeedback=`${EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK}\n검출된 anchor 오류: ${error.message}`;
-    } else if (error instanceof InvalidExecutedRegressionTestSyntaxError) {
-      revisionContext=enrichContextWithAnchorFile(context,error.path);
-      revisionFeedback=`${INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK}\n검출된 구문 오류: ${error.message}`;
-    } else {
-      throw error;
-    }
-    payload=await api({
+  for (let revision=0; revision<=MAX_GENERATION_REVISIONS; revision+=1) {
+    const payload=await api({
       action:"generate",
       job_id:job.job_id,
       files:revisionContext,
-      revision_feedback:revisionFeedback,
+      ...(revisionFeedback ? { revision_feedback: revisionFeedback } : {}),
     });
     proposal=payload.proposal;
-    changed=applyProposal(proposal,revisionContext);
+    try {
+      changed=applyProposal(proposal,revisionContext);
+      break;
+    } catch (error) {
+      if (revision>=MAX_GENERATION_REVISIONS) throw error;
+      const next=revisionPlan(error,revisionContext);
+      if (!next) throw error;
+      revisionContext=next.context;
+      revisionFeedback=next.feedback;
+    }
   }
+  if (!proposal || !changed) throw new Error("Autofix generation ended without a validated proposal");
   writeFileSync(PROPOSAL_FILE,JSON.stringify(proposal,null,2));
   output("changed_paths",JSON.stringify(changed));
   output("summary",String(proposal.summary||"AI low-risk reliability fix").slice(0,500));
