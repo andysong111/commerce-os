@@ -20,6 +20,7 @@ import { applyKeywordElonMarketSeoProfiles } from "@/lib/keywordEngineElonMarket
 import { selectBalancedKeywordElonSearchKeywords } from "@/lib/keywordEngineElonSearchKeywordBalance";
 import {
   buildKeywordElonSeoFactPool,
+  factPoolTitleMaterials,
   resolveKeywordElonSeoSourceMode,
 } from "@/lib/keywordEngineElonSeoFactPool";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
@@ -222,11 +223,13 @@ export function composeKeywordElonBulkFinal(
     supportingText: input.supportingText,
     searchKeywords: output.searchKeywordDetails,
   });
+  const titleFacts = factPoolTitleMaterials(factPool);
   const profiled = applyKeywordElonMarketSeoProfiles({
     rows: output.mallTitles,
     modelName: output.modelName,
     identity: input.identity,
     searchKeywords: output.searchKeywordDetails,
+    factMaterials: titleFacts,
   });
   const diversity = diversifyKeywordElonMallTitles({
     rows: profiled.rows,
@@ -306,7 +309,7 @@ export function composeKeywordElonBulkFinal(
       ...balanced.warnings,
       ...(input.source.warnings ?? []),
       `SEO_SOURCE_MODE:${sourceMode}`,
-      `SEO_FACT_POOL:${factPool.filter((fact) => fact.titleAllowed).length}`,
+      `SEO_FACT_POOL:${titleFacts.length}`,
       ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_TIER_B:${recoveredCount}`] : []),
     ],
   };
