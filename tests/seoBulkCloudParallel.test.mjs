@@ -60,9 +60,10 @@ test("bulk final API는 분할 source/compose와 기존 STEP 1~4 엔진 계약�
   assert.match(engine, /selectKeywordElonStep4Union/);
   assert.match(engine, /filterKeywordElonProhibitedKeywords/);
   assert.match(engine, /buildKeywordElonSeoModelPackage/);
+  assert.match(engine, /diversifyKeywordElonMallTitles/);
   assert.match(engine, /supplementalSearchKeywords/);
   assert.match(engine, /searchKeywords\.length !== 10/);
-  assert.match(engine, /output\.mallTitles\.length !== 29/);
+  assert.match(engine, /mallTitles\.length !== 29/);
 });
 
 test("검색어 부족은 AI+결정형 후보를 STEP4 안전필터에 통과시켜 정확히 10개로 보충한다", async () => {
