@@ -45,3 +45,13 @@ test("registered products can reserve the next 29 title inventory rows and relau
   assert.match(finalize, /finalize_seo_title_reservation/);
   assert.match(finalize, /inventoryDisposition: success \? "used" : "review"/);
 });
+
+test("once an external relaunch may have started, an uncertain outcome is review-locked instead of released", async () => {
+  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkRelaunchBridge.tsx");
+  assert.match(bridge, /let externalWriteStarted = false/);
+  assert.match(bridge, /externalWriteStarted = true/);
+  assert.match(bridge, /if \(externalWriteStarted\)/);
+  assert.match(bridge, /finalizeReservation\(reservation, false\)/);
+  assert.match(bridge, /외부 등록 결과 불명확: 상품명 재고를 검토대기로 잠금/);
+  assert.match(bridge, /restoreBeforeExternalWrite/);
+});
