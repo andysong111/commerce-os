@@ -154,6 +154,9 @@ test("GitHub Worker는 생성 코드와 쓰기 권한을 분리하고 CI·Previe
   assert.match(worker, /test-only proposals are not deployable improvements/);
   assert.match(worker, /Autofix cannot reduce test assertions/);
   assert.match(worker, /Autofix cannot introduce new capability/);
+  assert.match(worker, /Proposal must contain at most one edit per file/);
+  assert.match(worker, /MAX_GENERATION_REVISIONS = 2/);
+  assert.match(worker, /CAPABILITY_BUDGET_REVISION_FEEDBACK/);
   assert.match(worker, /changed\.length>4\|\|lineBudget>260/);
 });
 
