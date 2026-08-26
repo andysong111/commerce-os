@@ -1,0 +1,46 @@
+name: SEO Title Diversity and Barcode Repair CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/keywordEngineElonMallTitleDiversity.ts'
+      - 'src/lib/keywordEngineElonBulkFinal.ts'
+      - 'src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx'
+      - 'src/app/seo-bulk-cloud/page.tsx'
+      - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
+      - 'supabase/migrations/*option_barcode*.sql'
+      - 'tests/seoTitleDiversityAndBarcodeRepair.test.mjs'
+      - 'tests/seoBulkCloudParallel.test.mjs'
+      - '.github/workflows/seo-title-diversity-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Lint SEO diversity integration
+        run: >-
+          npx eslint
+          src/lib/keywordEngineElonMallTitleDiversity.ts
+          src/lib/keywordEngineElonBulkFinal.ts
+          src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx
+      - name: Run deterministic diversity and barcode regressions
+        run: >-
+          node --experimental-strip-types --test
+          tests/seoTitleDiversityAndBarcodeRepair.test.mjs
+          tests/seoBulkCloudParallel.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://seo-diversity-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_seo_diversity_build_check
