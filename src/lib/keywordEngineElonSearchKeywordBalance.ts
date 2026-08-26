@@ -34,10 +34,7 @@ const FUNCTION_PATTERN = /(청소|지압|마사지|수납|정리|보관|고정|�
 const CONTEXT_PATTERN = /(주방|욕실|화장실|차량|자동차|사무실|실내|야외|캠핑|여행|현관|창틀|책상|침실|거실|학교|홈트)/i;
 const FORM_PATTERN = /(원형|사각|직사각|슬림|롱|미니|소형|대형|접이식|걸이형|스텝형|판형|보드형|파우치형|케이스형|브러시|브러쉬|스텝퍼|거치대|수납함|파우치|노트|수건|판)$/i;
 const SPEC_PATTERN = /\d+(?:\.\d+)?(?:mm|cm|m|ml|l|g|kg|개|매|장|쌍|세트|입|호|인치)/i;
-
-function text(value: unknown) {
-  return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
-}
+const MAX_FALLBACK_KEYWORD_LENGTH = 20;
 
 function compact(value: unknown) {
   return keywordElonSeoCanonical(value);
@@ -104,6 +101,81 @@ function nearDuplicate(left: string, right: string) {
   return false;
 }
 
+function addGroundedCombinationCandidates(input: {
+  candidates: BalancedKeyword[];
+  seen: Set<string>;
+  identity: KeywordElonSeoIdentity;
+  targetCount: number;
+}) {
+  if (input.candidates.length >= input.targetCount) return 0;
+  const materials = [...input.candidates]
+    .sort((left, right) => right.score - left.score || left.keyword.length - right.keyword.length)
+    .slice(0, 14);
+  const before = input.candidates.length;
+
+  const addCombination = (parts: BalancedKeyword[]) => {
+    const partKeys = parts.map((row) => compact(row.keyword)).filter(Boolean);
+    if (new Set(partKeys).size !== partKeys.length) return;
+    if (
+      partKeys.some((key, index) =>
+        partKeys.some(
+          (other, otherIndex) =>
+            index !== otherIndex && (key.includes(other) || other.includes(key)),
+        ),
+      )
+    ) {
+      return;
+    }
+    const keyword = compact(parts.map((row) => row.keyword).join(""));
+    if (
+      !keyword ||
+      keyword.length < 2 ||
+      keyword.length > MAX_FALLBACK_KEYWORD_LENGTH ||
+      input.seen.has(keyword)
+    ) {
+      return;
+    }
+    input.seen.add(keyword);
+    input.candidates.push({
+      keyword,
+      role: roleForKeyword(keyword, input.identity),
+      tier: "B",
+      score: Math.max(1, Math.min(...parts.map((row) => row.score)) - (parts.length === 2 ? 6 : 12)),
+    });
+  };
+
+  for (let left = 0; left < materials.length; left += 1) {
+    for (let right = 0; right < materials.length; right += 1) {
+      if (left === right) continue;
+      addCombination([materials[left], materials[right]]);
+      if (input.candidates.length >= Math.max(input.targetCount * 3, 30)) {
+        return input.candidates.length - before;
+      }
+    }
+  }
+
+  if (input.candidates.length < input.targetCount) {
+    const compactMaterials = materials.slice(0, 8);
+    for (let first = 0; first < compactMaterials.length; first += 1) {
+      for (let second = 0; second < compactMaterials.length; second += 1) {
+        if (second === first) continue;
+        for (let third = 0; third < compactMaterials.length; third += 1) {
+          if (third === first || third === second) continue;
+          addCombination([
+            compactMaterials[first],
+            compactMaterials[second],
+            compactMaterials[third],
+          ]);
+          if (input.candidates.length >= Math.max(input.targetCount * 3, 30)) {
+            return input.candidates.length - before;
+          }
+        }
+      }
+    }
+  }
+  return input.candidates.length - before;
+}
+
 export function selectBalancedKeywordElonSearchKeywords(input: {
   identity: KeywordElonSeoIdentity;
   searchKeywordDetails: KeywordElonSeoSearchKeyword[];
@@ -124,6 +196,9 @@ export function selectBalancedKeywordElonSearchKeywords(input: {
     ...(input.baseKeywords ?? []),
     ...(input.searchKeywordDetails ?? []).map((row) => row.keyword),
     ...(input.supplementalKeywords ?? []),
+    input.identity.coreProduct,
+    input.identity.koreanProductIdentity,
+    input.identity.identityAnchor,
     ...(input.identity.primarySeeds ?? []),
     ...(input.identity.functionModifiers ?? []),
     ...(input.identity.conditionalSeeds ?? []),
@@ -150,6 +225,13 @@ export function selectBalancedKeywordElonSearchKeywords(input: {
       score: keywordScore(detail),
     });
   }
+
+  const generatedFallbackCount = addGroundedCombinationCandidates({
+    candidates,
+    seen,
+    identity: input.identity,
+    targetCount: limit,
+  });
 
   candidates.sort((left, right) => {
     if (left.tier !== right.tier) return left.tier === "A" ? -1 : 1;
@@ -195,6 +277,9 @@ export function selectBalancedKeywordElonSearchKeywords(input: {
   }
 
   const warnings: string[] = [];
+  if (generatedFallbackCount > 0) {
+    warnings.push(`SEO_SEARCH_KEYWORD_GROUNDED_FILL:${generatedFallbackCount}`);
+  }
   if (keywords.length < limit) warnings.push(`SEO_SEARCH_KEYWORD_SHORTAGE:${limit - keywords.length}`);
   if (tierCounts.B > 0) warnings.push(`SEO_SEARCH_KEYWORD_TIER_B:${tierCounts.B}`);
   return {

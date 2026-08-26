@@ -248,7 +248,7 @@ export function composeKeywordElonBulkFinal(
     searchKeywordDetails: output.searchKeywordDetails,
     baseKeywords: [...output.commonSearchKeywords],
     supplementalKeywords: blockedSupplementalKeywords(
-      input.supplementalSearchKeywords ?? [],
+      [...titleFacts, ...(input.supplementalSearchKeywords ?? [])],
       input.blockedKeys,
       input.customBlockedTerms ?? [],
     ),
