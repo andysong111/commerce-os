@@ -43,15 +43,26 @@ export function rotateShoplingSelfCodeForRetry(input: {
   allItems: unknown[];
   now?: string;
   randomFactory?: () => string;
+  reason?: string;
 }) {
   const item = asRecord(input.item);
   const previousSelfCodeBase = normalizeSelfCode(item.selfCodeBase);
-  const usedCodes = input.allItems.map((value) => asRecord(value).selfCodeBase);
+  const usedCodes = input.allItems.flatMap((value) => {
+    const candidate = asRecord(value);
+    const history = Array.isArray(candidate.registrationResetHistory)
+      ? candidate.registrationResetHistory
+      : [];
+    return [
+      candidate.selfCodeBase,
+      ...history.map((entry) => asRecord(entry).previousSelfCodeBase),
+    ];
+  });
   const selfCodeBase = generateShoplingRetrySelfCode(
     usedCodes,
     input.randomFactory,
   );
   const rotatedAt = input.now ?? new Date().toISOString();
+  const reason = text(input.reason) || "SHOPLING_SELF_CODE_DUPLICATE";
   return {
     previousSelfCodeBase,
     selfCodeBase,
@@ -61,11 +72,14 @@ export function rotateShoplingSelfCodeForRetry(input: {
       shoplingSelfCodeRetry: {
         previousSelfCodeBase,
         selfCodeBase,
-        reason: "SHOPLING_SELF_CODE_DUPLICATE",
+        reason,
         rotatedAt,
       },
       updatedAt: rotatedAt,
-      updatedBy: "샵플링 자사상품코드 자동교체",
+      updatedBy:
+        reason === "SEO_TITLE_INVENTORY_RELAUNCH"
+          ? "SEO 상품명 재고 재등록"
+          : "샵플링 자사상품코드 자동교체",
     },
   };
 }
