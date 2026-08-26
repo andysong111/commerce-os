@@ -51,7 +51,7 @@ test("validator feedback is bounded and asks for a complete replacement proposal
   assert.match(parsed.revision_feedback.instruction, /완전한 대체 제안/);
 });
 
-test("worker retries exactly once for a missing, alias-incompatible, or malformed edit anchor proposal", async () => {
+test("worker retries exactly once for a missing, alias-incompatible, malformed anchor, or invalid syntax proposal", async () => {
   const [worker, route, openai] = await Promise.all([
     source("scripts/reliability-autofix-worker.mjs"),
     source("src/app/api/integrations/reliability/autofix/route.ts"),
@@ -61,20 +61,28 @@ test("worker retries exactly once for a missing, alias-incompatible, or malforme
   assert.match(worker, /class MissingExecutedRegressionTestError extends Error/);
   assert.match(worker, /class IncompatibleExecutedRegressionTestError extends Error/);
   assert.match(worker, /class EditAnchorMismatchError extends Error/);
+  assert.match(worker, /class InvalidExecutedRegressionTestSyntaxError extends Error/);
   assert.match(worker, /this\.targetPath = targetPath/);
   assert.match(worker, /this\.occurrences = occurrences/);
+  assert.match(worker, /this\.detail = detail/);
   assert.match(worker, /function directTypeScriptImports\(source\)/);
   assert.match(worker, /function sourceUsesUnresolvedAlias\(path\)/);
   assert.match(worker, /function enrichContextWithExistingHarness\(context, targetPath\)/);
   assert.match(worker, /function enrichContextWithAnchorFile\(context, path\)/);
+  assert.match(worker, /function assertExecutableTestSyntax\(planned\)/);
+  assert.match(worker, /execFileSync\(process\.execPath, \["--check", tempPath\]/);
   assert.match(worker, /assertExecutedTestHarnessCompatible\(path, newText\)/);
+  assert.match(worker, /assertExecutableTestSyntax\(planned\)/);
   assert.match(worker, /error instanceof MissingExecutedRegressionTestError/);
   assert.match(worker, /error instanceof IncompatibleExecutedRegressionTestError/);
   assert.match(worker, /error instanceof EditAnchorMismatchError/);
+  assert.match(worker, /error instanceof InvalidExecutedRegressionTestSyntaxError/);
   assert.match(worker, /INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK/);
   assert.match(worker, /EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK/);
+  assert.match(worker, /INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK/);
   assert.match(worker, /검증된 기존 실행 하네스 후보/);
   assert.match(worker, /검출된 anchor 오류/);
+  assert.match(worker, /검출된 구문 오류/);
   assert.match(worker, /files:revisionContext/);
   assert.match(worker, /changed=applyProposal\(proposal,revisionContext\)/);
   assert.match(worker, /revision_feedback:revisionFeedback/);
@@ -115,4 +123,17 @@ test("exact edit anchor failures stay bounded and preserve the original trusted 
   assert.match(worker, /push\(normalized, readFileSync\(absolute, "utf8"\)\)/);
   assert.match(worker, /old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다/);
   assert.match(worker, /동일한 저위험 수정 범위 안에서 완전한 대체 제안/);
+});
+
+test("generated executable JavaScript tests receive a parser preflight before repository tests", async () => {
+  const worker = await source("scripts/reliability-autofix-worker.mjs");
+
+  assert.match(worker, /Executable regression test is not valid JavaScript syntax/);
+  assert.match(worker, /Node 구문 검사에서 실패했습니다/);
+  assert.match(worker, /중첩 template literal\/backtick/);
+  assert.match(worker, /mkdtempSync\(join\(tmpdir\(\), "commerce-os-autofix-syntax-"\)\)/);
+  assert.match(worker, /writeFileSync\(tempPath, state\.current, "utf8"\)/);
+  assert.match(worker, /execFileSync\(process\.execPath, \["--check", tempPath\]/);
+  assert.match(worker, /rmSync\(tempRoot, \{ recursive: true, force: true \}\)/);
+  assert.match(worker, /revisionContext=enrichContextWithAnchorFile\(context,error\.path\)/);
 });

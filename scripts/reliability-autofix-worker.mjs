@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 
 const ROOT = process.cwd();
 const ENDPOINT = process.env.RELIABILITY_AUTOFIX_ENDPOINT ||
@@ -22,6 +22,10 @@ const EDIT_ANCHOR_MISMATCH_MESSAGE =
   "Proposal old_text must match exactly once in the trusted repository file";
 const EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK =
   "이전 제안의 old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다. 해당 파일의 제공된 원문을 그대로 사용해 고유하게 한 번만 존재하는 충분히 긴 old_text를 선택하세요. old_text를 추측하거나 생략하거나 새 테스트 파일로 우회하지 말고, 동일한 저위험 수정 범위 안에서 완전한 대체 제안을 작성하세요.";
+const INVALID_EXECUTED_TEST_SYNTAX_MESSAGE =
+  "Executable regression test is not valid JavaScript syntax";
+const INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK =
+  "이전 제안의 실행 회귀 테스트가 Node 구문 검사에서 실패했습니다. 제공된 최신 테스트 파일 원문과 기존 하네스를 그대로 유지하면서 문법 오류를 수정한 완전한 대체 제안을 작성하세요. 특히 중첩 template literal/backtick은 올바르게 escape하거나 문자열 조립 방식으로 바꾸고, 테스트나 안전 경계를 약화하거나 수정 범위를 넓히지 마세요.";
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -66,6 +70,15 @@ class EditAnchorMismatchError extends Error {
     this.name = "EditAnchorMismatchError";
     this.path = path;
     this.occurrences = occurrences;
+  }
+}
+
+class InvalidExecutedRegressionTestSyntaxError extends Error {
+  constructor(path, detail) {
+    super(`${INVALID_EXECUTED_TEST_SYNTAX_MESSAGE}: ${path}${detail ? `: ${detail}` : ""}`);
+    this.name = "InvalidExecutedRegressionTestSyntaxError";
+    this.path = path;
+    this.detail = detail;
   }
 }
 
@@ -280,6 +293,26 @@ function planProposalFiles(edits, context) {
   }
   return planned;
 }
+function assertExecutableTestSyntax(planned) {
+  for (const state of planned.values()) {
+    if (!isExecutedTestPath(state.path) || !/\.(?:mjs|cjs|js)$/i.test(state.path)) continue;
+    const tempRoot = mkdtempSync(join(tmpdir(), "commerce-os-autofix-syntax-"));
+    const tempPath = join(tempRoot, `candidate${extname(state.path) || ".mjs"}`);
+    try {
+      writeFileSync(tempPath, state.current, "utf8");
+      execFileSync(process.execPath, ["--check", tempPath], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      const detail = String(error?.stderr || error?.message || "node --check failed")
+        .replaceAll(tempPath, state.path)
+        .replaceAll(tempRoot, "")
+        .trim()
+        .slice(0, 700);
+      throw new InvalidExecutedRegressionTestSyntaxError(state.path, detail);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }
+}
 function assertProposalCapabilityBudget(planned) {
   const positiveExpansion = new Map(CAPABILITY_TOKENS.map((token) => [token, 0]));
   for (const state of planned.values()) {
@@ -305,6 +338,7 @@ function applyProposal(proposal, context) {
   const edits=proposal?.edits; if(!Array.isArray(edits)||edits.length<1||edits.length>6)throw new Error("Unsafe autofix edit count");
   preflightProposal(edits);
   const planned = planProposalFiles(edits, context);
+  assertExecutableTestSyntax(planned);
   const changedStates = [...planned.values()].filter((state) => state.original !== state.current);
   const sourceChangedBeforeWrite = changedStates.some((state) => state.path.startsWith("src/") && !state.path.includes(".test."));
   if (!sourceChangedBeforeWrite) {
@@ -350,6 +384,9 @@ async function generate(){
     } else if (error instanceof EditAnchorMismatchError) {
       revisionContext=enrichContextWithAnchorFile(context,error.path);
       revisionFeedback=`${EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK}\n검출된 anchor 오류: ${error.message}`;
+    } else if (error instanceof InvalidExecutedRegressionTestSyntaxError) {
+      revisionContext=enrichContextWithAnchorFile(context,error.path);
+      revisionFeedback=`${INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK}\n검출된 구문 오류: ${error.message}`;
     } else {
       throw error;
     }
