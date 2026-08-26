@@ -1,5 +1,7 @@
 const SEO_BULK_ROUTE = "/seo-bulk-cloud";
 const SEO_BULK_BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
+const SEO_BULK_WINDOW_NAME = "commerce-os-seo-bulk-cloud";
+const SEO_BULK_REVISION_PARAM = "rev";
 const NORMALIZED_ITEM_API = "/api/product-launch-tracker/normalized-optimized";
 const BUTTON_ID = "seo-title-ledger-handoff-button";
 const DATA_GROUP_ID = "bulk-action-group-data";
@@ -123,6 +125,19 @@ function listOfRecords(value) {
   return Array.isArray(value) ? value.map(record) : [];
 }
 
+function batchItemSignature(items) {
+  return listOfRecords(items)
+    .map((item) => [
+      text(item.id),
+      text(item.modelNumber),
+      text(item.productName),
+      text(item.sourceUrl),
+    ].join("|"))
+    .filter(Boolean)
+    .sort()
+    .join("||");
+}
+
 function showMessage(message) {
   if (typeof window.showToast === "function") {
     window.showToast(message);
@@ -138,6 +153,64 @@ function updateButton(button) {
     : "SEO 대량등록 클라우드 열기";
   if (button.textContent !== nextText) button.textContent = nextText;
   button.dataset.selectedCount = String(selectedCount);
+}
+
+function isSeoBulkWindow(opened) {
+  try {
+    return (
+      opened.location.origin === window.location.origin &&
+      opened.location.pathname === SEO_BULK_ROUTE
+    );
+  } catch {
+    return false;
+  }
+}
+
+function seoBulkWindowRevision(opened) {
+  try {
+    return new URLSearchParams(opened.location.search).get(SEO_BULK_REVISION_PARAM) || "";
+  } catch {
+    return "";
+  }
+}
+
+function isSeoBulkWindowBusy(opened) {
+  try {
+    const bodyText = opened.document?.body?.innerText || "";
+    return /FINAL 생성 중|원본 준비 중|STEP\s*[1-4]\s*·|조립 중|원장에 저장 중/.test(bodyText);
+  } catch {
+    return false;
+  }
+}
+
+function openOrFocusBulkWindow(target, revision) {
+  const opened = window.open("", SEO_BULK_WINDOW_NAME);
+  if (!opened) {
+    window.location.assign(target);
+    return;
+  }
+
+  const existingCloud = isSeoBulkWindow(opened);
+  if (existingCloud && seoBulkWindowRevision(opened) === revision) {
+    opened.focus();
+    return;
+  }
+
+  if (existingCloud && isSeoBulkWindowBusy(opened)) {
+    opened.focus();
+    showMessage(
+      "현재 SEO 대량등록 클라우드가 생성 중입니다. 새 선택은 대기 묶음에 저장했습니다. 현재 생성이 끝난 뒤 SEO 클라우드 버튼을 한 번 더 누르면 같은 창에 반영됩니다.",
+    );
+    return;
+  }
+
+  try {
+    opened.location.href = target;
+    opened.focus();
+    opened.opener = null;
+  } catch {
+    window.location.assign(target);
+  }
 }
 
 async function openBulkCloud(button) {
@@ -179,26 +252,30 @@ async function openBulkCloud(button) {
       text(previousBatch?.batchId) ||
       globalThis.crypto?.randomUUID?.() ||
       `seo-bulk-${Date.now()}`;
+    const now = new Date().toISOString();
+    const previousSignature =
+      text(previousBatch?.itemSignature) || batchItemSignature(previousBatch?.items);
+    const itemSignature = batchItemSignature(mergedItems);
+    const changed = previousSignature !== itemSignature;
+    const revision = changed
+      ? now
+      : text(previousBatch?.revision) || text(previousBatch?.updatedAt) || now;
     const batch = {
-      version: 1,
+      version: 2,
       batchId,
-      createdAt: text(previousBatch?.createdAt) || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: text(previousBatch?.createdAt) || now,
+      updatedAt: changed ? now : text(previousBatch?.updatedAt) || now,
+      revision,
+      itemSignature,
       autoStart: true,
       items: mergedItems,
     };
     window.localStorage.setItem(SEO_BULK_BATCH_STORAGE_KEY, JSON.stringify(batch));
-    const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({ batchId }).toString()}`;
-    const opened = window.open(target, "_blank");
-    if (!opened) {
-      window.location.assign(target);
-      return;
-    }
-    try {
-      opened.opener = null;
-    } catch {
-      // New tab still works when opener changes are blocked.
-    }
+    const target = `${SEO_BULK_ROUTE}?${new URLSearchParams({
+      batchId,
+      [SEO_BULK_REVISION_PARAM]: revision,
+    }).toString()}`;
+    openOrFocusBulkWindow(target, revision);
   } catch (error) {
     showMessage(error instanceof Error ? error.message : "SEO 대량등록 클라우드로 이동하지 못했습니다.");
   } finally {

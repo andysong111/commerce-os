@@ -111,6 +111,34 @@ test("SEO 대량등록 handoff는 두 번 나눠 선택해도 미등록 배치�
   assert.doesNotMatch(handoff, /const batchId = globalThis\.crypto\?\.randomUUID\?\.\(\) \|\| `seo-bulk-/);
 });
 
+test("SEO 대량등록 버튼을 반복해서 눌러도 같은 창을 재사용하고 동일 배치는 재로딩하지 않는다", async () => {
+  const handoff = await source("public/product-launch-tracker-app/seo-title-ledger-handoff.js");
+  const windowBridge = await source("src/app/seo-bulk-cloud/SeoBulkWindowBridge.tsx");
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+
+  assert.match(handoff, /SEO_BULK_WINDOW_NAME = "commerce-os-seo-bulk-cloud"/);
+  assert.match(handoff, /window\.open\("", SEO_BULK_WINDOW_NAME\)/);
+  assert.doesNotMatch(handoff, /window\.open\(target, "_blank"\)/);
+  assert.match(handoff, /batchItemSignature/);
+  assert.match(handoff, /SEO_BULK_REVISION_PARAM/);
+  assert.match(handoff, /seoBulkWindowRevision\(opened\) === revision/);
+  assert.match(handoff, /현재 SEO 대량등록 클라우드가 생성 중입니다/);
+  assert.match(windowBridge, /window\.name = SEO_BULK_WINDOW_NAME/);
+  assert.match(page, /SeoBulkWindowBridge/);
+});
+
+test("기등록 완료 상품은 SEO 클라우드 목록에서 숨기지 않고 기등록 상태로 계속 표시한다", async () => {
+  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkCompletionArchiveBridge.tsx");
+  const client = await source("src/app/seo-bulk-cloud/SeoBulkCloudClient.tsx");
+
+  assert.match(bridge, /scanCompletedArticles/);
+  assert.match(bridge, /data-seo-bulk-goods-key-complete/);
+  assert.doesNotMatch(bridge, /style\.display\s*=\s*"none"/);
+  assert.doesNotMatch(bridge, /style\.removeProperty\("display"\)/);
+  assert.match(client, /shoplingStatus: goodsKeys\.length \? "already_registered" : "idle"/);
+  assert.match(client, /goods_key \$\{goodsKeys\.length\}개 등록됨/);
+});
+
 test("기등록 상품은 상품명 재고 29개를 예약한 뒤 새 자사상품코드로 force 추가등록하고 실패 시 원상복구한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source("src/app/seo-bulk-cloud/SeoBulkInventoryReregisterBridge.tsx");

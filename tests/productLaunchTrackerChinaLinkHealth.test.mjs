@@ -69,10 +69,13 @@ test("상품출시 iframe은 상위 Ops 문서의 Collector 버전을 재사용�
   assert.match(panel, /parentCollectorDocument\?\.removeEventListener/);
 });
 
-test("SEO 대량등록 클라우드는 상품출시 검사 화면을 닫지 않고 새 탭으로 연다", async () => {
+test("SEO 대량등록 클라우드는 상품출시 화면을 닫지 않고 하나의 전용창을 재사용한다", async () => {
   const handoff = await read("public/product-launch-tracker-app/seo-title-ledger-handoff.js");
   const popupBridge = await read("src/app/keyword-engine-elon-lab/KeywordElonPopupCollectorBridge.tsx");
-  assert.match(handoff, /window\.open\(target, "_blank"\)/);
+  assert.match(handoff, /SEO_BULK_WINDOW_NAME = "commerce-os-seo-bulk-cloud"/);
+  assert.match(handoff, /window\.open\("", SEO_BULK_WINDOW_NAME\)/);
+  assert.match(handoff, /opened\.focus\(\)/);
+  assert.doesNotMatch(handoff, /window\.open\(target, "_blank"\)/);
   assert.doesNotMatch(handoff, /window\.top\.location\.assign\(target\)/);
   assert.match(popupBridge, /POPUP_WINDOW_NAME/);
   assert.match(popupBridge, /AUDIT_RUN_KEY/);
