@@ -2,13 +2,13 @@ import {
   KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT,
   keywordElonSeoCanonical,
   keywordElonSeoUtf8Bytes,
-} from "@/lib/keywordEngineElonLabSeoOutput";
+} from "./keywordEngineElonLabSeoOutput.ts";
 import {
   SEO_TITLE_DEFAULT_ROUNDS,
   SEO_TITLE_GROUP_QUOTAS,
   SEO_TITLE_MAX_ROUNDS,
   type SeoTitleProductGroup,
-} from "@/lib/seoTitleInventoryGenerator";
+} from "./seoTitleInventoryGenerator.ts";
 
 const GROUPS = Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[];
 const MAX_COMBINATION_SIZE = 5;
