@@ -7,15 +7,10 @@ import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry"
 
 const BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const NORMALIZED_API = "/api/product-launch-tracker/normalized-optimized";
-const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v3:";
+const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v4:";
 
 type UnknownRecord = Record<string, unknown>;
-
-type BatchContext = {
-  batchId?: string;
-  items?: Array<{ id?: string }>;
-};
-
+type BatchContext = { batchId?: string; items?: Array<{ id?: string }> };
 type MallTitle = {
   productGroup: string;
   marketName: string;
@@ -61,13 +56,7 @@ function readBatch() {
 }
 
 function batchItemIds(batch: BatchContext) {
-  return [
-    ...new Set(
-      (batch.items ?? [])
-        .map((item) => text(item?.id))
-        .filter(Boolean),
-    ),
-  ].slice(0, 50);
+  return [...new Set((batch.items ?? []).map((item) => text(item?.id)).filter(Boolean))].slice(0, 50);
 }
 
 async function requestJson(url: string, init?: RequestInit) {
@@ -95,8 +84,7 @@ async function readItem(itemId: string) {
 }
 
 function hasRegisteredGoodsKeys(item: UnknownRecord) {
-  const products = record(item.shoplingProducts);
-  return Object.values(products).some((value) => text(record(value).goodsKey));
+  return Object.values(record(item.shoplingProducts)).some((value) => text(record(value).goodsKey));
 }
 
 function readMallTitles(value: unknown): MallTitle[] {
@@ -119,22 +107,6 @@ function canonical(value: unknown) {
   return text(value).toLocaleLowerCase().replace(/[^0-9a-z가-힣]/g, "");
 }
 
-function needsDiversityRepair(mallTitles: MallTitle[]) {
-  return mallTitles.length === 29;
-}
-
-function safeOptionText(item: UnknownRecord) {
-  const options = Array.isArray(item.orderOptions) ? item.orderOptions.map(record) : [];
-  if (!options.length) return "";
-  if (options.length === 1) {
-    return [text(options[0].optionName), text(options[0].saleOption)]
-      .filter(Boolean)
-      .join(" / ");
-  }
-  return [...new Set(options.map((option) => text(option.optionName)).filter(Boolean))]
-    .join(" / ");
-}
-
 function sameTitles(left: MallTitle[], right: MallTitle[]) {
   if (left.length !== right.length) return false;
   return left.every((row, index) => canonical(row.title) === canonical(right[index]?.title));
@@ -148,11 +120,8 @@ async function repairItem(itemId: string) {
   const modelName = text(seoFinal.productName);
   const searchKeywords = stringList(seoFinal.searchKeywords, 20);
   const mallTitles = readMallTitles(seoFinal.mallTitles);
-  if (!modelName || !searchKeywords.length || !needsDiversityRepair(mallTitles)) {
-    return false;
-  }
+  if (!modelName || searchKeywords.length !== 10 || mallTitles.length !== 29) return false;
 
-  const detailAsset = record(item.detailPageAsset);
   const composed = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: searchKeywords,
@@ -160,11 +129,6 @@ async function repairItem(itemId: string) {
     context: {
       modelNumber: text(item.modelNumber),
       productName: text(item.productName) || modelName,
-      category: text(item.shoplingCategory),
-      optionText: safeOptionText(item),
-      detailHtml: text(detailAsset.html),
-      mainImageUrl: text(detailAsset.mainImageUrl),
-      additionalImageUrls: stringList(detailAsset.additionalImageUrls, 5),
     },
   });
   const repaired: MallTitle[] = composed.rows.map((row) => ({
@@ -174,7 +138,9 @@ async function repairItem(itemId: string) {
     accountIdLabel: row.accountIdLabel,
     title: row.title,
   }));
-  if (sameTitles(mallTitles, repaired)) return false;
+  if (sameTitles(mallTitles, repaired) && text(record(seoFinal.diversityRepair).composer) === "final-keywords-only-v4-min-length") {
+    return false;
+  }
 
   const groupTitles: Record<string, string> = {};
   const groupKeyByLabel: Record<string, string> = {
@@ -201,8 +167,9 @@ async function repairItem(itemId: string) {
           mallTitles: repaired,
           groupProductNames: groupTitles,
           diversityRepair: {
-            version: 3,
-            composer: "final-keywords-only-v3",
+            version: 4,
+            composer: "final-keywords-only-v4-min-length",
+            titleByteRange: [30, 50],
             uniqueTitleCount: composed.uniqueTitleCount,
             nearDuplicateCount: composed.nearDuplicateCount,
             keywordCoverageCount: composed.keywordCoverageCount,
@@ -211,7 +178,7 @@ async function repairItem(itemId: string) {
           },
         },
       },
-      updatedBy: "SEO 최종키워드 전용 상품명 자동보정",
+      updatedBy: "SEO FINAL 키워드 전용 30~50B 상품명 자동보정",
     }),
   });
   return true;
@@ -227,25 +194,18 @@ export default function SeoBulkExistingFinalDiversityBridge() {
     let cancelled = false;
     void (async () => {
       const itemIds = batchItemIds(batch);
-      if (!itemIds.length) {
-        window.sessionStorage.setItem(sessionKey, "done");
-        return;
-      }
-
       let repairedCount = 0;
       for (const itemId of itemIds) {
         if (cancelled) return;
         try {
           if (await repairItem(itemId)) repairedCount += 1;
         } catch (error) {
-          console.warn(`[SEO bulk final-keyword repair] ${itemId} skipped`, error);
+          console.warn(`[SEO bulk v4 final-keyword repair] ${itemId} skipped`, error);
         }
       }
       if (cancelled) return;
       window.sessionStorage.setItem(sessionKey, "done");
-      if (repairedCount > 0) {
-        window.location.reload();
-      }
+      if (repairedCount > 0) window.location.reload();
     })();
 
     return () => {
