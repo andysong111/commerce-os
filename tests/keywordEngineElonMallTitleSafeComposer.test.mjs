@@ -18,7 +18,7 @@ const aaa491Keywords = [
   "발판",
 ];
 
-test("AAA491형 최종키워드 10개만 사용해 29개 쇼핑몰 상품명을 분산한다", () => {
+test("AAA491형 최종키워드 10개만 사용해 30~50bytes 상품명 29개를 만든다", () => {
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: aaa491Keywords,
@@ -39,7 +39,7 @@ test("AAA491형 최종키워드 10개만 사용해 29개 쇼핑몰 상품명을 
   assert.equal(result.keywordCoverageTotal, aaa491Keywords.length);
   assert.equal(result.uniqueTitleCount, 29);
   assert.equal(result.facts.length, 0);
-  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3"));
+  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH"));
 
   const allowed = new Set(aaa491Keywords.map(keywordElonSeoCanonical));
   for (const keyword of aaa491Keywords) {
@@ -51,15 +51,17 @@ test("AAA491형 최종키워드 10개만 사용해 29개 쇼핑몰 상품명을 
   }
 
   for (const row of result.rows) {
-    assert.ok(row.title.trim());
-    assert.ok(keywordElonSeoUtf8Bytes(row.title) <= 50, row.title);
+    const bytes = keywordElonSeoUtf8Bytes(row.title);
+    assert.ok(bytes >= 30, `${bytes}B ${row.title}`);
+    assert.ok(bytes <= 50, `${bytes}B ${row.title}`);
+    assert.ok(row.keywordMaterials.length >= 2, row.title);
     assert.equal(row.keywordMaterials.every((material) => allowed.has(keywordElonSeoCanonical(material))), true);
     assert.doesNotMatch(row.title, /AAA491|BAF6-2|000000000730/i);
     assert.doesNotMatch(row.title, /윤지선작업|통합|예지|공지|하단공지|색상랜덤|발송|안마용품/);
   }
 });
 
-test("최종키워드가 4개뿐이어도 외부 재료를 발명하지 않고 순서 조합만으로 29개를 만든다", () => {
+test("최종키워드 4개만 있어도 외부 재료 없이 30~50bytes 29개를 만든다", () => {
   const keywords = ["포켓수첩", "가죽수첩", "미니노트", "펜홀더노트"];
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
@@ -79,7 +81,10 @@ test("최종키워드가 4개뿐이어도 외부 재료를 발명하지 않고 �
   assert.equal(result.uniqueTitleCount, 29);
   const allowed = new Set(keywords.map(keywordElonSeoCanonical));
   for (const row of result.rows) {
-    assert.ok(keywordElonSeoUtf8Bytes(row.title) <= 50);
+    const bytes = keywordElonSeoUtf8Bytes(row.title);
+    assert.ok(bytes >= 30, `${bytes}B ${row.title}`);
+    assert.ok(bytes <= 50, `${bytes}B ${row.title}`);
+    assert.ok(row.keywordMaterials.length >= 2, row.title);
     assert.equal(row.keywordMaterials.every((material) => allowed.has(keywordElonSeoCanonical(material))), true);
     assert.doesNotMatch(row.title, /AAA446|BCD2-1|000000000123/i);
     assert.doesNotMatch(row.title, /윤지선작업|통합|공지|A7|슬리브|볼펜꽂이/);
