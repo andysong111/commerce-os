@@ -168,7 +168,6 @@ function buildCandidatePool(keywords: string[]) {
     walk();
   }
   for (const keyword of keywords) append([keyword]);
-
   return result;
 }
 
@@ -203,10 +202,9 @@ function candidateScore(input: {
   candidate: TitleCandidate;
   primary: string;
   rowIndex: number;
-  usedTitles: string[];
   keywordUsage: Map<string, number>;
 }) {
-  const { candidate, primary, rowIndex, usedTitles, keywordUsage } = input;
+  const { candidate, primary, rowIndex, keywordUsage } = input;
   const primaryKey = keywordElonSeoCanonical(primary);
   const containsPrimary = candidate.segments.some(
     (segment) => keywordElonSeoCanonical(segment) === primaryKey,
@@ -218,18 +216,42 @@ function candidateScore(input: {
     (sum, segment) => sum + (keywordUsage.get(keywordElonSeoCanonical(segment)) ?? 0),
     0,
   );
-  const similarityPenalty = usedTitles.reduce(
-    (max, title) => Math.max(max, jaccard(candidate.title, title)),
-    0,
-  );
   const lengthPenalty = Math.abs(TARGET_TITLE_BYTES - candidate.byteLength) * 0.15;
   return (
     (containsPrimary ? 0 : 10_000) +
     primaryPlacementPenalty +
     usagePenalty * 2 +
-    similarityPenalty * 100 +
     lengthPenalty
   );
+}
+
+function selectCandidate(input: {
+  candidates: TitleCandidate[];
+  usedCanonical: Set<string>;
+  primary: string;
+  rowIndex: number;
+  keywordUsage: Map<string, number>;
+}) {
+  let best: TitleCandidate | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of input.candidates) {
+    if (input.usedCanonical.has(candidate.canonical)) continue;
+    const score = candidateScore({
+      candidate,
+      primary: input.primary,
+      rowIndex: input.rowIndex,
+      keywordUsage: input.keywordUsage,
+    });
+    if (
+      score < bestScore ||
+      (score === bestScore &&
+        (!best || candidate.canonical.localeCompare(best.canonical, "ko") < 0))
+    ) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 export function composeKeywordElonSafeMallTitles(input: {
@@ -254,37 +276,23 @@ export function composeKeywordElonSafeMallTitles(input: {
 
   const rows: KeywordElonSafeMallTitleRow[] = [];
   const usedCanonical = new Set<string>();
-  const usedTitles: string[] = [];
   const keywordUsage = new Map<string, number>();
 
   for (let index = 0; index < input.markets.length; index += 1) {
     const market = input.markets[index];
     const primary = keywords[index % keywords.length];
-    const selected = candidates
-      .filter((candidate) => !usedCanonical.has(candidate.canonical))
-      .sort(
-        (left, right) =>
-          candidateScore({
-            candidate: left,
-            primary,
-            rowIndex: index,
-            usedTitles,
-            keywordUsage,
-          }) -
-          candidateScore({
-            candidate: right,
-            primary,
-            rowIndex: index,
-            usedTitles,
-            keywordUsage,
-          }) || left.canonical.localeCompare(right.canonical, "ko"),
-      )[0];
+    const selected = selectCandidate({
+      candidates,
+      usedCanonical,
+      primary,
+      rowIndex: index,
+      keywordUsage,
+    });
     if (!selected) {
       throw new Error("최종키워드 전용 쇼핑몰 상품명 후보가 부족합니다.");
     }
 
     usedCanonical.add(selected.canonical);
-    usedTitles.push(selected.title);
     for (const segment of selected.segments) {
       const key = keywordElonSeoCanonical(segment);
       keywordUsage.set(key, (keywordUsage.get(key) ?? 0) + 1);
