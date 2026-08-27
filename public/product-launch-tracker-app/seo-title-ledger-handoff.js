@@ -23,6 +23,15 @@ function list(value) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
 
+function listOfRecords(value) {
+  return Array.isArray(value) ? value.map(record) : [];
+}
+
+function newId(prefix) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${uuid || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`}`;
+}
+
 function readSelectedItemIds() {
   return [
     ...document.querySelectorAll("#launch-table-body tr[data-id] .row-check:checked"),
@@ -111,28 +120,44 @@ function readPendingBatch() {
   }
 }
 
-function mergePendingItems(previousItems, nextItems) {
-  const merged = new Map();
-  for (const item of [...listOfRecords(previousItems), ...listOfRecords(nextItems)]) {
-    const id = text(item.id);
-    if (!id) continue;
-    merged.set(id, { ...record(merged.get(id)), ...item, id });
-  }
-  return [...merged.values()];
+function normalizeRunItem(item, index = 0) {
+  const row = record(item);
+  const id = text(row.id);
+  if (!id) return null;
+  return {
+    ...row,
+    id,
+    runId: text(row.runId) || `legacy-${id}-${index}`,
+    runCreatedAt: text(row.runCreatedAt) || text(row.createdAt) || new Date().toISOString(),
+  };
 }
 
-function listOfRecords(value) {
-  return Array.isArray(value) ? value.map(record) : [];
+function mergePendingItems(previousItems, nextItems) {
+  const merged = [];
+  const seenRunIds = new Set();
+  const all = [...listOfRecords(previousItems), ...listOfRecords(nextItems)];
+  all.forEach((item, index) => {
+    const normalized = normalizeRunItem(item, index);
+    if (!normalized || seenRunIds.has(normalized.runId)) return;
+    seenRunIds.add(normalized.runId);
+    merged.push(normalized);
+  });
+  return merged;
 }
 
 function batchItemSignature(items) {
   return listOfRecords(items)
-    .map((item) => [
-      text(item.id),
-      text(item.modelNumber),
-      text(item.productName),
-      text(item.sourceUrl),
-    ].join("|"))
+    .map((item, index) => {
+      const row = normalizeRunItem(item, index);
+      if (!row) return "";
+      return [
+        row.runId,
+        text(row.id),
+        text(row.modelNumber),
+        text(row.productName),
+        text(row.sourceUrl),
+      ].join("|");
+    })
     .filter(Boolean)
     .sort()
     .join("||");
@@ -177,7 +202,7 @@ function seoBulkWindowRevision(opened) {
 function isSeoBulkWindowBusy(opened) {
   try {
     const bodyText = opened.document?.body?.innerText || "";
-    return /FINAL 생성 중|원본 준비 중|STEP\s*[1-4]\s*·|조립 중|원장에 저장 중/.test(bodyText);
+    return /FINAL 생성 중|원본 준비 중|STEP\s*[1-4]\s*·|조립 중|Shopling.*등록 중/.test(bodyText);
   } catch {
     return false;
   }
@@ -199,7 +224,7 @@ function openOrFocusBulkWindow(target, revision) {
   if (existingCloud && isSeoBulkWindowBusy(opened)) {
     opened.focus();
     showMessage(
-      "현재 SEO 대량등록 클라우드가 생성 중입니다. 새 선택은 대기 묶음에 저장했습니다. 현재 생성이 끝난 뒤 SEO 클라우드 버튼을 한 번 더 누르면 같은 창에 반영됩니다.",
+      "새 SEO 등록 회차를 기존 클라우드에 추가했습니다. 현재 실행은 계속되고 새 카드는 자동으로 합류합니다.",
     );
     return;
   }
@@ -220,16 +245,16 @@ async function openBulkCloud(button) {
     return;
   }
   if (selectedIds.length > MAX_BATCH_ITEMS) {
-    showMessage(`한 배치에서 최대 ${MAX_BATCH_ITEMS}개까지 처리합니다. 현재 ${selectedIds.length}개가 선택되었습니다.`);
+    showMessage(`한 번에 최대 ${MAX_BATCH_ITEMS}개 상품을 추가합니다. 현재 ${selectedIds.length}개가 선택되었습니다.`);
     return;
   }
 
   button.disabled = true;
   const original = button.textContent;
-  button.textContent = `${selectedIds.length}개 상품 확인 중…`;
+  button.textContent = `${selectedIds.length}개 새 등록회차 생성 중…`;
   try {
-    const items = await mapLimit(selectedIds, 8, readSelectedItem);
-    const missingLinks = items.filter((item) => !item.sourceUrl);
+    const masters = await mapLimit(selectedIds, 8, readSelectedItem);
+    const missingLinks = masters.filter((item) => !item.sourceUrl);
     if (missingLinks.length) {
       const labels = missingLinks
         .slice(0, 5)
@@ -240,34 +265,37 @@ async function openBulkCloud(button) {
       );
     }
 
-    const storedBatch = readPendingBatch();
-    const previousBatch = listOfRecords(storedBatch?.items).length ? storedBatch : null;
-    const mergedItems = mergePendingItems(previousBatch?.items, items);
+    const now = new Date().toISOString();
+    const runItems = masters.map((item, index) => ({
+      ...item,
+      runId: newId("seo-run"),
+      runCreatedAt: now,
+      runSequenceInClick: index + 1,
+      generationStatus: "idle",
+      shoplingStatus: "idle",
+    }));
+    const previousBatch = readPendingBatch();
+    const previousIsRunBatch = Number(previousBatch?.version) >= 3;
+    const previousItems = previousIsRunBatch ? listOfRecords(previousBatch?.items) : [];
+    const mergedItems = mergePendingItems(previousItems, runItems);
     if (mergedItems.length > MAX_BATCH_ITEMS) {
       throw new Error(
-        `아직 Shopling 일괄등록하지 않은 기존 상품과 합치면 ${mergedItems.length}개가 됩니다. 한 대기 묶음은 최대 ${MAX_BATCH_ITEMS}개입니다.`,
+        `현재 SEO 클라우드의 활성 등록회차와 합치면 ${mergedItems.length}개입니다. 완료 카드를 보관한 뒤 다시 추가하세요.`,
       );
     }
 
-    const batchId =
-      text(previousBatch?.batchId) ||
-      globalThis.crypto?.randomUUID?.() ||
-      `seo-bulk-${Date.now()}`;
-    const now = new Date().toISOString();
-    const previousSignature =
-      text(previousBatch?.itemSignature) || batchItemSignature(previousBatch?.items);
-    const itemSignature = batchItemSignature(mergedItems);
-    const changed = previousSignature !== itemSignature;
-    const revision = changed
-      ? now
-      : text(previousBatch?.revision) || text(previousBatch?.updatedAt) || now;
+    const hasExistingRuns = previousIsRunBatch && previousItems.length > 0;
+    const batchId = hasExistingRuns && text(previousBatch?.batchId)
+      ? text(previousBatch.batchId)
+      : newId("seo-bulk");
+    const revision = now;
     const batch = {
-      version: 2,
+      version: 3,
       batchId,
-      createdAt: text(previousBatch?.createdAt) || now,
-      updatedAt: changed ? now : text(previousBatch?.updatedAt) || now,
+      createdAt: hasExistingRuns ? text(previousBatch?.createdAt) || now : now,
+      updatedAt: now,
       revision,
-      itemSignature,
+      itemSignature: batchItemSignature(mergedItems),
       autoStart: true,
       items: mergedItems,
     };

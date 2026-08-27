@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { buildKeywordElonTitleExpansionPool } from "../src/lib/keywordEngineElonTitleExpansion.ts";
 import { composeKeywordElonSafeMallTitles } from "../src/lib/keywordEngineElonMallTitleSafeComposer.ts";
+import { composeFreshKeywordElonMallTitles } from "../src/lib/keywordEngineElonFreshMallTitleComposer.ts";
 import { generateFinalKeywordOnlySeoTitleInventory } from "../src/lib/seoTitleFinalKeywordInventoryGenerator.ts";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "../src/lib/productGroupMarketRegistry.ts";
 import { keywordElonSeoCanonical, keywordElonSeoUtf8Bytes } from "../src/lib/keywordEngineElonLabSeoOutput.ts";
@@ -88,6 +89,13 @@ function buildPool() {
   });
 }
 
+const CONTEXT = {
+  modelNumber: "AAA491",
+  productName: "발바닥 지압 스텝퍼",
+  category: "생활/건강>안마용품>다리/발안마기",
+  detailHtml: '<img src="https://example.com/윤지선작업/예지/공지.jpg" />',
+};
+
 test("FINAL 10개 외 카테고리 일치 후보만 TITLE EXPANSION POOL에 보존한다", () => {
   const pool = buildPool();
   assert.ok(pool.length >= 10, `pool=${pool.length}`);
@@ -96,12 +104,6 @@ test("FINAL 10개 외 카테고리 일치 후보만 TITLE EXPANSION POOL에 보�
   assert.equal(pool.every((row) => row.categoryAligned === true), true);
   assert.equal(pool.every((row) => row.categoryMatch >= 85), true);
   assert.ok(new Set(pool.map((row) => row.intentClass)).size >= 5);
-
-  for (let index = 1; index < pool.length; index += 1) {
-    // The pool is intent-round-robin, so it must not collapse to one intent bucket.
-    if (pool[index - 1].intentClass === pool[index].intentClass) continue;
-    assert.ok(true);
-  }
 });
 
 test("29개 쇼핑몰 상품명은 FINAL anchor와 카테고리 intent를 섞어 의미적으로 분산한다", () => {
@@ -111,12 +113,7 @@ test("29개 쇼핑몰 상품명은 FINAL anchor와 카테고리 intent를 섞어
     finalKeywords: FINAL,
     titleExpansionPool: pool,
     modelName: "발바닥 지압판",
-    context: {
-      modelNumber: "AAA491",
-      productName: "발바닥 지압 스텝퍼",
-      category: "생활/건강>안마용품>다리/발안마기",
-      detailHtml: '<img src="https://example.com/윤지선작업/예지/공지.jpg" />',
-    },
+    context: CONTEXT,
   });
 
   assert.equal(result.rows.length, 29);
@@ -133,16 +130,37 @@ test("29개 쇼핑몰 상품명은 FINAL anchor와 카테고리 intent를 섞어
       true,
       row.title,
     );
-    if (
-      row.keywordMaterials.some((material) =>
-        expansionKeys.has(keywordElonSeoCanonical(material)),
-      )
-    ) {
-      expansionRows += 1;
-    }
+    if (row.keywordMaterials.some((material) => expansionKeys.has(keywordElonSeoCanonical(material)))) expansionRows += 1;
     assert.doesNotMatch(row.title, /윤지선작업|예지|공지|족저근막염|치료/);
   }
   assert.ok(expansionRows >= 20, `expansionRows=${expansionRows}`);
+});
+
+test("새 SEO run은 과거 29개를 제외하고 단순 어순변경이 아닌 새 상품명을 우선한다", () => {
+  const pool = buildPool();
+  const first = composeFreshKeywordElonMallTitles({
+    markets: PRODUCT_GROUP_MARKET_REGISTRY,
+    finalKeywords: FINAL,
+    titleExpansionPool: pool,
+    modelName: "발바닥 지압판",
+    context: CONTEXT,
+    variationSeed: "seo-run-first",
+  });
+  const previousTitles = first.rows.map((row) => row.title);
+  const second = composeFreshKeywordElonMallTitles({
+    markets: PRODUCT_GROUP_MARKET_REGISTRY,
+    finalKeywords: FINAL,
+    titleExpansionPool: pool,
+    modelName: "발바닥 지압판",
+    context: CONTEXT,
+    variationSeed: "seo-run-second",
+    excludedTitles: previousTitles,
+  });
+  const firstCanonical = new Set(previousTitles.map(keywordElonSeoCanonical));
+  const exactReuse = second.rows.filter((row) => firstCanonical.has(keywordElonSeoCanonical(row.title))).length;
+  assert.equal(second.rows.length, 29);
+  assert.equal(exactReuse, 0, `exactReuse=${exactReuse}`);
+  assert.ok(second.warnings.some((warning) => warning === "SEO_RUN_EXACT_TITLE_REUSE:0"));
 });
 
 test("145개 추가등록 재고도 카테고리 intent 재료를 사용하고 FINAL anchor를 유지한다", () => {
@@ -170,7 +188,7 @@ test("145개 추가등록 재고도 카테고리 intent 재료를 사용하고 F
   assert.ok(expanded >= 100, `expanded=${expanded}`);
 });
 
-test("segmented SEO API carries Product Launch category into the existing scoring pass", async () => {
+test("segmented SEO API carries Product Launch category and run freshness inputs into scoring/composition", async () => {
   const route = await readFile(
     new URL("../src/app/api/keyword-engine-elon-lab/route.ts", import.meta.url),
     "utf8",
@@ -185,9 +203,12 @@ test("segmented SEO API carries Product Launch category into the existing scorin
   );
   assert.match(route, /SHOPLING_CATEGORY=/);
   assert.match(route, /categoryFromSource/);
+  assert.match(route, /variationSeed/);
+  assert.match(route, /excludedMallTitles/);
   assert.match(scoring, /categoryMatch/);
   assert.match(scoring, /intentClass/);
   assert.match(scoring, /shoplingCategory/);
   assert.match(bulk, /buildKeywordElonTitleExpansionPool/);
+  assert.match(bulk, /composeFreshKeywordElonMallTitles/);
   assert.match(bulk, /TITLE_EXPANSION_POOL_COUNT/);
 });

@@ -14,7 +14,7 @@ import {
   mergeKeywordElonDiscovery,
 } from "@/lib/keywordEngineElonLabV2Merge";
 import { buildKeywordElonSeoModelPackage } from "@/lib/keywordEngineElonLabSeoModelOutput";
-import { composeKeywordElonSafeMallTitles } from "@/lib/keywordEngineElonMallTitleSafeComposer";
+import { composeFreshKeywordElonMallTitles } from "@/lib/keywordEngineElonFreshMallTitleComposer";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import {
   analyzeKeywordElonIdentity,
@@ -57,6 +57,8 @@ export type KeywordElonBulkFinalInput = {
   mallTitleMainImageUrl?: string;
   mallTitleAdditionalImageUrls?: string[];
   customBlockedTerms?: string[];
+  variationSeed?: string;
+  excludedMallTitles?: string[];
 };
 
 export type KeywordElonBulkFinalResult = {
@@ -266,7 +268,7 @@ export function composeKeywordElonBulkFinal(
     limit: 30,
   });
 
-  const mallComposition = composeKeywordElonSafeMallTitles({
+  const mallComposition = composeFreshKeywordElonMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: searchKeywords,
     titleExpansionPool,
@@ -284,6 +286,8 @@ export function composeKeywordElonBulkFinal(
       ...input.blockedKeys,
       ...(input.customBlockedTerms ?? []),
     ]),
+    excludedTitles: unique(input.excludedMallTitles ?? [], 1200),
+    variationSeed: text(input.variationSeed),
   });
   const mallTitles = mallComposition.rows;
   if (mallTitles.length !== 29) {
@@ -351,6 +355,7 @@ export function composeKeywordElonBulkFinal(
       ...sourceWarnings,
       `TITLE_EXPANSION_CATEGORY:${titleExpansionCategory || "none"}`,
       `TITLE_EXPANSION_POOL_COUNT:${titleExpansionPool.length}`,
+      `SEO_RUN_VARIATION_SEED:${text(input.variationSeed) || "none"}`,
       ...(recoveredCount
         ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`]
         : []),
