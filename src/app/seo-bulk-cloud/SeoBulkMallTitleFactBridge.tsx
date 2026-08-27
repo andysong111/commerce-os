@@ -21,6 +21,43 @@ function stringList(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
 
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function koreanWords(value: string) {
+  const decoded = safeDecode(value);
+  return [...decoded.matchAll(/[가-힣]{2,12}/g)].map((match) => match[0]);
+}
+
+function htmlTextFacts(html: string) {
+  const facts: string[] = [];
+  for (const match of html.matchAll(/(?:alt|title)\s*=\s*["']([^"']+)["']/gi)) {
+    facts.push(...koreanWords(match[1]));
+  }
+  for (const match of html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
+    facts.push(...koreanWords(match[1]));
+  }
+  return facts;
+}
+
+function unique(values: string[], limit = 40) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values.map(text).filter(Boolean)) {
+    const key = value.normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
 function requestUrl(input: RequestInfo | URL) {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
@@ -47,24 +84,39 @@ async function readTrackerItem(
   return record(body.item);
 }
 
+function trackerFactContext(item: UnknownRecord) {
+  const detailAsset = record(item.detailPageAsset);
+  const detailHtml = text(detailAsset.html);
+  const mainImageUrl = text(detailAsset.mainImageUrl);
+  const additionalImages = stringList(detailAsset.additionalImageUrls).slice(0, 5);
+  const category = text(item.shoplingCategory);
+  const productName = text(item.productName);
+  const options = Array.isArray(item.orderOptions)
+    ? item.orderOptions
+        .map(record)
+        .flatMap((row) => [text(row.optionName), text(row.saleOption)])
+        .filter(Boolean)
+    : [];
+
+  return unique([
+    productName,
+    ...category.split(/[>\/]+/).map(text).filter(Boolean),
+    ...options,
+    ...htmlTextFacts(detailHtml),
+    ...koreanWords(mainImageUrl),
+    ...additionalImages.flatMap(koreanWords),
+  ]);
+}
+
 function mallTitleSupportingText(item: UnknownRecord, existing: string) {
   const detailAsset = record(item.detailPageAsset);
   const mainImageUrl = text(detailAsset.mainImageUrl);
   const additionalImages = stringList(detailAsset.additionalImageUrls).slice(0, 5);
   const detailHtml = text(detailAsset.html);
-  const options = Array.isArray(item.orderOptions)
-    ? item.orderOptions
-        .map(record)
-        .map((row) => [text(row.optionName), text(row.saleOption)].filter(Boolean).join(" "))
-        .filter(Boolean)
-        .join(" / ")
-    : "";
-
   return [
     existing,
     text(item.shoplingCategory) ? `카테고리 ${text(item.shoplingCategory)}` : "",
     text(item.productName) ? `상품명 ${text(item.productName)}` : "",
-    options ? `옵션 ${options}` : "",
     detailHtml,
     mainImageUrl ? `<img src="${mainImageUrl}" />` : "",
     ...additionalImages.map((url) => `<img src="${url}" />`),
@@ -94,12 +146,15 @@ export default function SeoBulkMallTitleFactBridge() {
         const trackerItem = await readTrackerItem(previousFetch, itemId);
         if (!trackerItem) return previousFetch(input, init);
 
+        const facts = trackerFactContext(trackerItem);
+        const existingOptionText = text(item.optionText);
         const nextBody = {
           ...body,
           item: {
             ...item,
-            // This is attached only for compose_bulk_final. It never enters keyword
-            // discovery/scoring/final-keyword generation.
+            // Both fields are augmented only for compose_bulk_final. Keyword discovery,
+            // scoring and final-keyword generation have already finished at this point.
+            optionText: [existingOptionText, ...facts].filter(Boolean).join(" / "),
             supportingText: mallTitleSupportingText(
               trackerItem,
               text(item.supportingText),
