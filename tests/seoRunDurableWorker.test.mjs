@@ -6,12 +6,15 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("Supabase SEO RUN 원장은 RLS·명시적 service_role grant·SKIP LOCKED lease를 사용한다", async () => {
+test("Supabase SEO RUN 원장은 RLS·service_role·SKIP LOCKED lease와 실패 전용 재시도 카운트를 사용한다", async () => {
   const base = await source(
     "supabase/migrations/202608280001_seo_run_durable_jobs.sql",
   );
   const serial = await source(
     "supabase/migrations/202608280002_seo_run_same_item_serial_claim.sql",
+  );
+  const retryAndChain = await source(
+    "supabase/migrations/202608280003_seo_run_retry_and_title_chaining.sql",
   );
   assert.match(base, /create table if not exists public\.seo_run_jobs/);
   assert.match(base, /checkpoint_payload jsonb/);
@@ -23,6 +26,19 @@ test("Supabase SEO RUN 원장은 RLS·명시적 service_role grant·SKIP LOCKED 
   assert.match(base, /request\.jwt\.claim\.role/);
   assert.match(serial, /active\.launch_item_id = job\.launch_item_id/);
   assert.match(serial, /active\.lease_until > now\(\)/);
+
+  assert.match(retryAndChain, /create or replace function public\.claim_next_seo_run_job/);
+  assert.doesNotMatch(
+    retryAndChain,
+    /set status = 'running',\s*attempt_count = attempt_count \+ 1/s,
+  );
+  assert.match(retryAndChain, /enforce_seo_run_failure_attempts/);
+  assert.match(retryAndChain, /old\.status = 'running'/);
+  assert.match(retryAndChain, /new\.attempt_count := old\.attempt_count \+ 1/);
+  assert.match(retryAndChain, /new\.status := 'failed'/);
+  assert.match(retryAndChain, /propagate_ready_seo_run_titles/);
+  assert.match(retryAndChain, /excludedMallTitles/);
+  assert.match(retryAndChain, /pending\.status = 'queued'/);
 });
 
 test("SEO RUN API는 브라우저 localStorage 회차를 서버 원장에 넣고 after worker를 시작한다", async () => {
