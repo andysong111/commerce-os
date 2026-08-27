@@ -60,7 +60,8 @@ test("bulk final API는 분할 source/compose와 기존 STEP 1~4 엔진 계약�
   assert.match(engine, /selectKeywordElonStep4Union/);
   assert.match(engine, /filterKeywordElonProhibitedKeywords/);
   assert.match(engine, /buildKeywordElonSeoModelPackage/);
-  assert.match(engine, /diversifyKeywordElonMallTitles/);
+  assert.match(engine, /composeKeywordElonSafeMallTitles/);
+  assert.doesNotMatch(engine, /diversifyKeywordElonMallTitles/);
   assert.match(engine, /supplementalSearchKeywords/);
   assert.match(engine, /searchKeywords\.length !== 10/);
   assert.match(engine, /mallTitles\.length !== 29/);
