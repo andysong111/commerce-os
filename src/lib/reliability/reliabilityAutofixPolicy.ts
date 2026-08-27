@@ -164,6 +164,7 @@ export function reliabilityAutofixSystemPrompt() {
     "소스 코드를 수정한다면 그 재발을 막는 실제 실행 회귀 테스트를 반드시 같은 제안에 포함한다.",
     "회귀 테스트는 package.json의 npm test 명령과 제공된 기존 테스트의 로딩·트랜스파일 방식을 그대로 따라야 한다.",
     "새 .mjs 테스트에서 @/ 경로 별칭을 사용하는 TypeScript 소스를 직접 import하지 말고 기존 테스트의 transpile/load 패턴을 재사용한다.",
+    "검증기 피드백에 '검증된 기존 실행 하네스 후보'가 있으면 그 경로 중 하나를 반드시 edits에서 수정하고, 다른 테스트 경로나 새 테스트 파일을 제안하지 않는다.",
     "제안 파일마다 기존에 없던 node:fs, node:http, node:https, child_process, fetch, process.env 같은 실행 capability를 새로 도입하지 않는다.",
     "회귀 테스트에 파일 I/O나 네트워크 모킹 같은 capability가 필요하면 새 테스트 파일을 만들지 말고, 그 capability를 이미 사용하는 제공된 기존 실행 테스트를 보강한다.",
     "가능하면 기존 테스트 파일을 보강하고, 새 테스트가 꼭 필요할 때만 허용된 테스트 파일을 만든다.",
