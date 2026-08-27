@@ -282,8 +282,13 @@ export default function SeoBulkCompletionArchiveBridge() {
           loadArchivedItemIds(),
           loadOneShotClearedItemIds(),
         ]);
-        const removeIds = [...new Set([...archivedIds, ...clearedIds])];
-        if (removeIds.length && pruneBatchItems(removeIds)) {
+        const archivedPruned = archivedIds.length
+          ? pruneBatchItems(archivedIds)
+          : false;
+        const clearedPruned = clearedIds.length
+          ? pruneBatchItems(clearedIds)
+          : false;
+        if (archivedPruned || clearedPruned) {
           window.location.reload();
         }
       } catch (error) {
