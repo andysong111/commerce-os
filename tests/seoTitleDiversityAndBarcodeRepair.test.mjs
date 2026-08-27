@@ -101,23 +101,23 @@ test("실제 SEO bulk 경로는 FINAL10과 카테고리 Gate를 통과한 확장
   assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
 });
 
-test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 기존 v4 30~50B 안전 fallback으로 자동 보정한다", async () => {
+test("상품을 다시 SEO 클라우드에 넣으면 과거 FINAL을 고치는 대신 새 RUN에서 30~50B 상품명을 새로 생성한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
-  const bridge = await source(
-    "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",
-  );
+  const client = await source("src/app/seo-bulk-cloud/SeoBulkRunCloudClient.tsx");
+  const handoff = await source("public/product-launch-tracker-app/seo-title-ledger-handoff.js");
+  const composer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
+  const fresh = await source("src/lib/keywordEngineElonFreshMallTitleComposer.ts");
 
-  assert.match(page, /SeoBulkExistingFinalDiversityBridge/);
-  assert.match(bridge, /commerceOs\.seoBulkCloud\.diversityRepair\.v4/);
-  assert.match(bridge, /composeKeywordElonSafeMallTitles/);
-  assert.doesNotMatch(bridge, /diversifyKeywordElonMallTitles/);
-  assert.match(bridge, /operation: "patch_item"/);
-  assert.match(bridge, /hasRegisteredGoodsKeys\(item\)/);
-  assert.match(bridge, /if \(!text\(item\.id\) \|\| hasRegisteredGoodsKeys\(item\)\) return false/);
-  assert.match(bridge, /window\.location\.reload\(\)/);
-  assert.match(bridge, /composer: "final-keywords-only-v4-min-length"/);
-  assert.match(bridge, /titleByteRange: \[30, 50\]/);
-  assert.match(bridge, /SEO FINAL 키워드 전용 30~50B 상품명 자동보정/);
+  assert.match(page, /SeoBulkRunCloudClient/);
+  assert.doesNotMatch(page, /SeoBulkExistingFinalDiversityBridge/);
+  assert.match(handoff, /runId: newId\("seo-run"\)/);
+  assert.match(client, /historicalMallTitles/);
+  assert.match(client, /variationSeed: row\.runId/);
+  assert.match(client, /excludedMallTitles: exclusions/);
+  assert.match(composer, /MIN_TITLE_BYTES = 30/);
+  assert.match(composer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
+  assert.match(fresh, /SEO_RUN_EXACT_TITLE_REUSE/);
+  assert.match(fresh, /SEO_RUN_REORDER_ONLY_REUSE/);
 });
 
 test("기등록 SEO 추가등록은 새 goods_key 후처리를 위해 이전 상품명·가격 request를 초기화하고 실패 시 복구한다", async () => {
