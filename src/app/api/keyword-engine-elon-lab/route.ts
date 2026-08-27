@@ -148,7 +148,7 @@ function readiness() {
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 8,
+    version: 7,
     marketRecall: "evidence-first-category-gated",
     ...readiness(),
   });
