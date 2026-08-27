@@ -1,3 +1,4 @@
+import { ProductLaunchCompletedArchiveButtonBridge } from "@/components/product-launch-flow/ProductLaunchCompletedArchiveButtonBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
@@ -20,6 +21,8 @@ export default async function ProductLaunchTrackerPage({
 
   return (
     <section className="space-y-3">
+      <ProductLaunchCompletedArchiveButtonBridge />
+
       <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
         <strong className="block text-sm">백그라운드 자동화 · 상품마스터와 분리 운영</strong>
         <span className="mt-1 block text-xs leading-5">
@@ -54,6 +57,7 @@ export default async function ProductLaunchTrackerPage({
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <iframe
+          id="product-launch-tracker-frame"
           title="상품마스터 · 출시관리"
           src={`/product-launch-tracker-app/index.html?${iframeParams.toString()}`}
           allow="local-network; loopback-network; local-network-access"
