@@ -1,4 +1,4 @@
-import SeoBulkDurableRunCloudClient from "./SeoBulkDurableRunCloudClient";
+import SeoBulkRunCloudClient from "./SeoBulkDurableRunCloudClient";
 import SeoBulkLongTitleV6UpgradeBridge from "./SeoBulkLongTitleV6UpgradeBridge";
 import SeoBulkMallSeoRecoveryBridge from "./SeoBulkMallSeoRecoveryBridge";
 import SeoBulkRunMigrationBridge from "./SeoBulkRunMigrationBridge";
@@ -11,7 +11,7 @@ export default function SeoBulkCloudPage() {
       <SeoBulkRunMigrationBridge />
       <SeoBulkLongTitleV6UpgradeBridge />
       <SeoBulkMallSeoRecoveryBridge />
-      <SeoBulkDurableRunCloudClient />
+      <SeoBulkRunCloudClient />
     </>
   );
 }
