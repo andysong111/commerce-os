@@ -32,6 +32,7 @@ on:
       - "tests/seoCategoryIntentExpansionV5.test.mjs"
       - "tests/seoBulkMallTitleFactBridge.test.mjs"
       - "tests/seoBulkCloudParallel.test.mjs"
+      - "tests/seoBulkLongTitleV6UpgradeBridge.test.mjs"
       - "tests/seoCloudPerformance.test.mjs"
       - ".github/workflows/seo-title-inventory-ledger-ci.yml"
   workflow_dispatch:
@@ -64,6 +65,7 @@ jobs:
           src/app/shopling-seo-dispatch/ShoplingSeoDispatchCenter.tsx
           src/app/product-launch-tracker/page.tsx
           src/app/seo-bulk-cloud/page.tsx
+          src/app/seo-bulk-cloud/SeoBulkLongTitleV6UpgradeBridge.tsx
           src/lib/keywordEngineElonBulkFinal.ts
           src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonTitleExpansion.ts
@@ -87,6 +89,7 @@ jobs:
           tests/seoCategoryIntentExpansionV5.test.mjs
           tests/seoBulkMallTitleFactBridge.test.mjs
           tests/seoBulkCloudParallel.test.mjs
+          tests/seoBulkLongTitleV6UpgradeBridge.test.mjs
           tests/seoCloudPerformance.test.mjs
       - name: Build
         run: npm run build
