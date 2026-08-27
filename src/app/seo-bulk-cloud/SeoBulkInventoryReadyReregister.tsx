@@ -10,6 +10,8 @@ const NORMALIZED_API = "/api/product-launch-tracker/normalized-optimized";
 const KEYWORD_API = "/api/keyword-engine-elon-lab";
 const LEDGER_SYNC_API = "/api/seo-title-ledger/sync";
 const PREPARE_CONCURRENCY = 2;
+const TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5";
+const EXPANSION_META_KEY = "__seoTitleExpansionV5";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -97,17 +99,45 @@ function sourceUrlFromItem(item: UnknownRecord) {
 }
 
 function preparedExpansion(item: UnknownRecord) {
-  const meta = record(item.seoTitleExpansionV5);
-  return Number(meta.version) === 5 && Array.isArray(meta.pool);
+  const seoFinal = record(item.seoFinal);
+  if (text(seoFinal.source) !== TRUSTED_V5_FINAL_SOURCE) return false;
+  const groupNames = record(seoFinal.groupProductNames);
+  const raw = text(groupNames[EXPANSION_META_KEY]);
+  if (!raw) return false;
+  try {
+    const meta = record(JSON.parse(raw));
+    return Number(meta.version) === 5 && Array.isArray(meta.pool);
+  } catch {
+    return false;
+  }
 }
 
-async function patchExpansion(itemId: string, metadata: UnknownRecord) {
+async function patchExpansion(
+  item: UnknownRecord,
+  metadata: UnknownRecord,
+) {
+  const itemId = text(item.id);
+  const previousSeoFinal = record(item.seoFinal);
+  const groupProductNames = record(previousSeoFinal.groupProductNames);
+  const nextSeoFinal = {
+    ...previousSeoFinal,
+    source: TRUSTED_V5_FINAL_SOURCE,
+    groupProductNames: {
+      ...groupProductNames,
+      [EXPANSION_META_KEY]: JSON.stringify(metadata),
+    },
+    titleExpansionCategory: text(metadata.category),
+    titleMaterialPolicy: text(metadata.titleMaterialPolicy),
+    titleExpansionPool: Array.isArray(metadata.pool) ? metadata.pool : [],
+    legacyMallTitlesPreserved: true,
+    categoryIntentPreparedAt: text(metadata.preparedAt),
+  };
   await requestJson(NORMALIZED_API, {
     method: "PATCH",
     body: JSON.stringify({
       operation: "patch_item",
       itemId,
-      patch: { seoTitleExpansionV5: metadata },
+      patch: { seoFinal: nextSeoFinal },
       updatedBy: "SEO 카테고리 정합 TITLE 확장 준비",
     }),
   });
@@ -144,17 +174,18 @@ async function prepareLegacyRegisteredItem(
     }),
   });
   const result = record(body.result);
-  const seoFinal = record(result.seoFinal);
-  const pool = Array.isArray(seoFinal.titleExpansionPool)
-    ? seoFinal.titleExpansionPool
+  const generatedSeoFinal = record(result.seoFinal);
+  const pool = Array.isArray(generatedSeoFinal.titleExpansionPool)
+    ? generatedSeoFinal.titleExpansionPool
     : [];
-  await patchExpansion(itemId, {
+  await patchExpansion(item, {
     version: 5,
     category,
     pool,
     preparedAt: new Date().toISOString(),
     source: "category-intent-expansion-v5-legacy-reregister-prep",
-    titleMaterialPolicy: text(seoFinal.titleMaterialPolicy) ||
+    titleMaterialPolicy:
+      text(generatedSeoFinal.titleMaterialPolicy) ||
       (pool.length
         ? "final10-plus-category-aligned-expansion-v5"
         : "final10-only-v5-fallback"),
@@ -191,13 +222,11 @@ async function syncInventory(itemIds: string[]) {
   });
   const results = Array.isArray(body.results) ? body.results.map(record) : [];
   const blocked = results.find((row) =>
-    ["category_intent_expansion_not_prepared", "inventory_upgrade_deferred_active_reservation"].includes(
-      text(row.reason),
-    ),
+    ["inventory_upgrade_deferred_active_reservation"].includes(text(row.reason)),
   );
   if (blocked) {
     throw new Error(
-      `${text(blocked.modelNumber) || text(blocked.itemId)}: 카테고리 정합 상품명 재고 준비가 완료되지 않았습니다.`,
+      `${text(blocked.modelNumber) || text(blocked.itemId)}: 상품명 재고 예약이 진행 중이라 v5 전환을 보류했습니다.`,
     );
   }
 }
