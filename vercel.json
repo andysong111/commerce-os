@@ -9,10 +9,6 @@
       "schedule": "* * * * *"
     },
     {
-      "path": "/api/cron/seo-run-worker",
-      "schedule": "*/2 * * * *"
-    },
-    {
       "path": "/api/cron/product-decision-live-refresh",
       "schedule": "2,17,32,47 * * * *"
     },
