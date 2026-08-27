@@ -1,4 +1,7 @@
 import { NextRequest } from "next/server";
+import {
+  fetchKeywordShoplingDirectApplyResult,
+} from "@/lib/keywordShoplingDirectApplyRunner";
 import { dispatchProductLaunchMallSeo } from "@/lib/productLaunchShoplingMallSeo";
 import { reconcileProductLaunchNormalizedAfterLegacyItems } from "@/lib/productLaunchTrackerNormalizedLegacyReconcile";
 import {
@@ -11,6 +14,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const EXPECTED_MALL_TITLE_COUNT = 29;
+
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): UnknownRecord {
@@ -21,6 +26,41 @@ function record(value: unknown): UnknownRecord {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function completeMallSeoResult(result: UnknownRecord) {
+  const summary = record(result.summary);
+  return (
+    text(result.status) === "success" &&
+    summary.direct_apply_completed === true &&
+    Number(summary.title_apply_success_count ?? 0) >= EXPECTED_MALL_TITLE_COUNT
+  );
+}
+
+async function persistItem(
+  config: { supabaseUrl: string; secretKey: string },
+  identity: { userId: string; email: string },
+  state: UnknownRecord,
+  items: UnknownRecord[],
+  itemIndex: number,
+  item: UnknownRecord,
+  itemId: string,
+) {
+  const now = new Date().toISOString();
+  item.updatedAt = now;
+  item.updatedBy = "SEO Cloud 쇼핑몰별 상품명";
+  items[itemIndex] = item;
+  await writeProductLaunchState(
+    config,
+    identity,
+    { ...state, items, savedAt: now },
+  );
+  await reconcileProductLaunchNormalizedAfterLegacyItems(
+    config,
+    identity,
+    [itemId],
+  );
+  return now;
 }
 
 export async function POST(request: NextRequest) {
@@ -54,41 +94,113 @@ export async function POST(request: NextRequest) {
     }
 
     const item = { ...items[itemIndex] };
-    const current = record(item.mallSeoApply);
-    if (["pending", "running"].includes(text(current.status)) && text(current.requestId)) {
-      return Response.json(
-        {
-          ok: false,
-          code: "SHOPLING_MALL_SEO_ALREADY_RUNNING",
-          message: "이미 쇼핑몰별 상품명 반영 작업이 진행 중입니다.",
-          requestId: text(current.requestId),
-        },
-        { status: 409 },
+    let current = record(item.mallSeoApply);
+    const currentStatus = text(current.status);
+    const currentRequestId = text(current.requestId);
+
+    if (currentStatus === "success" && Number(current.itemCount ?? 0) >= EXPECTED_MALL_TITLE_COUNT) {
+      return Response.json({
+        ok: true,
+        status: "success",
+        requestId: currentRequestId,
+        itemCount: Number(current.itemCount ?? EXPECTED_MALL_TITLE_COUNT),
+        message: "쇼핑몰별 상품명 29개 반영이 이미 완료되었습니다.",
+      });
+    }
+
+    if (["pending", "running"].includes(currentStatus) && currentRequestId) {
+      const actual = record(
+        await fetchKeywordShoplingDirectApplyResult(currentRequestId),
       );
+      if (text(actual.status) === "pending") {
+        return Response.json({
+          ok: true,
+          status: "pending",
+          requestId: currentRequestId,
+          itemCount: Number(current.itemCount ?? EXPECTED_MALL_TITLE_COUNT),
+          runUrl: text(actual.runUrl),
+          message: "기존 쇼핑몰별 상품명 반영 작업이 아직 진행 중입니다.",
+        });
+      }
+      if (completeMallSeoResult(actual)) {
+        const now = new Date().toISOString();
+        item.mallSeoApply = {
+          ...current,
+          status: "success",
+          requestId: currentRequestId,
+          itemCount: EXPECTED_MALL_TITLE_COUNT,
+          message: "SEO Cloud 쇼핑몰별 상품명 29개 반영 완료",
+          completedAt: now,
+          updatedAt: now,
+        };
+        await persistItem(
+          config.value,
+          identity.value,
+          state,
+          items,
+          itemIndex,
+          item,
+          itemId,
+        );
+        return Response.json({
+          ok: true,
+          status: "success",
+          requestId: currentRequestId,
+          itemCount: EXPECTED_MALL_TITLE_COUNT,
+          runUrl: text(actual.runUrl),
+          message: "쇼핑몰별 상품명 29개와 공통 검색어 10개 반영을 확인했습니다.",
+        });
+      }
+
+      const now = new Date().toISOString();
+      item.mallSeoApply = {
+        ...current,
+        status: "failed",
+        requestId: currentRequestId,
+        itemCount: Number(current.itemCount ?? EXPECTED_MALL_TITLE_COUNT),
+        message:
+          text(actual.message) ||
+          "기존 쇼핑몰별 상품명 반영 작업이 종료됐지만 완전 성공을 확인하지 못했습니다.",
+        failedPhase: text(actual.phase),
+        failedAt: now,
+        updatedAt: now,
+      };
+      await persistItem(
+        config.value,
+        identity.value,
+        state,
+        items,
+        itemIndex,
+        item,
+        itemId,
+      );
+      current = record(item.mallSeoApply);
     }
 
     const started = await dispatchProductLaunchMallSeo(item);
     const now = new Date().toISOString();
     item.mallSeoApply = {
+      ...current,
       status: "pending",
       requestId: started.requestId,
+      previousRequestId: currentRequestId || text(current.requestId),
       itemCount: started.plan.length,
+      retryCount:
+        currentStatus === "pending" || currentStatus === "running" || currentStatus === "failed"
+          ? Number(current.retryCount ?? 0) + 1
+          : Number(current.retryCount ?? 0),
       message: "SEO Cloud 상품명 재고 29개를 쇼핑몰별로 반영 중입니다.",
       startedAt: now,
       updatedAt: now,
     };
-    item.updatedAt = now;
-    item.updatedBy = "SEO Cloud 쇼핑몰별 상품명";
-    items[itemIndex] = item;
-    await writeProductLaunchState(
+    await persistItem(
       config.value,
       identity.value,
-      { ...state, items, savedAt: now },
-    );
-    await reconcileProductLaunchNormalizedAfterLegacyItems(
-      config.value,
-      identity.value,
-      [itemId],
+      state,
+      items,
+      itemIndex,
+      item,
+      itemId,
     );
 
     return Response.json({
@@ -97,7 +209,9 @@ export async function POST(request: NextRequest) {
       requestId: started.requestId,
       itemCount: started.plan.length,
       runUrl: started.runUrl || started.githubActionsUrl || "",
-      message: "쇼핑몰별 상품명 29개와 공통 검색어 10개 반영을 시작했습니다.",
+      message: currentRequestId
+        ? "중단된 기존 작업을 정리하고 쇼핑몰별 상품명 29개 자동 재시도를 시작했습니다."
+        : "쇼핑몰별 상품명 29개와 공통 검색어 10개 반영을 시작했습니다.",
     });
   } catch (error) {
     return Response.json(
