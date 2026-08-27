@@ -157,3 +157,16 @@ test("기등록 상품은 상품명 재고 29개를 예약한 뒤 새 자사상�
   assert.match(finalize, /finalize_seo_title_reservation/);
   assert.match(finalize, /inventoryConsumed: success/);
 });
+
+test("SEO 대량등록은 6개 goods_key 후처리의 pending/failed 상태를 백그라운드에서 자동 재확인한다", async () => {
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+  const recovery = await source("src/app/seo-bulk-cloud/SeoBulkMallSeoRecoveryBridge.tsx");
+
+  assert.match(page, /SeoBulkMallSeoRecoveryBridge/);
+  assert.match(recovery, /CHECK_INTERVAL_MS = 6000/);
+  assert.match(recovery, /EXPECTED_GOODS_KEY_COUNT = 6/);
+  assert.match(recovery, /EXPECTED_MALL_TITLE_COUNT = 29/);
+  assert.match(recovery, /\["pending", "running", "failed"\]/);
+  assert.match(recovery, /\/api\/product-launch-tracker\/shopling-mall-seo/);
+  assert.match(recovery, /MAX_CONCURRENCY = 3/);
+});
