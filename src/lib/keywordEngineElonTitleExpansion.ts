@@ -1,7 +1,7 @@
 import {
   compactKeywordElonKey,
   type KeywordElonCandidate,
-} from "@/lib/keywordEngineElonLabV2";
+} from "./keywordEngineElonLabV2.ts";
 
 export const KEYWORD_ELON_TITLE_EXPANSION_LIMIT = 30;
 export const KEYWORD_ELON_CATEGORY_MATCH_GATE = 85;
