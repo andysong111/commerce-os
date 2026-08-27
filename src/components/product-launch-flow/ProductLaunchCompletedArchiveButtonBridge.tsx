@@ -5,6 +5,7 @@ import { useEffect } from "react";
 const FRAME_ID = "product-launch-tracker-frame";
 const BUTTON_ID = "completed-archive-button";
 const OPTIMIZED_API = "/api/product-launch-tracker/optimized";
+const COMPLETED_BATCH = "등록완료건";
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -49,7 +50,8 @@ function installButton(frame: HTMLIFrameElement) {
 
   const controls = doc.querySelector<HTMLElement>(".bulk-controls");
   const overall = doc.querySelector<HTMLSelectElement>("#overall-filter");
-  if (!controls || !overall) return () => {};
+  const batch = doc.querySelector<HTMLSelectElement>("#batch-filter");
+  if (!controls || !overall || !batch) return () => {};
 
   let button = doc.querySelector<HTMLButtonElement>(`#${BUTTON_ID}`);
   if (!button) {
@@ -61,10 +63,14 @@ function installButton(frame: HTMLIFrameElement) {
     controls.appendChild(button);
   }
 
+  const isCompletedView = () =>
+    overall.value === "완료" || text(batch.value) === COMPLETED_BATCH;
+
   const syncVisibility = () => {
     if (!button) return;
-    button.hidden = overall.value !== "완료";
-    button.title = overall.value === "완료"
+    const visible = isCompletedView();
+    button.hidden = !visible;
+    button.title = visible
       ? "선택한 등록완료 상품을 보관함으로 이동합니다."
       : "등록완료건 화면에서 사용할 수 있습니다.";
   };
@@ -89,11 +95,13 @@ function installButton(frame: HTMLIFrameElement) {
 
   syncVisibility();
   overall.addEventListener("change", syncVisibility);
+  batch.addEventListener("change", syncVisibility);
   button.addEventListener("click", onClick);
   win.addEventListener("product-launch-tracker:page-loaded", syncVisibility);
 
   return () => {
     overall.removeEventListener("change", syncVisibility);
+    batch.removeEventListener("change", syncVisibility);
     button?.removeEventListener("click", onClick);
     win.removeEventListener("product-launch-tracker:page-loaded", syncVisibility);
   };

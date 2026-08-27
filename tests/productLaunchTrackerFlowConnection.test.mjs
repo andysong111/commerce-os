@@ -66,7 +66,11 @@ test("등록완료건 화면은 선택 상품을 보관함으로 옮기는 전�
   assert.match(trackerPageSource, /ProductLaunchCompletedArchiveButtonBridge/);
   assert.match(trackerPageSource, /id="product-launch-tracker-frame"/);
   assert.match(completedArchiveBridgeSource, /button\.textContent = "보관함 이동"/);
-  assert.match(completedArchiveBridgeSource, /overall\.value !== "완료"/);
+  assert.match(completedArchiveBridgeSource, /#overall-filter/);
+  assert.match(completedArchiveBridgeSource, /#batch-filter/);
+  assert.match(completedArchiveBridgeSource, /COMPLETED_BATCH = "등록완료건"/);
+  assert.match(completedArchiveBridgeSource, /overall\.value === "완료"/);
+  assert.match(completedArchiveBridgeSource, /text\(batch\.value\) === COMPLETED_BATCH/);
   assert.match(completedArchiveBridgeSource, /#launch-table-body \.row-check:checked/);
   assert.match(completedArchiveBridgeSource, /tr\[data-id\]/);
   assert.match(completedArchiveBridgeSource, /operation: "archive_items"/);
