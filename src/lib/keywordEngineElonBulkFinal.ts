@@ -153,8 +153,17 @@ function trackerFallbackSource(
   input: KeywordElonBulkFinalInput,
 ): KeywordElonSourceDraft {
   const optionText = text(input.optionText);
+  const rawSupportingText = text(input.supportingText);
+  const category = text(input.mallTitleCategory);
+  const categoryFreeSupportingText =
+    category && rawSupportingText.startsWith(category)
+      ? rawSupportingText
+          .slice(category.length)
+          .replace(/^\s*·\s*/, "")
+          .trim()
+      : rawSupportingText;
   const supportingText = [
-    text(input.supportingText),
+    categoryFreeSupportingText,
     input.modelNumber ? `모델번호 ${input.modelNumber}` : "",
   ]
     .filter(Boolean)
