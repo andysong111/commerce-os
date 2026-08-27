@@ -58,6 +58,17 @@ function unique(values: string[], limit = 40) {
   return result;
 }
 
+function safeOptionFacts(item: UnknownRecord) {
+  const options = Array.isArray(item.orderOptions) ? item.orderOptions.map(record) : [];
+  if (!options.length) return [];
+  if (options.length === 1) {
+    return [text(options[0].optionName), text(options[0].saleOption)].filter(Boolean);
+  }
+  // One selected value from a multi-option product (for example "블랙") must not
+  // become a product-wide title fact. Keep only labels shared by all options.
+  return [...new Set(options.map((option) => text(option.optionName)).filter(Boolean))];
+}
+
 function requestUrl(input: RequestInfo | URL) {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
@@ -91,17 +102,11 @@ function trackerFactContext(item: UnknownRecord) {
   const additionalImages = stringList(detailAsset.additionalImageUrls).slice(0, 5);
   const category = text(item.shoplingCategory);
   const productName = text(item.productName);
-  const options = Array.isArray(item.orderOptions)
-    ? item.orderOptions
-        .map(record)
-        .flatMap((row) => [text(row.optionName), text(row.saleOption)])
-        .filter(Boolean)
-    : [];
 
   return unique([
     productName,
     ...category.split(/[>\/]+/).map(text).filter(Boolean),
-    ...options,
+    ...safeOptionFacts(item),
     ...htmlTextFacts(detailHtml),
     ...koreanWords(mainImageUrl),
     ...additionalImages.flatMap(koreanWords),
