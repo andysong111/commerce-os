@@ -2,19 +2,12 @@
 
 import { useEffect } from "react";
 
-import {
-  diversifyKeywordElonMallTitles,
-} from "@/lib/keywordEngineElonMallTitleDiversity";
-import type {
-  KeywordElonSeoIdentity,
-  KeywordElonSeoSearchKeyword,
-} from "@/lib/keywordEngineElonLabSeoOutput";
+import { composeKeywordElonSafeMallTitles } from "@/lib/keywordEngineElonMallTitleSafeComposer";
+import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
 const BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const NORMALIZED_API = "/api/product-launch-tracker/normalized-optimized";
-const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v1:";
-
-const FIRST_MODEL_GROUPS = new Set(["도매1", "도매4"]);
+const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v2:";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -132,42 +125,18 @@ function needsDiversityRepair(mallTitles: MallTitle[]) {
   return uniqueCount < mallTitles.length;
 }
 
-function searchDetails(keywords: string[]): KeywordElonSeoSearchKeyword[] {
-  return keywords.map((keyword, index) => ({
-    keyword,
-    origin: "step4",
-    sourceMaterials: [keyword],
-    score: Math.max(1, 100 - index),
-    relevance: 90,
-    shoppingIntent: 75,
-    specificity: 75,
-    qualityScore: 80,
-    demandScore: Math.max(1, 70 - index),
-    totalSearch: null,
-  }));
-}
-
-function identityForItem(item: UnknownRecord, seoFinal: UnknownRecord): KeywordElonSeoIdentity {
+function safeOptionText(item: UnknownRecord) {
   const options = Array.isArray(item.orderOptions) ? item.orderOptions.map(record) : [];
-  const optionMaterials = options.flatMap((option) => [
-    text(option.saleOption),
-    text(option.optionName),
-    text(option.chinaOption),
-  ]).filter(Boolean);
-  const productName = text(item.productName);
-  const modelName = text(seoFinal.productName);
-  const category = text(item.shoplingCategory);
-
-  return {
-    coreProduct: modelName || productName,
-    koreanProductIdentity: productName || modelName,
-    identityAnchor: [productName || modelName, category].filter(Boolean).join(" "),
-    primarySeeds: [],
-    conditionalSeeds: optionMaterials,
-    functionModifiers: optionMaterials,
-    designShapeModifiers: [],
-    specAttributes: [],
-  };
+  if (!options.length) return "";
+  if (options.length === 1) {
+    return [text(options[0].optionName), text(options[0].saleOption)]
+      .filter(Boolean)
+      .join(" / ");
+  }
+  // Multiple choices must not turn one option value (for example one color) into
+  // a product-wide title claim. Keep only shared option labels.
+  return [...new Set(options.map((option) => text(option.optionName)).filter(Boolean))]
+    .join(" / ");
 }
 
 function sameTitles(left: MallTitle[], right: MallTitle[]) {
@@ -181,29 +150,35 @@ async function repairItem(itemId: string) {
 
   const seoFinal = record(item.seoFinal);
   const modelName = text(seoFinal.productName);
-  const searchKeywords = stringList(seoFinal.searchKeywords, 10);
+  const searchKeywords = stringList(seoFinal.searchKeywords, 20);
   const mallTitles = readMallTitles(seoFinal.mallTitles);
-  if (!modelName || searchKeywords.length !== 10 || !needsDiversityRepair(mallTitles)) {
+  if (!modelName || !searchKeywords.length || !needsDiversityRepair(mallTitles)) {
     return false;
   }
 
-  const diversity = diversifyKeywordElonMallTitles({
-    rows: mallTitles.map((row) => ({
-      ...row,
-      modelPosition: FIRST_MODEL_GROUPS.has(row.productGroup) ? "first" as const : "after_lead" as const,
-    })),
+  const detailAsset = record(item.detailPageAsset);
+  const composed = composeKeywordElonSafeMallTitles({
+    markets: PRODUCT_GROUP_MARKET_REGISTRY,
+    finalKeywords: searchKeywords,
     modelName,
-    identity: identityForItem(item, seoFinal),
-    searchKeywords: searchDetails(searchKeywords),
+    context: {
+      modelNumber: text(item.modelNumber),
+      productName: text(item.productName) || modelName,
+      category: text(item.shoplingCategory),
+      optionText: safeOptionText(item),
+      detailHtml: text(detailAsset.html),
+      mainImageUrl: text(detailAsset.mainImageUrl),
+      additionalImageUrls: stringList(detailAsset.additionalImageUrls, 5),
+    },
   });
-  const repaired: MallTitle[] = diversity.rows.map((row) => ({
+  const repaired: MallTitle[] = composed.rows.map((row) => ({
     productGroup: row.productGroup,
     marketName: row.marketName,
     mallKey: row.mallKey,
     accountIdLabel: row.accountIdLabel,
     title: row.title,
   }));
-  if (!diversity.adjustedCount || sameTitles(mallTitles, repaired)) return false;
+  if (sameTitles(mallTitles, repaired)) return false;
 
   const groupTitles: Record<string, string> = {};
   const groupKeyByLabel: Record<string, string> = {
@@ -230,15 +205,17 @@ async function repairItem(itemId: string) {
           mallTitles: repaired,
           groupProductNames: groupTitles,
           diversityRepair: {
-            version: 1,
-            adjustedCount: diversity.adjustedCount,
-            uniqueTitleCount: diversity.uniqueTitleCount,
-            nearDuplicateCount: diversity.nearDuplicateCount,
+            version: 2,
+            composer: "safe-final-keyword-coverage-v2",
+            uniqueTitleCount: composed.uniqueTitleCount,
+            nearDuplicateCount: composed.nearDuplicateCount,
+            keywordCoverageCount: composed.keywordCoverageCount,
+            keywordCoverageTotal: composed.keywordCoverageTotal,
             repairedAt: new Date().toISOString(),
           },
         },
       },
-      updatedBy: "SEO 쇼핑몰 상품명 중복 자동보정",
+      updatedBy: "SEO 쇼핑몰 상품명 SAFE 중복 자동보정",
     }),
   });
   return true;
@@ -265,7 +242,7 @@ export default function SeoBulkExistingFinalDiversityBridge() {
         try {
           if (await repairItem(itemId)) repairedCount += 1;
         } catch (error) {
-          console.warn(`[SEO bulk diversity repair] ${itemId} skipped`, error);
+          console.warn(`[SEO bulk safe diversity repair] ${itemId} skipped`, error);
         }
       }
       if (cancelled) return;
