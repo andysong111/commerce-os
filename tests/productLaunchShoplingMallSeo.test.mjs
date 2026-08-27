@@ -116,6 +116,8 @@ test("취소된 direct-apply가 pending으로 고착되지 않고 실제 실행�
   assert.match(repairRoute, /direct_apply_completed/);
   assert.match(repairRoute, /title_apply_success_count/);
   assert.match(repairRoute, /EXPECTED_MALL_TITLE_COUNT = 29/);
+  assert.match(repairRoute, /MAX_AUTO_RETRY_COUNT = 2/);
+  assert.match(repairRoute, /SHOPLING_MALL_SEO_RETRY_LIMIT_REACHED/);
   assert.match(repairRoute, /previousRequestId/);
   assert.match(repairRoute, /자동 재시도를 시작했습니다/);
   assert.doesNotMatch(repairRoute, /SHOPLING_MALL_SEO_ALREADY_RUNNING/);
