@@ -18,7 +18,7 @@ const aaa491Keywords = [
   "발판",
 ];
 
-test("AAA491형 최종키워드 10개를 모두 쓰면서 29개 쇼핑몰 상품명을 안전하게 분산한다", () => {
+test("AAA491형 최종키워드 10개만 사용해 29개 쇼핑몰 상품명을 분산한다", () => {
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: aaa491Keywords,
@@ -29,8 +29,8 @@ test("AAA491형 최종키워드 10개를 모두 쓰면서 29개 쇼핑몰 상품
       category: "생활/건강>안마용품>다리/발안마기",
       optionText: "색상랜덤 발송 / BAF6-2 / 000000000730",
       detailHtml:
-        '<img src="https://ai-saurus.com/assets/발바닥지압스텝퍼.jpg" alt="跨境脚底穴位按摩器充气指压板" />',
-      mainImageUrl: "https://ai-saurus.com/assets/발바닥지압스텝퍼-main.jpg",
+        '<img src="https://ai-saurus.com/assets/윤지선작업/통합/발바닥지압스텝퍼.jpg" alt="공지 하단공지" />',
+      mainImageUrl: "https://ai-saurus.com/assets/예지/발바닥지압스텝퍼-main.jpg",
     },
   });
 
@@ -38,11 +38,14 @@ test("AAA491형 최종키워드 10개를 모두 쓰면서 29개 쇼핑몰 상품
   assert.equal(result.keywordCoverageCount, aaa491Keywords.length);
   assert.equal(result.keywordCoverageTotal, aaa491Keywords.length);
   assert.equal(result.uniqueTitleCount, 29);
+  assert.equal(result.facts.length, 0);
+  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3"));
 
+  const allowed = new Set(aaa491Keywords.map(keywordElonSeoCanonical));
   for (const keyword of aaa491Keywords) {
     const key = keywordElonSeoCanonical(keyword);
     assert.ok(
-      result.rows.some((row) => keywordElonSeoCanonical(row.title).includes(key)),
+      result.rows.some((row) => row.keywordMaterials.some((material) => keywordElonSeoCanonical(material) === key)),
       `missing keyword coverage: ${keyword}`,
     );
   }
@@ -50,15 +53,13 @@ test("AAA491형 최종키워드 10개를 모두 쓰면서 29개 쇼핑몰 상품
   for (const row of result.rows) {
     assert.ok(row.title.trim());
     assert.ok(keywordElonSeoUtf8Bytes(row.title) <= 50, row.title);
-    assert.doesNotMatch(row.title, /AAA491/i);
-    assert.doesNotMatch(row.title, /BAF6-2/i);
-    assert.doesNotMatch(row.title, /000000000730/);
-    assert.doesNotMatch(row.title, /쿠팡|스마트스토어|지마켓|옥션|도매꾹/);
-    assert.doesNotMatch(row.title, /발바닥지압스텝퍼발지압용스텝퍼발마사지발판/);
+    assert.equal(row.keywordMaterials.every((material) => allowed.has(keywordElonSeoCanonical(material))), true);
+    assert.doesNotMatch(row.title, /AAA491|BAF6-2|000000000730/i);
+    assert.doesNotMatch(row.title, /윤지선작업|통합|예지|공지|하단공지|색상랜덤|발송|안마용품/);
   }
 });
 
-test("최종키워드가 4개뿐이어도 새 검색키워드를 발명하지 않고 SAFE FACT와 어순으로 29개를 만든다", () => {
+test("최종키워드가 4개뿐이어도 외부 재료를 발명하지 않고 순서 조합만으로 29개를 만든다", () => {
   const keywords = ["포켓수첩", "가죽수첩", "미니노트", "펜홀더노트"];
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
@@ -69,17 +70,19 @@ test("최종키워드가 4개뿐이어도 새 검색키워드를 발명하지 �
       productName: "볼펜꽂이 미니 가죽노트",
       category: "문구/사무용품>노트/수첩>미니수첩",
       optionText: "A7 / 펜홀더 / 슬리브 포함 / BCD2-1 / 000000000123",
-      detailHtml: '<img src="https://example.com/미니가죽노트/펜홀더슬리브.jpg" />',
+      detailHtml: '<img src="https://example.com/윤지선작업/통합/공지.jpg" />',
     },
   });
 
   assert.equal(result.rows.length, 29);
   assert.equal(result.keywordCoverageCount, 4);
-  assert.ok(result.uniqueTitleCount >= 24, `unique=${result.uniqueTitleCount}`);
+  assert.equal(result.uniqueTitleCount, 29);
+  const allowed = new Set(keywords.map(keywordElonSeoCanonical));
   for (const row of result.rows) {
     assert.ok(keywordElonSeoUtf8Bytes(row.title) <= 50);
+    assert.equal(row.keywordMaterials.every((material) => allowed.has(keywordElonSeoCanonical(material))), true);
     assert.doesNotMatch(row.title, /AAA446|BCD2-1|000000000123/i);
-    assert.doesNotMatch(row.title, /a7가죽포켓수첩펜홀더슬리브포함/i);
+    assert.doesNotMatch(row.title, /윤지선작업|통합|공지|A7|슬리브|볼펜꽂이/);
   }
 });
 
