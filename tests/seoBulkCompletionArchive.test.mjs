@@ -6,38 +6,33 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("SEO 대량등록 화면은 goods_key 6/6 완료 상품을 화면에서 자동 숨김 처리한다", async () => {
+test("SEO 대량등록 화면은 등록완료 상품 원본이 아니라 실행회차 카드만 보관한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
-  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkCompletionArchiveBridge.tsx");
-  assert.match(page, /SeoBulkCompletionArchiveBridge/);
-  assert.match(bridge, /goods\[_ \]\?key/);
-  assert.match(bridge, /6개\\s\*등록됨/);
-  assert.match(bridge, /data-seo-bulk-goods-key-complete/);
-  assert.match(bridge, /article\.style\.display = "none"/);
-  assert.match(bridge, /MutationObserver/);
+  const client = await source("src/app/seo-bulk-cloud/SeoBulkRunCloudClient.tsx");
+  assert.match(page, /SeoBulkRunCloudClient/);
+  assert.doesNotMatch(page, /SeoBulkCompletionArchiveBridge/);
+  assert.match(client, /등록완료 카드 보관/);
+  assert.match(client, /archiveRuns/);
+  assert.match(client, /item\.runId/);
+  assert.doesNotMatch(client, /archive_items/);
+  assert.doesNotMatch(client, /archivedAt: true/);
 });
 
-test("완료 여부와 무관하게 현재 배치의 FINAL 상품명은 영구 상품명 재고 원장으로 백그라운드 동기화한다", async () => {
-  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkCompletionArchiveBridge.tsx");
-  const route = await source("src/app/api/seo-title-ledger/sync/route.ts");
-  const sync = await source("src/lib/seoTitleBulkInventorySync.ts");
-  assert.match(bridge, /\/api\/seo-title-ledger\/sync/);
-  assert.match(bridge, /commerceOs\.seoBulkCloud\.batch\.v1/);
-  assert.match(route, /syncSeoTitleBulkInventoryForItem/);
-  assert.match(route, /mapLimit\(itemIds, 2/);
-  assert.match(sync, /upsertSeoTitleLedger/);
-  assert.match(sync, /seo_title_inventory/);
-  assert.match(sync, /generateSeoTitleInventory/);
-  assert.match(sync, /seo-bulk-cloud-inventory-v2/);
-  assert.match(sync, /status: fullGoodsKeys \? "used" : "review"/);
-  assert.match(sync, /existingTitleFingerprints/);
-  assert.match(sync, /existingSemanticFingerprints/);
+test("등록회차 이력은 상품의 shoplingRegistrationHistory에 남아 이미지 회전과 감사 이력을 유지한다", async () => {
+  const client = await source("src/app/seo-bulk-cloud/SeoBulkRunCloudClient.tsx");
+  const shopling = await source("src/lib/productLaunchTrackerShopling.ts");
+  assert.match(client, /shoplingRegistrationHistory/);
+  assert.match(client, /seoRunId: row\.runId/);
+  assert.match(client, /registrationType: hasExistingGoods \? "seo_inventory_append" : "seo_run_initial"/);
+  assert.match(shopling, /registrationType\) === "seo_inventory_append"/);
+  assert.match(shopling, /imageRotationRound/);
 });
 
-test("상품명 재고는 상품별 launch ledger를 재사용해 같은 FINAL을 다시 열어도 중복 원장을 만들지 않는다", async () => {
+test("상품명 재고 원장은 기존 launch ledger 구조를 유지해 과거 운영 데이터와 호환된다", async () => {
   const sync = await source("src/lib/seoTitleBulkInventorySync.ts");
   assert.match(sync, /ledgerKey = `launch:\$\{normalizedId\}`/);
   assert.match(sync, /findSeoTitleLedgerByKey/);
   assert.match(sync, /on_conflict=ledger_id,title_fingerprint/);
-  assert.match(sync, /resolution=merge-duplicates/);
+  assert.match(sync, /existingTitleFingerprints/);
+  assert.match(sync, /existingSemanticFingerprints/);
 });
