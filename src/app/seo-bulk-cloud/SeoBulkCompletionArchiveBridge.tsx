@@ -276,7 +276,7 @@ export default function SeoBulkCompletionArchiveBridge() {
       }
     };
 
-    const pruneServerRemovedItems = async () => {
+    const pruneAlreadyArchived = async () => {
       try {
         const [archivedIds, clearedIds] = await Promise.all([
           loadArchivedItemIds(),
@@ -292,7 +292,7 @@ export default function SeoBulkCompletionArchiveBridge() {
     };
 
     refresh();
-    void pruneServerRemovedItems();
+    void pruneAlreadyArchived();
     scheduleInventorySync(100);
     const observer = new MutationObserver(() => refresh());
     observer.observe(document.body, {
