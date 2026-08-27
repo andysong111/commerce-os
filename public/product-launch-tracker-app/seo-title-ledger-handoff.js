@@ -240,7 +240,8 @@ async function openBulkCloud(button) {
       );
     }
 
-    const previousBatch = readPendingBatch();
+    const storedBatch = readPendingBatch();
+    const previousBatch = listOfRecords(storedBatch?.items).length ? storedBatch : null;
     const mergedItems = mergePendingItems(previousBatch?.items, items);
     if (mergedItems.length > MAX_BATCH_ITEMS) {
       throw new Error(
