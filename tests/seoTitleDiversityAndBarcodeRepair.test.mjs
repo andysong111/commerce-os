@@ -37,7 +37,7 @@ function keywordDetails(keywords) {
   }));
 }
 
-test("AAA491처럼 키워드 폭이 좁아도 검증 재료를 조합해 29개 상품명을 실제로 분산한다", () => {
+test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29개 분산 계약을 유지한다", () => {
   const modelName = "발 지압 스텝퍼";
   const repeatedTitles = [
     "발 지압 스텝퍼 발지압판 지압발판",
@@ -75,27 +75,26 @@ test("AAA491처럼 키워드 폭이 좁아도 검증 재료를 조합해 29개 �
   }
 });
 
-test("SEO 쇼핑몰 상품명 다양화는 검증된 키워드·상품 정체성 재료만 사용한다", async () => {
-  const diversity = await source("src/lib/keywordEngineElonMallTitleDiversity.ts");
+test("실제 SEO bulk 경로는 레거시 identity 재료가 아니라 최종키워드 + SAFE FACT Composer를 사용한다", async () => {
+  const safeComposer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
 
-  assert.match(diversity, /groundedMaterials/);
-  assert.match(diversity, /searchKeywords\.flatMap/);
-  assert.match(diversity, /functionModifiers/);
-  assert.match(diversity, /designShapeModifiers/);
-  assert.match(diversity, /specAttributes/);
-  assert.match(diversity, /isNearDuplicate/);
-  assert.match(diversity, /similarity\(remainder, other\) >= 0\.82/);
-  assert.match(diversity, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
-  assert.match(diversity, /modelOccurrenceCount\(cleaned, modelName\) === 1/);
-  assert.doesNotMatch(diversity, /인기|베스트|최고|추천상품|프리미엄/);
+  assert.match(safeComposer, /validateFinalKeywords/);
+  assert.match(safeComposer, /modelCodeLike/);
+  assert.match(safeComposer, /suspiciousCompositeFact/);
+  assert.match(safeComposer, /factPool/);
+  assert.match(safeComposer, /keywordCoverageCount/);
+  assert.match(safeComposer, /MARKETPLACE_TERMS/);
+  assert.match(safeComposer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
+  assert.doesNotMatch(safeComposer, /인기|베스트|최고|추천상품|프리미엄/);
 
-  assert.match(bulk, /diversifyKeywordElonMallTitles/);
-  assert.match(bulk, /const mallTitles = diversity\.rows/);
-  assert.match(bulk, /\.\.\.diversity\.warnings/);
+  assert.match(bulk, /composeKeywordElonSafeMallTitles/);
+  assert.match(bulk, /finalKeywords: searchKeywords/);
+  assert.match(bulk, /\.\.\.mallComposition\.warnings/);
+  assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
 });
 
-test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 중복 상품명을 자동 보정한다", async () => {
+test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 SAFE Composer로 중복 상품명을 자동 보정한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source(
     "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",
@@ -103,12 +102,15 @@ test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 중복 �
 
   assert.match(page, /SeoBulkExistingFinalDiversityBridge/);
   assert.match(bridge, /needsDiversityRepair/);
-  assert.match(bridge, /diversifyKeywordElonMallTitles/);
+  assert.match(bridge, /composeKeywordElonSafeMallTitles/);
+  assert.doesNotMatch(bridge, /diversifyKeywordElonMallTitles/);
   assert.match(bridge, /operation: "patch_item"/);
   assert.match(bridge, /hasRegisteredGoodsKeys\(item\)/);
   assert.match(bridge, /if \(!text\(item\.id\) \|\| hasRegisteredGoodsKeys\(item\)\) return false/);
   assert.match(bridge, /window\.location\.reload\(\)/);
-  assert.match(bridge, /SEO 쇼핑몰 상품명 중복 자동보정/);
+  assert.match(bridge, /SEO 쇼핑몰 상품명 SAFE 중복 자동보정/);
+  assert.match(bridge, /options\.length === 1/);
+  assert.match(bridge, /Multiple choices must not turn one option value/);
 });
 
 test("기존 OPTION 임시 identity가 있어도 B코드가 생기면 B코드 identity를 우선한다", () => {
