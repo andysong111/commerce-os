@@ -120,9 +120,10 @@ function canonical(value: unknown) {
 }
 
 function needsDiversityRepair(mallTitles: MallTitle[]) {
-  if (mallTitles.length !== 29) return false;
-  const uniqueCount = new Set(mallTitles.map((row) => canonical(row.title))).size;
-  return uniqueCount < mallTitles.length;
+  // Re-evaluate every complete, unregistered legacy FINAL once. Old finals can have
+  // 29 exact-unique titles and still contain weak/unsafe material or poor diversity.
+  // sameTitles() below prevents unnecessary writes when the SAFE result is unchanged.
+  return mallTitles.length === 29;
 }
 
 function safeOptionText(item: UnknownRecord) {
