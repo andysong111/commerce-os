@@ -22,6 +22,11 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function timestampMs(value: unknown) {
+  const parsed = Date.parse(text(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function readBatchContext() {
   try {
     const raw = window.localStorage.getItem(BATCH_STORAGE_KEY);
@@ -130,6 +135,19 @@ async function loadArchivedItemIds() {
     .filter(Boolean);
 }
 
+async function loadOneShotClearedItemIds() {
+  const batch = readBatchContext();
+  const batchCreatedAt = timestampMs(batch?.createdAt);
+  if (!batchCreatedAt) return [];
+  const items = await loadBatchTrackerItems();
+  return items
+    .filter(
+      (item) => timestampMs(item.seoBulkBatchClearedAt) > batchCreatedAt,
+    )
+    .map((item) => text(item.id))
+    .filter(Boolean);
+}
+
 async function archiveItems(itemIds: string[]) {
   const response = await fetch(TRACKER_API, {
     method: "PATCH",
@@ -155,10 +173,10 @@ async function archiveItems(itemIds: string[]) {
 function pruneBatchItems(itemIds: string[]) {
   const parsed = readBatchContext();
   if (!parsed) return false;
-  const archivedIds = new Set(itemIds);
+  const removeIds = new Set(itemIds);
   const items = Array.isArray(parsed.items) ? parsed.items : [];
   const nextItems = items.filter(
-    (item) => !archivedIds.has(text(record(item).id)),
+    (item) => !removeIds.has(text(record(item).id)),
   );
   if (nextItems.length === items.length) return false;
   window.localStorage.setItem(
@@ -260,18 +278,27 @@ export default function SeoBulkCompletionArchiveBridge() {
 
     const pruneAlreadyArchived = async () => {
       try {
-        const archivedIds = await loadArchivedItemIds();
-        if (archivedIds.length && pruneBatchItems(archivedIds)) {
+        const [archivedIds, clearedIds] = await Promise.all([
+          loadArchivedItemIds(),
+          loadOneShotClearedItemIds(),
+        ]);
+        const archivedPruned = archivedIds.length
+          ? pruneBatchItems(archivedIds)
+          : false;
+        const clearedPruned = clearedIds.length
+          ? pruneBatchItems(clearedIds)
+          : false;
+        if (archivedPruned || clearedPruned) {
           window.location.reload();
         }
       } catch (error) {
-        console.warn("[SEO bulk archive prune] archived batch cleanup skipped", error);
+        console.warn("[SEO bulk batch prune] server cleanup skipped", error);
       }
     };
 
     refresh();
-    scheduleInventorySync(100);
     void pruneAlreadyArchived();
+    scheduleInventorySync(100);
     const observer = new MutationObserver(() => refresh());
     observer.observe(document.body, {
       subtree: true,
