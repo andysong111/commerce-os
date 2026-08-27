@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+async function source(path) {
+  return readFile(new URL(`../${path}`, import.meta.url), "utf8");
+}
+
+test("v4 SEO title inventory revision replaces prior v3 inventory and keeps final-keyword-only policy", async () => {
+  const sync = await source("src/lib/seoTitleBulkInventorySync.ts");
+  const generator = await source("src/lib/seoTitleFinalKeywordInventoryGenerator.ts");
+
+  assert.match(sync, /seo-bulk-cloud-inventory-v4-final-keywords-min-length/);
+  assert.match(sync, /titleMaterialPolicy: "final-keywords-only-v4-min-length"/);
+  assert.match(sync, /titleByteRange: \[30, 50\]/);
+  assert.match(sync, /purgeLegacyUnissuedInventory/);
+  assert.match(generator, /MIN_TITLE_BYTES = 30/);
+  assert.match(generator, /TARGET_TITLE_BYTES = 42/);
+  assert.match(generator, /final-keywords-only-v4-min-length/);
+  assert.doesNotMatch(generator, /윤지선작업|예지|하단공지/);
+});
