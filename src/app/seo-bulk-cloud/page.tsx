@@ -4,6 +4,7 @@ import SeoBulkExistingFinalDiversityBridge from "./SeoBulkExistingFinalDiversity
 import SeoBulkFetchRecovery from "./SeoBulkFetchRecovery";
 import SeoBulkInventoryReregisterBridge from "./SeoBulkInventoryReregisterBridge";
 import SeoBulkMallSeoRecoveryBridge from "./SeoBulkMallSeoRecoveryBridge";
+import SeoBulkMallTitleFactBridge from "./SeoBulkMallTitleFactBridge";
 import SeoBulkWindowBridge from "./SeoBulkWindowBridge";
 
 export default function SeoBulkCloudPage() {
@@ -11,6 +12,7 @@ export default function SeoBulkCloudPage() {
     <>
       <SeoBulkWindowBridge />
       <SeoBulkFetchRecovery />
+      <SeoBulkMallTitleFactBridge />
       <SeoBulkMallSeoRecoveryBridge />
       <SeoBulkCompletionArchiveBridge />
       <SeoBulkExistingFinalDiversityBridge />
