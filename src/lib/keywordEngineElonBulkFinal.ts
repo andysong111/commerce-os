@@ -33,6 +33,8 @@ import {
 } from "@/lib/keywordEngineElonTitleExpansion";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
+const SEO_FINAL_SOURCE_V5 = "seo-bulk-cloud-category-intent-v5";
+const INTERNAL_CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
 const SHOPLING_GROUPS = [
   ["wholesale1", "도매1"],
   ["wholesale2", "도매2"],
@@ -118,6 +120,12 @@ function unique(values: unknown[], limit = 120) {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+function publicSourceWarnings(source: KeywordElonSourceDraft) {
+  return (source.warnings ?? []).filter(
+    (warning) => !text(warning).startsWith(INTERNAL_CATEGORY_META_PREFIX),
+  );
 }
 
 function passingRows(candidates: KeywordElonCandidate[]) {
@@ -286,13 +294,14 @@ export function composeKeywordElonBulkFinal(
     0,
     searchKeywords.length - output.commonSearchKeywords.length,
   );
+  const sourceWarnings = publicSourceWarnings(input.source);
   return {
     launchItemId: input.launchItemId,
     modelNumber: input.modelNumber,
     productName: input.productName,
     sourceUrl: input.sourceUrl,
     collectionMode: input.collectionMode,
-    sourceWarnings: input.source.warnings ?? [],
+    sourceWarnings,
     identity: input.identity,
     candidateCount: input.candidates.length,
     finalMaterialCount: Math.max(
@@ -304,7 +313,7 @@ export function composeKeywordElonBulkFinal(
       groupProductNames,
       searchKeywords,
       searchLine: searchKeywords.join(","),
-      source: "seo-bulk-cloud",
+      source: SEO_FINAL_SOURCE_V5,
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
@@ -324,7 +333,7 @@ export function composeKeywordElonBulkFinal(
     warnings: [
       ...output.warnings,
       ...mallComposition.warnings,
-      ...(input.source.warnings ?? []),
+      ...sourceWarnings,
       `TITLE_EXPANSION_CATEGORY:${titleExpansionCategory || "none"}`,
       `TITLE_EXPANSION_POOL_COUNT:${titleExpansionPool.length}`,
       ...(recoveredCount
