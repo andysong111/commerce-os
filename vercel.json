@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/seo-run-worker",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/product-decision-live-refresh",
