@@ -2,9 +2,9 @@ import {
   composeKeywordElonSafeMallTitles,
   type KeywordElonMallTitleFactContext,
   type KeywordElonMallTitleSafeComposerResult,
-} from "./keywordEngineElonMallTitleSafeComposer";
-import type { KeywordElonSeoMarket } from "./keywordEngineElonLabSeoOutput";
-import type { KeywordElonTitleExpansionMaterial } from "./keywordEngineElonTitleExpansion";
+} from "./keywordEngineElonMallTitleSafeComposer.ts";
+import type { KeywordElonSeoMarket } from "./keywordEngineElonLabSeoOutput.ts";
+import type { KeywordElonTitleExpansionMaterial } from "./keywordEngineElonTitleExpansion.ts";
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
