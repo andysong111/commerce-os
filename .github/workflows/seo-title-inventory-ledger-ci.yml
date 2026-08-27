@@ -22,6 +22,7 @@ on:
       - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
       - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
+      - "tests/seoTitleV4MinLengthContract.test.mjs"
       - "tests/keywordEngineElonMallTitleSafeComposer.test.mjs"
       - "tests/seoBulkMallTitleFactBridge.test.mjs"
       - "tests/seoBulkCloudParallel.test.mjs"
@@ -70,6 +71,7 @@ jobs:
           node --experimental-strip-types --test
           tests/seoTitleInventoryLedger.test.mjs
           tests/seoTitleFinalKeywordInventoryGenerator.test.mjs
+          tests/seoTitleV4MinLengthContract.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
           tests/keywordEngineElonMallTitleSafeComposer.test.mjs
           tests/seoBulkMallTitleFactBridge.test.mjs

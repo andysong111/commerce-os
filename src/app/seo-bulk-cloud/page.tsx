@@ -2,10 +2,12 @@ import SeoBulkCloudClient from "./SeoBulkCloudClient";
 import SeoBulkCompletionArchiveBridge from "./SeoBulkCompletionArchiveBridge";
 import SeoBulkExistingFinalDiversityBridge from "./SeoBulkExistingFinalDiversityBridge";
 import SeoBulkFetchRecovery from "./SeoBulkFetchRecovery";
-import SeoBulkInventoryReregisterBridge from "./SeoBulkInventoryReregisterBridge";
+import SeoBulkInventoryReadyReregister from "./SeoBulkInventoryReadyReregister";
 import SeoBulkMallSeoRecoveryBridge from "./SeoBulkMallSeoRecoveryBridge";
 import SeoBulkWindowBridge from "./SeoBulkWindowBridge";
 
+// SeoBulkInventoryReregisterBridge is rendered inside SeoBulkInventoryReadyReregister
+// only after the FINAL-keyword v4 inventory sync succeeds.
 export default function SeoBulkCloudPage() {
   return (
     <>
@@ -14,7 +16,7 @@ export default function SeoBulkCloudPage() {
       <SeoBulkMallSeoRecoveryBridge />
       <SeoBulkCompletionArchiveBridge />
       <SeoBulkExistingFinalDiversityBridge />
-      <SeoBulkInventoryReregisterBridge />
+      <SeoBulkInventoryReadyReregister />
       <SeoBulkCloudClient />
     </>
   );
