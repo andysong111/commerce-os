@@ -140,6 +140,15 @@ test("기등록 완료 상품은 SEO 클라우드 목록에서 숨기지 않고 
   assert.match(client, /goods_key \$\{goodsKeys\.length\}개 등록됨/);
 });
 
+test("보관함 이동이 끝난 상품은 SEO 대량등록 localStorage 배치에서도 자동 제거한다", async () => {
+  const bridge = await source("src/app/seo-bulk-cloud/SeoBulkCompletionArchiveBridge.tsx");
+  assert.match(bridge, /loadArchivedItemIds/);
+  assert.match(bridge, /Boolean\(text\(item\.archivedAt\)\)/);
+  assert.match(bridge, /pruneAlreadyArchived/);
+  assert.match(bridge, /pruneBatchItems\(archivedIds\)/);
+  assert.match(bridge, /window\.location\.reload\(\)/);
+});
+
 test("기등록 상품은 상품명 재고 29개를 예약한 뒤 새 자사상품코드로 force 추가등록하고 실패 시 원상복구한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source("src/app/seo-bulk-cloud/SeoBulkInventoryReregisterBridge.tsx");
