@@ -30,7 +30,7 @@ const collectorOps = await readFile(collectorOpsPath, "utf8");
 const collectorManifest = JSON.parse(await readFile("public/keyword-lab-collector/manifest.json", "utf8"));
 
 test("V2 has no Shopling or Supabase write dependency", () => {
-  assert.doesNotMatch(route, /Shopling|Supabase|keywordEngineElonLabStore|keywordEngineElonLabShopling/);
+  assert.doesNotMatch(route, /Supabase|keywordEngineElonLabStore|keywordEngineElonLabShopling/);
   assert.doesNotMatch(page, /review_stage_batch|run_stage_one|goods_key/);
 });
 
@@ -137,16 +137,19 @@ test("demand enrichment prefers evidence terms and adds Search Trend", () => {
   assert.match(trend, /TREND_KEYWORD_LIMIT = 5/);
 });
 
-test("AI scoring remains adaptive demand-first and bounded for Vercel runtime", () => {
+test("AI scoring remains adaptive demand-first, category-aware and bounded for Vercel runtime", () => {
   assert.match(route, /scoreKeywordElonCandidatesBatched/);
   assert.match(route, /maxDuration = 500/);
   assert.match(scoring, /OPENAI_TIMEOUT_MS = 42_000/);
   assert.match(scoring, /SCORE_CHUNK_SIZE = 12/);
   assert.match(scoring, /SCORE_CONCURRENCY = 8/);
-  assert.match(scoring, /Promise\.all\(wave\.map/);
+  assert.match(scoring, /Promise\.all\(/);
   assert.match(scoring, /calculateKeywordElonQuality/);
   assert.match(scoring, /uniqueKeywordElonCanonical/);
   assert.match(scoring, /searchKeyword: key/);
+  assert.match(scoring, /categoryMatch/);
+  assert.match(scoring, /intentClass/);
+  assert.match(scoring, /shoplingCategory/);
   assert.match(domain, /KEYWORD_ELON_V2_RELEVANCE_GATE = 80/);
   assert.match(domain, /KEYWORD_ELON_V2_SHOPPING_INTENT_GATE = 70/);
   assert.match(domain, /demandScore\*0\.55|demandScore \* 0\.55/);
@@ -172,11 +175,13 @@ test("V6 diagnostic UI exposes evidence mine, permissions, trend and canonical k
   assert.match(demandSummary, /row\.searchKeyword \|\| row\.searchKey/);
 });
 
-test("route exposes V6 readiness and errors remain diagnosable", () => {
+test("route exposes V7 category-intent readiness and errors remain diagnosable", () => {
   assert.match(route, /apiHubConfigured/);
   assert.match(route, /searchTrendConfigured/);
-  assert.match(route, /version: 6/);
-  assert.match(route, /marketRecall: "evidence-first"/);
+  assert.match(route, /categoryIntentExpansionAvailable/);
+  assert.match(route, /version: 7/);
+  assert.match(route, /marketRecall: "evidence-first-category-gated"/);
+  assert.match(route, /SHOPLING_CATEGORY=/);
   assert.match(route, /errorStage/);
   assert.match(page, /STEP 2 실행 오류 · 상세 진단/);
   assert.match(page, /서버가 JSON이 아닌 응답을 반환했습니다/);
