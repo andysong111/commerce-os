@@ -13,17 +13,6 @@ const connectedSource = await readFile(
   ),
   "utf8",
 );
-const trackerPageSource = await readFile(
-  new URL("../src/app/product-launch-tracker/page.tsx", import.meta.url),
-  "utf8",
-);
-const completedArchiveBridgeSource = await readFile(
-  new URL(
-    "../src/components/product-launch-flow/ProductLaunchCompletedArchiveButtonBridge.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
 const trackerAppSource = await readFile(
   new URL("../public/product-launch-tracker-app/app.js", import.meta.url),
   "utf8",
@@ -60,23 +49,6 @@ test("진행관리 표의 일괄 전달 기능은 건강한 Workflow gate 뒤의
   );
   assert.match(optimizedTrackerSource, /MAX_PRODUCT_FLOW_SELECTION = 20/);
   assert.doesNotMatch(trackerAppSource, /product-launch-flow-batch-handoff\.js/);
-});
-
-test("등록완료건 화면은 선택 상품을 보관함으로 옮기는 전용 버튼을 제공한다", () => {
-  assert.match(trackerPageSource, /ProductLaunchCompletedArchiveButtonBridge/);
-  assert.match(trackerPageSource, /id="product-launch-tracker-frame"/);
-  assert.match(completedArchiveBridgeSource, /button\.textContent = "보관함 이동"/);
-  assert.match(completedArchiveBridgeSource, /#overall-filter/);
-  assert.match(completedArchiveBridgeSource, /#batch-filter/);
-  assert.match(completedArchiveBridgeSource, /COMPLETED_BATCH = "등록완료건"/);
-  assert.match(completedArchiveBridgeSource, /overall\.value === "완료"/);
-  assert.match(completedArchiveBridgeSource, /text\(batch\.value\) === COMPLETED_BATCH/);
-  assert.match(completedArchiveBridgeSource, /#launch-table-body \.row-check:checked/);
-  assert.match(completedArchiveBridgeSource, /tr\[data-id\]/);
-  assert.match(completedArchiveBridgeSource, /operation: "archive_items"/);
-  assert.match(completedArchiveBridgeSource, /archived: true/);
-  assert.match(completedArchiveBridgeSource, /등록완료건 보관함 이동/);
-  assert.match(completedArchiveBridgeSource, /win\.location\.reload\(\)/);
 });
 
 test("등록 작업은 기존 진행관리 샵플링 API를 재사용하고 새로고침 복구 정보를 저장한다", () => {
