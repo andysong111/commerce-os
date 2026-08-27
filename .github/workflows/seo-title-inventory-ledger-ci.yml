@@ -28,6 +28,7 @@ on:
       - "tests/seoTitleV4MinLengthContract.test.mjs"
       - "tests/keywordEngineElonMallTitleSafeComposer.test.mjs"
       - "tests/seoCategoryIntentExpansionV5.test.mjs"
+      - "tests/seoCategoryIntentPrepareV5.test.mjs"
       - "tests/seoBulkMallTitleFactBridge.test.mjs"
       - "tests/seoBulkCloudParallel.test.mjs"
       - "tests/seoCloudPerformance.test.mjs"
@@ -52,6 +53,7 @@ jobs:
         run: >-
           npx eslint
           src/app/api/seo-title-ledger/route.ts
+          src/app/api/seo-title-ledger/prepare-v5/route.ts
           src/app/api/seo-title-dispatch/route.ts
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/keyword-engine-elon-lab/SeoTitleLedgerControlPanel.tsx
@@ -62,6 +64,7 @@ jobs:
           src/app/shopling-seo-dispatch/ShoplingSeoDispatchCenter.tsx
           src/app/product-launch-tracker/page.tsx
           src/app/seo-bulk-cloud/page.tsx
+          src/app/seo-bulk-cloud/SeoBulkInventoryReadyReregister.tsx
           src/lib/keywordEngineElonBulkFinal.ts
           src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonTitleExpansion.ts
@@ -82,6 +85,7 @@ jobs:
           tests/keywordEngineElonLabSeoOutput.test.mjs
           tests/keywordEngineElonMallTitleSafeComposer.test.mjs
           tests/seoCategoryIntentExpansionV5.test.mjs
+          tests/seoCategoryIntentPrepareV5.test.mjs
           tests/seoBulkMallTitleFactBridge.test.mjs
           tests/seoBulkCloudParallel.test.mjs
           tests/seoCloudPerformance.test.mjs
