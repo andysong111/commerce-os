@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 import { dispatchProductLaunchMallSeo } from "@/lib/productLaunchShoplingMallSeo";
+import { verifyProductLaunchShoplingReadback } from "@/lib/productLaunchShoplingReadback";
 import {
   extractCanonicalPriceTargetsFromUploadResult,
   SHOPLING_CANONICAL_PRICE_POLICY_VERSION,
@@ -14,6 +15,10 @@ import {
   readResponseJson,
   writeProductLaunchState,
 } from "@/lib/productLaunchTrackerServer";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const JOB_TABLE = "product_launch_upload_jobs";
 const CHANNEL_KEY_BY_LABEL: Record<string, string> = {
@@ -176,15 +181,53 @@ export async function PUT(
     }
 
     const completedAt = new Date().toISOString();
+    const readback = await verifyProductLaunchShoplingReadback({
+      reportedStatus: input.status,
+      rows: input.rows,
+      completedAt,
+    });
+    const finalErrorMessage = [input.errorMessage, readback.errorMessage]
+      .filter(Boolean)
+      .join(" · ")
+      .slice(0, 2000);
+    const verifiedInput = {
+      status: readback.status,
+      rows: readback.rows,
+      errorMessage: finalErrorMessage,
+    };
+    const successCount = readback.rows.filter(rowSucceeded).length;
+    const failedCount = Math.max(0, readback.rows.length - successCount);
+    const verifiedResult = {
+      ...input.result,
+      status: readback.status,
+      rows: readback.rows,
+      total_count: readback.rows.length,
+      success_count: successCount,
+      failed_count: failedCount,
+      error_message: finalErrorMessage,
+      readback_verification: readback.verification,
+    };
+
     await patchJob(config.value, jobId, {
-      status: input.status,
-      result: input.result,
-      error_message: input.errorMessage,
+      status: readback.status,
+      result: verifiedResult,
+      error_message: finalErrorMessage,
       updated_at: completedAt,
       completed_at: completedAt,
     });
-    await applyResultToTrackerState(config.value, job, input, completedAt);
-    return Response.json({ ok: true, jobId, status: input.status, completedAt });
+    await applyResultToTrackerState(
+      config.value,
+      job,
+      verifiedInput,
+      completedAt,
+    );
+    return Response.json({
+      ok: true,
+      jobId,
+      status: readback.status,
+      completedAt,
+      readbackVerification: readback.verification,
+    });
   } catch (error) {
     return Response.json(
       {
@@ -353,11 +396,10 @@ async function applyResultToTrackerState(
       CHANNEL_KEY_BY_LABEL[String(row.channel ?? row.channel_label ?? "")] ||
       "";
     if (!channelKey) continue;
-    const succeeded =
-      String(row.status ?? "") === "success" || String(row.code ?? "") === "000";
+    const succeeded = rowSucceeded(row);
     products[channelKey] = {
       ...asRecord(products[channelKey]),
-      goodsKey: String(row.goods_key ?? row.goodsKey ?? ""),
+      goodsKey: succeeded ? String(row.goods_key ?? row.goodsKey ?? "") : "",
       status: succeeded ? "success" : "failed",
       error: succeeded ? "" : String(row.message ?? row.msg ?? ""),
       registeredAt: succeeded ? completedAt : null,
@@ -393,11 +435,7 @@ async function applyResultToTrackerState(
     savedAt: completedAt,
   };
   const identity = { userId: ownerId, email: ownerEmail };
-  await writeProductLaunchState(
-    config,
-    identity,
-    nextState,
-  );
+  await writeProductLaunchState(config, identity, nextState);
   await reconcileProductLaunchNormalizedAfterLegacyItems(
     config,
     identity,
@@ -531,6 +569,10 @@ async function startCanonicalPricePolicy(
       updatedAt: completedAt,
     };
   }
+}
+
+function rowSucceeded(row: Record<string, unknown>) {
+  return String(row.status ?? "") === "success" || String(row.code ?? "") === "000";
 }
 
 function isValidJobId(value: string) {
