@@ -58,7 +58,7 @@ export type ProductLaunchShoplingPayload = {
   imageRotation: {
     strategy: "round_robin_v1";
     round: number;
-    source: "shopling_registration_history";
+    source: "seo_inventory_append_history";
   };
   fixedFields: {
     prodTp: string;
@@ -131,7 +131,9 @@ export function buildProductLaunchShoplingPayload(
   const registrationHistory = Array.isArray(item.shoplingRegistrationHistory)
     ? item.shoplingRegistrationHistory
     : [];
-  const imageRotationRound = registrationHistory.length;
+  const imageRotationRound = registrationHistory.filter(
+    (entry) => text(asRecord(entry).registrationType) === "seo_inventory_append",
+  ).length;
   const seoFinal = normalizeSeoFinal(item.seoFinal);
   const rawOptions = Array.isArray(item.orderOptions) ? item.orderOptions : [];
   const singleOptionBarcode =
@@ -268,7 +270,7 @@ export function buildProductLaunchShoplingPayload(
     imageRotation: {
       strategy: "round_robin_v1",
       round: imageRotationRound,
-      source: "shopling_registration_history",
+      source: "seo_inventory_append_history",
     },
     fixedFields: {
       prodTp: text(policy.productType) || "A",
