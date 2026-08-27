@@ -9,7 +9,10 @@ on:
       - "src/app/keyword-engine-elon-lab/layout.tsx"
       - "src/app/shopling-seo-dispatch/**"
       - "src/app/product-launch-tracker/page.tsx"
+      - "src/app/seo-bulk-cloud/**"
       - "src/lib/seoTitle*"
+      - "src/lib/keywordEngineElonBulkFinal.ts"
+      - "src/lib/keywordEngineElonMallTitleSafeComposer.ts"
       - "src/lib/shoplingSeoDispatchModule.ts"
       - "src/lib/keywordEngineElonLabModule.ts"
       - "src/lib/opsModuleRegistry.ts"
@@ -18,6 +21,9 @@ on:
       - "supabase/migrations/202608220001_seo_title_inventory_ledger.sql"
       - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
+      - "tests/keywordEngineElonMallTitleSafeComposer.test.mjs"
+      - "tests/seoBulkMallTitleFactBridge.test.mjs"
+      - "tests/seoBulkCloudParallel.test.mjs"
       - "tests/seoCloudPerformance.test.mjs"
       - ".github/workflows/seo-title-inventory-ledger-ci.yml"
   workflow_dispatch:
@@ -48,16 +54,23 @@ jobs:
           src/app/shopling-seo-dispatch/page.tsx
           src/app/shopling-seo-dispatch/ShoplingSeoDispatchCenter.tsx
           src/app/product-launch-tracker/page.tsx
+          src/app/seo-bulk-cloud/SeoBulkMallTitleFactBridge.tsx
+          src/app/seo-bulk-cloud/page.tsx
+          src/lib/keywordEngineElonBulkFinal.ts
+          src/lib/keywordEngineElonMallTitleSafeComposer.ts
           src/lib/seoTitleInventoryGenerator.ts
           src/lib/seoTitleLedgerServer.ts
           src/lib/shoplingSeoDispatchModule.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/opsModuleRegistry.ts
-      - name: Test title inventory, no-reuse and performance contracts
+      - name: Test title inventory, safe mall titles, no-reuse and performance contracts
         run: >-
           node --experimental-strip-types --test
           tests/seoTitleInventoryLedger.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
+          tests/keywordEngineElonMallTitleSafeComposer.test.mjs
+          tests/seoBulkMallTitleFactBridge.test.mjs
+          tests/seoBulkCloudParallel.test.mjs
           tests/seoCloudPerformance.test.mjs
       - name: Build
         run: npm run build
