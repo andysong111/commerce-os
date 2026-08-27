@@ -29,6 +29,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 500;
 
+const CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -97,7 +99,11 @@ function titleResultFrom(value: unknown): KeywordElonTitleResult {
 function bulkItemFrom(value: unknown) {
   const item = isRecord(value) ? value : {};
   const supportingText = text(item.supportingText);
-  const inferredCategory = supportingText.split(" · ").map((part) => part.trim()).filter(Boolean)[0] || "";
+  const inferredCategory =
+    supportingText
+      .split(" · ")
+      .map((part) => part.trim())
+      .filter(Boolean)[0] || "";
   return {
     launchItemId: text(item.launchItemId ?? item.id),
     modelNumber: text(item.modelNumber),
@@ -110,8 +116,10 @@ function bulkItemFrom(value: unknown) {
   };
 }
 function categoryFromSource(source: KeywordElonSourceDraft) {
-  const match = text(source.supportingText).match(/(?:^|\s·\s)SHOPLING_CATEGORY=([^·]+)/);
-  return match?.[1]?.trim() || "";
+  const marker = (source.warnings ?? []).find((warning) =>
+    text(warning).startsWith(CATEGORY_META_PREFIX),
+  );
+  return marker ? text(marker).slice(CATEGORY_META_PREFIX.length).trim() : "";
 }
 function readiness() {
   return {
@@ -158,13 +166,12 @@ export async function POST(request: NextRequest) {
       });
       const source = {
         ...collected.source,
-        supportingText: [
-          item.mallTitleCategory ? `SHOPLING_CATEGORY=${item.mallTitleCategory}` : "",
-          item.supportingText,
-          collected.source.supportingText,
-        ]
-          .filter(Boolean)
-          .join(" · "),
+        warnings: [
+          ...(item.mallTitleCategory
+            ? [`${CATEGORY_META_PREFIX}${item.mallTitleCategory}`]
+            : []),
+          ...(collected.source.warnings ?? []),
+        ].slice(0, 20),
       };
       return NextResponse.json({
         ok: true,
@@ -191,7 +198,10 @@ export async function POST(request: NextRequest) {
         candidates: candidatesFrom(body.candidates),
         allowedKeys: textArray(body.allowedKeys, 120),
         blockedKeys: textArray(body.blockedKeys, 120),
-        finalMaterialCount: Math.max(0, Math.floor(Number(body.finalMaterialCount) || 0)),
+        finalMaterialCount: Math.max(
+          0,
+          Math.floor(Number(body.finalMaterialCount) || 0),
+        ),
         titleResult: titleResultFrom(body.titleResult),
       };
 
@@ -303,7 +313,8 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : "키워드 실험실 처리 실패";
+    const message =
+      error instanceof Error ? error.message : "키워드 실험실 처리 실패";
     console.error("[keyword-engine-elon-lab]", action, message);
     return NextResponse.json(
       { ok: false, errorStage: action, error: `[${action}] ${message}` },
