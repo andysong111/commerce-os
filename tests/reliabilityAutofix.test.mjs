@@ -58,7 +58,7 @@ test("자동수정 후보는 낮은 위험·충분한 신뢰도·명시적 안�
   );
 });
 
-test("AI 제안도 경로 안전 경계를 다시 통과해야 하고 새 소스 파일 생성은 금지된다", () => {
+test("AI 제안도 경로 안전 경계를 다시 통과하고 모든 새 파일 생성을 금지한다", () => {
   const proposal = parseReliabilityAutofixProposal({
     summary: "bounded retry",
     reasoning: "transient failure only",
@@ -71,8 +71,8 @@ test("AI 제안도 경로 안전 경계를 다시 통과해야 하고 새 소스
       },
       {
         path: "tests/safeExternalRetry.test.mjs",
-        old_text: "",
-        new_text: "import test from 'node:test';\n",
+        old_text: "test('existing', () => {});",
+        new_text: "test('existing', () => { assert.ok(true); });",
       },
     ],
   });
@@ -96,7 +96,23 @@ test("AI 제안도 경로 안전 경계를 다시 통과해야 하고 새 소스
         validation_notes: "none",
         edits: [{ path: "src/lib/newHelper.ts", old_text: "", new_text: "export {}" }],
       }),
-    /테스트 파일/,
+    /새 파일 생성은 허용되지 않습니다/,
+  );
+  assert.throws(
+    () =>
+      parseReliabilityAutofixProposal({
+        summary: "new test",
+        reasoning: "unsafe",
+        validation_notes: "none",
+        edits: [
+          {
+            path: "tests/newRegression.test.mjs",
+            old_text: "",
+            new_text: "import test from 'node:test';\n",
+          },
+        ],
+      }),
+    /새 파일 생성은 허용되지 않습니다/,
   );
 });
 
