@@ -3,13 +3,19 @@ import {
   keywordElonSeoCanonical,
   keywordElonSeoUtf8Bytes,
 } from "./keywordEngineElonLabSeoOutput.ts";
-import {
-  SEO_TITLE_DEFAULT_ROUNDS,
-  SEO_TITLE_GROUP_QUOTAS,
-  SEO_TITLE_MAX_ROUNDS,
-  type SeoTitleProductGroup,
-} from "./seoTitleInventoryGenerator.ts";
 
+const SEO_TITLE_DEFAULT_ROUNDS = 5;
+const SEO_TITLE_MAX_ROUNDS = 50;
+const SEO_TITLE_GROUP_QUOTAS = {
+  도매1: 5,
+  도매2: 3,
+  도매3: 3,
+  도매4: 1,
+  소매1: 12,
+  소매2: 5,
+} as const;
+
+type SeoTitleProductGroup = keyof typeof SEO_TITLE_GROUP_QUOTAS;
 const GROUPS = Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[];
 const MAX_COMBINATION_SIZE = 5;
 const MAX_CANDIDATE_POOL = 60_000;
