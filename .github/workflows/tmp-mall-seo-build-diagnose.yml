@@ -1,0 +1,34 @@
+name: Temporary Mall SEO Build Diagnose
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-mall-seo-build-diagnose.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Target regression tests
+        run: >-
+          node --experimental-strip-types --test
+          tests/productLaunchShoplingMallSeo.test.mjs
+          tests/seoBulkCloudParallel.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://price-auth-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_price_auth_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
