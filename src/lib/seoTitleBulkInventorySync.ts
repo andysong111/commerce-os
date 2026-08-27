@@ -29,7 +29,7 @@ import {
 } from "@/lib/productLaunchTrackerServer";
 
 const GROUPS = ["도매1", "도매2", "도매3", "도매4", "소매1", "소매2"] as const;
-const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v3-final-keywords-only";
+const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v4-final-keywords-min-length";
 const CHANNEL_BY_GROUP: Record<SeoTitleProductGroup, string> = {
   도매1: "wholesale1",
   도매2: "wholesale2",
@@ -40,7 +40,6 @@ const CHANNEL_BY_GROUP: Record<SeoTitleProductGroup, string> = {
 };
 
 type UnknownRecord = Record<string, unknown>;
-
 type CurrentAssignment = {
   productGroup: SeoTitleProductGroup;
   title: string;
@@ -129,9 +128,7 @@ function currentAssignments(
   return [...byFingerprint.values()];
 }
 
-function currentGroupCounts(
-  rows: Array<{ product_group: string; status: string }>,
-) {
+function currentGroupCounts(rows: Array<{ product_group: string; status: string }>) {
   const counts = Object.fromEntries(GROUPS.map((group) => [group, 0])) as Record<
     SeoTitleProductGroup,
     number
@@ -191,9 +188,7 @@ async function upsertCurrentAssignments(
       },
     );
     const body = await readResponseJson(response);
-    if (!response.ok) {
-      throw new Error(readProductLaunchError(body, response.status));
-    }
+    if (!response.ok) throw new Error(readProductLaunchError(body, response.status));
     if (Array.isArray(body)) result.push(...body.map(record));
   }
   return result;
@@ -221,9 +216,7 @@ async function purgeLegacyUnissuedInventory(
     },
   );
   const body = await readResponseJson(response);
-  if (!response.ok) {
-    throw new Error(readProductLaunchError(body, response.status));
-  }
+  if (!response.ok) throw new Error(readProductLaunchError(body, response.status));
   return true;
 }
 
@@ -284,10 +277,7 @@ export async function syncSeoTitleBulkInventoryForItem(
   const ledgerKey = `launch:${normalizedId}`;
   const existingLedger = await findSeoTitleLedgerByKey(context, ledgerKey);
 
-  if (
-    existingLedger &&
-    text(existingLedger.engine_revision) !== STRICT_ENGINE_REVISION
-  ) {
+  if (existingLedger && text(existingLedger.engine_revision) !== STRICT_ENGINE_REVISION) {
     const legacyFingerprints = await listSeoTitleInventoryFingerprints(
       context,
       existingLedger.ledger_id,
@@ -329,7 +319,8 @@ export async function syncSeoTitleBulkInventoryForItem(
         modelNumber: text(item.modelNumber),
       },
       inventoryPolicy: {
-        titleMaterialPolicy: "final-keywords-only-v3",
+        titleMaterialPolicy: "final-keywords-only-v4-min-length",
+        titleByteRange: [30, 50],
         currentFinalTitlesAreConsumed: fullGoodsKeys,
         targetRounds: SEO_TITLE_DEFAULT_ROUNDS,
       },
@@ -341,14 +332,8 @@ export async function syncSeoTitleBulkInventoryForItem(
     updated_at: now,
   });
 
-  // Only titles that actually exist in Shopling are audit history. Unregistered
-  // draft mall titles are not inventory material and must never pollute the pool.
   if (fullGoodsKeys) {
-    await upsertCurrentAssignments(
-      context,
-      ledger.ledger_id,
-      assignments,
-    );
+    await upsertCurrentAssignments(context, ledger.ledger_id, assignments);
   }
 
   const fingerprints = await listSeoTitleInventoryFingerprints(
@@ -383,6 +368,7 @@ export async function syncSeoTitleBulkInventoryForItem(
     selectedByGroup.set(candidate.productGroup, used + 1);
     return true;
   });
+
   const inserted = await insertSeoTitleInventory(
     context,
     selected.map((candidate) => ({
@@ -409,8 +395,7 @@ export async function syncSeoTitleBulkInventoryForItem(
   const finalCounts = currentGroupCounts(finalFingerprints);
   const shortages = GROUPS.filter(
     (group) =>
-      finalCounts[group] <
-      SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
+      finalCounts[group] < SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
   );
   const status = shortages.length ? "needs_review" : "ready";
   await patchSeoTitleLedger(context, ledger.ledger_id, {
