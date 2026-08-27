@@ -102,6 +102,7 @@ test("alias harness guard covers the Shopling failure shape from the first close
     source("src/lib/shopling/shoplingReadClient.ts"),
     source("tests/shoplingReadClient.test.mjs"),
   ]);
+  const systemPrompt = reliabilityAutofixSystemPrompt();
 
   assert.match(shoplingSource, /from "@\/lib\/shopling\/simpleXml"/);
   assert.match(shoplingSource, /from "@\/lib\/shopling\/shoplingTlsTransport"/);
@@ -114,6 +115,8 @@ test("alias harness guard covers the Shopling failure shape from the first close
   assert.match(worker, /contentReferencesHarnessTarget/);
   assert.match(worker, /harnessPaths\.join\(", "\)/);
   assert.match(worker, /provided existing.*transpile\/load|기존 실행 테스트.*transpile\/load/i);
+  assert.match(systemPrompt, /검증된 기존 실행 하네스 후보/);
+  assert.match(systemPrompt, /다른 테스트 경로나 새 테스트 파일을 제안하지 않는다/);
 });
 
 test("exact edit anchor failures stay bounded and preserve the original trusted file first", async () => {
