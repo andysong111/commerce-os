@@ -11,8 +11,11 @@ test("autofix generation keeps enough server time and output budget without exce
   const route = await source("src/app/api/integrations/reliability/autofix/route.ts");
   const worker = await source("scripts/reliability-autofix-worker.mjs");
 
-  assert.match(openai, /AUTOFIX_TIMEOUT_MS = 100_000/);
+  assert.match(openai, /AUTOFIX_TIMEOUT_MS = 145_000/);
   assert.match(openai, /AUTOFIX_OUTPUT_TOKENS = 9_000/);
-  assert.match(route, /maxDuration = 120/);
-  assert.match(worker, /AbortSignal\.timeout\(110_000\)/);
+  assert.match(route, /maxDuration = 180/);
+  assert.match(worker, /AUTOFIX_API_TIMEOUT_MS = 165_000/);
+  assert.match(worker, /AbortSignal\.timeout\(AUTOFIX_API_TIMEOUT_MS\)/);
+  assert.ok(145_000 < 165_000);
+  assert.ok(165_000 < 180_000);
 });

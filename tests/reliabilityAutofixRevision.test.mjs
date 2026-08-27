@@ -51,7 +51,7 @@ test("validator feedback is bounded and asks for a complete replacement proposal
   assert.match(parsed.revision_feedback.instruction, /완전한 대체 제안/);
 });
 
-test("worker retries exactly once for a missing, alias-incompatible, malformed anchor, or invalid syntax proposal", async () => {
+test("worker keeps missing, alias-incompatible, required-harness, malformed anchor, and syntax revisions bounded", async () => {
   const [worker, route, openai] = await Promise.all([
     source("scripts/reliability-autofix-worker.mjs"),
     source("src/app/api/integrations/reliability/autofix/route.ts"),
@@ -60,9 +60,12 @@ test("worker retries exactly once for a missing, alias-incompatible, malformed a
 
   assert.match(worker, /class MissingExecutedRegressionTestError extends Error/);
   assert.match(worker, /class IncompatibleExecutedRegressionTestError extends Error/);
+  assert.match(worker, /class RequiredExistingHarnessError extends Error/);
   assert.match(worker, /class EditAnchorMismatchError extends Error/);
   assert.match(worker, /class InvalidExecutedRegressionTestSyntaxError extends Error/);
   assert.match(worker, /this\.targetPath = targetPath/);
+  assert.match(worker, /this\.requiredPaths = required/);
+  assert.match(worker, /this\.proposedPaths = proposed/);
   assert.match(worker, /this\.occurrences = occurrences/);
   assert.match(worker, /this\.detail = detail/);
   assert.match(worker, /function directTypeScriptImports\(source\)/);
@@ -71,32 +74,37 @@ test("worker retries exactly once for a missing, alias-incompatible, malformed a
   assert.match(worker, /function enrichContextWithAnchorFile\(context, path\)/);
   assert.match(worker, /function assertExecutableTestSyntax\(planned\)/);
   assert.match(worker, /execFileSync\(process\.execPath, \["--check", tempPath\]/);
-  assert.match(worker, /assertExecutedTestHarnessCompatible\(path, newText\)/);
+  assert.match(worker, /assertExecutedTestHarnessCompatible\(proposalPath\(edit\), String\(edit\?\.new_text \?\? ""\)\)/);
   assert.match(worker, /assertExecutableTestSyntax\(planned\)/);
   assert.match(worker, /error instanceof MissingExecutedRegressionTestError/);
   assert.match(worker, /error instanceof IncompatibleExecutedRegressionTestError/);
+  assert.match(worker, /error instanceof RequiredExistingHarnessError/);
   assert.match(worker, /error instanceof EditAnchorMismatchError/);
   assert.match(worker, /error instanceof InvalidExecutedRegressionTestSyntaxError/);
   assert.match(worker, /INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK/);
+  assert.match(worker, /REQUIRED_EXISTING_HARNESS_REVISION_FEEDBACK/);
   assert.match(worker, /EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK/);
   assert.match(worker, /INVALID_EXECUTED_TEST_SYNTAX_REVISION_FEEDBACK/);
-  assert.match(worker, /검증된 기존 실행 하네스 후보/);
+  assert.match(worker, /허용 실행 테스트 경로/);
   assert.match(worker, /검출된 anchor 오류/);
   assert.match(worker, /검출된 구문 오류/);
   assert.match(worker, /files:revisionContext/);
-  assert.match(worker, /changed=applyProposal\(proposal,revisionContext\)/);
-  assert.match(worker, /revision_feedback:revisionFeedback/);
-  assert.match(worker, /preflightProposal\(edits\)/);
-  assert.match(worker, /if \(!executedTestProposed\) throw new MissingExecutedRegressionTestError\(\)/);
+  assert.match(worker, /changed=applyProposal\(proposal,revisionContext,requiredTestPaths\)/);
+  assert.match(worker, /revision_feedback: revisionFeedback|revision_feedback:revisionFeedback/);
+  assert.match(worker, /preflightProposal\(edits, requiredTestPaths\)/);
+  assert.match(worker, /if \(!executedTestPaths\.length\) throw new MissingExecutedRegressionTestError\(\)/);
+  assert.match(worker, /throw new RequiredExistingHarnessError\(required, executedTestPaths\)/);
   assert.match(worker, /const occurrences = countOccurrences\(state\.current, oldText\)/);
   assert.match(worker, /throw new EditAnchorMismatchError\(path, occurrences\)/);
-  assert.doesNotMatch(worker, /for\s*\([^)]*revision/i);
+  assert.match(worker, /const MAX_GENERATION_REVISIONS = 2;/);
+  assert.match(worker, /for \(let revision=0; revision<=MAX_GENERATION_REVISIONS; revision\+=1\)/);
   assert.doesNotMatch(worker, /while\s*\([^)]*revision/i);
+  assert.match(worker, /requiredTestPaths=next\.requiredTestPaths/);
   assert.match(route, /text\(body\.revision_feedback, 1_000\)/);
   assert.match(openai, /buildReliabilityAutofixPrompt\(job, files, revisionFeedback\)/);
 });
 
-test("alias harness guard covers the Shopling failure shape from the first closed-loop run", async () => {
+test("alias harness guard covers the Shopling failure shape from the closed-loop runs", async () => {
   const [worker, shoplingSource, existingHarness] = await Promise.all([
     source("scripts/reliability-autofix-worker.mjs"),
     source("src/lib/shopling/shoplingReadClient.ts"),
@@ -112,7 +120,10 @@ test("alias harness guard covers the Shopling failure shape from the first close
   assert.match(worker, /targetPath\.startsWith\("src\/"\)/);
   assert.match(worker, /walk\(join\(ROOT, "tests"\)\)/);
   assert.match(worker, /contentReferencesHarnessTarget/);
-  assert.match(worker, /harnessPaths\.join\(", "\)/);
+  assert.match(worker, /if \(enriched\.harnessPaths\.length\) nextRequiredTestPaths=enriched\.harnessPaths/);
+  assert.match(worker, /const allowed = new Set\(required\)/);
+  assert.match(worker, /hasUnexpected = executedTestPaths\.some\(\(path\) => !allowed\.has\(path\)\)/);
+  assert.match(worker, /목록 밖 테스트 파일을 새로 만들거나 수정하지 마세요/);
   assert.match(worker, /provided existing.*transpile\/load|기존 실행 테스트.*transpile\/load/i);
 });
 
@@ -121,8 +132,8 @@ test("exact edit anchor failures stay bounded and preserve the original trusted 
 
   assert.match(worker, /Proposal old_text must match exactly once in the trusted repository file/);
   assert.match(worker, /push\(normalized, readFileSync\(absolute, "utf8"\)\)/);
-  assert.match(worker, /old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다/);
-  assert.match(worker, /동일한 저위험 수정 범위 안에서 완전한 대체 제안/);
+  assert.match(worker, /old_text는 최신 repository_context에서/);
+  assert.match(worker, /정확히 한 번 존재하는 연속 문자열/);
 });
 
 test("generated executable JavaScript tests receive a parser preflight before repository tests", async () => {

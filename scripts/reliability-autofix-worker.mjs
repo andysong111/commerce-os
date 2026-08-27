@@ -18,6 +18,10 @@ const INCOMPATIBLE_TEST_HARNESS_MESSAGE =
   "Regression test directly imports a TypeScript source that uses unresolved @/ aliases";
 const INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK =
   "이전 제안의 회귀 테스트가 npm test의 Node 실행환경에서 직접 로드할 수 없는 TypeScript 소스를 import했습니다. 특히 대상 소스가 @/ 경로 별칭을 사용하면 새 .mjs/.ts 테스트에서 그 소스를 직접 import하지 마세요. 제공된 기존 실행 테스트 중 같은 소스를 이미 transpile/load하는 테스트를 보강하고, 그 테스트의 기존 fixture 형식과 helper를 그대로 재사용한 완전한 대체 제안을 작성하세요. 위험 경계나 수정 범위는 넓히지 마세요.";
+const REQUIRED_EXISTING_HARNESS_MESSAGE =
+  "Autofix revision must reuse a validator-approved existing regression harness";
+const REQUIRED_EXISTING_HARNESS_REVISION_FEEDBACK =
+  "검증기가 호환 가능한 기존 실행 테스트 경로를 지정한 뒤에는 그 테스트만 보강해야 합니다. 지정 목록 밖의 테스트 파일을 새로 만들거나 수정하지 말고, 제공된 기존 하네스의 fixture·transpile/load helper를 그대로 재사용한 완전한 대체 제안을 작성하세요.";
 const EDIT_ANCHOR_MISMATCH_MESSAGE =
   "Proposal old_text must match exactly once in the trusted repository file";
 const EDIT_ANCHOR_MISMATCH_REVISION_FEEDBACK =
@@ -69,6 +73,17 @@ class IncompatibleExecutedRegressionTestError extends Error {
     this.name = "IncompatibleExecutedRegressionTestError";
     this.testPath = path;
     this.targetPath = targetPath;
+  }
+}
+
+class RequiredExistingHarnessError extends Error {
+  constructor(requiredPaths, proposedPaths) {
+    const required = [...new Set(requiredPaths)].sort();
+    const proposed = [...new Set(proposedPaths)].sort();
+    super(`${REQUIRED_EXISTING_HARNESS_MESSAGE}: required=${required.join(",")} proposed=${proposed.join(",")}`);
+    this.name = "RequiredExistingHarnessError";
+    this.requiredPaths = required;
+    this.proposedPaths = proposed;
   }
 }
 
@@ -264,8 +279,9 @@ function exactTestTailAnchor(path) {
 function proposalPath(edit) {
   return String(edit?.path || "").replaceAll("\\", "/").replace(/^\.\//, "");
 }
-function preflightProposal(edits) {
+function preflightProposal(edits, requiredTestPaths = []) {
   const seenPaths = new Set();
+  const executedTestPaths = [];
   for (const edit of edits) {
     const path = proposalPath(edit);
     if (seenPaths.has(path)) throw new DuplicateEditPathError(path);
@@ -276,7 +292,7 @@ function preflightProposal(edits) {
     if (!oldText && (!isExecutedTestPath(path) || existsSync(resolve(ROOT, path)))) {
       throw new Error(`New files must be executable regression tests: ${path}`);
     }
-    assertExecutedTestHarnessCompatible(path, newText);
+    if (isExecutedTestPath(path)) executedTestPaths.push(path);
   }
   const sourceProposed = edits.some((edit) => {
     const path = proposalPath(edit);
@@ -285,8 +301,19 @@ function preflightProposal(edits) {
   if (!sourceProposed) {
     throw new Error("Autofix must change service source code; test-only proposals are not deployable improvements");
   }
-  const executedTestProposed = edits.some((edit) => isExecutedTestPath(proposalPath(edit)));
-  if (!executedTestProposed) throw new MissingExecutedRegressionTestError();
+  if (!executedTestPaths.length) throw new MissingExecutedRegressionTestError();
+  const required = [...new Set(requiredTestPaths.map((path) => String(path || "").replaceAll("\\", "/")).filter(isExecutedTestPath))];
+  if (required.length) {
+    const allowed = new Set(required);
+    const hasRequired = executedTestPaths.some((path) => allowed.has(path));
+    const hasUnexpected = executedTestPaths.some((path) => !allowed.has(path));
+    if (!hasRequired || hasUnexpected) {
+      throw new RequiredExistingHarnessError(required, executedTestPaths);
+    }
+  }
+  for (const edit of edits) {
+    assertExecutedTestHarnessCompatible(proposalPath(edit), String(edit?.new_text ?? ""));
+  }
 }
 function planProposalFiles(edits, context) {
   const contextPaths = new Set(context.map((item) => item.path));
@@ -361,9 +388,9 @@ function assertProposalCapabilityBudget(planned) {
     }
   }
 }
-function applyProposal(proposal, context) {
+function applyProposal(proposal, context, requiredTestPaths = []) {
   const edits=proposal?.edits; if(!Array.isArray(edits)||edits.length<1||edits.length>6)throw new Error("Unsafe autofix edit count");
-  preflightProposal(edits);
+  preflightProposal(edits, requiredTestPaths);
   const planned = planProposalFiles(edits, context);
   assertExecutableTestSyntax(planned);
   const changedStates = [...planned.values()].filter((state) => state.original !== state.current);
@@ -387,18 +414,24 @@ function applyProposal(proposal, context) {
   if(!executedTestChanged)throw new Error("Autofix diff lost the required executable regression test");
   return changed;
 }
-function revisionPlan(error, context) {
+function revisionPlan(error, context, requiredTestPaths = []) {
   let revisionFeedback;
   let revisionContext=context;
+  let nextRequiredTestPaths=requiredTestPaths;
   if (error instanceof MissingExecutedRegressionTestError) {
     revisionFeedback=REGRESSION_TEST_REVISION_FEEDBACK;
   } else if (error instanceof IncompatibleExecutedRegressionTestError) {
     const enriched=enrichContextWithExistingHarness(context,error.targetPath);
     revisionContext=enriched.context;
+    if (enriched.harnessPaths.length) nextRequiredTestPaths=enriched.harnessPaths;
     const harnessNote=enriched.harnessPaths.length
-      ? `\n검증된 기존 실행 하네스 후보: ${enriched.harnessPaths.join(", ")}. 이 중 하나를 보강하고 새 테스트 파일을 만들지 마세요.`
+      ? `\n허용 실행 테스트 경로: ${enriched.harnessPaths.join(", ")}. 이 목록 중 하나를 보강하고 목록 밖 테스트 파일을 새로 만들거나 수정하지 마세요.`
       : "";
     revisionFeedback=`${INCOMPATIBLE_TEST_HARNESS_REVISION_FEEDBACK}\n검출된 호환성 오류: ${error.message}${harnessNote}`;
+  } else if (error instanceof RequiredExistingHarnessError) {
+    nextRequiredTestPaths=error.requiredPaths;
+    for (const path of error.requiredPaths) revisionContext=enrichContextWithAnchorFile(revisionContext,path);
+    revisionFeedback=`${REQUIRED_EXISTING_HARNESS_REVISION_FEEDBACK}\n허용 실행 테스트 경로: ${error.requiredPaths.join(", ")}. 검출된 제안 테스트 경로: ${error.proposedPaths.join(", ")}.`;
   } else if (error instanceof EditAnchorMismatchError) {
     revisionContext=enrichContextWithAnchorFile(context,error.path);
     const tail=exactTestTailAnchor(error.path);
@@ -417,7 +450,11 @@ function revisionPlan(error, context) {
   } else {
     return null;
   }
-  return { context: revisionContext, feedback: String(revisionFeedback || "").slice(0, 980) };
+  return {
+    context: revisionContext,
+    feedback: String(revisionFeedback || "").slice(0, 980),
+    requiredTestPaths: nextRequiredTestPaths,
+  };
 }
 async function claim(){ const payload=await api({action:"claim"}); if(!payload.job){output("has_job","false");return;} if(payload.job.target_repo!==REPOSITORY)throw new Error("Claimed job repository mismatch"); writeFileSync(JOB_FILE,JSON.stringify(payload.job,null,2)); output("has_job","true"); output("job_id",payload.job.job_id); output("improvement_id",payload.job.improvement_id); }
 async function generate(){
@@ -425,6 +462,7 @@ async function generate(){
   const baseContext=collectContext(job);
   let revisionContext=baseContext;
   let revisionFeedback="";
+  let requiredTestPaths=[];
   let proposal;
   let changed;
   for (let revision=0; revision<=MAX_GENERATION_REVISIONS; revision+=1) {
@@ -436,14 +474,15 @@ async function generate(){
     });
     proposal=payload.proposal;
     try {
-      changed=applyProposal(proposal,revisionContext);
+      changed=applyProposal(proposal,revisionContext,requiredTestPaths);
       break;
     } catch (error) {
       if (revision>=MAX_GENERATION_REVISIONS) throw error;
-      const next=revisionPlan(error,revisionContext);
+      const next=revisionPlan(error,revisionContext,requiredTestPaths);
       if (!next) throw error;
       revisionContext=next.context;
       revisionFeedback=next.feedback;
+      requiredTestPaths=next.requiredTestPaths;
     }
   }
   if (!proposal || !changed) throw new Error("Autofix generation ended without a validated proposal");
