@@ -84,7 +84,10 @@ export function composeFreshKeywordElonMallTitles(input: {
   const finals = [...input.finalKeywords];
   const expansion = [...(input.titleExpansionPool ?? [])];
   const excludedTitles = [...new Set((input.excludedTitles ?? []).map(text).filter(Boolean))].slice(0, 1200);
-  const seed = stableHash(input.variationSeed || `${input.context.modelNumber ?? ""}:${Date.now()}`);
+  const deterministicSeed =
+    input.variationSeed ||
+    `${input.context.modelNumber ?? ""}:${input.modelName}:${finals.join("|")}`;
+  const seed = stableHash(deterministicSeed);
   const attempts = Math.min(18, Math.max(8, finals.length + Math.min(expansion.length, 8)));
   let best: KeywordElonMallTitleSafeComposerResult | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
