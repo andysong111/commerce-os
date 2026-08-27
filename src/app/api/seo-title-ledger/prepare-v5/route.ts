@@ -9,6 +9,7 @@ import {
 import {
   findSeoTitleLedgerByKey,
   requireSeoTitleLedgerContext,
+  type SeoTitleLedgerContext,
 } from "@/lib/seoTitleLedgerServer";
 import { readProductLaunchNormalizedItem } from "@/lib/productLaunchTrackerNormalizedStore";
 
@@ -76,15 +77,7 @@ async function mapLimit<T, R>(
   return result;
 }
 
-async function prepareOne(
-  context: Awaited<ReturnType<typeof requireSeoTitleLedgerContext>> extends {
-    ok: true;
-    value: infer T;
-  }
-    ? T
-    : never,
-  itemId: string,
-) {
+async function prepareOne(context: SeoTitleLedgerContext, itemId: string) {
   const item = record(
     await readProductLaunchNormalizedItem(
       context.config,
@@ -220,18 +213,21 @@ export async function POST(request: NextRequest) {
     }
   });
   const failed = results.filter((row) => row.ok !== true);
-  return Response.json({
-    ok: failed.length === 0,
-    requestedCount: itemIds.length,
-    preparedCount: results.filter((row) => row.ok === true).length,
-    failedCount: failed.length,
-    results,
-    ...(failed.length
-      ? {
-          message: failed
-            .map((row) => `${text(row.itemId)}: ${text(row.reason) || "준비 실패"}`)
-            .join(" · "),
-        }
-      : {}),
-  }, { status: failed.length ? 409 : 200 });
+  return Response.json(
+    {
+      ok: failed.length === 0,
+      requestedCount: itemIds.length,
+      preparedCount: results.filter((row) => row.ok === true).length,
+      failedCount: failed.length,
+      results,
+      ...(failed.length
+        ? {
+            message: failed
+              .map((row) => `${text(row.itemId)}: ${text(row.reason) || "준비 실패"}`)
+              .join(" · "),
+          }
+        : {}),
+    },
+    { status: failed.length ? 409 : 200 },
+  );
 }
