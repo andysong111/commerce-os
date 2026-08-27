@@ -49,6 +49,16 @@ function goodsKeyCount(item: UnknownRecord) {
   ).length;
 }
 
+function finalReady(seoFinal: UnknownRecord) {
+  const searchKeywords = Array.isArray(seoFinal.searchKeywords)
+    ? seoFinal.searchKeywords.map(text).filter(Boolean)
+    : [];
+  const mallTitles = Array.isArray(seoFinal.mallTitles) ? seoFinal.mallTitles : [];
+  return Boolean(
+    text(seoFinal.productName) && searchKeywords.length === 10 && mallTitles.length === 29,
+  );
+}
+
 function firstSourceUrl(item: UnknownRecord) {
   const seoFinal = record(item.seoFinal);
   const direct = text(seoFinal.sourceUrl);
@@ -100,6 +110,21 @@ async function prepareOne(context: SeoTitleLedgerContext, itemId: string) {
   }
   const registered = count === 6;
   const currentFinal = record(item.seoFinal);
+
+  // Brand-new items are already handled by the normal SEO cloud generator.
+  // Preparing them here as well would duplicate SearchAd/OpenAI work and race the client flow.
+  if (!registered && !finalReady(currentFinal)) {
+    return {
+      itemId,
+      ok: true,
+      skippedNewItem: true,
+      prepared: false,
+      registered: false,
+      expansionCount: 0,
+      seoFinal: null,
+    };
+  }
+
   const currentPool = seoTitleV5ExpansionPoolFromFinal(currentFinal);
   const ledger = await findSeoTitleLedgerByKey(context, `launch:${itemId}`);
   const ledgerPool = seoTitleV5ExpansionPoolFromLedger(ledger);
