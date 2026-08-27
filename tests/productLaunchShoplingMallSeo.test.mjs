@@ -104,3 +104,19 @@ test("등록 실행기는 29개 상품명을 저장하고 신규 자동후적용
   assert.match(repairRoute, /dispatchProductLaunchMallSeo/);
   assert.match(repairRoute, /reconcileProductLaunchNormalizedAfterLegacyItems/);
 });
+
+test("취소된 direct-apply가 pending으로 고착되지 않고 실제 실행결과를 확인한 뒤 재시도한다", async () => {
+  const repairRoute = await readFile(
+    new URL("../src/app/api/product-launch-tracker/shopling-mall-seo/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(repairRoute, /fetchKeywordShoplingDirectApplyResult/);
+  assert.match(repairRoute, /completeMallSeoResult/);
+  assert.match(repairRoute, /direct_apply_completed/);
+  assert.match(repairRoute, /title_apply_success_count/);
+  assert.match(repairRoute, /EXPECTED_MALL_TITLE_COUNT = 29/);
+  assert.match(repairRoute, /previousRequestId/);
+  assert.match(repairRoute, /자동 재시도를 시작했습니다/);
+  assert.doesNotMatch(repairRoute, /SHOPLING_MALL_SEO_ALREADY_RUNNING/);
+});
