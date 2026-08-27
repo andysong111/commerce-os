@@ -87,6 +87,24 @@ export function isAutofixSafePath(pathValue: unknown) {
   return !FORBIDDEN_PATH_PARTS.some((part) => lower.includes(part));
 }
 
+function revisionHarnessPaths(revisionFeedback: unknown) {
+  const feedback = text(revisionFeedback, 1_000).trim();
+  const match = feedback.match(/검증된 기존 실행 하네스 후보:\s*(.+?)\.\s*이 중/u);
+  if (!match?.[1]) return [];
+  return [
+    ...new Set(
+      match[1]
+        .split(",")
+        .map((value) => value.trim().replace(/\\/g, "/").replace(/^\.\//, ""))
+        .filter(
+          (path) =>
+            isAutofixSafePath(path) &&
+            (path.startsWith("tests/") || path.includes(".test.")),
+        ),
+    ),
+  ].slice(0, 8);
+}
+
 export function assertAutofixJobEligible(job: ReliabilityAutofixJob) {
   if (!ALLOWED_REPOSITORIES.has(job.target_repo)) {
     throw new Error("자동수정 대상 저장소가 허용 목록에 없습니다.");
@@ -125,7 +143,25 @@ export function normalizeAutofixContext(
   return safe;
 }
 
-export function reliabilityAutofixSchema() {
+export function reliabilityAutofixSchema(revisionFeedback = "") {
+  const allowedHarnessPaths = revisionHarnessPaths(revisionFeedback);
+  const pathSchema = allowedHarnessPaths.length
+    ? {
+        anyOf: [
+          {
+            type: "string",
+            minLength: 1,
+            maxLength: 500,
+            pattern: "^src/lib/",
+          },
+          {
+            type: "string",
+            enum: allowedHarnessPaths,
+          },
+        ],
+      }
+    : { type: "string", minLength: 1, maxLength: 500 };
+
   return {
     type: "object",
     additionalProperties: false,
@@ -143,7 +179,7 @@ export function reliabilityAutofixSchema() {
           additionalProperties: false,
           required: ["path", "old_text", "new_text"],
           properties: {
-            path: { type: "string", minLength: 1, maxLength: 500 },
+            path: pathSchema,
             old_text: { type: "string", maxLength: 14_000 },
             new_text: { type: "string", minLength: 1, maxLength: 18_000 },
           },
@@ -164,6 +200,7 @@ export function reliabilityAutofixSystemPrompt() {
     "소스 코드를 수정한다면 그 재발을 막는 실제 실행 회귀 테스트를 반드시 같은 제안에 포함한다.",
     "회귀 테스트는 package.json의 npm test 명령과 제공된 기존 테스트의 로딩·트랜스파일 방식을 그대로 따라야 한다.",
     "새 .mjs 테스트에서 @/ 경로 별칭을 사용하는 TypeScript 소스를 직접 import하지 말고 기존 테스트의 transpile/load 패턴을 재사용한다.",
+    "검증기 피드백에 허용된 기존 실행 하네스 경로가 명시되면 테스트 edit은 그 경로만 사용하고 새 테스트 파일을 만들지 않는다.",
     "제안 파일마다 기존에 없던 node:fs, node:http, node:https, child_process, fetch, process.env 같은 실행 capability를 새로 도입하지 않는다.",
     "회귀 테스트에 파일 I/O나 네트워크 모킹 같은 capability가 필요하면 새 테스트 파일을 만들지 말고, 그 capability를 이미 사용하는 제공된 기존 실행 테스트를 보강한다.",
     "가능하면 기존 테스트 파일을 보강하고, 새 테스트가 꼭 필요할 때만 허용된 테스트 파일을 만든다.",
