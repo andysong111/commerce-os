@@ -91,7 +91,7 @@ async function syncTitleInventory() {
   }
 }
 
-async function loadFullyRegisteredItemIds() {
+async function loadBatchTrackerItems() {
   const itemIds = readBatchItemIds();
   if (!itemIds.length) return [];
 
@@ -107,14 +107,25 @@ async function loadFullyRegisteredItemIds() {
   if (!response.ok || body.ok !== true) {
     throw new Error(text(body.message || body.error) || `HTTP ${response.status}`);
   }
+  return Array.isArray(body.items) ? body.items.map(record) : [];
+}
 
-  const items = Array.isArray(body.items) ? body.items.map(record) : [];
+async function loadFullyRegisteredItemIds() {
+  const items = await loadBatchTrackerItems();
   return items
     .filter(
       (item) =>
         !text(item.archivedAt) &&
         itemGoodsKeyCount(item) === EXPECTED_GOODS_KEY_COUNT,
     )
+    .map((item) => text(item.id))
+    .filter(Boolean);
+}
+
+async function loadArchivedItemIds() {
+  const items = await loadBatchTrackerItems();
+  return items
+    .filter((item) => Boolean(text(item.archivedAt)))
     .map((item) => text(item.id))
     .filter(Boolean);
 }
@@ -143,16 +154,21 @@ async function archiveItems(itemIds: string[]) {
 
 function pruneBatchItems(itemIds: string[]) {
   const parsed = readBatchContext();
-  if (!parsed) return;
+  if (!parsed) return false;
   const archivedIds = new Set(itemIds);
   const items = Array.isArray(parsed.items) ? parsed.items : [];
+  const nextItems = items.filter(
+    (item) => !archivedIds.has(text(record(item).id)),
+  );
+  if (nextItems.length === items.length) return false;
   window.localStorage.setItem(
     BATCH_STORAGE_KEY,
     JSON.stringify({
       ...parsed,
-      items: items.filter((item) => !archivedIds.has(text(record(item).id))),
+      items: nextItems,
     }),
   );
+  return true;
 }
 
 function headerActions() {
@@ -242,8 +258,20 @@ export default function SeoBulkCompletionArchiveBridge() {
       }
     };
 
+    const pruneAlreadyArchived = async () => {
+      try {
+        const archivedIds = await loadArchivedItemIds();
+        if (archivedIds.length && pruneBatchItems(archivedIds)) {
+          window.location.reload();
+        }
+      } catch (error) {
+        console.warn("[SEO bulk archive prune] archived batch cleanup skipped", error);
+      }
+    };
+
     refresh();
     scheduleInventorySync(100);
+    void pruneAlreadyArchived();
     const observer = new MutationObserver(() => refresh());
     observer.observe(document.body, {
       subtree: true,
