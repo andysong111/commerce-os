@@ -81,7 +81,7 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /composeKeywordElonBulkFinal/);
 });
 
-test("Vercel cron이 매분 durable SEO worker를 실행하고 CRON_SECRET으로 보호한다", async () => {
+test("Vercel cron이 2분 fallback으로 durable SEO worker를 실행하고 CRON_SECRET으로 보호한다", async () => {
   const cron = await source("src/app/api/cron/seo-run-worker/route.ts");
   const vercel = JSON.parse(await source("vercel.json"));
   assert.match(cron, /CRON_SECRET/);
@@ -93,7 +93,7 @@ test("Vercel cron이 매분 durable SEO worker를 실행하고 CRON_SECRET으로
   );
   assert.deepEqual(entry, {
     path: "/api/cron/seo-run-worker",
-    schedule: "* * * * *",
+    schedule: "*/2 * * * *",
   });
 });
 
