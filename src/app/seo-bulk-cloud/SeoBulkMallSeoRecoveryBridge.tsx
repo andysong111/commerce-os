@@ -22,18 +22,15 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function readBatchItemIds() {
+function readBatchItemIds(): string[] {
   try {
     const raw = window.localStorage.getItem(BATCH_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    const items = Array.isArray(parsed?.items) ? parsed.items : [];
-    return [
-      ...new Set(
-        items
-          .map((value: unknown) => text(record(value).id))
-          .filter(Boolean),
-      ),
-    ].slice(0, 50);
+    const items: unknown[] = Array.isArray(parsed?.items) ? parsed.items : [];
+    const ids = items
+      .map((value) => text(record(value).id))
+      .filter((value): value is string => Boolean(value));
+    return [...new Set<string>(ids)].slice(0, 50);
   } catch {
     return [];
   }
