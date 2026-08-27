@@ -73,7 +73,7 @@ export async function requestReliabilityAutofixProposal(
           type: "json_schema",
           name: "commerce_os_reliability_autofix",
           strict: true,
-          schema: reliabilityAutofixSchema(),
+          schema: reliabilityAutofixSchema(revisionFeedback),
         },
       },
     }),
