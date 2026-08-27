@@ -9,12 +9,17 @@ async function source(path) {
 test("v5 SEO title inventory revision replaces prior inventory and keeps 30~50B category-intent policy", async () => {
   const sync = await source("src/lib/seoTitleBulkInventorySync.ts");
   const generator = await source("src/lib/seoTitleFinalKeywordInventoryGenerator.ts");
+  const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
 
   assert.match(sync, /seo-bulk-cloud-inventory-v5-category-intent-expansion/);
   assert.match(sync, /final10-plus-category-aligned-expansion-v5/);
   assert.match(sync, /titleByteRange: \[30, 50\]/);
   assert.match(sync, /purgeLegacyUnissuedInventory/);
   assert.match(sync, /recoverExpansionPoolFromFinalTitles/);
+  assert.match(sync, /TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5"/);
+  assert.match(sync, /text\(seoFinal\.source\) !== TRUSTED_V5_FINAL_SOURCE/);
+  assert.match(bulk, /SEO_FINAL_SOURCE_V5 = "seo-bulk-cloud-category-intent-v5"/);
+  assert.match(bulk, /source: SEO_FINAL_SOURCE_V5/);
   assert.match(generator, /MIN_TITLE_BYTES = 30/);
   assert.match(generator, /TARGET_TITLE_BYTES = 42/);
   assert.match(generator, /category-intent-expansion-v5/);
