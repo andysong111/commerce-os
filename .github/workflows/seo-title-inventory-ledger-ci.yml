@@ -15,6 +15,7 @@ on:
       - "src/lib/keywordEngineElonBulkFinal.ts"
       - "src/lib/keywordEngineElonLabV2Scoring.ts"
       - "src/lib/keywordEngineElonTitleExpansion.ts"
+      - "src/lib/keywordEngineElonLongTitlePriority.ts"
       - "src/lib/keywordEngineElonMallTitleSafeComposer.ts"
       - "src/lib/shoplingSeoDispatchModule.ts"
       - "src/lib/keywordEngineElonLabModule.ts"
@@ -26,6 +27,7 @@ on:
       - "tests/seoTitleInventoryLedger.test.mjs"
       - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
       - "tests/seoTitleV4MinLengthContract.test.mjs"
+      - "tests/keywordEngineElonLabSeoOutput.test.mjs"
       - "tests/keywordEngineElonMallTitleSafeComposer.test.mjs"
       - "tests/seoCategoryIntentExpansionV5.test.mjs"
       - "tests/seoBulkMallTitleFactBridge.test.mjs"
@@ -65,6 +67,7 @@ jobs:
           src/lib/keywordEngineElonBulkFinal.ts
           src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonTitleExpansion.ts
+          src/lib/keywordEngineElonLongTitlePriority.ts
           src/lib/keywordEngineElonMallTitleSafeComposer.ts
           src/lib/seoTitleInventoryGenerator.ts
           src/lib/seoTitleFinalKeywordInventoryGenerator.ts
