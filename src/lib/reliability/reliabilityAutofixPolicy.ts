@@ -144,7 +144,7 @@ export function reliabilityAutofixSchema() {
           required: ["path", "old_text", "new_text"],
           properties: {
             path: { type: "string", minLength: 1, maxLength: 500 },
-            old_text: { type: "string", maxLength: 14_000 },
+            old_text: { type: "string", minLength: 1, maxLength: 14_000 },
             new_text: { type: "string", minLength: 1, maxLength: 18_000 },
           },
         },
@@ -166,9 +166,9 @@ export function reliabilityAutofixSystemPrompt() {
     "새 .mjs 테스트에서 @/ 경로 별칭을 사용하는 TypeScript 소스를 직접 import하지 말고 기존 테스트의 transpile/load 패턴을 재사용한다.",
     "제안 파일마다 기존에 없던 node:fs, node:http, node:https, child_process, fetch, process.env 같은 실행 capability를 새로 도입하지 않는다.",
     "회귀 테스트에 파일 I/O나 네트워크 모킹 같은 capability가 필요하면 새 테스트 파일을 만들지 말고, 그 capability를 이미 사용하는 제공된 기존 실행 테스트를 보강한다.",
-    "가능하면 기존 테스트 파일을 보강하고, 새 테스트가 꼭 필요할 때만 허용된 테스트 파일을 만든다.",
+    "모든 edit는 repository_context에 제공된 기존 파일만 수정해야 하며 새 소스 파일이나 새 테스트 파일을 만들지 않는다.",
     "각 edit의 old_text는 제공된 파일에 정확히 한 번 존재하는 연속 문자열이어야 한다.",
-    "새 파일 생성이 꼭 필요하면 tests/ 또는 허용된 *.test.* 테스트 파일에만 old_text를 빈 문자열로 제안할 수 있다.",
+    "old_text는 비어 있으면 안 되며 새 파일 생성으로 우회하지 않는다.",
     "최대 4개 파일, 가급적 220줄 이하 변경을 목표로 한다.",
     "안전한 소스 수정과 실제 실행 회귀 테스트를 함께 만들 수 없다면 위험한 우회 수정이나 검증 약화를 절대 제안하지 않는다.",
     "출력은 지정된 JSON 스키마만 사용한다.",
@@ -232,8 +232,8 @@ export function parseReliabilityAutofixProposal(value: unknown): ReliabilityAuto
     if (!isAutofixSafePath(path) || !newText) {
       throw new Error(`자동수정 금지 경로 또는 빈 수정입니다: ${path}`);
     }
-    if (!oldText && !path.startsWith("tests/") && !path.includes(".test.")) {
-      throw new Error("새 파일 생성은 테스트 파일에만 허용됩니다.");
+    if (!oldText) {
+      throw new Error("새 파일 생성은 허용되지 않습니다.");
     }
     return { path, old_text: oldText, new_text: newText };
   });
