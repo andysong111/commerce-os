@@ -190,7 +190,12 @@ export async function POST(request: NextRequest) {
       context.identity.userId,
       itemIds,
     );
-    const itemById = new Map(items.map((item) => [text(item.id), item]));
+    const itemById = new Map<string, UnknownRecord>();
+    for (const value of items) {
+      const item = record(value);
+      const itemId = text(item.id);
+      if (itemId) itemById.set(itemId, item);
+    }
     const existing = await listSeoRunJobs(context, {
       includeArchived: true,
       launchItemIds: itemIds,
