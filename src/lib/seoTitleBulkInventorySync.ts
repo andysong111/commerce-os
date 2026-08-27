@@ -31,6 +31,7 @@ import {
 
 const GROUPS = ["도매1", "도매2", "도매3", "도매4", "소매1", "소매2"] as const;
 const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v5-category-intent-expansion";
+const TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5";
 const CHANNEL_BY_GROUP: Record<SeoTitleProductGroup, string> = {
   도매1: "wholesale1",
   도매2: "wholesale2",
@@ -133,6 +134,7 @@ function recoverExpansionPoolFromFinalTitles(
   seoFinal: UnknownRecord,
   searchKeywords: string[],
 ): KeywordElonTitleExpansionMaterial[] {
+  if (text(seoFinal.source) !== TRUSTED_V5_FINAL_SOURCE) return [];
   const finalKeys = new Set(searchKeywords.map(keywordElonSeoCanonical));
   const rows = Array.isArray(seoFinal.mallTitles) ? seoFinal.mallTitles : [];
   const map = new Map<string, KeywordElonTitleExpansionMaterial>();
@@ -347,7 +349,7 @@ export async function syncSeoTitleBulkInventoryForItem(
     common_search_keywords: searchKeywords,
     common_search_line: searchKeywords.join(","),
     source_payload: {
-      source: "seo-bulk-cloud",
+      source: text(seoFinal.source) || "seo-bulk-cloud",
       seoFinal,
       titleExpansionPool,
       launchContext: {
@@ -436,7 +438,8 @@ export async function syncSeoTitleBulkInventoryForItem(
   const finalCounts = currentGroupCounts(finalFingerprints);
   const shortages = GROUPS.filter(
     (group) =>
-      finalCounts[group] < SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
+      finalCounts[group] <
+      SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
   );
   const status = shortages.length ? "needs_review" : "ready";
   await patchSeoTitleLedger(context, ledger.ledger_id, {
