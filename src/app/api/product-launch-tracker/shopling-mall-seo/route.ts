@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const EXPECTED_MALL_TITLE_COUNT = 29;
+const MAX_AUTO_RETRY_COUNT = 2;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -71,6 +72,7 @@ export async function POST(request: NextRequest) {
 
   const body = record(await request.json().catch(() => ({})));
   const itemId = text(body.itemId);
+  const forceRetry = body.forceRetry === true;
   if (!itemId || itemId.length > 160) {
     return Response.json(
       { ok: false, code: "INVALID_ITEM_ID", message: "상품 ID가 올바르지 않습니다." },
@@ -177,18 +179,30 @@ export async function POST(request: NextRequest) {
       current = record(item.mallSeoApply);
     }
 
+    const retryCount = Math.max(0, Number(current.retryCount ?? 0) || 0);
+    if (text(current.status) === "failed" && retryCount >= MAX_AUTO_RETRY_COUNT && !forceRetry) {
+      return Response.json(
+        {
+          ok: false,
+          code: "SHOPLING_MALL_SEO_RETRY_LIMIT_REACHED",
+          message: `쇼핑몰별 상품명 자동 재시도 ${MAX_AUTO_RETRY_COUNT}회를 모두 사용했습니다. 수동 확인 후 다시 실행하세요.`,
+          requestId: text(current.requestId),
+          retryCount,
+        },
+        { status: 409 },
+      );
+    }
+
     const started = await dispatchProductLaunchMallSeo(item);
     const now = new Date().toISOString();
+    const isRetry = Boolean(currentRequestId) || text(current.status) === "failed";
     item.mallSeoApply = {
       ...current,
       status: "pending",
       requestId: started.requestId,
       previousRequestId: currentRequestId || text(current.requestId),
       itemCount: started.plan.length,
-      retryCount:
-        currentStatus === "pending" || currentStatus === "running" || currentStatus === "failed"
-          ? Number(current.retryCount ?? 0) + 1
-          : Number(current.retryCount ?? 0),
+      retryCount: isRetry ? retryCount + 1 : retryCount,
       message: "SEO Cloud 상품명 재고 29개를 쇼핑몰별로 반영 중입니다.",
       startedAt: now,
       updatedAt: now,
@@ -208,8 +222,9 @@ export async function POST(request: NextRequest) {
       status: "queued",
       requestId: started.requestId,
       itemCount: started.plan.length,
+      retryCount: Number(record(item.mallSeoApply).retryCount ?? 0),
       runUrl: started.runUrl || started.githubActionsUrl || "",
-      message: currentRequestId
+      message: isRetry
         ? "중단된 기존 작업을 정리하고 쇼핑몰별 상품명 29개 자동 재시도를 시작했습니다."
         : "쇼핑몰별 상품명 29개와 공통 검색어 10개 반영을 시작했습니다.",
     });
