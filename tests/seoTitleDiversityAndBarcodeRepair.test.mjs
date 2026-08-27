@@ -75,32 +75,36 @@ test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29�
   }
 });
 
-test("실제 SEO bulk 경로는 레거시 identity 재료가 아니라 최종키워드 + SAFE FACT Composer를 사용한다", async () => {
-  const safeComposer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
+test("실제 SEO bulk 경로는 확정 FINAL 키워드만 쇼핑몰별 상품명 재료로 사용한다", async () => {
+  const composer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
 
-  assert.match(safeComposer, /validateFinalKeywords/);
-  assert.match(safeComposer, /modelCodeLike/);
-  assert.match(safeComposer, /suspiciousCompositeFact/);
-  assert.match(safeComposer, /factPool/);
-  assert.match(safeComposer, /keywordCoverageCount/);
-  assert.match(safeComposer, /MARKETPLACE_TERMS/);
-  assert.match(safeComposer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
-  assert.doesNotMatch(safeComposer, /인기|베스트|최고|추천상품|프리미엄/);
+  assert.match(composer, /validateFinalKeywords/);
+  assert.match(composer, /modelCodeLike/);
+  assert.match(composer, /final-keywords-only-v3/);
+  assert.match(composer, /SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3/);
+  assert.match(composer, /keywordMaterials/);
+  assert.match(composer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
+  assert.doesNotMatch(composer, /factPool|htmlFacts|urlFacts|suspiciousCompositeFact|MARKETPLACE_TERMS/);
+  assert.doesNotMatch(composer, /인기|베스트|최고|추천상품|프리미엄/);
 
   assert.match(bulk, /composeKeywordElonSafeMallTitles/);
   assert.match(bulk, /finalKeywords: searchKeywords/);
   assert.match(bulk, /\.\.\.mallComposition\.warnings/);
   assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
+
+  assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
 });
 
-test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 SAFE Composer로 중복 상품명을 자동 보정한다", async () => {
+test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 final-keywords-only-v3로 자동 보정한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source(
     "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",
   );
 
   assert.match(page, /SeoBulkExistingFinalDiversityBridge/);
+  assert.match(bridge, /commerceOs\.seoBulkCloud\.diversityRepair\.v3/);
   assert.match(bridge, /needsDiversityRepair/);
   assert.match(bridge, /composeKeywordElonSafeMallTitles/);
   assert.doesNotMatch(bridge, /diversifyKeywordElonMallTitles/);
@@ -108,9 +112,21 @@ test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 SAFE Com
   assert.match(bridge, /hasRegisteredGoodsKeys\(item\)/);
   assert.match(bridge, /if \(!text\(item\.id\) \|\| hasRegisteredGoodsKeys\(item\)\) return false/);
   assert.match(bridge, /window\.location\.reload\(\)/);
-  assert.match(bridge, /SEO 쇼핑몰 상품명 SAFE 중복 자동보정/);
-  assert.match(bridge, /options\.length === 1/);
-  assert.match(bridge, /Multiple choices must not turn one option value/);
+  assert.match(bridge, /composer: "final-keywords-only-v3"/);
+  assert.match(bridge, /SEO 최종키워드 전용 상품명 자동보정/);
+});
+
+test("기등록 SEO 추가등록은 새 goods_key 후처리를 위해 이전 상품명·가격 request를 초기화하고 실패 시 복구한다", async () => {
+  const bridge = await source(
+    "src/app/seo-bulk-cloud/SeoBulkInventoryReregisterBridge.tsx",
+  );
+
+  assert.match(bridge, /previousMallSeoApply/);
+  assert.match(bridge, /previousPricePolicy/);
+  assert.match(bridge, /mallSeoApply: null/);
+  assert.match(bridge, /pricePolicy: null/);
+  assert.match(bridge, /mallSeoApply: previousMallSeoApply/);
+  assert.match(bridge, /pricePolicy: previousPricePolicy/);
 });
 
 test("기존 OPTION 임시 identity가 있어도 B코드가 생기면 B코드 identity를 우선한다", () => {
