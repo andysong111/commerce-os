@@ -14,7 +14,7 @@ import {
   mergeKeywordElonDiscovery,
 } from "@/lib/keywordEngineElonLabV2Merge";
 import { buildKeywordElonSeoModelPackage } from "@/lib/keywordEngineElonLabSeoModelOutput";
-import { diversifyKeywordElonMallTitles } from "@/lib/keywordEngineElonMallTitleDiversity";
+import { composeKeywordElonSafeMallTitles } from "@/lib/keywordEngineElonMallTitleSafeComposer";
 import { scoreKeywordElonCandidatesBatched } from "@/lib/keywordEngineElonLabV2Scoring";
 import {
   analyzeKeywordElonIdentity,
@@ -45,6 +45,10 @@ export type KeywordElonBulkFinalInput = {
   sourceUrl: string;
   optionText?: string;
   supportingText?: string;
+  mallTitleCategory?: string;
+  mallTitleDetailHtml?: string;
+  mallTitleMainImageUrl?: string;
+  mallTitleAdditionalImageUrls?: string[];
   customBlockedTerms?: string[];
 };
 
@@ -202,18 +206,9 @@ export function composeKeywordElonBulkFinal(
     },
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
-  const diversity = diversifyKeywordElonMallTitles({
-    rows: output.mallTitles,
-    modelName: output.modelName,
-    identity: input.identity,
-    searchKeywords: output.searchKeywordDetails,
-    blockedTerms: unique([
-      ...input.blockedKeys,
-      ...(input.customBlockedTerms ?? []),
-    ]),
-  });
-  const mallTitles = diversity.rows;
 
+  // IMPORTANT: final keyword generation remains unchanged. Mall-title composition only
+  // consumes the already finalized keyword list below.
   const searchKeywords = recoveredSearchKeywords(
     [...output.commonSearchKeywords],
     input.supplementalSearchKeywords ?? [],
@@ -225,6 +220,26 @@ export function composeKeywordElonBulkFinal(
       `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
     );
   }
+
+  const mallComposition = composeKeywordElonSafeMallTitles({
+    markets: PRODUCT_GROUP_MARKET_REGISTRY,
+    finalKeywords: searchKeywords,
+    modelName: output.modelName,
+    context: {
+      modelNumber: input.modelNumber,
+      productName: input.productName,
+      category: input.mallTitleCategory,
+      optionText: input.optionText,
+      detailHtml: input.mallTitleDetailHtml,
+      mainImageUrl: input.mallTitleMainImageUrl,
+      additionalImageUrls: input.mallTitleAdditionalImageUrls,
+    },
+    blockedTerms: unique([
+      ...input.blockedKeys,
+      ...(input.customBlockedTerms ?? []),
+    ]),
+  });
+  const mallTitles = mallComposition.rows;
   if (mallTitles.length !== 29) {
     throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${mallTitles.length}개`);
   }
@@ -267,7 +282,7 @@ export function composeKeywordElonBulkFinal(
     },
     warnings: [
       ...output.warnings,
-      ...diversity.warnings,
+      ...mallComposition.warnings,
       ...(input.source.warnings ?? []),
       ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`] : []),
     ],
