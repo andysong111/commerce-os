@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildReliabilityAutofixPrompt, reliabilityAutofixSystemPrompt } from "../src/lib/reliability/reliabilityAutofixPolicy.ts";
+import { buildReliabilityAutofixPrompt, reliabilityAutofixSchema, reliabilityAutofixSystemPrompt } from "../src/lib/reliability/reliabilityAutofixPolicy.ts";
 
 const ROOT = new URL("../", import.meta.url);
 const source = (path) => readFile(new URL(path, ROOT), "utf8");
@@ -37,6 +37,13 @@ test("autofix prompt requires an executable regression test whenever source chan
   );
   assert.equal(parsed.safety.executable_regression_test_required_with_source_change, true);
   assert.equal(parsed.revision_feedback, undefined);
+});
+
+test("autofix structured proposals cannot create new source or test files", () => {
+  const schema = reliabilityAutofixSchema();
+  assert.equal(schema.properties.edits.items.properties.old_text.minLength, 1);
+  assert.match(reliabilityAutofixSystemPrompt(), /새 소스 파일이나 새 테스트 파일을 만들지 않는다/);
+  assert.match(reliabilityAutofixSystemPrompt(), /old_text는 비어 있으면 안 되며/);
 });
 
 test("validator feedback is bounded and asks for a complete replacement proposal", () => {
