@@ -1,4 +1,3 @@
-import { ProductLaunchCompletedArchiveButtonBridge } from "@/components/product-launch-flow/ProductLaunchCompletedArchiveButtonBridge";
 import { ProductMasterSyncButton } from "@/components/product-launch-flow/ProductMasterSyncButton";
 
 const PRODUCT_LAUNCH_ASSET_VERSION =
@@ -21,8 +20,6 @@ export default async function ProductLaunchTrackerPage({
 
   return (
     <section className="space-y-3">
-      <ProductLaunchCompletedArchiveButtonBridge />
-
       <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-900 shadow-sm">
         <strong className="block text-sm">백그라운드 자동화 · 상품마스터와 분리 운영</strong>
         <span className="mt-1 block text-xs leading-5">
