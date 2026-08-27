@@ -33,6 +33,7 @@ const DUPLICATE_EDIT_PATH_MESSAGE =
 const DUPLICATE_EDIT_PATH_REVISION_FEEDBACK =
   "같은 파일을 edits 배열에 두 번 이상 넣지 마세요. 한 파일의 여러 변경은 해당 파일 원문에서 정확히 한 번 존재하는 하나의 old_text와, 모든 변경을 반영한 하나의 new_text 블록으로 합친 완전한 대체 제안을 작성하세요.";
 const MAX_GENERATION_REVISIONS = 2;
+const AUTOFIX_API_TIMEOUT_MS = 165_000;
 
 const FORBIDDEN = [
   ".github/", "supabase/migrations/", "vercel.json", ".env", "package.json",
@@ -116,7 +117,7 @@ async function api(body) {
   const response = await fetch(ENDPOINT, {
     method: "POST",
     headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-    body: JSON.stringify(body), signal: AbortSignal.timeout(110_000),
+    body: JSON.stringify(body), signal: AbortSignal.timeout(AUTOFIX_API_TIMEOUT_MS),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload?.ok === false) throw new Error(payload?.message || `autofix API status=${response.status}`);
