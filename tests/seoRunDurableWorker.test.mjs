@@ -81,20 +81,35 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /composeKeywordElonBulkFinal/);
 });
 
-test("Vercel cron이 2분 fallback으로 durable SEO worker를 실행하고 CRON_SECRET으로 보호한다", async () => {
-  const cron = await source("src/app/api/cron/seo-run-worker/route.ts");
-  const vercel = JSON.parse(await source("vercel.json"));
-  assert.match(cron, /CRON_SECRET/);
-  assert.match(cron, /timingSafeEqual/);
-  assert.match(cron, /maxDuration = 300/);
-  assert.match(cron, /processSeoRunQueue/);
-  const entry = vercel.crons.find(
-    (row) => row.path === "/api/cron/seo-run-worker",
+test("durable SEO 복구는 새 고빈도 cron을 추가하지 않고 기존 5분 staggered wakeup을 재사용한다", async () => {
+  const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
+  const shared = await source(
+    "src/app/api/cron/receipt-live-price-proposals/route.ts",
   );
-  assert.deepEqual(entry, {
-    path: "/api/cron/seo-run-worker",
-    schedule: "*/2 * * * *",
-  });
+  const vercel = JSON.parse(await source("vercel.json"));
+
+  assert.match(standalone, /CRON_SECRET/);
+  assert.match(standalone, /timingSafeEqual/);
+  assert.match(standalone, /maxDuration = 300/);
+  assert.match(standalone, /processSeoRunQueue/);
+
+  assert.match(shared, /import \{ after \} from "next\/server"/);
+  assert.match(shared, /processSeoRunQueue/);
+  assert.match(shared, /timeBudgetMs: 220_000/);
+  assert.match(shared, /scheduleDurableSeoRunRecovery/);
+  assert.equal(
+    vercel.crons.some((row) => row.path === "/api/cron/seo-run-worker"),
+    false,
+  );
+  assert.deepEqual(
+    vercel.crons.find(
+      (row) => row.path === "/api/cron/receipt-live-price-proposals",
+    ),
+    {
+      path: "/api/cron/receipt-live-price-proposals",
+      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
+    },
+  );
 });
 
 test("SEO 클라우드는 서버 원장을 polling하고 인계 완료 후 localStorage 실행본을 제거한다", async () => {
