@@ -5,9 +5,16 @@ import test from "node:test";
 import { buildKeywordElonTitleExpansionPool } from "../src/lib/keywordEngineElonTitleExpansion.ts";
 import { composeKeywordElonSafeMallTitles } from "../src/lib/keywordEngineElonMallTitleSafeComposer.ts";
 import { composeFreshKeywordElonMallTitles } from "../src/lib/keywordEngineElonFreshMallTitleComposer.ts";
+import {
+  classifyKeywordElonLongTitleExpansion,
+  keywordElonLongTitleLengthPenalty,
+} from "../src/lib/keywordEngineElonLongTitlePriority.ts";
 import { generateFinalKeywordOnlySeoTitleInventory } from "../src/lib/seoTitleFinalKeywordInventoryGenerator.ts";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "../src/lib/productGroupMarketRegistry.ts";
-import { keywordElonSeoCanonical, keywordElonSeoUtf8Bytes } from "../src/lib/keywordEngineElonLabSeoOutput.ts";
+import {
+  keywordElonSeoCanonical,
+  keywordElonSeoUtf8Bytes,
+} from "../src/lib/keywordEngineElonLabSeoOutput.ts";
 
 const FINAL = [
   "발바닥지압판",
@@ -106,7 +113,19 @@ test("FINAL 10개 외 카테고리 일치 후보만 TITLE EXPANSION POOL에 보�
   assert.ok(new Set(pool.map((row) => row.intentClass)).size >= 5);
 });
 
-test("29개 쇼핑몰 상품명은 FINAL anchor와 카테고리 intent를 섞어 의미적으로 분산한다", () => {
+test("좋은 동의어·형태 재료를 우선하고 상황형 카테고리 인접어는 후순위로 둔다", () => {
+  const pool = buildPool();
+  const preferred = pool.find((row) => row.keyword === "풋마사지판");
+  const adjacent = pool.find((row) => row.keyword === "실내발지압");
+  assert.ok(preferred);
+  assert.ok(adjacent);
+  assert.equal(classifyKeywordElonLongTitleExpansion(preferred), "preferred");
+  assert.equal(classifyKeywordElonLongTitleExpansion(adjacent), "adjacent");
+  assert.ok(keywordElonLongTitleLengthPenalty(48) < keywordElonLongTitleLengthPenalty(42));
+  assert.ok(keywordElonLongTitleLengthPenalty(42) < keywordElonLongTitleLengthPenalty(34));
+});
+
+test("29개 쇼핑몰 상품명은 FINAL anchor를 유지하며 44~50B 긴 제목과 우수 확장재료를 우선한다", () => {
   const pool = buildPool();
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
@@ -118,22 +137,52 @@ test("29개 쇼핑몰 상품명은 FINAL anchor와 카테고리 intent를 섞어
 
   assert.equal(result.rows.length, 29);
   assert.equal(result.uniqueTitleCount, 29);
-  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:CATEGORY_INTENT_EXPANSION_V5"));
-  const expansionKeys = new Set(pool.map((row) => keywordElonSeoCanonical(row.keyword)));
+  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:LONG_TITLE_PRIORITY_V6"));
+  const expansionByKey = new Map(
+    pool.map((row) => [keywordElonSeoCanonical(row.keyword), row]),
+  );
   const finalKeys = new Set(FINAL.map(keywordElonSeoCanonical));
   let expansionRows = 0;
+  let preferredRows = 0;
+  let adjacentRows = 0;
+  let recommendedLengthRows = 0;
+  let totalBytes = 0;
   for (const row of result.rows) {
     const bytes = keywordElonSeoUtf8Bytes(row.title);
+    totalBytes += bytes;
+    if (bytes >= 40) recommendedLengthRows += 1;
     assert.ok(bytes >= 30 && bytes <= 50, `${bytes}B ${row.title}`);
     assert.equal(
-      row.keywordMaterials.some((material) => finalKeys.has(keywordElonSeoCanonical(material))),
+      row.keywordMaterials.some((material) =>
+        finalKeys.has(keywordElonSeoCanonical(material)),
+      ),
       true,
       row.title,
     );
-    if (row.keywordMaterials.some((material) => expansionKeys.has(keywordElonSeoCanonical(material)))) expansionRows += 1;
+    const expansions = row.keywordMaterials
+      .map((material) => expansionByKey.get(keywordElonSeoCanonical(material)))
+      .filter(Boolean);
+    if (expansions.length) expansionRows += 1;
+    if (
+      expansions.some(
+        (material) => classifyKeywordElonLongTitleExpansion(material) === "preferred",
+      )
+    ) {
+      preferredRows += 1;
+    }
+    if (
+      expansions.some(
+        (material) => classifyKeywordElonLongTitleExpansion(material) === "adjacent",
+      )
+    ) {
+      adjacentRows += 1;
+    }
     assert.doesNotMatch(row.title, /윤지선작업|예지|공지|족저근막염|치료/);
   }
-  assert.ok(expansionRows >= 20, `expansionRows=${expansionRows}`);
+  assert.ok(expansionRows >= 10, `expansionRows=${expansionRows}`);
+  assert.ok(preferredRows >= adjacentRows, `preferred=${preferredRows} adjacent=${adjacentRows}`);
+  assert.ok(recommendedLengthRows >= 20, `recommended=${recommendedLengthRows}`);
+  assert.ok(totalBytes / result.rows.length >= 41, `average=${totalBytes / result.rows.length}`);
 });
 
 test("새 SEO run은 과거 29개를 제외하고 단순 어순변경이 아닌 새 상품명을 우선한다", () => {
@@ -157,13 +206,19 @@ test("새 SEO run은 과거 29개를 제외하고 단순 어순변경이 아닌 
     excludedTitles: previousTitles,
   });
   const firstCanonical = new Set(previousTitles.map(keywordElonSeoCanonical));
-  const exactReuse = second.rows.filter((row) => firstCanonical.has(keywordElonSeoCanonical(row.title))).length;
+  const exactReuse = second.rows.filter((row) =>
+    firstCanonical.has(keywordElonSeoCanonical(row.title)),
+  ).length;
   assert.equal(second.rows.length, 29);
   assert.equal(exactReuse, 0, `exactReuse=${exactReuse}`);
-  assert.ok(second.warnings.some((warning) => warning === "SEO_RUN_EXACT_TITLE_REUSE:0"));
+  assert.ok(
+    second.warnings.some(
+      (warning) => warning === "SEO_RUN_EXACT_TITLE_REUSE:0",
+    ),
+  );
 });
 
-test("145개 추가등록 재고도 카테고리 intent 재료를 사용하고 FINAL anchor를 유지한다", () => {
+test("145개 추가등록 재고도 긴 제목 정책·FINAL anchor·확장 우선순위를 공유한다", () => {
   const pool = buildPool();
   const result = generateFinalKeywordOnlySeoTitleInventory({
     finalKeywords: FINAL,
@@ -171,24 +226,39 @@ test("145개 추가등록 재고도 카테고리 intent 재료를 사용하고 F
     rounds: 5,
   });
   assert.equal(result.generatedCount, 145);
-  assert.equal(new Set(result.candidates.map((row) => row.titleFingerprint)).size, 145);
+  assert.equal(
+    new Set(result.candidates.map((row) => row.titleFingerprint)).size,
+    145,
+  );
   assert.ok(result.expansionMaterialCount >= 10);
+  assert.ok(
+    result.warnings.includes("SEO_TITLE_INVENTORY_SOURCE:LONG_TITLE_PRIORITY_V6"),
+  );
   const finalKeys = new Set(FINAL.map(keywordElonSeoCanonical));
   let expanded = 0;
+  let recommended = 0;
+  let totalBytes = 0;
   for (const row of result.candidates) {
     const bytes = keywordElonSeoUtf8Bytes(row.title);
+    totalBytes += bytes;
+    if (bytes >= 40) recommended += 1;
     assert.ok(bytes >= 30 && bytes <= 50, `${bytes}B ${row.title}`);
     assert.equal(
-      row.sourceMaterials.some((material) => finalKeys.has(keywordElonSeoCanonical(material))),
+      row.sourceMaterials.some((material) =>
+        finalKeys.has(keywordElonSeoCanonical(material)),
+      ),
       true,
       row.title,
     );
     if (row.metadata.materialOrigins.includes("category_expansion")) expanded += 1;
+    assert.equal(row.metadata.strategy, "long-title-priority-v6");
   }
-  assert.ok(expanded >= 100, `expanded=${expanded}`);
+  assert.ok(expanded >= 60, `expanded=${expanded}`);
+  assert.ok(recommended >= 100, `recommended=${recommended}`);
+  assert.ok(totalBytes / result.candidates.length >= 40, `average=${totalBytes / result.candidates.length}`);
 });
 
-test("segmented SEO API carries Product Launch category and run freshness inputs into scoring/composition", async () => {
+test("segmented SEO API는 Product Launch 카테고리와 run freshness 입력을 점수화/조립에 전달한다", async () => {
   const route = await readFile(
     new URL("../src/app/api/keyword-engine-elon-lab/route.ts", import.meta.url),
     "utf8",
@@ -211,4 +281,5 @@ test("segmented SEO API carries Product Launch category and run freshness inputs
   assert.match(bulk, /buildKeywordElonTitleExpansionPool/);
   assert.match(bulk, /composeFreshKeywordElonMallTitles/);
   assert.match(bulk, /TITLE_EXPANSION_POOL_COUNT/);
+  assert.match(bulk, /TITLE_MALL_NAME_POLICY:LONG_TITLE_PRIORITY_V6/);
 });
