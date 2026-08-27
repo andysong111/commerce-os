@@ -29,6 +29,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 500;
 
+const CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -96,14 +98,28 @@ function titleResultFrom(value: unknown): KeywordElonTitleResult {
 }
 function bulkItemFrom(value: unknown) {
   const item = isRecord(value) ? value : {};
+  const supportingText = text(item.supportingText);
+  const inferredCategory =
+    supportingText
+      .split(" · ")
+      .map((part) => part.trim())
+      .filter(Boolean)[0] || "";
   return {
     launchItemId: text(item.launchItemId ?? item.id),
     modelNumber: text(item.modelNumber),
     productName: text(item.productName),
     sourceUrl: text(item.sourceUrl),
     optionText: text(item.optionText),
-    supportingText: text(item.supportingText),
+    supportingText,
+    mallTitleCategory:
+      text(item.mallTitleCategory ?? item.shoplingCategory) || inferredCategory,
   };
+}
+function categoryFromSource(source: KeywordElonSourceDraft) {
+  const marker = (source.warnings ?? []).find((warning) =>
+    text(warning).startsWith(CATEGORY_META_PREFIX),
+  );
+  return marker ? text(marker).slice(CATEGORY_META_PREFIX.length).trim() : "";
 }
 function readiness() {
   return {
@@ -122,14 +138,15 @@ function readiness() {
     bulkParallelAvailable: true,
     bulkSegmentedAvailable: true,
     bulkAutoRecoveryAvailable: true,
+    categoryIntentExpansionAvailable: true,
   };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 6,
-    marketRecall: "evidence-first",
+    version: 7,
+    marketRecall: "evidence-first-category-gated",
     ...readiness(),
   });
 }
@@ -147,10 +164,19 @@ export async function POST(request: NextRequest) {
         ...item,
         customBlockedTerms: textArray(body.customBlockedTerms, 120),
       });
+      const source = {
+        ...collected.source,
+        warnings: [
+          ...(item.mallTitleCategory
+            ? [`${CATEGORY_META_PREFIX}${item.mallTitleCategory}`]
+            : []),
+          ...(collected.source.warnings ?? []),
+        ].slice(0, 20),
+      };
       return NextResponse.json({
         ok: true,
         action,
-        source: collected.source,
+        source,
         collectionMode: collected.mode,
       });
     }
@@ -161,6 +187,7 @@ export async function POST(request: NextRequest) {
       const customBlockedTerms = textArray(body.customBlockedTerms, 120);
       const composeInput = {
         ...item,
+        mallTitleCategory: item.mallTitleCategory || categoryFromSource(source),
         customBlockedTerms,
         source,
         collectionMode:
@@ -171,7 +198,10 @@ export async function POST(request: NextRequest) {
         candidates: candidatesFrom(body.candidates),
         allowedKeys: textArray(body.allowedKeys, 120),
         blockedKeys: textArray(body.blockedKeys, 120),
-        finalMaterialCount: Math.max(0, Math.floor(Number(body.finalMaterialCount) || 0)),
+        finalMaterialCount: Math.max(
+          0,
+          Math.floor(Number(body.finalMaterialCount) || 0),
+        ),
         titleResult: titleResultFrom(body.titleResult),
       };
 
@@ -238,10 +268,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, action, ...result });
     }
     if (action === "score_keywords") {
+      const source = sourceFrom(body.source);
       const result = await scoreKeywordElonCandidatesBatched({
-        source: sourceFrom(body.source),
+        source,
         identity: identityFrom(body.identity),
         discovery: discoveryFrom(body.discovery),
+        shoplingCategory:
+          text(body.shoplingCategory ?? body.mallTitleCategory) ||
+          categoryFromSource(source),
       });
       return NextResponse.json({ ok: true, action, ...result });
     }

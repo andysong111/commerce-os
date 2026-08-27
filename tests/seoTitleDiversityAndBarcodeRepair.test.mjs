@@ -75,29 +75,33 @@ test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29�
   }
 });
 
-test("실제 SEO bulk 경로는 확정 FINAL 키워드만 사용하고 30~50bytes 제목을 강제한다", async () => {
+test("실제 SEO bulk 경로는 FINAL10과 카테고리 Gate를 통과한 확장재료만 사용하고 30~50bytes 제목을 강제한다", async () => {
   const composer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
+  const expansion = await source("src/lib/keywordEngineElonTitleExpansion.ts");
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
 
-  assert.match(composer, /validateFinalKeywords/);
   assert.match(composer, /modelCodeLike/);
   assert.match(composer, /MIN_TITLE_BYTES = 30/);
-  assert.match(composer, /final-keywords-only-v4-min-length/);
-  assert.match(composer, /SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH/);
+  assert.match(composer, /category-intent-expansion-v5/);
+  assert.match(composer, /SEO_MALL_TITLE_SOURCE:CATEGORY_INTENT_EXPANSION_V5/);
   assert.match(composer, /keywordMaterials/);
   assert.match(composer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
   assert.doesNotMatch(composer, /factPool|htmlFacts|urlFacts|suspiciousCompositeFact|MARKETPLACE_TERMS/);
   assert.doesNotMatch(composer, /인기|베스트|최고|추천상품|프리미엄/);
 
-  assert.match(bulk, /composeKeywordElonSafeMallTitles/);
+  assert.match(expansion, /KEYWORD_ELON_CATEGORY_MATCH_GATE = 85/);
+  assert.match(expansion, /competitionOpportunity/);
+  assert.match(expansion, /intentClass/);
+  assert.match(bulk, /buildKeywordElonTitleExpansionPool/);
   assert.match(bulk, /finalKeywords: searchKeywords/);
+  assert.match(bulk, /titleExpansionPool/);
   assert.match(bulk, /\.\.\.mallComposition\.warnings/);
   assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
   assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
 });
 
-test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 v4 30~50B 정책으로 자동 보정한다", async () => {
+test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 기존 v4 30~50B 안전 fallback으로 자동 보정한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source(
     "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",

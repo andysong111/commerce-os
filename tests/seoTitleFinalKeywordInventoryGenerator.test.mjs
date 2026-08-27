@@ -17,7 +17,7 @@ const KEYWORDS = [
   "발판",
 ];
 
-test("5회차 145개 상품명 재고는 FINAL 키워드만으로 30~50bytes 생성한다", () => {
+test("확장 재료가 없을 때도 5회차 145개 상품명 재고를 FINAL 키워드 fallback으로 30~50bytes 생성한다", () => {
   const result = generateFinalKeywordOnlySeoTitleInventory({
     finalKeywords: KEYWORDS,
     rounds: 5,
@@ -26,7 +26,8 @@ test("5회차 145개 상품명 재고는 FINAL 키워드만으로 30~50bytes 생
   assert.equal(result.targetCount, 145);
   assert.equal(result.generatedCount, 145);
   assert.equal(new Set(result.candidates.map((row) => row.titleFingerprint)).size, 145);
-  assert.ok(result.warnings.includes("SEO_TITLE_INVENTORY_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH"));
+  assert.ok(result.warnings.includes("SEO_TITLE_INVENTORY_SOURCE:FINAL_KEYWORDS_ONLY_V5_FALLBACK"));
+  assert.equal(result.expansionMaterialCount, 0);
 
   const allowed = new Set(KEYWORDS.map(keywordElonSeoCanonical));
   for (const candidate of result.candidates) {
@@ -40,7 +41,7 @@ test("5회차 145개 상품명 재고는 FINAL 키워드만으로 30~50bytes 생
       candidate.title,
     );
     assert.doesNotMatch(candidate.title, /윤지선작업|통합|예지|공지|하단공지|PVC|색상랜덤|발송/);
-    assert.equal(candidate.metadata.strategy, "final-keywords-only-v4-min-length");
+    assert.equal(candidate.metadata.strategy, "final-keywords-only-v5-fallback");
   }
 });
 

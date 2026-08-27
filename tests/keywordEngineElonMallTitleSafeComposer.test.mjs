@@ -24,7 +24,7 @@ function assertStrictFinalOnly(result, keywords, blockedPattern) {
   assert.equal(result.keywordCoverageTotal, keywords.length);
   assert.equal(result.uniqueTitleCount, 29);
   assert.equal(result.facts.length, 0);
-  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH"));
+  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V5_FALLBACK"));
   const allowed = new Set(keywords.map(keywordElonSeoCanonical));
   for (const keyword of keywords) {
     const key = keywordElonSeoCanonical(keyword);
@@ -43,7 +43,7 @@ function assertStrictFinalOnly(result, keywords, blockedPattern) {
   }
 }
 
-test("AAA491형 최종키워드 10개만 사용해 30~50bytes 상품명 29개를 만든다", () => {
+test("AAA491형 최종키워드 10개만 사용해 30~50bytes fallback 상품명 29개를 만든다", () => {
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: aaa491Keywords,
@@ -66,7 +66,7 @@ test("AAA491형 최종키워드 10개만 사용해 30~50bytes 상품명 29개를
   );
 });
 
-test("AAA446형 운영 FINAL 10개도 외부 재료 없이 30~50bytes 29개를 만든다", () => {
+test("AAA446형 운영 FINAL 10개도 외부 재료 없이 30~50bytes fallback 29개를 만든다", () => {
   const keywords = [
     "미니노트",
     "a7",
@@ -100,7 +100,7 @@ test("AAA446형 운영 FINAL 10개도 외부 재료 없이 30~50bytes 29개를 �
   );
 });
 
-test("코드형 최종키워드는 쇼핑몰별 상품명에 조용히 섞지 않고 즉시 차단한다", () => {
+test("코드형 최종키워드는 쇼핑몰별 상품명에 조용히 섞지 않고 차단한다", () => {
   assert.throws(
     () =>
       composeKeywordElonSafeMallTitles({
@@ -112,6 +112,6 @@ test("코드형 최종키워드는 쇼핑몰별 상품명에 조용히 섞지 �
           productName: "발바닥 지압스텝퍼",
         },
       }),
-    /코드형 최종키워드/,
+    /부적합 최종키워드/,
   );
 });

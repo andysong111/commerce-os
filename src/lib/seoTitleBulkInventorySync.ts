@@ -7,12 +7,17 @@ import {
 } from "@/lib/seoTitleInventoryGenerator";
 import { generateFinalKeywordOnlySeoTitleInventory } from "@/lib/seoTitleFinalKeywordInventoryGenerator";
 import {
+  normalizeKeywordElonTitleIntentClass,
+  type KeywordElonTitleExpansionMaterial,
+} from "@/lib/keywordEngineElonTitleExpansion";
+import {
   findSeoTitleLedgerByKey,
   insertSeoTitleInventory,
   listSeoTitleInventoryFingerprints,
   patchSeoTitleLedger,
   upsertSeoTitleLedger,
   type SeoTitleLedgerContext,
+  type SeoTitleLedgerRow,
 } from "@/lib/seoTitleLedgerServer";
 import {
   keywordElonSeoCanonical,
@@ -29,7 +34,9 @@ import {
 } from "@/lib/productLaunchTrackerServer";
 
 const GROUPS = ["도매1", "도매2", "도매3", "도매4", "소매1", "소매2"] as const;
-const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v4-final-keywords-min-length";
+const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v5-category-intent-expansion";
+const TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5";
+const TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV5";
 const CHANNEL_BY_GROUP: Record<SeoTitleProductGroup, string> = {
   도매1: "wholesale1",
   도매2: "wholesale2",
@@ -86,6 +93,75 @@ function stringArray(value: unknown, limit = 100) {
     if (result.length >= limit) break;
   }
   return result;
+}
+
+function number100(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.min(100, numeric));
+}
+
+function parseExpansionPool(value: unknown): KeywordElonTitleExpansionMaterial[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: KeywordElonTitleExpansionMaterial[] = [];
+  for (const entry of value) {
+    const row = record(entry);
+    const keyword = text(row.keyword);
+    const key = keywordElonSeoCanonical(keyword);
+    if (!key || seen.has(key) || row.categoryAligned !== true) continue;
+    const categoryMatch = number100(row.categoryMatch);
+    const relevance = number100(row.relevance);
+    const shoppingIntent = number100(row.shoppingIntent);
+    const qualityScore = number100(row.qualityScore);
+    if (categoryMatch < 85 || relevance < 85 || shoppingIntent < 70 || qualityScore < 60) {
+      continue;
+    }
+    seen.add(key);
+    result.push({
+      keyword,
+      intentClass: normalizeKeywordElonTitleIntentClass(row.intentClass),
+      categoryAligned: true,
+      categoryMatch,
+      relevance,
+      shoppingIntent,
+      specificity: number100(row.specificity),
+      qualityScore,
+      competitionOpportunity: number100(row.competitionOpportunity),
+      totalSearch:
+        row.totalSearch === null || !Number.isFinite(Number(row.totalSearch))
+          ? null
+          : Math.max(0, Number(row.totalSearch)),
+      expansionScore: Number.isFinite(Number(row.expansionScore))
+        ? Number(row.expansionScore)
+        : 0,
+    });
+    if (result.length >= 30) break;
+  }
+  return result;
+}
+
+function expansionPoolFromCurrentSeoFinal(
+  seoFinal: UnknownRecord,
+): KeywordElonTitleExpansionMaterial[] {
+  if (text(seoFinal.source) !== TRUSTED_V5_FINAL_SOURCE) return [];
+  const groupProductNames = record(seoFinal.groupProductNames);
+  const raw = text(groupProductNames[TITLE_EXPANSION_META_GROUP_KEY]);
+  if (!raw) return [];
+  try {
+    const metadata = record(JSON.parse(raw));
+    if (Number(metadata.version) !== 5) return [];
+    return parseExpansionPool(metadata.pool);
+  } catch {
+    return [];
+  }
+}
+
+function expansionPoolFromExistingLedger(
+  ledger: SeoTitleLedgerRow | null,
+): KeywordElonTitleExpansionMaterial[] {
+  if (!ledger || text(ledger.engine_revision) !== STRICT_ENGINE_REVISION) return [];
+  return parseExpansionPool(record(ledger.source_payload).titleExpansionPool);
 }
 
 function isGroup(value: string): value is SeoTitleProductGroup {
@@ -270,12 +346,18 @@ export async function syncSeoTitleBulkInventoryForItem(
     };
   }
 
+  const ledgerKey = `launch:${normalizedId}`;
+  const existingLedger = await findSeoTitleLedgerByKey(context, ledgerKey);
+  const currentExpansionPool = expansionPoolFromCurrentSeoFinal(seoFinal);
+  const storedExpansionPool = expansionPoolFromExistingLedger(existingLedger);
+  const titleExpansionPool = currentExpansionPool.length
+    ? currentExpansionPool
+    : storedExpansionPool;
+
   const now = new Date().toISOString();
   const goodsKeys = goodsKeysByGroup(item);
   const fullGoodsKeys = GROUPS.every((group) => Boolean(goodsKeys[group]));
   const assignments = currentAssignments(seoFinal, goodsKeys);
-  const ledgerKey = `launch:${normalizedId}`;
-  const existingLedger = await findSeoTitleLedgerByKey(context, ledgerKey);
 
   if (existingLedger && text(existingLedger.engine_revision) !== STRICT_ENGINE_REVISION) {
     const legacyFingerprints = await listSeoTitleInventoryFingerprints(
@@ -311,15 +393,19 @@ export async function syncSeoTitleBulkInventoryForItem(
     common_search_keywords: searchKeywords,
     common_search_line: searchKeywords.join(","),
     source_payload: {
-      source: "seo-bulk-cloud",
+      source: text(seoFinal.source) || "seo-bulk-cloud",
       seoFinal,
+      titleExpansionPool,
       launchContext: {
         itemId: normalizedId,
         trackerRowNumber: Number(item.trackerRowNumber) || null,
         modelNumber: text(item.modelNumber),
+        shoplingCategory: text(item.shoplingCategory),
       },
       inventoryPolicy: {
-        titleMaterialPolicy: "final-keywords-only-v4-min-length",
+        titleMaterialPolicy: titleExpansionPool.length
+          ? "final10-plus-category-aligned-expansion-v5"
+          : "final10-only-v5-fallback",
         titleByteRange: [30, 50],
         currentFinalTitlesAreConsumed: fullGoodsKeys,
         targetRounds: SEO_TITLE_DEFAULT_ROUNDS,
@@ -348,6 +434,7 @@ export async function syncSeoTitleBulkInventoryForItem(
 
   const generation = generateFinalKeywordOnlySeoTitleInventory({
     finalKeywords: searchKeywords,
+    titleExpansionPool,
     rounds: SEO_TITLE_DEFAULT_ROUNDS,
     existingTitleFingerprints: fingerprints.map((row) => row.title_fingerprint),
   });
@@ -395,7 +482,8 @@ export async function syncSeoTitleBulkInventoryForItem(
   const finalCounts = currentGroupCounts(finalFingerprints);
   const shortages = GROUPS.filter(
     (group) =>
-      finalCounts[group] < SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
+      finalCounts[group] <
+      SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS,
   );
   const status = shortages.length ? "needs_review" : "ready";
   await patchSeoTitleLedger(context, ledger.ledger_id, {

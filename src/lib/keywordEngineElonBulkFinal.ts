@@ -27,8 +27,15 @@ import {
   normalizeKeywordElonSelectionThresholds,
   selectKeywordElonStep4Union,
 } from "@/lib/keywordEngineElonLabV2Selection";
+import {
+  buildKeywordElonTitleExpansionPool,
+  type KeywordElonTitleExpansionMaterial,
+} from "@/lib/keywordEngineElonTitleExpansion";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
+export const SEO_TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV5";
+const SEO_FINAL_SOURCE_V5 = "seo-bulk-cloud-category-intent-v5";
+const INTERNAL_CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
 const SHOPLING_GROUPS = [
   ["wholesale1", "도매1"],
   ["wholesale2", "도매2"],
@@ -71,6 +78,9 @@ export type KeywordElonBulkFinalResult = {
     sourceUrl: string;
     offerId: string;
     generatedAt: string;
+    titleExpansionCategory: string;
+    titleMaterialPolicy: string;
+    titleExpansionPool: KeywordElonTitleExpansionMaterial[];
     mallTitles: Array<{
       productGroup: string;
       marketName: string;
@@ -113,9 +123,17 @@ function unique(values: unknown[], limit = 120) {
   return out;
 }
 
+function publicSourceWarnings(source: KeywordElonSourceDraft) {
+  return (source.warnings ?? []).filter(
+    (warning) => !text(warning).startsWith(INTERNAL_CATEGORY_META_PREFIX),
+  );
+}
+
 function passingRows(candidates: KeywordElonCandidate[]) {
   return candidates
-    .filter((row) => row.safetyPass && row.qualityScore >= KEYWORD_ELON_V2_DEFAULT_CUTOFF)
+    .filter(
+      (row) => row.safetyPass && row.qualityScore >= KEYWORD_ELON_V2_DEFAULT_CUTOFF,
+    )
     .sort(
       (a, b) =>
         b.qualityScore - a.qualityScore ||
@@ -132,10 +150,21 @@ function seedRows(candidates: KeywordElonCandidate[]) {
   );
 }
 
-function trackerFallbackSource(input: KeywordElonBulkFinalInput): KeywordElonSourceDraft {
+function trackerFallbackSource(
+  input: KeywordElonBulkFinalInput,
+): KeywordElonSourceDraft {
   const optionText = text(input.optionText);
+  const rawSupportingText = text(input.supportingText);
+  const category = text(input.mallTitleCategory);
+  const categoryFreeSupportingText =
+    category && rawSupportingText.startsWith(category)
+      ? rawSupportingText
+          .slice(category.length)
+          .replace(/^\s*·\s*/, "")
+          .trim()
+      : rawSupportingText;
   const supportingText = [
-    text(input.supportingText),
+    categoryFreeSupportingText,
     input.modelNumber ? `모델번호 ${input.modelNumber}` : "",
   ]
     .filter(Boolean)
@@ -161,10 +190,15 @@ async function collectSource(input: KeywordElonBulkFinalInput) {
   } catch {
     // Product Launch Tracker data is the deterministic fallback for cloud-blocked 1688 fetches.
   }
-  return { source: trackerFallbackSource(input), mode: "tracker_fallback" as const };
+  return {
+    source: trackerFallbackSource(input),
+    mode: "tracker_fallback" as const,
+  };
 }
 
-export async function collectKeywordElonBulkSource(input: KeywordElonBulkFinalInput) {
+export async function collectKeywordElonBulkSource(
+  input: KeywordElonBulkFinalInput,
+) {
   if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
   if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
   return collectSource(input);
@@ -192,8 +226,12 @@ export function composeKeywordElonBulkFinal(
 ): KeywordElonBulkFinalResult {
   if (!text(input.launchItemId)) throw new Error("출시 상품 ID가 없습니다.");
   if (!text(input.sourceUrl)) throw new Error("1688 상품 링크가 없습니다.");
-  if (!input.candidates.length) throw new Error("FINAL RESULT를 만들 후보 키워드가 없습니다.");
-  if (!input.allowedKeys.length) throw new Error("금지키워드 제거 후 사용할 SEO 재료가 없습니다.");
+  if (!input.candidates.length) {
+    throw new Error("FINAL RESULT를 만들 후보 키워드가 없습니다.");
+  }
+  if (!input.allowedKeys.length) {
+    throw new Error("금지키워드 제거 후 사용할 SEO 재료가 없습니다.");
+  }
 
   const output = buildKeywordElonSeoModelPackage(
     {
@@ -207,8 +245,6 @@ export function composeKeywordElonBulkFinal(
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
 
-  // IMPORTANT: final keyword generation remains unchanged. Mall-title composition only
-  // consumes the already finalized keyword list below.
   const searchKeywords = recoveredSearchKeywords(
     [...output.commonSearchKeywords],
     input.supplementalSearchKeywords ?? [],
@@ -221,14 +257,24 @@ export function composeKeywordElonBulkFinal(
     );
   }
 
+  const titleExpansionCategory = text(input.mallTitleCategory);
+  const titleExpansionPool = buildKeywordElonTitleExpansionPool({
+    candidates: input.candidates,
+    searchKeywords,
+    allowedKeys: input.allowedKeys,
+    category: titleExpansionCategory,
+    limit: 30,
+  });
+
   const mallComposition = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: searchKeywords,
+    titleExpansionPool,
     modelName: output.modelName,
     context: {
       modelNumber: input.modelNumber,
       productName: input.productName,
-      category: input.mallTitleCategory,
+      category: titleExpansionCategory,
       optionText: input.optionText,
       detailHtml: input.mallTitleDetailHtml,
       mainImageUrl: input.mallTitleMainImageUrl,
@@ -241,7 +287,9 @@ export function composeKeywordElonBulkFinal(
   });
   const mallTitles = mallComposition.rows;
   if (mallTitles.length !== 29) {
-    throw new Error(`쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${mallTitles.length}개`);
+    throw new Error(
+      `쇼핑몰별 상품명이 29개가 아닙니다. 현재 ${mallTitles.length}개`,
+    );
   }
 
   const groupProductNames: Record<string, string> = {};
@@ -250,28 +298,45 @@ export function composeKeywordElonBulkFinal(
     if (!title) throw new Error(`${label} 기준 상품명을 만들지 못했습니다.`);
     groupProductNames[key] = title;
   }
+  groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY] = JSON.stringify({
+    version: 5,
+    category: titleExpansionCategory,
+    pool: titleExpansionPool,
+  });
 
   const generatedAt = new Date().toISOString();
-  const recoveredCount = Math.max(0, searchKeywords.length - output.commonSearchKeywords.length);
+  const recoveredCount = Math.max(
+    0,
+    searchKeywords.length - output.commonSearchKeywords.length,
+  );
+  const sourceWarnings = publicSourceWarnings(input.source);
   return {
     launchItemId: input.launchItemId,
     modelNumber: input.modelNumber,
     productName: input.productName,
     sourceUrl: input.sourceUrl,
     collectionMode: input.collectionMode,
-    sourceWarnings: input.source.warnings ?? [],
+    sourceWarnings,
     identity: input.identity,
     candidateCount: input.candidates.length,
-    finalMaterialCount: Math.max(0, Math.floor(input.finalMaterialCount || input.allowedKeys.length)),
+    finalMaterialCount: Math.max(
+      0,
+      Math.floor(input.finalMaterialCount || input.allowedKeys.length),
+    ),
     seoFinal: {
       productName: output.modelName,
       groupProductNames,
       searchKeywords,
       searchLine: searchKeywords.join(","),
-      source: "seo-bulk-cloud",
+      source: SEO_FINAL_SOURCE_V5,
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
+      titleExpansionCategory,
+      titleMaterialPolicy: titleExpansionPool.length
+        ? "final10-plus-category-aligned-expansion-v5"
+        : "final10-only-v5-fallback",
+      titleExpansionPool,
       mallTitles: mallTitles.map((row) => ({
         productGroup: row.productGroup,
         marketName: row.marketName,
@@ -283,8 +348,12 @@ export function composeKeywordElonBulkFinal(
     warnings: [
       ...output.warnings,
       ...mallComposition.warnings,
-      ...(input.source.warnings ?? []),
-      ...(recoveredCount ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`] : []),
+      ...sourceWarnings,
+      `TITLE_EXPANSION_CATEGORY:${titleExpansionCategory || "none"}`,
+      `TITLE_EXPANSION_POOL_COUNT:${titleExpansionPool.length}`,
+      ...(recoveredCount
+        ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`]
+        : []),
     ],
   };
 }
@@ -296,14 +365,13 @@ export async function generateKeywordElonBulkFinal(
   const source = collected.source;
   const identity = await analyzeKeywordElonIdentity(source);
 
-  let discovery: KeywordElonDiscovery = await discoverKeywordElonCandidatesResilient(
-    source,
-    identity,
-  );
+  let discovery: KeywordElonDiscovery =
+    await discoverKeywordElonCandidatesResilient(source, identity);
   const firstScored = await scoreKeywordElonCandidatesBatched({
     source,
     identity,
     discovery,
+    shoplingCategory: input.mallTitleCategory,
   });
   let candidates = firstScored.candidates;
 
@@ -317,11 +385,14 @@ export async function generateKeywordElonBulkFinal(
       existingCandidates: candidates,
       round,
     });
-    if (!expanded.newCandidateCount || !expanded.discovery.candidates.length) continue;
+    if (!expanded.newCandidateCount || !expanded.discovery.candidates.length) {
+      continue;
+    }
     const scored = await scoreKeywordElonCandidatesBatched({
       source,
       identity,
       discovery: expanded.discovery,
+      shoplingCategory: input.mallTitleCategory,
     });
     candidates = mergeKeywordElonCandidates(candidates, scored.candidates);
     discovery = mergeKeywordElonDiscovery(discovery, expanded.discovery);
