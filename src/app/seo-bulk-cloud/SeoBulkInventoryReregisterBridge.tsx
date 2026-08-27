@@ -303,6 +303,8 @@ export default function SeoBulkInventoryReregisterBridge() {
     const previousSelfCodeBase = text(original.selfCodeBase);
     const previousStages = record(original.stages);
     const previousHistory = array(original.shoplingRegistrationHistory).map(record);
+    const previousMallSeoApply = original.mallSeoApply ?? null;
+    const previousPricePolicy = original.pricePolicy ?? null;
     const newSelfCodeBase = nextSelfCode();
     const historyEntry = {
       registrationType: "seo_inventory_append",
@@ -311,6 +313,8 @@ export default function SeoBulkInventoryReregisterBridge() {
       previousSelfCodeBase,
       previousProducts,
       previousSeoFinal,
+      previousMallSeoApply,
+      previousPricePolicy,
       dispatchId,
       reservationId,
     };
@@ -326,6 +330,8 @@ export default function SeoBulkInventoryReregisterBridge() {
         {
           seoFinal,
           selfCodeBase: newSelfCodeBase,
+          mallSeoApply: null,
+          pricePolicy: null,
           shoplingRegistrationHistory: [...previousHistory, historyEntry],
           seoInventoryDispatch: {
             status: "reserved",
@@ -414,6 +420,8 @@ export default function SeoBulkInventoryReregisterBridge() {
           seoFinal: previousSeoFinal,
           selfCodeBase: previousSelfCodeBase,
           stages: previousStages,
+          mallSeoApply: previousMallSeoApply,
+          pricePolicy: previousPricePolicy,
           shoplingRegistrationHistory: failedHistory,
           seoInventoryDispatch: {
             status: "failed",

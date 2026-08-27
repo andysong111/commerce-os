@@ -7,7 +7,7 @@ import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry"
 
 const BATCH_STORAGE_KEY = "commerceOs.seoBulkCloud.batch.v1";
 const NORMALIZED_API = "/api/product-launch-tracker/normalized-optimized";
-const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v2:";
+const SESSION_PREFIX = "commerceOs.seoBulkCloud.diversityRepair.v3:";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -120,9 +120,6 @@ function canonical(value: unknown) {
 }
 
 function needsDiversityRepair(mallTitles: MallTitle[]) {
-  // Re-evaluate every complete, unregistered legacy FINAL once. Old finals can have
-  // 29 exact-unique titles and still contain weak/unsafe material or poor diversity.
-  // sameTitles() below prevents unnecessary writes when the SAFE result is unchanged.
   return mallTitles.length === 29;
 }
 
@@ -134,8 +131,6 @@ function safeOptionText(item: UnknownRecord) {
       .filter(Boolean)
       .join(" / ");
   }
-  // Multiple choices must not turn one option value (for example one color) into
-  // a product-wide title claim. Keep only shared option labels.
   return [...new Set(options.map((option) => text(option.optionName)).filter(Boolean))]
     .join(" / ");
 }
@@ -206,8 +201,8 @@ async function repairItem(itemId: string) {
           mallTitles: repaired,
           groupProductNames: groupTitles,
           diversityRepair: {
-            version: 2,
-            composer: "safe-final-keyword-coverage-v2",
+            version: 3,
+            composer: "final-keywords-only-v3",
             uniqueTitleCount: composed.uniqueTitleCount,
             nearDuplicateCount: composed.nearDuplicateCount,
             keywordCoverageCount: composed.keywordCoverageCount,
@@ -216,7 +211,7 @@ async function repairItem(itemId: string) {
           },
         },
       },
-      updatedBy: "SEO 쇼핑몰 상품명 SAFE 중복 자동보정",
+      updatedBy: "SEO 최종키워드 전용 상품명 자동보정",
     }),
   });
   return true;
@@ -243,7 +238,7 @@ export default function SeoBulkExistingFinalDiversityBridge() {
         try {
           if (await repairItem(itemId)) repairedCount += 1;
         } catch (error) {
-          console.warn(`[SEO bulk safe diversity repair] ${itemId} skipped`, error);
+          console.warn(`[SEO bulk final-keyword repair] ${itemId} skipped`, error);
         }
       }
       if (cancelled) return;

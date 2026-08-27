@@ -8,60 +8,8 @@ import {
   type KeywordElonSeoMarket,
 } from "./keywordEngineElonLabSeoOutput.ts";
 
-const TARGET_MIN_TITLE_BYTES = 27;
-const MAX_FACTS = 48;
-const GENERIC_FACTS = new Set([
-  "상품",
-  "제품",
-  "옵션",
-  "기타",
-  "생활",
-  "건강",
-  "잡화",
-  "패션잡화",
-  "용품",
-  "색상",
-  "발송",
-]);
-const OPTION_ONLY_FACTS = new Set(["블랙", "화이트", "그레이", "회색", "검정", "흰색"]);
-const MARKETPLACE_TERMS = [
-  "쿠팡",
-  "스마트스토어",
-  "네이버",
-  "옥션",
-  "지마켓",
-  "11번가",
-  "에이블리",
-  "도매꾹",
-  "도매매",
-  "오너클랜",
-  "인터파크",
-] as const;
-const PRODUCT_NOUN_SUFFIXES = [
-  "스텝퍼",
-  "브러쉬",
-  "브러시",
-  "수납함",
-  "수납장",
-  "정리함",
-  "마사지기",
-  "안마기",
-  "지압판",
-  "발판",
-  "썬캡",
-  "선캡",
-  "모자",
-  "거치대",
-  "케이스",
-  "커버",
-  "수첩",
-  "노트",
-  "파우치",
-  "테이블",
-  "서랍",
-  "솔",
-  "캡",
-] as const;
+const TARGET_TITLE_BYTES = 36;
+const MAX_CANDIDATES = 20_000;
 
 export type KeywordElonMallTitleFactContext = {
   modelNumber?: string;
@@ -100,6 +48,13 @@ export type KeywordElonMallTitleSafeComposerResult = {
   warnings: string[];
 };
 
+type TitleCandidate = {
+  title: string;
+  segments: string[];
+  canonical: string;
+  byteLength: number;
+};
+
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
 }
@@ -109,8 +64,6 @@ function clean(value: unknown) {
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&amp;/gi, "&")
-    .replace(/&quot;|&#34;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
     .replace(/[\u3400-\u9fff]+/g, " ")
     .replace(/[·•:;,|/\\]+/g, " ")
     .replace(/[_~`^=*#@!?]+/g, " ")
@@ -118,7 +71,7 @@ function clean(value: unknown) {
     .trim();
 }
 
-function unique(values: unknown[], limit = MAX_FACTS) {
+function unique(values: unknown[], limit = 120) {
   const result: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
@@ -130,14 +83,6 @@ function unique(values: unknown[], limit = MAX_FACTS) {
     if (result.length >= limit) break;
   }
   return result;
-}
-
-function safeDecode(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
 }
 
 function modelCodeLike(value: string, modelNumber = "") {
@@ -152,96 +97,9 @@ function modelCodeLike(value: string, modelNumber = "") {
   return false;
 }
 
-function suspiciousCompositeFact(value: string) {
-  const compact = value.replace(/\s+/g, "");
-  if (/^[가-힣]{15,}$/.test(compact)) return true;
-  if (/^[A-Za-z0-9]{14,}$/.test(compact) && !/^\d+(?:MM|CM|ML|L|P)$/i.test(compact)) {
-    return true;
-  }
-  return false;
-}
-
-function blockedFact(value: string, blockedKeys: string[], modelNumber: string) {
-  const key = keywordElonSeoCanonical(value);
-  if (!key || key.length < 2) return true;
-  if (GENERIC_FACTS.has(key)) return true;
-  if (modelCodeLike(value, modelNumber)) return true;
-  if (suspiciousCompositeFact(value)) return true;
-  if (MARKETPLACE_TERMS.some((term) => key.includes(keywordElonSeoCanonical(term)))) return true;
-  return blockedKeys.some((term) => term && key.includes(term));
-}
-
-function materialParts(value: unknown) {
-  const normalized = clean(value);
-  if (!normalized) return [];
-  const words = normalized.split(/\s+/).filter(Boolean);
-  const result: string[] = [normalized];
-  result.push(...words);
-  for (let index = 0; index < words.length - 1; index += 1) {
-    result.push(`${words[index]} ${words[index + 1]}`);
-  }
-  return result;
-}
-
-function htmlFacts(html: string) {
-  if (!html) return [];
-  const result: string[] = [];
-  for (const match of html.matchAll(/(?:alt|title)\s*=\s*["']([^"']+)["']/gi)) {
-    result.push(...materialParts(match[1]));
-  }
-  const withoutTags = html.replace(/<[^>]*>/g, " ");
-  result.push(...materialParts(withoutTags));
-  for (const match of html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
-    result.push(...urlFacts(match[1]));
-  }
-  return result;
-}
-
-function urlFacts(url: string) {
-  const decoded = safeDecode(text(url));
-  if (!decoded) return [];
-  const result: string[] = [];
-  for (const match of decoded.matchAll(/[가-힣]{2,12}/g)) result.push(match[0]);
-  return result;
-}
-
-function optionFacts(optionText: string) {
-  const lines = text(optionText)
-    .split(/[\n,;|/]+/)
-    .map(clean)
-    .filter(Boolean);
-  const result: string[] = [];
-  for (const line of lines) {
-    for (const part of materialParts(line)) {
-      const key = keywordElonSeoCanonical(part);
-      if (OPTION_ONLY_FACTS.has(key)) continue;
-      result.push(part);
-    }
-  }
-  return result;
-}
-
-function pickAnchor(productName: string, facts: string[], finalKeywords: string[]) {
-  const productParts = materialParts(productName)
-    .filter((value) => !suspiciousCompositeFact(value));
-  const candidates = unique([...productParts, ...facts, ...finalKeywords], 80);
-  const scored = candidates.map((value, index) => {
-    const key = keywordElonSeoCanonical(value);
-    let score = 0;
-    if (productParts.some((part) => keywordElonSeoCanonical(part) === key)) score += 40;
-    if (PRODUCT_NOUN_SUFFIXES.some((suffix) => key.endsWith(keywordElonSeoCanonical(suffix)))) score += 50;
-    if (value.includes(" ")) score += 8;
-    score += Math.min(18, key.length);
-    score -= index * 0.05;
-    return { value, score };
-  });
-  scored.sort((left, right) => right.score - left.score);
-  return scored[0]?.value ?? finalKeywords[0] ?? "";
-}
-
-function factPool(
-  context: KeywordElonMallTitleFactContext,
+function validateFinalKeywords(
   finalKeywords: string[],
+  context: KeywordElonMallTitleFactContext,
   blockedTerms: string[],
 ) {
   const blockedKeys = unique([
@@ -249,71 +107,68 @@ function factPool(
     ...KEYWORD_ELON_SEO_NOISE_TERMS,
     ...blockedTerms,
   ], 160).map(keywordElonSeoCanonical);
-  const raw: string[] = [];
-  raw.push(...materialParts(context.productName));
-  for (const categoryPart of text(context.category).split(/[>\/]+/)) {
-    raw.push(...materialParts(categoryPart));
+  const keywords = unique(finalKeywords, 40);
+  if (!keywords.length) {
+    throw new Error("쇼핑몰별 상품명에 사용할 최종키워드가 없습니다.");
   }
-  raw.push(...optionFacts(context.optionText ?? ""));
-  raw.push(...htmlFacts(context.detailHtml ?? ""));
-  raw.push(...urlFacts(context.mainImageUrl ?? ""));
-  for (const url of context.additionalImageUrls ?? []) raw.push(...urlFacts(url));
-
-  const keywordKeys = new Set(finalKeywords.map(keywordElonSeoCanonical));
-  const facts = unique(raw, 120).filter((value) => {
-    if (blockedFact(value, blockedKeys, context.modelNumber ?? "")) return false;
-    const key = keywordElonSeoCanonical(value);
-    if (keywordKeys.has(key)) return false;
-    if (keywordElonSeoUtf8Bytes(value) > 32) return false;
-    return true;
-  });
-  return facts.slice(0, MAX_FACTS);
-}
-
-function overlap(left: string, right: string) {
-  const leftKey = keywordElonSeoCanonical(left);
-  const rightKey = keywordElonSeoCanonical(right);
-  return Boolean(
-    leftKey
-    && rightKey
-    && (leftKey === rightKey || leftKey.includes(rightKey) || rightKey.includes(leftKey)),
-  );
-}
-
-function addSegment(target: string[], value: string, required = false) {
-  const normalized = text(value);
-  if (!normalized) return;
-  if (!required && target.some((current) => overlap(current, normalized))) return;
-  const candidate = [...target, normalized].join(" ");
-  if (keywordElonSeoUtf8Bytes(candidate) <= KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
-    target.push(normalized);
-  }
-}
-
-function fitPattern(
-  pattern: string[],
-  primary: string,
-  fillers: string[],
-) {
-  const segments: string[] = [];
-  for (const value of pattern) addSegment(segments, value, value === primary);
-  if (!segments.some((value) => keywordElonSeoCanonical(value) === keywordElonSeoCanonical(primary))) {
-    segments.unshift(primary);
-  }
-  if (keywordElonSeoUtf8Bytes(segments.join(" ")) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
-    while (segments.length > 1 && keywordElonSeoUtf8Bytes(segments.join(" ")) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
-      const removable = segments.findLastIndex(
-        (value) => keywordElonSeoCanonical(value) !== keywordElonSeoCanonical(primary),
-      );
-      if (removable < 0) break;
-      segments.splice(removable, 1);
+  for (const keyword of keywords) {
+    if (modelCodeLike(keyword, context.modelNumber ?? "")) {
+      throw new Error(`쇼핑몰별 상품명 차단 · 코드형 최종키워드: ${keyword}`);
+    }
+    if (keywordElonSeoUtf8Bytes(keyword) > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT) {
+      throw new Error(`쇼핑몰별 상품명 차단 · 지나치게 긴 최종키워드: ${keyword}`);
+    }
+    const key = keywordElonSeoCanonical(keyword);
+    if (blockedKeys.some((blocked) => blocked && key.includes(blocked))) {
+      throw new Error(`쇼핑몰별 상품명 차단 · 금지/노이즈 최종키워드: ${keyword}`);
     }
   }
-  for (const filler of fillers) {
-    if (keywordElonSeoUtf8Bytes(segments.join(" ")) >= TARGET_MIN_TITLE_BYTES) break;
-    addSegment(segments, filler);
+  return keywords;
+}
+
+function buildCandidatePool(keywords: string[]) {
+  const result: TitleCandidate[] = [];
+  const seen = new Set<string>();
+  const maxLength = Math.min(4, keywords.length);
+
+  const append = (segments: string[]) => {
+    const title = segments.join(" ").replace(/\s+/g, " ").trim();
+    const canonical = keywordElonSeoCanonical(title);
+    const byteLength = keywordElonSeoUtf8Bytes(title);
+    if (
+      !canonical ||
+      seen.has(canonical) ||
+      byteLength > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+    ) {
+      return;
+    }
+    seen.add(canonical);
+    result.push({ title, segments: [...segments], canonical, byteLength });
+  };
+
+  for (let length = 2; length <= maxLength; length += 1) {
+    const selected: string[] = [];
+    const used = new Set<number>();
+    const walk = () => {
+      if (result.length >= MAX_CANDIDATES) return;
+      if (selected.length === length) {
+        append(selected);
+        return;
+      }
+      for (let index = 0; index < keywords.length; index += 1) {
+        if (used.has(index)) continue;
+        used.add(index);
+        selected.push(keywords[index]);
+        walk();
+        selected.pop();
+        used.delete(index);
+        if (result.length >= MAX_CANDIDATES) return;
+      }
+    };
+    walk();
   }
-  return segments.join(" ").trim();
+  for (const keyword of keywords) append([keyword]);
+  return result;
 }
 
 function tokenSet(value: string) {
@@ -330,80 +185,6 @@ function jaccard(left: string, right: string) {
   return union ? intersection / union : 0;
 }
 
-function candidateScore(candidate: string, usedTitles: string[]) {
-  const key = keywordElonSeoCanonical(candidate);
-  const exactDuplicate = usedTitles.some((title) => keywordElonSeoCanonical(title) === key);
-  const maxSimilarity = usedTitles.reduce(
-    (max, title) => Math.max(max, jaccard(candidate, title)),
-    0,
-  );
-  const bytes = keywordElonSeoUtf8Bytes(candidate);
-  const shortPenalty = bytes < TARGET_MIN_TITLE_BYTES ? (TARGET_MIN_TITLE_BYTES - bytes) * 2 : 0;
-  const longPenalty = Math.abs(42 - bytes) * 0.12;
-  return (exactDuplicate ? 10_000 : 0) + maxSimilarity * 100 + shortPenalty + longPenalty;
-}
-
-function titleCandidates(input: {
-  index: number;
-  primary: string;
-  keywords: string[];
-  facts: string[];
-  anchor: string;
-}) {
-  const { index, primary, keywords, facts, anchor } = input;
-  const keywordCount = Math.max(1, keywords.length);
-  const factCount = Math.max(1, facts.length);
-  const secondaryPool = [1, 3, 5, 7]
-    .map((step) => keywords[(index * step + 1) % keywordCount])
-    .filter((value) => value && keywordElonSeoCanonical(value) !== keywordElonSeoCanonical(primary));
-  const tertiaryPool = [2, 4, 6]
-    .map((step) => keywords[(index * step + 2) % keywordCount])
-    .filter((value) => value && keywordElonSeoCanonical(value) !== keywordElonSeoCanonical(primary));
-  const factPoolForRow = facts.length
-    ? [0, 5, 11, 17].map((step) => facts[(index + step) % factCount]).filter(Boolean)
-    : [];
-  const fillers = unique([
-    ...secondaryPool,
-    ...tertiaryPool,
-    ...factPoolForRow,
-    anchor,
-    ...keywords,
-    ...facts,
-  ], 60);
-  const candidates: string[] = [];
-  const add = (pattern: string[]) => {
-    const title = fitPattern(pattern, primary, fillers);
-    if (!title || keywordElonSeoUtf8Bytes(title) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) return;
-    candidates.push(title);
-  };
-
-  const secondary = secondaryPool[0] ?? "";
-  const tertiary = tertiaryPool[0] ?? "";
-  const fact = factPoolForRow[0] ?? "";
-  const fact2 = factPoolForRow[1] ?? "";
-  const patterns = [
-    [primary, anchor, secondary, fact],
-    [anchor, primary, fact, secondary],
-    [primary, fact, secondary, anchor],
-    [secondary, primary, anchor, fact],
-    [fact, primary, secondary, anchor],
-    [primary, secondary, fact2, tertiary],
-    [tertiary, primary, fact, secondary],
-    [primary, fact2, tertiary, anchor],
-    [fact2, anchor, primary, secondary],
-    [secondary, fact, primary, tertiary],
-  ];
-  for (const pattern of patterns) add(pattern.filter(Boolean));
-
-  for (const secondaryValue of secondaryPool) {
-    for (const factValue of factPoolForRow) {
-      add([primary, secondaryValue, factValue, anchor]);
-      add([factValue, primary, anchor, secondaryValue]);
-    }
-  }
-  return unique(candidates, 80);
-}
-
 function nearDuplicateCount(titles: string[]) {
   let count = 0;
   for (let index = 0; index < titles.length; index += 1) {
@@ -417,27 +198,60 @@ function nearDuplicateCount(titles: string[]) {
   return count;
 }
 
-function validateFinalKeywords(finalKeywords: string[], context: KeywordElonMallTitleFactContext, blockedTerms: string[]) {
-  const blockedKeys = unique([
-    ...KEYWORD_ELON_SEO_FORBIDDEN_TERMS,
-    ...KEYWORD_ELON_SEO_NOISE_TERMS,
-    ...blockedTerms,
-  ], 160).map(keywordElonSeoCanonical);
-  const keywords = unique(finalKeywords, 40);
-  if (!keywords.length) throw new Error("쇼핑몰별 상품명에 사용할 최종키워드가 없습니다.");
-  for (const keyword of keywords) {
-    if (modelCodeLike(keyword, context.modelNumber ?? "")) {
-      throw new Error(`쇼핑몰별 상품명 차단 · 코드형 최종키워드: ${keyword}`);
-    }
-    if (keywordElonSeoUtf8Bytes(keyword) > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT) {
-      throw new Error(`쇼핑몰별 상품명 차단 · 지나치게 긴 최종키워드: ${keyword}`);
-    }
-    const key = keywordElonSeoCanonical(keyword);
-    if (blockedKeys.some((blocked) => blocked && key.includes(blocked))) {
-      throw new Error(`쇼핑몰별 상품명 차단 · 금지/노이즈 최종키워드: ${keyword}`);
+function candidateScore(input: {
+  candidate: TitleCandidate;
+  primary: string;
+  rowIndex: number;
+  keywordUsage: Map<string, number>;
+}) {
+  const { candidate, primary, rowIndex, keywordUsage } = input;
+  const primaryKey = keywordElonSeoCanonical(primary);
+  const containsPrimary = candidate.segments.some(
+    (segment) => keywordElonSeoCanonical(segment) === primaryKey,
+  );
+  const preferredFirst = rowIndex % 2 === 0;
+  const primaryFirst = keywordElonSeoCanonical(candidate.segments[0]) === primaryKey;
+  const primaryPlacementPenalty = preferredFirst === primaryFirst ? 0 : 3;
+  const usagePenalty = candidate.segments.reduce(
+    (sum, segment) => sum + (keywordUsage.get(keywordElonSeoCanonical(segment)) ?? 0),
+    0,
+  );
+  const lengthPenalty = Math.abs(TARGET_TITLE_BYTES - candidate.byteLength) * 0.15;
+  return (
+    (containsPrimary ? 0 : 10_000) +
+    primaryPlacementPenalty +
+    usagePenalty * 2 +
+    lengthPenalty
+  );
+}
+
+function selectCandidate(input: {
+  candidates: TitleCandidate[];
+  usedCanonical: Set<string>;
+  primary: string;
+  rowIndex: number;
+  keywordUsage: Map<string, number>;
+}) {
+  let best: TitleCandidate | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of input.candidates) {
+    if (input.usedCanonical.has(candidate.canonical)) continue;
+    const score = candidateScore({
+      candidate,
+      primary: input.primary,
+      rowIndex: input.rowIndex,
+      keywordUsage: input.keywordUsage,
+    });
+    if (
+      score < bestScore ||
+      (score === bestScore &&
+        (!best || candidate.canonical.localeCompare(best.canonical, "ko") < 0))
+    ) {
+      best = candidate;
+      bestScore = score;
     }
   }
-  return keywords;
+  return best;
 }
 
 export function composeKeywordElonSafeMallTitles(input: {
@@ -448,86 +262,105 @@ export function composeKeywordElonSafeMallTitles(input: {
   blockedTerms?: string[];
 }): KeywordElonMallTitleSafeComposerResult {
   const blockedTerms = input.blockedTerms ?? [];
-  const keywords = validateFinalKeywords(input.finalKeywords, input.context, blockedTerms);
-  const facts = factPool(input.context, keywords, blockedTerms);
-  const anchor = pickAnchor(input.context.productName, facts, keywords);
+  const keywords = validateFinalKeywords(
+    input.finalKeywords,
+    input.context,
+    blockedTerms,
+  );
+  const candidates = buildCandidatePool(keywords);
+  if (candidates.length < input.markets.length) {
+    throw new Error(
+      `최종키워드만으로 고유 쇼핑몰별 상품명 ${input.markets.length}개를 만들 수 없습니다. 현재 ${candidates.length}개`,
+    );
+  }
+
   const rows: KeywordElonSafeMallTitleRow[] = [];
-  const usedTitles: string[] = [];
+  const usedCanonical = new Set<string>();
+  const keywordUsage = new Map<string, number>();
 
   for (let index = 0; index < input.markets.length; index += 1) {
     const market = input.markets[index];
     const primary = keywords[index % keywords.length];
-    const candidates = titleCandidates({ index, primary, keywords, facts, anchor });
-    const selected = [...candidates].sort(
-      (left, right) => candidateScore(left, usedTitles) - candidateScore(right, usedTitles),
-    )[0] ?? primary;
-    usedTitles.push(selected);
-    const selectedKey = keywordElonSeoCanonical(selected);
-    const keywordMaterials = keywords.filter((keyword) =>
-      selectedKey.includes(keywordElonSeoCanonical(keyword)),
-    );
-    const usedMaterials = unique([
-      ...keywordMaterials,
-      ...facts.filter((fact) => selectedKey.includes(keywordElonSeoCanonical(fact))),
-      anchor,
-    ], 20).filter((material) => selectedKey.includes(keywordElonSeoCanonical(material)));
+    const selected = selectCandidate({
+      candidates,
+      usedCanonical,
+      primary,
+      rowIndex: index,
+      keywordUsage,
+    });
+    if (!selected) {
+      throw new Error("최종키워드 전용 쇼핑몰 상품명 후보가 부족합니다.");
+    }
+
+    usedCanonical.add(selected.canonical);
+    for (const segment of selected.segments) {
+      const key = keywordElonSeoCanonical(segment);
+      keywordUsage.set(key, (keywordUsage.get(key) ?? 0) + 1);
+    }
     rows.push({
       productGroup: market.productGroup,
       groupSuffix: market.groupSuffix,
       marketName: market.marketName,
       mallKey: market.mallKey,
       accountIdLabel: market.accountIdLabel,
-      title: selected,
-      byteLength: keywordElonSeoUtf8Bytes(selected),
+      title: selected.title,
+      byteLength: selected.byteLength,
       modelName: input.modelName,
       modelPosition: index % 2 === 0 ? "first" : "after_lead",
-      usedMaterials,
-      keywordMaterials,
-      titleKeywordSegments: keywordMaterials,
-      strategyLabel: "safe-final-keyword-coverage-v2",
+      usedMaterials: [...selected.segments],
+      keywordMaterials: [...selected.segments],
+      titleKeywordSegments: [...selected.segments],
+      strategyLabel: "final-keywords-only-v3",
       variantIndex: index,
     });
   }
 
   const coverage = keywords.filter((keyword) => {
     const key = keywordElonSeoCanonical(keyword);
-    return rows.some((row) => keywordElonSeoCanonical(row.title).includes(key));
+    return rows.some((row) =>
+      row.keywordMaterials.some(
+        (material) => keywordElonSeoCanonical(material) === key,
+      ),
+    );
   });
   if (coverage.length !== keywords.length) {
     const missing = keywords.filter((keyword) => !coverage.includes(keyword));
     throw new Error(`쇼핑몰별 상품명 최종키워드 커버 실패: ${missing.join(", ")}`);
   }
 
+  const allowedKeys = new Set(keywords.map(keywordElonSeoCanonical));
   for (const row of rows) {
-    if (modelCodeLike(row.title, input.context.modelNumber ?? "")) {
-      throw new Error(`쇼핑몰별 상품명에 코드형 값이 포함되었습니다: ${row.title}`);
-    }
     if (keywordElonSeoUtf8Bytes(row.title) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
       throw new Error(`쇼핑몰별 상품명이 ${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes를 초과했습니다.`);
+    }
+    if (
+      row.keywordMaterials.some(
+        (material) => !allowedKeys.has(keywordElonSeoCanonical(material)),
+      )
+    ) {
+      throw new Error(`쇼핑몰별 상품명에 최종키워드 외 재료가 포함되었습니다: ${row.title}`);
     }
   }
 
   const uniqueTitleCount = new Set(rows.map((row) => keywordElonSeoCanonical(row.title))).size;
+  if (uniqueTitleCount !== rows.length) {
+    throw new Error("최종키워드 전용 쇼핑몰 상품명에 중복이 발생했습니다.");
+  }
   const nearDuplicates = nearDuplicateCount(rows.map((row) => row.title));
-  const warnings: string[] = [
-    `SEO_MALL_TITLE_SAFE_FACTS:${facts.length}`,
-    `SEO_MALL_TITLE_KEYWORD_COVERAGE:${coverage.length}/${keywords.length}`,
-  ];
-  if (uniqueTitleCount < rows.length) {
-    warnings.push(`SEO_MALL_TITLE_EXACT_DUPLICATES_REMAIN:${rows.length - uniqueTitleCount}`);
-  }
-  if (nearDuplicates) warnings.push(`SEO_MALL_TITLE_NEAR_DUPLICATES_REMAIN:${nearDuplicates}`);
-  if (rows.some((row) => row.byteLength < TARGET_MIN_TITLE_BYTES)) {
-    warnings.push("SEO_MALL_TITLE_SHORT_ONLY_WHEN_FACTS_INSUFFICIENT");
-  }
 
   return {
     rows,
-    facts,
+    facts: [],
     keywordCoverageCount: coverage.length,
     keywordCoverageTotal: keywords.length,
     uniqueTitleCount,
     nearDuplicateCount: nearDuplicates,
-    warnings,
+    warnings: [
+      "SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3",
+      `SEO_MALL_TITLE_KEYWORD_COVERAGE:${coverage.length}/${keywords.length}`,
+      ...(nearDuplicates
+        ? [`SEO_MALL_TITLE_NEAR_DUPLICATES_REMAIN:${nearDuplicates}`]
+        : []),
+    ],
   };
 }
