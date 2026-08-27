@@ -33,6 +33,7 @@ import {
 } from "@/lib/keywordEngineElonTitleExpansion";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
+export const SEO_TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV5";
 const SEO_FINAL_SOURCE_V5 = "seo-bulk-cloud-category-intent-v5";
 const INTERNAL_CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
 const SHOPLING_GROUPS = [
@@ -297,6 +298,11 @@ export function composeKeywordElonBulkFinal(
     if (!title) throw new Error(`${label} 기준 상품명을 만들지 못했습니다.`);
     groupProductNames[key] = title;
   }
+  groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY] = JSON.stringify({
+    version: 5,
+    category: titleExpansionCategory,
+    pool: titleExpansionPool,
+  });
 
   const generatedAt = new Date().toISOString();
   const recoveredCount = Math.max(
