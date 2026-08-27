@@ -275,7 +275,8 @@ async function openBulkCloud(button) {
       shoplingStatus: "idle",
     }));
     const previousBatch = readPendingBatch();
-    const previousItems = listOfRecords(previousBatch?.items);
+    const previousIsRunBatch = Number(previousBatch?.version) >= 3;
+    const previousItems = previousIsRunBatch ? listOfRecords(previousBatch?.items) : [];
     const mergedItems = mergePendingItems(previousItems, runItems);
     if (mergedItems.length > MAX_BATCH_ITEMS) {
       throw new Error(
@@ -283,7 +284,7 @@ async function openBulkCloud(button) {
       );
     }
 
-    const hasExistingRuns = previousItems.length > 0;
+    const hasExistingRuns = previousIsRunBatch && previousItems.length > 0;
     const batchId = hasExistingRuns && text(previousBatch?.batchId)
       ? text(previousBatch.batchId)
       : newId("seo-bulk");
