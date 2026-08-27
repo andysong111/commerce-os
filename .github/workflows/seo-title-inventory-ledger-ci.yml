@@ -21,6 +21,7 @@ on:
       - "supabase/migrations/202608220001_seo_title_inventory_ledger.sql"
       - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
+      - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
       - "tests/keywordEngineElonMallTitleSafeComposer.test.mjs"
       - "tests/seoBulkMallTitleFactBridge.test.mjs"
       - "tests/seoBulkCloudParallel.test.mjs"
@@ -54,11 +55,12 @@ jobs:
           src/app/shopling-seo-dispatch/page.tsx
           src/app/shopling-seo-dispatch/ShoplingSeoDispatchCenter.tsx
           src/app/product-launch-tracker/page.tsx
-          src/app/seo-bulk-cloud/SeoBulkMallTitleFactBridge.tsx
           src/app/seo-bulk-cloud/page.tsx
           src/lib/keywordEngineElonBulkFinal.ts
           src/lib/keywordEngineElonMallTitleSafeComposer.ts
           src/lib/seoTitleInventoryGenerator.ts
+          src/lib/seoTitleFinalKeywordInventoryGenerator.ts
+          src/lib/seoTitleBulkInventorySync.ts
           src/lib/seoTitleLedgerServer.ts
           src/lib/shoplingSeoDispatchModule.ts
           src/lib/keywordEngineElonLabModule.ts
@@ -67,6 +69,7 @@ jobs:
         run: >-
           node --experimental-strip-types --test
           tests/seoTitleInventoryLedger.test.mjs
+          tests/seoTitleFinalKeywordInventoryGenerator.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
           tests/keywordEngineElonMallTitleSafeComposer.test.mjs
           tests/seoBulkMallTitleFactBridge.test.mjs
