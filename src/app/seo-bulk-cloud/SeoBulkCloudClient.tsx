@@ -30,6 +30,7 @@ const KEYWORD_API = "/api/keyword-engine-elon-lab";
 const SHOPLING_UPLOAD_API = "/api/product-launch-tracker/shopling-upload";
 const GENERATION_CONCURRENCY = 3;
 const REGISTRATION_CONCURRENCY = 3;
+const TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5";
 
 const GROUPS = [
   ["wholesale1", "도매1"],
@@ -415,15 +416,29 @@ export default function SeoBulkCloudClient() {
       try {
         const item = await reloadItem(handoff.id);
         if (cancelled) return;
-        const existing = normalizeSeoFinal(item.seoFinal);
+        const existingRaw = record(item.seoFinal);
+        const existing = normalizeSeoFinal(existingRaw);
         const goodsKeys = itemGoodsKeys(item);
+        const legacyUnregisteredFinal = Boolean(
+          existing &&
+            goodsKeys.length === 0 &&
+            text(existingRaw.source) !== TRUSTED_V5_FINAL_SOURCE,
+        );
         setRows((current) => [
           ...current,
           {
             ...handoff,
             item,
-            generationStatus: existing ? "ready" : "idle",
-            generationMessage: existing ? "저장된 FINAL RESULT를 불러왔습니다." : "생성 대기",
+            generationStatus: legacyUnregisteredFinal
+              ? "idle"
+              : existing
+                ? "ready"
+                : "idle",
+            generationMessage: legacyUnregisteredFinal
+              ? "기존 FINAL을 카테고리 정합 v5로 자동 재생성합니다."
+              : existing
+                ? "저장된 FINAL RESULT를 불러왔습니다."
+                : "생성 대기",
             generationError: "",
             collectionMode: "",
             candidateCount: 0,
@@ -497,6 +512,7 @@ export default function SeoBulkCloudClient() {
             ]
               .filter(Boolean)
               .join(" · "),
+            mallTitleCategory: text(item.shoplingCategory),
           };
 
           updateRow(row.id, { generationMessage: "원본 준비 · 1688 수집/상품정보 fallback 확인 중…" });
@@ -568,6 +584,7 @@ export default function SeoBulkCloudClient() {
               source,
               identity,
               discovery,
+              shoplingCategory: text(item.shoplingCategory),
             }),
           });
           let candidates = requireCandidates(
@@ -614,6 +631,7 @@ export default function SeoBulkCloudClient() {
                 source,
                 identity,
                 discovery: expandedDiscovery,
+                shoplingCategory: text(item.shoplingCategory),
               }),
             });
             const roundCandidates = requireCandidates(
@@ -1038,66 +1056,89 @@ export default function SeoBulkCloudClient() {
               <div className="border-t border-slate-200 p-4 text-sm">
                 {row.seoFinal ? (
                   <>
-                    <div className="font-black">SEO 모델명</div>
-                    <div className="mt-1 text-slate-700">{row.seoFinal.productName}</div>
-                    <div className="mt-4 font-black">6개 기준 상품명</div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <div>
+                        <div className="font-black text-slate-700">SEO 모델명</div>
+                        <div className="mt-1 font-semibold">{row.seoFinal.productName}</div>
+                      </div>
+                      <div>
+                        <div className="font-black text-slate-700">FINAL 검색어</div>
+                        <div className="mt-1 break-words font-semibold">
+                          {row.seoFinal.searchLine}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 font-black text-slate-700">6개 기준 상품명</div>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {GROUPS.map(([key, label]) => (
-                        <div key={key} className="rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200">
-                          <div className="text-[10px] font-black text-slate-400">{label}</div>
-                          <div className="mt-1 font-bold">{row.seoFinal?.groupProductNames[key]}</div>
+                        <div key={key} className="rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="text-[10px] font-black uppercase text-slate-400">{label}</div>
+                          <div className="mt-1 font-bold">{row.seoFinal?.groupProductNames[key] || "-"}</div>
                         </div>
                       ))}
                     </div>
-                    <div className="mt-4 font-black">쇼핑몰별 상품명 {row.seoFinal.mallTitles.length}/29</div>
-                    <div className="mt-2 max-h-72 overflow-auto rounded-lg bg-white ring-1 ring-slate-200">
-                      {row.seoFinal.mallTitles.map((mall) => (
-                        <div key={`${mall.mallKey}-${mall.productGroup}`} className="grid gap-1 border-b border-slate-100 px-3 py-2 last:border-b-0 md:grid-cols-[150px_1fr]">
-                          <span className="text-xs font-bold text-slate-500">{mall.productGroup} · {mall.marketName}</span>
-                          <span className="font-semibold text-slate-800">{mall.title}</span>
+                    <div className="mt-4 font-black text-slate-700">
+                      쇼핑몰별 상품명 {row.seoFinal.mallTitles.length}/29
+                    </div>
+                    <div className="mt-2 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white">
+                      {row.seoFinal.mallTitles.map((mall, mallIndex) => (
+                        <div
+                          key={`${row.id}-${mall.mallKey}-${mall.accountIdLabel}-${mallIndex}`}
+                          className="grid gap-1 border-b border-slate-100 px-3 py-2 last:border-b-0 md:grid-cols-[220px_1fr]"
+                        >
+                          <div className="text-xs font-bold text-slate-500">
+                            {mall.productGroup} · {mall.marketName}
+                          </div>
+                          <div className="font-semibold">{mall.title}</div>
                         </div>
                       ))}
                     </div>
+                    <div className="mt-3 break-all text-xs text-slate-400">{row.sourceUrl}</div>
                   </>
                 ) : (
                   <div className="text-slate-500">FINAL RESULT가 아직 없습니다.</div>
                 )}
-                {row.warnings.length ? (
-                  <div className="mt-4 rounded-lg bg-amber-50 p-3 text-xs font-semibold text-amber-900">
-                    {row.warnings.join(" · ")}
-                  </div>
-                ) : null}
-                <div className="mt-4 break-all text-xs text-slate-400">{row.sourceUrl}</div>
               </div>
             </details>
           </article>
         ))}
       </section>
 
-      <details className="rounded-2xl border border-slate-200 bg-white">
+      <details className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <summary className="cursor-pointer px-5 py-4 font-black text-slate-700">
           STEP 1~5 · 원장 · 진단 · 기존 세부 엔진 펼치기
         </summary>
         <div className="border-t border-slate-200 p-5">
-          <p className="text-sm leading-6 text-slate-600">
-            평소에는 위 FINAL RESULT와 일괄등록만 사용하면 됩니다. 상품 정체성·시장어·점수표·금지키워드·원장 재고를 직접 검토하거나 실패 상품을 다시 실행해야 할 때만 이 영역을 엽니다.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={generating || !retryRows.length}
-              onClick={() => void generateRows(retryRows)}
-              className="rounded-xl bg-violet-700 px-4 py-2 text-sm font-black text-white disabled:opacity-40"
+          <div className="grid gap-4 md:grid-cols-3">
+            <Link
+              href="/keyword-engine-elon-lab"
+              className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 font-black text-indigo-800"
             >
-              {generating ? "FINAL RESULT 재실행 중…" : `미완료 FINAL RESULT 재실행 (${retryRows.length})`}
-            </button>
-            <Link href="/keyword-engine-elon-lab" className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black">
-              기존 STEP 1~5 세부 엔진
+              기존 STEP 엔진 열기
             </Link>
-            <Link href="/seo-title-cloud-shopling-runner" className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-black">
-              단건 Shopling 실행기
+            <Link
+              href="/keyword-engine-elon-lab?ledger=1"
+              className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 font-black text-emerald-800"
+            >
+              상품명 재고 원장
+            </Link>
+            <Link
+              href="/keyword-engine-elon-lab?diagnostics=1"
+              className="rounded-xl border border-amber-200 bg-amber-50 p-4 font-black text-amber-900"
+            >
+              진단/근거 보기
             </Link>
           </div>
+          {retryRows.length ? (
+            <button
+              type="button"
+              disabled={generating}
+              onClick={() => void generateRows(retryRows)}
+              className="mt-4 rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-black text-violet-800 disabled:opacity-40"
+            >
+              미완료 FINAL RESULT 재실행 ({retryRows.length})
+            </button>
+          ) : null}
         </div>
       </details>
     </main>
