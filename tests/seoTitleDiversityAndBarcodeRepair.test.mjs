@@ -75,15 +75,16 @@ test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29�
   }
 });
 
-test("실제 SEO bulk 경로는 확정 FINAL 키워드만 쇼핑몰별 상품명 재료로 사용한다", async () => {
+test("실제 SEO bulk 경로는 확정 FINAL 키워드만 사용하고 30~50bytes 제목을 강제한다", async () => {
   const composer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
 
   assert.match(composer, /validateFinalKeywords/);
   assert.match(composer, /modelCodeLike/);
-  assert.match(composer, /final-keywords-only-v3/);
-  assert.match(composer, /SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3/);
+  assert.match(composer, /MIN_TITLE_BYTES = 30/);
+  assert.match(composer, /final-keywords-only-v4-min-length/);
+  assert.match(composer, /SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH/);
   assert.match(composer, /keywordMaterials/);
   assert.match(composer, /KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT/);
   assert.doesNotMatch(composer, /factPool|htmlFacts|urlFacts|suspiciousCompositeFact|MARKETPLACE_TERMS/);
@@ -93,27 +94,26 @@ test("실제 SEO bulk 경로는 확정 FINAL 키워드만 쇼핑몰별 상품명
   assert.match(bulk, /finalKeywords: searchKeywords/);
   assert.match(bulk, /\.\.\.mallComposition\.warnings/);
   assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
-
   assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
 });
 
-test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 final-keywords-only-v3로 자동 보정한다", async () => {
+test("이미 FINAL인 미등록 상품도 클라우드를 다시 열면 v4 30~50B 정책으로 자동 보정한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bridge = await source(
     "src/app/seo-bulk-cloud/SeoBulkExistingFinalDiversityBridge.tsx",
   );
 
   assert.match(page, /SeoBulkExistingFinalDiversityBridge/);
-  assert.match(bridge, /commerceOs\.seoBulkCloud\.diversityRepair\.v3/);
-  assert.match(bridge, /needsDiversityRepair/);
+  assert.match(bridge, /commerceOs\.seoBulkCloud\.diversityRepair\.v4/);
   assert.match(bridge, /composeKeywordElonSafeMallTitles/);
   assert.doesNotMatch(bridge, /diversifyKeywordElonMallTitles/);
   assert.match(bridge, /operation: "patch_item"/);
   assert.match(bridge, /hasRegisteredGoodsKeys\(item\)/);
   assert.match(bridge, /if \(!text\(item\.id\) \|\| hasRegisteredGoodsKeys\(item\)\) return false/);
   assert.match(bridge, /window\.location\.reload\(\)/);
-  assert.match(bridge, /composer: "final-keywords-only-v3"/);
-  assert.match(bridge, /SEO 최종키워드 전용 상품명 자동보정/);
+  assert.match(bridge, /composer: "final-keywords-only-v4-min-length"/);
+  assert.match(bridge, /titleByteRange: \[30, 50\]/);
+  assert.match(bridge, /SEO FINAL 키워드 전용 30~50B 상품명 자동보정/);
 });
 
 test("기등록 SEO 추가등록은 새 goods_key 후처리를 위해 이전 상품명·가격 request를 초기화하고 실패 시 복구한다", async () => {
