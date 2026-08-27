@@ -103,6 +103,7 @@ function bulkItemFrom(value: unknown) {
     sourceUrl: text(item.sourceUrl),
     optionText: text(item.optionText),
     supportingText: text(item.supportingText),
+    mallTitleCategory: text(item.mallTitleCategory ?? item.shoplingCategory),
   };
 }
 function readiness() {
@@ -122,14 +123,15 @@ function readiness() {
     bulkParallelAvailable: true,
     bulkSegmentedAvailable: true,
     bulkAutoRecoveryAvailable: true,
+    categoryIntentExpansionAvailable: true,
   };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 6,
-    marketRecall: "evidence-first",
+    version: 7,
+    marketRecall: "evidence-first-category-gated",
     ...readiness(),
   });
 }
@@ -171,7 +173,10 @@ export async function POST(request: NextRequest) {
         candidates: candidatesFrom(body.candidates),
         allowedKeys: textArray(body.allowedKeys, 120),
         blockedKeys: textArray(body.blockedKeys, 120),
-        finalMaterialCount: Math.max(0, Math.floor(Number(body.finalMaterialCount) || 0)),
+        finalMaterialCount: Math.max(
+          0,
+          Math.floor(Number(body.finalMaterialCount) || 0),
+        ),
         titleResult: titleResultFrom(body.titleResult),
       };
 
@@ -242,6 +247,7 @@ export async function POST(request: NextRequest) {
         source: sourceFrom(body.source),
         identity: identityFrom(body.identity),
         discovery: discoveryFrom(body.discovery),
+        shoplingCategory: text(body.shoplingCategory ?? body.mallTitleCategory),
       });
       return NextResponse.json({ ok: true, action, ...result });
     }
