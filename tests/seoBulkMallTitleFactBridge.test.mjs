@@ -6,26 +6,43 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
 }
 
-test("SEO bulk 쇼핑몰별 상품명은 FACT 브리지 없이 FINAL10 + 카테고리 검증 확장재료만 사용한다", async () => {
+test("SEO bulk 상품명은 FACT 브리지 없이 FINAL10 + 검증 확장재료로 긴 제목만 조립한다", async () => {
   const page = await source("src/app/seo-bulk-cloud/page.tsx");
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
-  const composer = await source("src/lib/keywordEngineElonMallTitleSafeComposer.ts");
+  const composer = await source(
+    "src/lib/keywordEngineElonMallTitleSafeComposer.ts",
+  );
   const expansion = await source("src/lib/keywordEngineElonTitleExpansion.ts");
+  const longTitle = await source(
+    "src/lib/keywordEngineElonLongTitlePriority.ts",
+  );
 
   assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
   assert.match(bulk, /const searchKeywords = recoveredSearchKeywords/);
   assert.match(bulk, /buildKeywordElonTitleExpansionPool/);
   assert.match(bulk, /finalKeywords: searchKeywords/);
   assert.match(bulk, /titleExpansionPool/);
+  assert.match(bulk, /TITLE_MALL_NAME_POLICY:LONG_TITLE_PRIORITY_V6/);
   assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
 
-  assert.match(composer, /category-intent-expansion-v5/);
-  assert.match(composer, /final-keywords-only-v5-fallback/);
-  assert.match(composer, /MIN_TITLE_BYTES = 30/);
-  assert.match(composer, /TARGET_TITLE_BYTES = 42/);
+  assert.match(composer, /long-title-priority-v6/);
+  assert.match(composer, /long-title-priority-v6-final-fallback/);
+  assert.match(composer, /KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES/);
+  assert.match(composer, /KEYWORD_ELON_LONG_TITLE_TARGET_BYTES/);
   assert.match(composer, /facts: \[\]/);
-  assert.match(composer, /origin: "category_expansion"/);
-  assert.doesNotMatch(composer, /detailHtml.*matchAll|mainImageUrl.*match|additionalImageUrls.*flatMap/);
+  assert.match(composer, /origin === "category_expansion"/);
+  assert.doesNotMatch(
+    composer,
+    /detailHtml.*matchAll|mainImageUrl.*match|additionalImageUrls.*flatMap/,
+  );
+
+  assert.match(longTitle, /KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES = 30/);
+  assert.match(longTitle, /KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES = 40/);
+  assert.match(longTitle, /KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES = 44/);
+  assert.match(longTitle, /KEYWORD_ELON_LONG_TITLE_TARGET_BYTES = 48/);
+  assert.match(longTitle, /priorityTier/);
+  assert.match(longTitle, /enumerateKeywordElonLongTitleSegments/);
+
   assert.match(expansion, /KEYWORD_ELON_CATEGORY_MATCH_GATE = 85/);
   assert.match(expansion, /competitionOpportunity/);
   assert.match(expansion, /intentClass/);

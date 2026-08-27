@@ -3,6 +3,21 @@ import {
   keywordElonSeoCanonical,
   keywordElonSeoUtf8Bytes,
 } from "./keywordEngineElonLabSeoOutput.ts";
+import {
+  KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_TARGET_BYTES,
+  buildKeywordElonLongTitleExpansionMaterial,
+  buildKeywordElonLongTitleFinalMaterial,
+  enumerateKeywordElonLongTitleSegments,
+  keywordElonLongTitleInternalRedundancyPenalty,
+  keywordElonLongTitleLengthPenalty,
+  keywordElonLongTitleMaterialPenalty,
+  keywordElonLongTitleSegmentCountPenalty,
+  type KeywordElonLongTitleMaterial,
+  type KeywordElonLongTitlePriorityTier,
+} from "./keywordEngineElonLongTitlePriority.ts";
 import type {
   KeywordElonTitleExpansionMaterial,
   KeywordElonTitleIntentClass,
@@ -21,17 +36,6 @@ const SEO_TITLE_GROUP_QUOTAS = {
 
 type SeoTitleProductGroup = keyof typeof SEO_TITLE_GROUP_QUOTAS;
 const GROUPS = Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[];
-const MIN_TITLE_BYTES = 30;
-const MAX_COMBINATION_SIZE = 4;
-const MAX_CANDIDATE_POOL = 60_000;
-const TARGET_TITLE_BYTES = 42;
-
-type InventoryMaterial = {
-  keyword: string;
-  key: string;
-  origin: "final_keyword" | "category_expansion";
-  intentClass: KeywordElonTitleIntentClass;
-};
 
 export type FinalKeywordOnlyInventoryCandidate = {
   productGroup: SeoTitleProductGroup;
@@ -42,12 +46,13 @@ export type FinalKeywordOnlyInventoryCandidate = {
   sourceMaterials: string[];
   metadata: {
     strategy:
-      | "category-intent-expansion-v5"
-      | "final-keywords-only-v5-fallback";
+      | "long-title-priority-v6"
+      | "long-title-priority-v6-final-fallback";
     modelPosition: "first" | "after_lead";
     keywordCount: number;
     materialOrigins: Array<"final_keyword" | "category_expansion">;
     intentClasses: KeywordElonTitleIntentClass[];
+    priorityTiers: KeywordElonLongTitlePriorityTier[];
   };
 };
 
@@ -67,10 +72,15 @@ export type FinalKeywordOnlyInventoryResult = {
 type CandidateSeed = {
   title: string;
   fingerprint: string;
-  segments: InventoryMaterial[];
+  segments: KeywordElonLongTitleMaterial[];
   bytes: number;
   expansionCount: number;
+  preferredExpansionCount: number;
+  supportingExpansionCount: number;
+  adjacentExpansionCount: number;
   intentClasses: KeywordElonTitleIntentClass[];
+  materialPenalty: number;
+  redundancyPenalty: number;
 };
 
 function text(value: unknown) {
@@ -95,118 +105,119 @@ function buildMaterials(
   titleExpansionPool: KeywordElonTitleExpansionMaterial[],
 ) {
   const finals = uniqueKeywords(finalKeywords);
-  const materials: InventoryMaterial[] = finals.map((keyword) => ({
-    keyword,
-    key: keywordElonSeoCanonical(keyword),
-    origin: "final_keyword" as const,
-    intentClass: "core_synonym" as const,
-  }));
+  const materials: KeywordElonLongTitleMaterial[] = finals.map(
+    (keyword, index) =>
+      buildKeywordElonLongTitleFinalMaterial({
+        keyword,
+        key: keywordElonSeoCanonical(keyword),
+        sourceOrder: index,
+      }),
+  );
   const seen = new Set(materials.map((row) => row.key));
-  for (const row of titleExpansionPool) {
+  for (let index = 0; index < titleExpansionPool.length; index += 1) {
+    const row = titleExpansionPool[index];
     if (row.categoryAligned !== true) continue;
     const keyword = text(row.keyword);
     const key = keywordElonSeoCanonical(keyword);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    materials.push({
-      keyword,
-      key,
-      origin: "category_expansion",
-      intentClass: row.intentClass,
-    });
+    materials.push(
+      buildKeywordElonLongTitleExpansionMaterial({
+        row,
+        keyword,
+        key,
+        sourceOrder: finals.length + index,
+      }),
+    );
   }
   return { finals, materials };
 }
 
 function buildCandidatePool(
-  materials: InventoryMaterial[],
+  materials: KeywordElonLongTitleMaterial[],
   finalKeys: Set<string>,
 ) {
   const result: CandidateSeed[] = [];
   const seen = new Set<string>();
 
-  const append = (segments: InventoryMaterial[]) => {
-    if (segments.length < 2) return;
-    if (!segments.some((segment) => finalKeys.has(segment.key))) return;
-    const title = segments
-      .map((segment) => segment.keyword)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    const fingerprint = keywordElonSeoCanonical(title);
-    const bytes = keywordElonSeoUtf8Bytes(title);
-    if (
-      !fingerprint ||
-      seen.has(fingerprint) ||
-      bytes < MIN_TITLE_BYTES ||
-      bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
-    ) {
-      return;
-    }
-    seen.add(fingerprint);
-    result.push({
-      title,
-      fingerprint,
-      segments: [...segments],
-      bytes,
-      expansionCount: segments.filter(
-        (segment) => segment.origin === "category_expansion",
-      ).length,
-      intentClasses: [...new Set(segments.map((segment) => segment.intentClass))],
-    });
-  };
-
-  const maxSize = Math.min(MAX_COMBINATION_SIZE, materials.length);
-  for (let size = 2; size <= maxSize; size += 1) {
-    const selected: InventoryMaterial[] = [];
-    const used = new Set<number>();
-    const walk = () => {
-      if (result.length >= MAX_CANDIDATE_POOL) return;
-      if (selected.length === size) {
-        append(selected);
-        return;
+  enumerateKeywordElonLongTitleSegments({
+    materials,
+    finalKeys,
+    append: (segments) => {
+      if (segments.length < 2) return false;
+      if (!segments.some((segment) => finalKeys.has(segment.key))) return false;
+      const title = segments
+        .map((segment) => segment.keyword)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const fingerprint = keywordElonSeoCanonical(title);
+      const bytes = keywordElonSeoUtf8Bytes(title);
+      if (
+        !fingerprint ||
+        seen.has(fingerprint) ||
+        bytes < KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES ||
+        bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+      ) {
+        return false;
       }
-      for (let index = 0; index < materials.length; index += 1) {
-        if (used.has(index)) continue;
-        used.add(index);
-        selected.push(materials[index]);
-        walk();
-        selected.pop();
-        used.delete(index);
-        if (result.length >= MAX_CANDIDATE_POOL) return;
-      }
-    };
-    walk();
-  }
+      seen.add(fingerprint);
+      result.push({
+        title,
+        fingerprint,
+        segments: [...segments],
+        bytes,
+        expansionCount: segments.filter(
+          (segment) => segment.origin === "category_expansion",
+        ).length,
+        preferredExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "preferred",
+        ).length,
+        supportingExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "supporting",
+        ).length,
+        adjacentExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "adjacent",
+        ).length,
+        intentClasses: [
+          ...new Set(segments.map((segment) => segment.intentClass)),
+        ],
+        materialPenalty: segments.reduce(
+          (sum, segment) =>
+            sum + keywordElonLongTitleMaterialPenalty(segment),
+          0,
+        ),
+        redundancyPenalty: keywordElonLongTitleInternalRedundancyPenalty(
+          segments.map((segment) => segment.key),
+        ),
+      });
+      return true;
+    },
+  });
 
-  const expansionAvailable = materials.some(
-    (row) => row.origin === "category_expansion",
-  );
   return result.sort(
     (left, right) =>
-      (expansionAvailable
-        ? Number(right.expansionCount > 0) - Number(left.expansionCount > 0)
-        : 0) ||
-      right.intentClasses.length - left.intentClasses.length ||
-      Math.abs(TARGET_TITLE_BYTES - left.bytes) -
-        Math.abs(TARGET_TITLE_BYTES - right.bytes) ||
-      Math.abs(3 - left.segments.length) - Math.abs(3 - right.segments.length) ||
-      right.expansionCount - left.expansionCount ||
+      scoreCandidate(right) - scoreCandidate(left) ||
+      right.preferredExpansionCount - left.preferredExpansionCount ||
+      right.supportingExpansionCount - left.supportingExpansionCount ||
+      left.adjacentExpansionCount - right.adjacentExpansionCount ||
+      Math.abs(KEYWORD_ELON_LONG_TITLE_TARGET_BYTES - left.bytes) -
+        Math.abs(KEYWORD_ELON_LONG_TITLE_TARGET_BYTES - right.bytes) ||
       left.fingerprint.localeCompare(right.fingerprint, "ko"),
   );
 }
 
 function scoreCandidate(candidate: CandidateSeed) {
-  const distance = Math.abs(TARGET_TITLE_BYTES - candidate.bytes);
-  const segmentPenalty = Math.abs(3 - candidate.segments.length) * 1.5;
   const intentBonus = Math.max(0, candidate.intentClasses.length - 1) * 2;
-  const expansionBonus = candidate.expansionCount > 0 ? 2 : 0;
+  const penalty =
+    keywordElonLongTitleLengthPenalty(candidate.bytes) +
+    keywordElonLongTitleSegmentCountPenalty(candidate.segments.length) +
+    candidate.materialPenalty +
+    candidate.redundancyPenalty -
+    intentBonus;
   return Math.max(
-    50,
-    Math.round(
-      (100 - distance * 0.8 - segmentPenalty + intentBonus + expansionBonus) *
-        1000,
-    ) / 1000,
+    0,
+    Math.min(100, Math.round((100 - penalty) * 1000) / 1000),
   );
 }
 
@@ -252,11 +263,12 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
   );
   if (pool.length < targetCount) {
     throw new Error(
-      `검증 키워드만으로 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 상품명 재고 ${targetCount}개를 만들 수 없습니다. 사용 가능한 고유 조합 ${pool.length}개`,
+      `검증 키워드만으로 ${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 상품명 재고 ${targetCount}개를 만들 수 없습니다. 사용 가능한 고유 조합 ${pool.length}개`,
     );
   }
 
   const candidates: FinalKeywordOnlyInventoryCandidate[] = [];
+  const selectedSeeds: CandidateSeed[] = [];
   const used = new Set(existing);
   const groupGenerated = Object.fromEntries(
     GROUPS.map((group) => [group, 0]),
@@ -276,6 +288,7 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
       attempts += 1;
       if (used.has(seed.fingerprint)) continue;
       used.add(seed.fingerprint);
+      selectedSeeds.push(seed);
       candidates.push({
         productGroup: group,
         title: seed.title,
@@ -287,14 +300,17 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
         sourceMaterials: seed.segments.map((segment) => segment.keyword),
         metadata: {
           strategy: expansionMaterialCount
-            ? "category-intent-expansion-v5"
-            : "final-keywords-only-v5-fallback",
+            ? "long-title-priority-v6"
+            : "long-title-priority-v6-final-fallback",
           modelPosition: groupIndex % 2 === 0 ? "first" : "after_lead",
           keywordCount: seed.segments.length,
           materialOrigins: [
             ...new Set(seed.segments.map((segment) => segment.origin)),
           ],
           intentClasses: seed.intentClasses,
+          priorityTiers: [
+            ...new Set(seed.segments.map((segment) => segment.priorityTier)),
+          ],
         },
       });
       groupGenerated[group] += 1;
@@ -303,12 +319,33 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
   }
 
   const generatedCount = candidates.length;
+  const recommendedLengthCount = selectedSeeds.filter(
+    (candidate) =>
+      candidate.bytes >= KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  ).length;
+  const idealLengthCount = selectedSeeds.filter(
+    (candidate) => candidate.bytes >= KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES,
+  ).length;
+  const adjacentExpansionCount = selectedSeeds.filter(
+    (candidate) => candidate.adjacentExpansionCount > 0,
+  ).length;
+  const averageLengthBytes =
+    Math.round(
+      (selectedSeeds.reduce((sum, candidate) => sum + candidate.bytes, 0) /
+        Math.max(1, selectedSeeds.length)) *
+        1000,
+    ) / 1000;
   const warnings: string[] = [
     expansionMaterialCount
-      ? "SEO_TITLE_INVENTORY_SOURCE:CATEGORY_INTENT_EXPANSION_V5"
-      : "SEO_TITLE_INVENTORY_SOURCE:FINAL_KEYWORDS_ONLY_V5_FALLBACK",
+      ? "SEO_TITLE_INVENTORY_SOURCE:LONG_TITLE_PRIORITY_V6"
+      : "SEO_TITLE_INVENTORY_SOURCE:LONG_TITLE_PRIORITY_V6_FINAL_FALLBACK",
     `SEO_TITLE_INVENTORY_EXPANSION_MATERIALS:${expansionMaterialCount}`,
-    `SEO_TITLE_INVENTORY_LENGTH_BYTES:${MIN_TITLE_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
+    `SEO_TITLE_INVENTORY_LENGTH_HARD_RANGE:${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
+    `SEO_TITLE_INVENTORY_LENGTH_RECOMMENDED:${recommendedLengthCount}/${generatedCount}`,
+    `SEO_TITLE_INVENTORY_LENGTH_IDEAL:${idealLengthCount}/${generatedCount}`,
+    `SEO_TITLE_INVENTORY_LENGTH_TARGET:${KEYWORD_ELON_LONG_TITLE_TARGET_BYTES}`,
+    `SEO_TITLE_INVENTORY_LENGTH_AVERAGE:${averageLengthBytes}`,
+    `SEO_TITLE_INVENTORY_ADJACENT_EXPANSION:${adjacentExpansionCount}/${generatedCount}`,
   ];
   for (const group of GROUPS) {
     if (groupShortages[group] > 0) {
@@ -326,9 +363,12 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
   const allowed = new Set(materials.map((row) => row.key));
   for (const candidate of candidates) {
     const bytes = keywordElonSeoUtf8Bytes(candidate.title);
-    if (bytes < MIN_TITLE_BYTES || bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
+    if (
+      bytes < KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES ||
+      bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+    ) {
       throw new Error(
-        `상품명 재고 길이가 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`,
+        `상품명 재고 길이가 ${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`,
       );
     }
     if (
@@ -345,7 +385,9 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
         finalKeys.has(keywordElonSeoCanonical(material)),
       )
     ) {
-      throw new Error(`FINAL 키워드가 없는 상품명 재고가 감지되었습니다: ${candidate.title}`);
+      throw new Error(
+        `FINAL 키워드가 없는 상품명 재고가 감지되었습니다: ${candidate.title}`,
+      );
     }
   }
 

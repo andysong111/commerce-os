@@ -7,14 +7,24 @@ import {
   keywordElonSeoUtf8Bytes,
   type KeywordElonSeoMarket,
 } from "./keywordEngineElonLabSeoOutput.ts";
+import {
+  KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_TARGET_BYTES,
+  buildKeywordElonLongTitleExpansionMaterial,
+  buildKeywordElonLongTitleFinalMaterial,
+  enumerateKeywordElonLongTitleSegments,
+  keywordElonLongTitleInternalRedundancyPenalty,
+  keywordElonLongTitleLengthPenalty,
+  keywordElonLongTitleMaterialPenalty,
+  keywordElonLongTitleSegmentCountPenalty,
+  type KeywordElonLongTitleMaterial,
+} from "./keywordEngineElonLongTitlePriority.ts";
 import type {
   KeywordElonTitleExpansionMaterial,
   KeywordElonTitleIntentClass,
 } from "./keywordEngineElonTitleExpansion.ts";
-
-const MIN_TITLE_BYTES = 30;
-const TARGET_TITLE_BYTES = 42;
-const MAX_CANDIDATES = 24_000;
 
 export type KeywordElonMallTitleFactContext = {
   modelNumber?: string;
@@ -53,20 +63,18 @@ export type KeywordElonMallTitleSafeComposerResult = {
   warnings: string[];
 };
 
-type TitleMaterial = {
-  keyword: string;
-  key: string;
-  origin: "final_keyword" | "category_expansion";
-  intentClass: KeywordElonTitleIntentClass;
-};
-
 type TitleCandidate = {
   title: string;
-  segments: TitleMaterial[];
+  segments: KeywordElonLongTitleMaterial[];
   canonical: string;
   byteLength: number;
   expansionCount: number;
+  preferredExpansionCount: number;
+  supportingExpansionCount: number;
+  adjacentExpansionCount: number;
   intentClasses: KeywordElonTitleIntentClass[];
+  materialPenalty: number;
+  redundancyPenalty: number;
 };
 
 function text(value: unknown) {
@@ -151,81 +159,97 @@ function buildMaterials(input: {
     }
   }
 
-  const materials: TitleMaterial[] = finals.map((keyword) => ({
-    keyword,
-    key: keywordElonSeoCanonical(keyword),
-    origin: "final_keyword" as const,
-    intentClass: "core_synonym" as const,
-  }));
+  const materials: KeywordElonLongTitleMaterial[] = finals.map(
+    (keyword, index) =>
+      buildKeywordElonLongTitleFinalMaterial({
+        keyword,
+        key: keywordElonSeoCanonical(keyword),
+        sourceOrder: index,
+      }),
+  );
   const seen = new Set(materials.map((row) => row.key));
-  for (const row of input.titleExpansionPool) {
+  for (let index = 0; index < input.titleExpansionPool.length; index += 1) {
+    const row = input.titleExpansionPool[index];
     if (row.categoryAligned !== true) continue;
     const keyword = clean(row.keyword);
     const key = keywordElonSeoCanonical(keyword);
     if (!key || seen.has(key) || !validateKeyword(keyword, input.context, blocked)) continue;
     seen.add(key);
-    materials.push({
-      keyword,
-      key,
-      origin: "category_expansion",
-      intentClass: row.intentClass,
-    });
+    materials.push(
+      buildKeywordElonLongTitleExpansionMaterial({
+        row,
+        keyword,
+        key,
+        sourceOrder: finals.length + index,
+      }),
+    );
   }
   return { finals, materials };
 }
 
-function buildCandidatePool(materials: TitleMaterial[], finalKeys: Set<string>) {
+function buildCandidatePool(
+  materials: KeywordElonLongTitleMaterial[],
+  finalKeys: Set<string>,
+) {
   const result: TitleCandidate[] = [];
   const seen = new Set<string>();
-  const maxLength = Math.min(4, materials.length);
 
-  const append = (segments: TitleMaterial[]) => {
-    if (segments.length < 2) return;
-    if (!segments.some((segment) => finalKeys.has(segment.key))) return;
-    const title = segments.map((segment) => segment.keyword).join(" ").replace(/\s+/g, " ").trim();
-    const canonical = keywordElonSeoCanonical(title);
-    const byteLength = keywordElonSeoUtf8Bytes(title);
-    if (
-      !canonical ||
-      seen.has(canonical) ||
-      byteLength < MIN_TITLE_BYTES ||
-      byteLength > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
-    ) {
-      return;
-    }
-    seen.add(canonical);
-    const intentClasses = [...new Set(segments.map((segment) => segment.intentClass))];
-    result.push({
-      title,
-      segments: [...segments],
-      canonical,
-      byteLength,
-      expansionCount: segments.filter((segment) => segment.origin === "category_expansion").length,
-      intentClasses,
-    });
-  };
+  enumerateKeywordElonLongTitleSegments({
+    materials,
+    finalKeys,
+    append: (segments) => {
+      if (segments.length < 2) return false;
+      if (!segments.some((segment) => finalKeys.has(segment.key))) return false;
+      const title = segments
+        .map((segment) => segment.keyword)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const canonical = keywordElonSeoCanonical(title);
+      const byteLength = keywordElonSeoUtf8Bytes(title);
+      if (
+        !canonical ||
+        seen.has(canonical) ||
+        byteLength < KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES ||
+        byteLength > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+      ) {
+        return false;
+      }
+      seen.add(canonical);
+      const intentClasses = [
+        ...new Set(segments.map((segment) => segment.intentClass)),
+      ];
+      result.push({
+        title,
+        segments: [...segments],
+        canonical,
+        byteLength,
+        expansionCount: segments.filter(
+          (segment) => segment.origin === "category_expansion",
+        ).length,
+        preferredExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "preferred",
+        ).length,
+        supportingExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "supporting",
+        ).length,
+        adjacentExpansionCount: segments.filter(
+          (segment) => segment.priorityTier === "adjacent",
+        ).length,
+        intentClasses,
+        materialPenalty: segments.reduce(
+          (sum, segment) =>
+            sum + keywordElonLongTitleMaterialPenalty(segment),
+          0,
+        ),
+        redundancyPenalty: keywordElonLongTitleInternalRedundancyPenalty(
+          segments.map((segment) => segment.key),
+        ),
+      });
+      return true;
+    },
+  });
 
-  for (let length = 2; length <= maxLength; length += 1) {
-    const selected: TitleMaterial[] = [];
-    const used = new Set<number>();
-    const walk = () => {
-      if (result.length >= MAX_CANDIDATES) return;
-      if (selected.length === length) {
-        append(selected);
-        return;
-      }
-      for (let index = 0; index < materials.length; index += 1) {
-        if (used.has(index)) continue;
-        used.add(index);
-        selected.push(materials[index]);
-        walk();
-        selected.pop();
-        used.delete(index);
-        if (result.length >= MAX_CANDIDATES) return;
-      }
-    };
-    walk();
-  }
   return result;
 }
 
@@ -262,14 +286,25 @@ function candidateScore(input: {
   rowIndex: number;
   keywordUsage: Map<string, number>;
   intentUsage: Map<KeywordElonTitleIntentClass, number>;
-  expansionAvailable: boolean;
+  preferredExpansionAvailable: boolean;
+  supportingExpansionAvailable: boolean;
 }) {
-  const { candidate, primary, rowIndex, keywordUsage, intentUsage, expansionAvailable } = input;
+  const {
+    candidate,
+    primary,
+    rowIndex,
+    keywordUsage,
+    intentUsage,
+    preferredExpansionAvailable,
+    supportingExpansionAvailable,
+  } = input;
   const primaryKey = keywordElonSeoCanonical(primary);
-  const containsPrimary = candidate.segments.some((segment) => segment.key === primaryKey);
+  const containsPrimary = candidate.segments.some(
+    (segment) => segment.key === primaryKey,
+  );
   const preferredFirst = rowIndex % 2 === 0;
   const primaryFirst = candidate.segments[0]?.key === primaryKey;
-  const primaryPlacementPenalty = preferredFirst === primaryFirst ? 0 : 3;
+  const primaryPlacementPenalty = preferredFirst === primaryFirst ? 0 : 2;
   const usagePenalty = candidate.segments.reduce(
     (sum, segment) => sum + (keywordUsage.get(segment.key) ?? 0),
     0,
@@ -278,18 +313,28 @@ function candidateScore(input: {
     (sum, intent) => sum + (intentUsage.get(intent) ?? 0),
     0,
   );
-  const segmentPenalty = candidate.segments.length === 3 ? 0 : candidate.segments.length === 4 ? 1 : 3;
-  const lengthPenalty = Math.abs(TARGET_TITLE_BYTES - candidate.byteLength) * 0.2;
-  const noExpansionPenalty = expansionAvailable && candidate.expansionCount === 0 ? 14 : 0;
-  const intentDiversityBonus = Math.max(0, candidate.intentClasses.length - 1) * -3;
+  const expansionPriorityNudge = preferredExpansionAvailable
+    ? candidate.preferredExpansionCount > 0
+      ? 0
+      : 3
+    : supportingExpansionAvailable && candidate.supportingExpansionCount === 0
+      ? 1.5
+      : 0;
+  const intentDiversityBonus = Math.max(
+    0,
+    candidate.intentClasses.length - 1,
+  ) * -2;
+
   return (
     (containsPrimary ? 0 : 10_000) +
     primaryPlacementPenalty +
-    usagePenalty * 2.5 +
-    intentPenalty * 0.8 +
-    segmentPenalty +
-    lengthPenalty +
-    noExpansionPenalty +
+    keywordElonLongTitleLengthPenalty(candidate.byteLength) +
+    keywordElonLongTitleSegmentCountPenalty(candidate.segments.length) +
+    candidate.materialPenalty +
+    candidate.redundancyPenalty +
+    expansionPriorityNudge +
+    usagePenalty * 2.2 +
+    intentPenalty * 0.7 +
     intentDiversityBonus
   );
 }
@@ -301,7 +346,8 @@ function selectCandidate(input: {
   rowIndex: number;
   keywordUsage: Map<string, number>;
   intentUsage: Map<KeywordElonTitleIntentClass, number>;
-  expansionAvailable: boolean;
+  preferredExpansionAvailable: boolean;
+  supportingExpansionAvailable: boolean;
 }) {
   let best: TitleCandidate | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
@@ -313,7 +359,8 @@ function selectCandidate(input: {
       rowIndex: input.rowIndex,
       keywordUsage: input.keywordUsage,
       intentUsage: input.intentUsage,
-      expansionAvailable: input.expansionAvailable,
+      preferredExpansionAvailable: input.preferredExpansionAvailable,
+      supportingExpansionAvailable: input.supportingExpansionAvailable,
     });
     if (
       score < bestScore ||
@@ -342,15 +389,24 @@ export function composeKeywordElonSafeMallTitles(input: {
     blockedTerms: input.blockedTerms ?? [],
   });
   const finalKeys = new Set(finals.map(keywordElonSeoCanonical));
-  const expansionAvailable = materials.some((row) => row.origin === "category_expansion");
+  const expansionAvailable = materials.some(
+    (row) => row.origin === "category_expansion",
+  );
+  const preferredExpansionAvailable = materials.some(
+    (row) => row.priorityTier === "preferred",
+  );
+  const supportingExpansionAvailable = materials.some(
+    (row) => row.priorityTier === "supporting",
+  );
   const candidates = buildCandidatePool(materials, finalKeys);
   if (candidates.length < input.markets.length) {
     throw new Error(
-      `검증 키워드만으로 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 고유 쇼핑몰별 상품명 ${input.markets.length}개를 만들 수 없습니다. 현재 ${candidates.length}개`,
+      `검증 키워드만으로 ${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 고유 쇼핑몰별 상품명 ${input.markets.length}개를 만들 수 없습니다. 현재 ${candidates.length}개`,
     );
   }
 
   const rows: KeywordElonSafeMallTitleRow[] = [];
+  const selectedCandidates: TitleCandidate[] = [];
   const usedCanonical = new Set<string>();
   const keywordUsage = new Map<string, number>();
   const intentUsage = new Map<KeywordElonTitleIntentClass, number>();
@@ -365,11 +421,13 @@ export function composeKeywordElonSafeMallTitles(input: {
       rowIndex: index,
       keywordUsage,
       intentUsage,
-      expansionAvailable,
+      preferredExpansionAvailable,
+      supportingExpansionAvailable,
     });
     if (!selected) throw new Error("카테고리 정합 상품명 후보가 부족합니다.");
 
     usedCanonical.add(selected.canonical);
+    selectedCandidates.push(selected);
     for (const segment of selected.segments) {
       keywordUsage.set(segment.key, (keywordUsage.get(segment.key) ?? 0) + 1);
     }
@@ -391,8 +449,8 @@ export function composeKeywordElonSafeMallTitles(input: {
       keywordMaterials: segmentKeywords,
       titleKeywordSegments: segmentKeywords,
       strategyLabel: expansionAvailable
-        ? "category-intent-expansion-v5"
-        : "final-keywords-only-v5-fallback",
+        ? "long-title-priority-v6"
+        : "long-title-priority-v6-final-fallback",
       variantIndex: index,
     });
   }
@@ -400,7 +458,9 @@ export function composeKeywordElonSafeMallTitles(input: {
   const coverage = finals.filter((keyword) => {
     const key = keywordElonSeoCanonical(keyword);
     return rows.some((row) =>
-      row.keywordMaterials.some((material) => keywordElonSeoCanonical(material) === key),
+      row.keywordMaterials.some(
+        (material) => keywordElonSeoCanonical(material) === key,
+      ),
     );
   });
   if (coverage.length !== finals.length) {
@@ -411,9 +471,12 @@ export function composeKeywordElonSafeMallTitles(input: {
   const allowedKeys = new Set(materials.map((row) => row.key));
   for (const row of rows) {
     const bytes = keywordElonSeoUtf8Bytes(row.title);
-    if (bytes < MIN_TITLE_BYTES || bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
+    if (
+      bytes < KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES ||
+      bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
+    ) {
       throw new Error(
-        `쇼핑몰별 상품명이 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`,
+        `쇼핑몰별 상품명이 ${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`,
       );
     }
     if (
@@ -432,14 +495,30 @@ export function composeKeywordElonSafeMallTitles(input: {
     throw new Error("쇼핑몰별 상품명에 중복이 발생했습니다.");
   }
   const nearDuplicates = nearDuplicateCount(rows.map((row) => row.title));
-  const expansionUseCount = rows.filter((row) =>
-    row.keywordMaterials.some((material) => {
-      const key = keywordElonSeoCanonical(material);
-      return materials.some(
-        (candidate) => candidate.key === key && candidate.origin === "category_expansion",
-      );
-    }),
+  const expansionUseCount = selectedCandidates.filter(
+    (candidate) => candidate.expansionCount > 0,
   ).length;
+  const preferredExpansionRows = selectedCandidates.filter(
+    (candidate) => candidate.preferredExpansionCount > 0,
+  ).length;
+  const supportingExpansionRows = selectedCandidates.filter(
+    (candidate) => candidate.supportingExpansionCount > 0,
+  ).length;
+  const adjacentExpansionRows = selectedCandidates.filter(
+    (candidate) => candidate.adjacentExpansionCount > 0,
+  ).length;
+  const idealLengthRows = rows.filter(
+    (row) => row.byteLength >= KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES,
+  ).length;
+  const recommendedLengthRows = rows.filter(
+    (row) => row.byteLength >= KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  ).length;
+  const fallbackLengthRows = rows.length - recommendedLengthRows;
+  const averageLengthBytes =
+    Math.round(
+      (rows.reduce((sum, row) => sum + row.byteLength, 0) / rows.length) *
+        1000,
+    ) / 1000;
 
   return {
     rows,
@@ -450,11 +529,19 @@ export function composeKeywordElonSafeMallTitles(input: {
     nearDuplicateCount: nearDuplicates,
     warnings: [
       expansionAvailable
-        ? "SEO_MALL_TITLE_SOURCE:CATEGORY_INTENT_EXPANSION_V5"
-        : "SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V5_FALLBACK",
+        ? "SEO_MALL_TITLE_SOURCE:LONG_TITLE_PRIORITY_V6"
+        : "SEO_MALL_TITLE_SOURCE:LONG_TITLE_PRIORITY_V6_FINAL_FALLBACK",
       `SEO_MALL_TITLE_EXPANSION_POOL:${materials.length - finals.length}`,
       `SEO_MALL_TITLE_EXPANSION_USED_ROWS:${expansionUseCount}/${rows.length}`,
-      `SEO_MALL_TITLE_LENGTH_BYTES:${MIN_TITLE_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
+      `SEO_MALL_TITLE_PREFERRED_EXPANSION_ROWS:${preferredExpansionRows}/${rows.length}`,
+      `SEO_MALL_TITLE_SUPPORTING_EXPANSION_ROWS:${supportingExpansionRows}/${rows.length}`,
+      `SEO_MALL_TITLE_ADJACENT_EXPANSION_ROWS:${adjacentExpansionRows}/${rows.length}`,
+      `SEO_MALL_TITLE_LENGTH_HARD_RANGE:${KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
+      `SEO_MALL_TITLE_LENGTH_RECOMMENDED_ROWS:${recommendedLengthRows}/${rows.length}`,
+      `SEO_MALL_TITLE_LENGTH_IDEAL_ROWS:${idealLengthRows}/${rows.length}`,
+      `SEO_MALL_TITLE_LENGTH_FALLBACK_ROWS:${fallbackLengthRows}/${rows.length}`,
+      `SEO_MALL_TITLE_LENGTH_TARGET:${KEYWORD_ELON_LONG_TITLE_TARGET_BYTES}`,
+      `SEO_MALL_TITLE_LENGTH_AVERAGE:${averageLengthBytes}`,
       `SEO_MALL_TITLE_KEYWORD_COVERAGE:${coverage.length}/${finals.length}`,
       ...(nearDuplicates
         ? [`SEO_MALL_TITLE_NEAR_DUPLICATES_REMAIN:${nearDuplicates}`]

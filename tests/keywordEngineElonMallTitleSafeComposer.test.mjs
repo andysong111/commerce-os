@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { composeKeywordElonSafeMallTitles } from "../src/lib/keywordEngineElonMallTitleSafeComposer.ts";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "../src/lib/productGroupMarketRegistry.ts";
-import { keywordElonSeoCanonical, keywordElonSeoUtf8Bytes } from "../src/lib/keywordEngineElonLabSeoOutput.ts";
+import {
+  keywordElonSeoCanonical,
+  keywordElonSeoUtf8Bytes,
+} from "../src/lib/keywordEngineElonLabSeoOutput.ts";
 
 const aaa491Keywords = [
   "발바닥지압판",
@@ -24,26 +27,50 @@ function assertStrictFinalOnly(result, keywords, blockedPattern) {
   assert.equal(result.keywordCoverageTotal, keywords.length);
   assert.equal(result.uniqueTitleCount, 29);
   assert.equal(result.facts.length, 0);
-  assert.ok(result.warnings.includes("SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V5_FALLBACK"));
+  assert.ok(
+    result.warnings.includes(
+      "SEO_MALL_TITLE_SOURCE:LONG_TITLE_PRIORITY_V6_FINAL_FALLBACK",
+    ),
+  );
   const allowed = new Set(keywords.map(keywordElonSeoCanonical));
   for (const keyword of keywords) {
     const key = keywordElonSeoCanonical(keyword);
     assert.ok(
-      result.rows.some((row) => row.keywordMaterials.some((material) => keywordElonSeoCanonical(material) === key)),
+      result.rows.some((row) =>
+        row.keywordMaterials.some(
+          (material) => keywordElonSeoCanonical(material) === key,
+        ),
+      ),
       `missing keyword coverage: ${keyword}`,
     );
   }
+
+  let recommendedLengthCount = 0;
+  let totalBytes = 0;
   for (const row of result.rows) {
     const bytes = keywordElonSeoUtf8Bytes(row.title);
+    totalBytes += bytes;
+    if (bytes >= 40) recommendedLengthCount += 1;
     assert.ok(bytes >= 30, `${bytes}B ${row.title}`);
     assert.ok(bytes <= 50, `${bytes}B ${row.title}`);
     assert.ok(row.keywordMaterials.length >= 2, row.title);
-    assert.equal(row.keywordMaterials.every((material) => allowed.has(keywordElonSeoCanonical(material))), true);
+    assert.equal(
+      row.keywordMaterials.every((material) =>
+        allowed.has(keywordElonSeoCanonical(material)),
+      ),
+      true,
+    );
+    assert.equal(row.strategyLabel, "long-title-priority-v6-final-fallback");
     assert.doesNotMatch(row.title, blockedPattern);
   }
+  assert.ok(
+    recommendedLengthCount >= 20,
+    `recommendedLengthCount=${recommendedLengthCount}`,
+  );
+  assert.ok(totalBytes / result.rows.length >= 40, `average=${totalBytes / result.rows.length}`);
 }
 
-test("AAA491형 최종키워드 10개만 사용해 30~50bytes fallback 상품명 29개를 만든다", () => {
+test("AAA491형 FINAL 10개는 그대로 두고 30~50B 중 긴 상품명을 우선한다", () => {
   const result = composeKeywordElonSafeMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
     finalKeywords: aaa491Keywords,
@@ -66,7 +93,7 @@ test("AAA491형 최종키워드 10개만 사용해 30~50bytes fallback 상품명
   );
 });
 
-test("AAA446형 운영 FINAL 10개도 외부 재료 없이 30~50bytes fallback 29개를 만든다", () => {
+test("AAA446형 FINAL 10개도 외부 재료 없이 긴 상품명 우선 fallback 29개를 만든다", () => {
   const keywords = [
     "미니노트",
     "a7",

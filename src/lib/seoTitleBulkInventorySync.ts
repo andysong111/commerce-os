@@ -7,6 +7,12 @@ import {
 } from "@/lib/seoTitleInventoryGenerator";
 import { generateFinalKeywordOnlySeoTitleInventory } from "@/lib/seoTitleFinalKeywordInventoryGenerator";
 import {
+  KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  KEYWORD_ELON_LONG_TITLE_TARGET_BYTES,
+} from "@/lib/keywordEngineElonLongTitlePriority";
+import {
   normalizeKeywordElonTitleIntentClass,
   type KeywordElonTitleExpansionMaterial,
 } from "@/lib/keywordEngineElonTitleExpansion";
@@ -34,9 +40,19 @@ import {
 } from "@/lib/productLaunchTrackerServer";
 
 const GROUPS = ["도매1", "도매2", "도매3", "도매4", "소매1", "소매2"] as const;
-const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v5-category-intent-expansion";
-const TRUSTED_V5_FINAL_SOURCE = "seo-bulk-cloud-category-intent-v5";
-const TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV5";
+const STRICT_ENGINE_REVISION = "seo-bulk-cloud-inventory-v6-long-title-priority";
+const COMPATIBLE_ENGINE_REVISIONS = new Set([
+  STRICT_ENGINE_REVISION,
+  "seo-bulk-cloud-inventory-v5-category-intent-expansion",
+]);
+const TRUSTED_FINAL_SOURCES = new Set([
+  "seo-bulk-cloud-long-title-priority-v6",
+  "seo-bulk-cloud-category-intent-v5",
+]);
+const TITLE_EXPANSION_META_GROUP_KEYS = [
+  { key: "__seoTitleExpansionV6", version: 6 },
+  { key: "__seoTitleExpansionV5", version: 5 },
+] as const;
 const CHANNEL_BY_GROUP: Record<SeoTitleProductGroup, string> = {
   도매1: "wholesale1",
   도매2: "wholesale2",
@@ -114,7 +130,12 @@ function parseExpansionPool(value: unknown): KeywordElonTitleExpansionMaterial[]
     const relevance = number100(row.relevance);
     const shoppingIntent = number100(row.shoppingIntent);
     const qualityScore = number100(row.qualityScore);
-    if (categoryMatch < 85 || relevance < 85 || shoppingIntent < 70 || qualityScore < 60) {
+    if (
+      categoryMatch < 85 ||
+      relevance < 85 ||
+      shoppingIntent < 70 ||
+      qualityScore < 60
+    ) {
       continue;
     }
     seen.add(key);
@@ -144,23 +165,35 @@ function parseExpansionPool(value: unknown): KeywordElonTitleExpansionMaterial[]
 function expansionPoolFromCurrentSeoFinal(
   seoFinal: UnknownRecord,
 ): KeywordElonTitleExpansionMaterial[] {
-  if (text(seoFinal.source) !== TRUSTED_V5_FINAL_SOURCE) return [];
+  if (!TRUSTED_FINAL_SOURCES.has(text(seoFinal.source))) return [];
+  const directPool = parseExpansionPool(seoFinal.titleExpansionPool);
+  if (directPool.length) return directPool;
+
   const groupProductNames = record(seoFinal.groupProductNames);
-  const raw = text(groupProductNames[TITLE_EXPANSION_META_GROUP_KEY]);
-  if (!raw) return [];
-  try {
-    const metadata = record(JSON.parse(raw));
-    if (Number(metadata.version) !== 5) return [];
-    return parseExpansionPool(metadata.pool);
-  } catch {
-    return [];
+  for (const metadataKey of TITLE_EXPANSION_META_GROUP_KEYS) {
+    const raw = text(groupProductNames[metadataKey.key]);
+    if (!raw) continue;
+    try {
+      const metadata = record(JSON.parse(raw));
+      if (Number(metadata.version) !== metadataKey.version) continue;
+      const pool = parseExpansionPool(metadata.pool);
+      if (pool.length) return pool;
+    } catch {
+      // Ignore an invalid legacy metadata row and try the next compatible key.
+    }
   }
+  return [];
 }
 
 function expansionPoolFromExistingLedger(
   ledger: SeoTitleLedgerRow | null,
 ): KeywordElonTitleExpansionMaterial[] {
-  if (!ledger || text(ledger.engine_revision) !== STRICT_ENGINE_REVISION) return [];
+  if (
+    !ledger ||
+    !COMPATIBLE_ENGINE_REVISIONS.has(text(ledger.engine_revision))
+  ) {
+    return [];
+  }
   return parseExpansionPool(record(ledger.source_payload).titleExpansionPool);
 }
 
@@ -264,7 +297,9 @@ async function upsertCurrentAssignments(
       },
     );
     const body = await readResponseJson(response);
-    if (!response.ok) throw new Error(readProductLaunchError(body, response.status));
+    if (!response.ok) {
+      throw new Error(readProductLaunchError(body, response.status));
+    }
     if (Array.isArray(body)) result.push(...body.map(record));
   }
   return result;
@@ -301,7 +336,9 @@ export async function syncSeoTitleBulkInventoryForItem(
   itemId: string,
 ): Promise<SeoBulkInventorySyncResult> {
   const normalizedId = text(itemId);
-  if (!normalizedId) return { itemId: "", synced: false, reason: "missing_item_id" };
+  if (!normalizedId) {
+    return { itemId: "", synced: false, reason: "missing_item_id" };
+  }
 
   const item = record(
     await readProductLaunchNormalizedItem(
@@ -359,7 +396,10 @@ export async function syncSeoTitleBulkInventoryForItem(
   const fullGoodsKeys = GROUPS.every((group) => Boolean(goodsKeys[group]));
   const assignments = currentAssignments(seoFinal, goodsKeys);
 
-  if (existingLedger && text(existingLedger.engine_revision) !== STRICT_ENGINE_REVISION) {
+  if (
+    existingLedger &&
+    text(existingLedger.engine_revision) !== STRICT_ENGINE_REVISION
+  ) {
     const legacyFingerprints = await listSeoTitleInventoryFingerprints(
       context,
       existingLedger.ledger_id,
@@ -404,15 +444,23 @@ export async function syncSeoTitleBulkInventoryForItem(
       },
       inventoryPolicy: {
         titleMaterialPolicy: titleExpansionPool.length
-          ? "final10-plus-category-aligned-expansion-v5"
-          : "final10-only-v5-fallback",
-        titleByteRange: [30, 50],
+          ? "final10-plus-priority-expansion-long-title-v6"
+          : "final10-long-title-v6-fallback",
+        titleByteRange: [
+          KEYWORD_ELON_LONG_TITLE_HARD_MIN_BYTES,
+          50,
+        ],
+        recommendedMinBytes: KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+        idealByteRange: [KEYWORD_ELON_LONG_TITLE_IDEAL_MIN_BYTES, 50],
+        targetBytes: KEYWORD_ELON_LONG_TITLE_TARGET_BYTES,
+        adjacentExpansionFallback: true,
         currentFinalTitlesAreConsumed: fullGoodsKeys,
         targetRounds: SEO_TITLE_DEFAULT_ROUNDS,
       },
     },
     engine_revision: STRICT_ENGINE_REVISION,
-    target_inventory_count: SEO_TITLE_FULL_MARKET_SIZE * SEO_TITLE_DEFAULT_ROUNDS,
+    target_inventory_count:
+      SEO_TITLE_FULL_MARKET_SIZE * SEO_TITLE_DEFAULT_ROUNDS,
     status: "generating",
     last_generated_at: now,
     updated_at: now,
@@ -427,16 +475,19 @@ export async function syncSeoTitleBulkInventoryForItem(
     ledger.ledger_id,
   );
   const counts = currentGroupCounts(fingerprints);
-  const generationBatch = Math.max(
-    0,
-    ...fingerprints.map((row) => Number(row.generation_batch) || 0),
-  ) + 1;
+  const generationBatch =
+    Math.max(
+      0,
+      ...fingerprints.map((row) => Number(row.generation_batch) || 0),
+    ) + 1;
 
   const generation = generateFinalKeywordOnlySeoTitleInventory({
     finalKeywords: searchKeywords,
     titleExpansionPool,
     rounds: SEO_TITLE_DEFAULT_ROUNDS,
-    existingTitleFingerprints: fingerprints.map((row) => row.title_fingerprint),
+    existingTitleFingerprints: fingerprints.map(
+      (row) => row.title_fingerprint,
+    ),
   });
 
   const missingByGroup = Object.fromEntries(
@@ -444,7 +495,8 @@ export async function syncSeoTitleBulkInventoryForItem(
       group,
       Math.max(
         0,
-        SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS - counts[group],
+        SEO_TITLE_GROUP_QUOTAS[group] * SEO_TITLE_DEFAULT_ROUNDS -
+          counts[group],
       ),
     ]),
   ) as Record<SeoTitleProductGroup, number>;
@@ -500,7 +552,10 @@ export async function syncSeoTitleBulkInventoryForItem(
     fullGoodsKeys,
     currentAssignmentCount: fullGoodsKeys ? assignments.length : 0,
     insertedInventoryCount: inserted.length,
-    availableCount: GROUPS.reduce((sum, group) => sum + finalCounts[group], 0),
+    availableCount: GROUPS.reduce(
+      (sum, group) => sum + finalCounts[group],
+      0,
+    ),
     status,
     reason: existingLedger ? "updated" : "created",
   };
