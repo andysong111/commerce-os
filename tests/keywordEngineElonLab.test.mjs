@@ -56,12 +56,14 @@ test("final result includes title and V6 evidence diagnostics", () => {
   assert.match(demandSummary, /상품 정확성 TOP/);
 });
 
-test("API exposes V6 pipeline actions", () => {
+test("API exposes V7 category-gated pipeline actions", () => {
   for (const action of ["collect_source", "analyze_identity", "discover_keywords", "score_keywords", "enrich_demand", "generate_title"]) {
     assert.match(route, new RegExp(`action === \\"${action}\\"`));
   }
-  assert.match(route, /version: 6/);
-  assert.match(route, /marketRecall: "evidence-first"/);
+  assert.match(route, /version: 7/);
+  assert.match(route, /marketRecall: "evidence-first-category-gated"/);
+  assert.match(route, /categoryIntentExpansionAvailable/);
+  assert.match(route, /SHOPLING_CATEGORY=/);
   assert.match(route, /apiHubConfigured/);
   assert.doesNotMatch(route, /keywordEngineElonLabStore|keywordEngineElonLabShopling/);
 });
