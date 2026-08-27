@@ -91,5 +91,12 @@ export default function SeoBulkInventoryReadyReregister() {
       </section>
     );
   }
-  return <SeoBulkInventoryReregisterBridge />;
+  return (
+    <>
+      <section className="mx-auto mt-5 max-w-[1500px] rounded-2xl border border-amber-200 bg-amber-50 px-5 py-3 text-xs font-bold text-amber-900">
+        `기등록` 카드 안의 29개 상품명은 과거 등록 당시 저장본입니다. 예지·공지 등 과거 v2 노이즈가 보이더라도 다음 추가등록에는 사용하지 않습니다. 추가등록은 방금 검증한 FINAL 키워드 전용 30~50B v4 재고만 사용합니다.
+      </section>
+      <SeoBulkInventoryReregisterBridge />
+    </>
+  );
 }
