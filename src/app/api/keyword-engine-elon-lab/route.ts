@@ -113,6 +113,8 @@ function bulkItemFrom(value: unknown) {
     supportingText,
     mallTitleCategory:
       text(item.mallTitleCategory ?? item.shoplingCategory) || inferredCategory,
+    variationSeed: text(item.variationSeed ?? item.seoRunId),
+    excludedMallTitles: textArray(item.excludedMallTitles, 1200),
   };
 }
 function categoryFromSource(source: KeywordElonSourceDraft) {
@@ -139,13 +141,14 @@ function readiness() {
     bulkSegmentedAvailable: true,
     bulkAutoRecoveryAvailable: true,
     categoryIntentExpansionAvailable: true,
+    runInstanceVariationAvailable: true,
   };
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
-    version: 7,
+    version: 8,
     marketRecall: "evidence-first-category-gated",
     ...readiness(),
   });
@@ -187,6 +190,10 @@ export async function POST(request: NextRequest) {
       const customBlockedTerms = textArray(body.customBlockedTerms, 120);
       const composeInput = {
         ...item,
+        variationSeed: text(body.variationSeed) || item.variationSeed,
+        excludedMallTitles: textArray(body.excludedMallTitles, 1200).length
+          ? textArray(body.excludedMallTitles, 1200)
+          : item.excludedMallTitles,
         mallTitleCategory: item.mallTitleCategory || categoryFromSource(source),
         customBlockedTerms,
         source,
