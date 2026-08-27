@@ -132,8 +132,8 @@ test("exact edit anchor failures stay bounded and preserve the original trusted 
 
   assert.match(worker, /Proposal old_text must match exactly once in the trusted repository file/);
   assert.match(worker, /push\(normalized, readFileSync\(absolute, "utf8"\)\)/);
-  assert.match(worker, /old_text가 제공된 최신 저장소 파일에서 정확히 한 번 일치하지 않았습니다/);
-  assert.match(worker, /동일한 저위험 수정 범위 안에서 완전한 대체 제안/);
+  assert.match(worker, /old_text는 최신 repository_context에서/);
+  assert.match(worker, /정확히 한 번 존재하는 연속 문자열/);
 });
 
 test("generated executable JavaScript tests receive a parser preflight before repository tests", async () => {
