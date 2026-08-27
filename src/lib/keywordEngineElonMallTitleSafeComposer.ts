@@ -8,7 +8,8 @@ import {
   type KeywordElonSeoMarket,
 } from "./keywordEngineElonLabSeoOutput.ts";
 
-const TARGET_TITLE_BYTES = 36;
+const MIN_TITLE_BYTES = 30;
+const TARGET_TITLE_BYTES = 42;
 const MAX_CANDIDATES = 20_000;
 
 export type KeywordElonMallTitleFactContext = {
@@ -132,12 +133,14 @@ function buildCandidatePool(keywords: string[]) {
   const maxLength = Math.min(4, keywords.length);
 
   const append = (segments: string[]) => {
+    if (segments.length < 2) return;
     const title = segments.join(" ").replace(/\s+/g, " ").trim();
     const canonical = keywordElonSeoCanonical(title);
     const byteLength = keywordElonSeoUtf8Bytes(title);
     if (
       !canonical ||
       seen.has(canonical) ||
+      byteLength < MIN_TITLE_BYTES ||
       byteLength > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
     ) {
       return;
@@ -167,7 +170,6 @@ function buildCandidatePool(keywords: string[]) {
     };
     walk();
   }
-  for (const keyword of keywords) append([keyword]);
   return result;
 }
 
@@ -216,11 +218,13 @@ function candidateScore(input: {
     (sum, segment) => sum + (keywordUsage.get(keywordElonSeoCanonical(segment)) ?? 0),
     0,
   );
-  const lengthPenalty = Math.abs(TARGET_TITLE_BYTES - candidate.byteLength) * 0.15;
+  const segmentPenalty = candidate.segments.length === 3 ? 0 : candidate.segments.length === 4 ? 1 : 3;
+  const lengthPenalty = Math.abs(TARGET_TITLE_BYTES - candidate.byteLength) * 0.2;
   return (
     (containsPrimary ? 0 : 10_000) +
     primaryPlacementPenalty +
     usagePenalty * 2 +
+    segmentPenalty +
     lengthPenalty
   );
 }
@@ -270,7 +274,7 @@ export function composeKeywordElonSafeMallTitles(input: {
   const candidates = buildCandidatePool(keywords);
   if (candidates.length < input.markets.length) {
     throw new Error(
-      `최종키워드만으로 고유 쇼핑몰별 상품명 ${input.markets.length}개를 만들 수 없습니다. 현재 ${candidates.length}개`,
+      `최종키워드만으로 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 고유 쇼핑몰별 상품명 ${input.markets.length}개를 만들 수 없습니다. 현재 ${candidates.length}개`,
     );
   }
 
@@ -310,7 +314,7 @@ export function composeKeywordElonSafeMallTitles(input: {
       usedMaterials: [...selected.segments],
       keywordMaterials: [...selected.segments],
       titleKeywordSegments: [...selected.segments],
-      strategyLabel: "final-keywords-only-v3",
+      strategyLabel: "final-keywords-only-v4-min-length",
       variantIndex: index,
     });
   }
@@ -330,8 +334,9 @@ export function composeKeywordElonSafeMallTitles(input: {
 
   const allowedKeys = new Set(keywords.map(keywordElonSeoCanonical));
   for (const row of rows) {
-    if (keywordElonSeoUtf8Bytes(row.title) > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
-      throw new Error(`쇼핑몰별 상품명이 ${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes를 초과했습니다.`);
+    const bytes = keywordElonSeoUtf8Bytes(row.title);
+    if (bytes < MIN_TITLE_BYTES || bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
+      throw new Error(`쇼핑몰별 상품명이 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`);
     }
     if (
       row.keywordMaterials.some(
@@ -356,7 +361,8 @@ export function composeKeywordElonSafeMallTitles(input: {
     uniqueTitleCount,
     nearDuplicateCount: nearDuplicates,
     warnings: [
-      "SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V3",
+      "SEO_MALL_TITLE_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH",
+      `SEO_MALL_TITLE_LENGTH_BYTES:${MIN_TITLE_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
       `SEO_MALL_TITLE_KEYWORD_COVERAGE:${coverage.length}/${keywords.length}`,
       ...(nearDuplicates
         ? [`SEO_MALL_TITLE_NEAR_DUPLICATES_REMAIN:${nearDuplicates}`]
