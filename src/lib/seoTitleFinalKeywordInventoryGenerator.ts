@@ -17,9 +17,10 @@ const SEO_TITLE_GROUP_QUOTAS = {
 
 type SeoTitleProductGroup = keyof typeof SEO_TITLE_GROUP_QUOTAS;
 const GROUPS = Object.keys(SEO_TITLE_GROUP_QUOTAS) as SeoTitleProductGroup[];
+const MIN_TITLE_BYTES = 30;
 const MAX_COMBINATION_SIZE = 5;
 const MAX_CANDIDATE_POOL = 60_000;
-const TARGET_TITLE_BYTES = 36;
+const TARGET_TITLE_BYTES = 42;
 
 export type FinalKeywordOnlyInventoryCandidate = {
   productGroup: SeoTitleProductGroup;
@@ -29,7 +30,7 @@ export type FinalKeywordOnlyInventoryCandidate = {
   qualityScore: number;
   sourceMaterials: string[];
   metadata: {
-    strategy: "final-keywords-only-v3";
+    strategy: "final-keywords-only-v4-min-length";
     modelPosition: "first" | "after_lead";
     keywordCount: number;
     materialOrigins: ["final_keyword"];
@@ -77,12 +78,14 @@ function buildCandidatePool(keywords: string[]) {
   const seen = new Set<string>();
 
   const append = (segments: string[]) => {
+    if (segments.length < 2) return;
     const title = segments.join(" ").replace(/\s+/g, " ").trim();
     const fingerprint = keywordElonSeoCanonical(title);
     const bytes = keywordElonSeoUtf8Bytes(title);
     if (
       !fingerprint ||
       seen.has(fingerprint) ||
+      bytes < MIN_TITLE_BYTES ||
       bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT
     ) {
       return;
@@ -113,20 +116,20 @@ function buildCandidatePool(keywords: string[]) {
     };
     walk();
   }
-  for (const keyword of keywords) append([keyword]);
 
   return result.sort(
     (left, right) =>
       Math.abs(TARGET_TITLE_BYTES - left.bytes) -
         Math.abs(TARGET_TITLE_BYTES - right.bytes) ||
-      right.segments.length - left.segments.length ||
+      Math.abs(3 - left.segments.length) - Math.abs(3 - right.segments.length) ||
       left.fingerprint.localeCompare(right.fingerprint, "ko"),
   );
 }
 
 function scoreCandidate(candidate: CandidateSeed) {
   const distance = Math.abs(TARGET_TITLE_BYTES - candidate.bytes);
-  return Math.max(50, Math.round((100 - distance * 0.8) * 1000) / 1000);
+  const segmentPenalty = Math.abs(3 - candidate.segments.length) * 1.5;
+  return Math.max(50, Math.round((100 - distance * 0.8 - segmentPenalty) * 1000) / 1000);
 }
 
 export function generateFinalKeywordOnlySeoTitleInventory(input: {
@@ -160,7 +163,7 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
   );
   if (pool.length < targetCount) {
     throw new Error(
-      `FINAL 키워드만으로 상품명 재고 ${targetCount}개를 만들 수 없습니다. 사용 가능한 고유 조합 ${pool.length}개`,
+      `FINAL 키워드만으로 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 상품명 재고 ${targetCount}개를 만들 수 없습니다. 사용 가능한 고유 조합 ${pool.length}개`,
     );
   }
 
@@ -194,7 +197,7 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
         qualityScore: scoreCandidate(seed),
         sourceMaterials: [...seed.segments],
         metadata: {
-          strategy: "final-keywords-only-v3",
+          strategy: "final-keywords-only-v4-min-length",
           modelPosition: groupIndex % 2 === 0 ? "first" : "after_lead",
           keywordCount: seed.segments.length,
           materialOrigins: ["final_keyword"],
@@ -207,7 +210,8 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
 
   const generatedCount = candidates.length;
   const warnings: string[] = [
-    "SEO_TITLE_INVENTORY_SOURCE:FINAL_KEYWORDS_ONLY_V3",
+    "SEO_TITLE_INVENTORY_SOURCE:FINAL_KEYWORDS_ONLY_V4_MIN_LENGTH",
+    `SEO_TITLE_INVENTORY_LENGTH_BYTES:${MIN_TITLE_BYTES}-${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}`,
   ];
   for (const group of GROUPS) {
     if (groupShortages[group] > 0) {
@@ -222,6 +226,10 @@ export function generateFinalKeywordOnlySeoTitleInventory(input: {
 
   const allowed = new Set(keywords.map(keywordElonSeoCanonical));
   for (const candidate of candidates) {
+    const bytes = keywordElonSeoUtf8Bytes(candidate.title);
+    if (bytes < MIN_TITLE_BYTES || bytes > KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT) {
+      throw new Error(`상품명 재고 길이가 ${MIN_TITLE_BYTES}~${KEYWORD_ELON_SEO_TITLE_BYTE_LIMIT}bytes 범위를 벗어났습니다.`);
+    }
     if (
       candidate.sourceMaterials.some(
         (material) => !allowed.has(keywordElonSeoCanonical(material)),
