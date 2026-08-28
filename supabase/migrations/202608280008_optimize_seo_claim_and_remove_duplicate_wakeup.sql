@@ -83,7 +83,9 @@ begin
 end;
 $function$;
 
--- Vercel /api/cron/seo-run-worker remains the every-minute durable primary.
+-- Vercel /api/cron/seo-run-worker remains the durable primary. During this DB
+-- recovery window it is bounded to a five-minute cadence; enqueue requests also
+-- kick the worker immediately through the existing server-side after() path.
 -- Remove the DB-side HTTP wakeup entirely: it duplicates the same worker and,
 -- during a degraded DB period, pg_cron/pg_net can add more pressure instead of
 -- recovering work. Durable queued jobs remain safely stored until Vercel's next
