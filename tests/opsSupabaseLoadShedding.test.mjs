@@ -17,13 +17,14 @@ function minuteSet(schedule) {
   return new Set(values);
 }
 
-test("only latency-sensitive Shopling price and detail workers remain every minute", () => {
+test("latency-sensitive price, detail and durable SEO workers remain every minute", () => {
   const everyMinute = vercel.crons
     .filter((cron) => cron.schedule === "* * * * *")
     .map((cron) => cron.path)
     .sort();
   assert.deepEqual(everyMinute, [
     "/api/cron/detail-page-jobs",
+    "/api/cron/seo-run-worker",
     "/api/cron/shopling-price-bulk-auto",
   ]);
 });
