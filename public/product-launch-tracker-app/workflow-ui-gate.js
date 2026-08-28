@@ -3,12 +3,13 @@ import { installProductLaunchDetailStability } from "./detail-state-stability.js
 import { installOptionBarcodeColumnAlignment } from "./option-barcode-column-alignment.js";
 import { installTwoStageProductLaunchWorkflow } from "./workflow-stage-pruner.js";
 
-const WORKFLOW_API = "/api/product-launch-tracker/normalized-optimized";
+const WORKFLOW_API = "/api/product-launch-tracker/recovery-page";
 const WORKFLOW_COMPATIBLE_PATHS = new Set([
   WORKFLOW_API,
+  "/api/product-launch-tracker/normalized-optimized",
   "/api/product-launch-tracker/optimized",
 ]);
-const PROBE_TIMEOUT_MS = 8_000;
+const PROBE_TIMEOUT_MS = 5_000;
 const IDLE_RETRY_MS = 5_000;
 const HIDDEN_RETRY_MS = 30_000;
 const INITIAL_WORKFLOW_PAGE_SIZE = 25;
