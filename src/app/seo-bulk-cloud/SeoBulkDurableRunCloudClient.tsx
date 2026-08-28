@@ -11,6 +11,8 @@ const NORMALIZED_API = "/api/product-launch-tracker/normalized-optimized";
 const SHOPLING_UPLOAD_API = "/api/product-launch-tracker/shopling-upload";
 const POLL_INTERVAL_MS = 4_000;
 const REGISTRATION_CONCURRENCY = 3;
+const SERVER_OWNS_SHOPLING_REGISTRATION = true;
+void REGISTRATION_CONCURRENCY;
 
 type UnknownRecord = Record<string, unknown>;
 type SeoFinal = {
@@ -162,6 +164,7 @@ async function mapLimit<T>(
     Array.from({ length: Math.min(limit, values.length) }, () => runner()),
   );
 }
+void mapLimit;
 
 function normalizeSeoFinal(value: unknown): SeoFinal | null {
   const root = record(value);
@@ -269,7 +272,7 @@ function registrationLabel(status: SeoRunJob["registration_status"]) {
   return {
     idle: "등록 대기",
     submitting: "등록 준비 중",
-    queued: "Shopling 실행 대기",
+    queued: "서버 등록 대기",
     running: "Shopling 등록 중",
     success: "등록 완료",
     failed: "등록 실패",
@@ -287,6 +290,7 @@ function groupByItem(jobs: SeoRunJob[]) {
     [...group].sort((a, b) => a.run_created_at.localeCompare(b.run_created_at)),
   );
 }
+void groupByItem;
 
 export default function SeoBulkDurableRunCloudClient() {
   const [jobs, setJobs] = useState<SeoRunJob[]>([]);
@@ -648,6 +652,7 @@ export default function SeoBulkDurableRunCloudClient() {
       rollbackRegistration,
     ],
   );
+  void registerOne;
 
   const registerRows = useCallback(
     async (targets: SeoRunJob[]) => {
@@ -655,23 +660,38 @@ export default function SeoBulkDurableRunCloudClient() {
       setRegistering(true);
       setGlobalError("");
       setGlobalMessage(
-        `${targets.length}개 서버 FINAL을 Shopling에 등록합니다. 같은 상품의 여러 회차는 순차 등록합니다.`,
+        `${targets.length}개 RUN을 서버 Shopling 등록큐에 인계합니다. 인계 후 브라우저를 닫아도 계속 처리됩니다.`,
       );
-      const groups = groupByItem(targets);
-      await mapLimit(groups, REGISTRATION_CONCURRENCY, async (group) => {
-        for (const run of group) {
-          try {
-            await registerOne(run);
-          } catch (error) {
-            console.error("[seo-run-registration] failed", run.run_id, error);
-          }
-        }
-      });
-      setRegistering(false);
-      setGlobalMessage("Shopling 등록 실행이 끝났습니다.");
-      await loadJobs();
+      try {
+        const body = await requestJson<{
+          ok?: boolean;
+          queuedCount?: unknown;
+          skippedCount?: unknown;
+          message?: unknown;
+        }>(SEO_RUN_API, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "queue_registration",
+            runIds: targets.map((run) => run.run_id),
+          }),
+        });
+        const queuedCount = Number(body.queuedCount ?? 0);
+        const skippedCount = Number(body.skippedCount ?? 0);
+        setGlobalMessage(
+          `${queuedCount}개 RUN을 서버 등록큐에 넣었습니다.${skippedCount ? ` 이미 처리 중/완료 ${skippedCount}개는 제외했습니다.` : ""} PC를 꺼도 서버가 분 단위로 계속 소화합니다.`,
+        );
+        await loadJobs();
+      } catch (error) {
+        setGlobalError(
+          error instanceof Error
+            ? error.message
+            : "Shopling 서버 일괄등록 요청에 실패했습니다.",
+        );
+      } finally {
+        setRegistering(false);
+      }
     },
-    [loadJobs, registerOne],
+    [loadJobs],
   );
 
   const retryRuns = useCallback(
@@ -716,6 +736,7 @@ export default function SeoBulkDurableRunCloudClient() {
   }, [enqueueStoredRuns, loadJobs]);
 
   useEffect(() => {
+    if (SERVER_OWNS_SHOPLING_REGISTRATION) return;
     for (const run of jobs) {
       if (
         !["queued", "running"].includes(run.registration_status) ||
@@ -769,6 +790,13 @@ export default function SeoBulkDurableRunCloudClient() {
     () => jobs.filter((job) => ["queued", "running"].includes(job.status)),
     [jobs],
   );
+  const registrationQueueRows = useMemo(
+    () =>
+      jobs.filter((job) =>
+        ["submitting", "queued", "running"].includes(job.registration_status),
+      ),
+    [jobs],
+  );
 
   return (
     <main className="mx-auto max-w-[1500px] space-y-5 px-5 py-7 text-slate-900">
@@ -780,8 +808,8 @@ export default function SeoBulkDurableRunCloudClient() {
             </p>
             <h1 className="mt-2 text-3xl font-black">SEO 대량등록 클라우드</h1>
             <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
-              SEO 생성은 Supabase 체크포인트와 Vercel 서버 worker에서 실행됩니다.
-              브라우저를 닫거나 컴퓨터를 꺼도 계속 진행하며, 다시 접속하면 마지막 성공 단계부터 현재 상태를 불러옵니다.
+              SEO 생성과 Shopling 일괄등록은 Supabase 체크포인트와 Vercel 서버 worker에서 실행됩니다.
+              브라우저를 닫거나 컴퓨터를 꺼도 계속 진행하며, 한 상품이 실패해도 나머지 서버 큐는 계속 처리됩니다.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -798,7 +826,7 @@ export default function SeoBulkDurableRunCloudClient() {
               className="rounded-xl bg-emerald-700 px-5 py-2 text-sm font-black text-white disabled:opacity-40"
             >
               {registering
-                ? "Shopling 일괄등록 중…"
+                ? "서버 등록큐 인계 중…"
                 : `Shopling 일괄 대량등록 (${registerableRows.length})`}
             </button>
             <button
@@ -818,7 +846,10 @@ export default function SeoBulkDurableRunCloudClient() {
             활성 등록회차 {jobs.length}
           </span>
           <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-900">
-            서버 실행 {runningRows.length}
+            SEO 서버 실행 {runningRows.length}
+          </span>
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-900">
+            Shopling 서버 큐 {registrationQueueRows.length}
           </span>
           <span className="rounded-full bg-cyan-100 px-3 py-1 text-cyan-900">
             FINAL {readyRows.length}/{jobs.length}
