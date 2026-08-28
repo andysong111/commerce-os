@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, route, panel, layout, receiptEngine, workflow] = await Promise.all([
+const [engine, route, panel, fallbackPanel, layout, receiptEngine, workflow] = await Promise.all([
   readFile("src/lib/internalChinaForwarderCost.ts", "utf8"),
   readFile("src/app/api/china-order-manager/forwarder-cost/route.ts", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaReceiptPanel.tsx", "utf8"),
+  readFile("src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx", "utf8"),
   readFile("src/app/china-order-manager/layout.tsx", "utf8"),
   readFile("src/lib/internalChinaReceipt.ts", "utf8"),
   readFile(".github/workflows/china-order-ledger-ci.yml", "utf8"),
@@ -45,6 +46,15 @@ test("China order manager fails fast instead of exhausting the Vercel function t
   assert.ok(layout.includes("발주원장 실시간 조회 지연"));
   assert.ok(layout.includes("실제 원장 데이터는 변경되지 않았습니다"));
   assert.ok(layout.includes("상품 표시정보 조회가 지연되어 B-code 중심으로 먼저 화면을 열었습니다"));
+});
+
+test("forwarder amount input remains available even when the cost summary times out", () => {
+  assert.ok(layout.includes("InternalChinaForwarderCostFallback"));
+  assert.ok(layout.includes("실제비용 입력 기능은 계속 사용할 수 있습니다"));
+  assert.ok(fallbackPanel.includes("배송대행지 실제비용(원)"));
+  assert.ok(fallbackPanel.includes("배송대행 비용 마감"));
+  assert.ok(fallbackPanel.includes('/api/china-order-manager/forwarder-cost'));
+  assert.ok(fallbackPanel.includes("상품 원가·판매가·상품등급에는 합산하지 않습니다"));
 });
 
 test("forwarder cost API is same-origin protected and never claims price inclusion", () => {
