@@ -11,8 +11,10 @@ import {
 import {
   collectKeywordElonBulkSource,
   composeKeywordElonBulkFinal,
+  type KeywordElonBulkComposeInput,
   type KeywordElonBulkFinalInput,
 } from "@/lib/keywordEngineElonBulkFinal";
+import { generateSafeBulkKeywordSupplements } from "@/lib/keywordEngineElonBulkKeywordRecovery";
 import { discoverKeywordElonCandidatesResilient } from "@/lib/keywordEngineElonLabV2Discovery";
 import {
   mergeKeywordElonCandidates,
@@ -181,9 +183,32 @@ function minimumStageStartBudgetMs(stage: SeoRunJobRow["stage"]) {
     expand_keywords: 190_000,
     filter_keywords: 100_000,
     generate_title: 75_000,
-    compose_final: 25_000,
+    compose_final: 100_000,
     completed: 0,
   }[stage];
+}
+
+async function composeFinalWithRecovery(input: KeywordElonBulkComposeInput) {
+  try {
+    return composeKeywordElonBulkFinal(input);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/FINAL 검색어가 10개가 아닙니다/.test(message)) throw error;
+
+    const supplementalSearchKeywords =
+      await generateSafeBulkKeywordSupplements({
+        identity: input.identity,
+        source: input.source,
+        productName: input.productName,
+        customBlockedTerms: input.customBlockedTerms ?? [],
+      });
+    if (!supplementalSearchKeywords.length) throw error;
+
+    return composeKeywordElonBulkFinal({
+      ...input,
+      supplementalSearchKeywords,
+    });
+  }
 }
 
 async function checkpoint(
@@ -413,7 +438,7 @@ async function executeStage(
       state.titleResult,
       "FINAL 상품명",
     );
-    const result = composeKeywordElonBulkFinal({
+    const result = await composeFinalWithRecovery({
       ...input,
       source,
       collectionMode,
