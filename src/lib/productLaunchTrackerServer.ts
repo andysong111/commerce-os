@@ -252,7 +252,7 @@ export async function writeProductLaunchState(
     state_payload: persistedState,
     updated_at: new Date().toISOString(),
   };
-  const response = await fetch(
+  const { body } = await readProductLaunchStorageJson(
     `${config.supabaseUrl}/rest/v1/product_launch_tracker_states?on_conflict=owner_id`,
     {
       method: "POST",
@@ -264,10 +264,6 @@ export async function writeProductLaunchState(
       cache: "no-store",
     },
   );
-  const body = await readResponseJson(response);
-  if (!response.ok) {
-    throw new Error(readProductLaunchError(body, response.status));
-  }
   return Array.isArray(body) ? body[0] ?? row : row;
 }
 
