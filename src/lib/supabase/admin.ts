@@ -2,6 +2,32 @@ type AdminResult = { data: unknown; error: { message: string } | null; count: nu
 type OrderOptions = { ascending?: boolean };
 type SelectOptions = { count?: "exact"; head?: boolean };
 
+// Fail before a stalled PostgREST request can consume the whole Vercel function
+// invocation. Reads are intentionally short; writes/RPCs get a larger window but
+// are never automatically retried here because an ambiguous write must remain
+// fail-closed and operator-visible.
+export const SUPABASE_ADMIN_READ_TIMEOUT_MS = 5_000;
+export const SUPABASE_ADMIN_WRITE_TIMEOUT_MS = 12_000;
+export const SUPABASE_ADMIN_RPC_TIMEOUT_MS = 12_000;
+
+function adminTransportError(error: unknown, timeoutMs: number) {
+  const detail = error instanceof Error ? error.message : String(error ?? "unknown error");
+  const name = error instanceof Error ? error.name : "";
+  const timeout =
+    name === "TimeoutError" ||
+    name === "AbortError" ||
+    /timeout|timed out|aborted/i.test(detail);
+  return {
+    data: null,
+    error: {
+      message: timeout
+        ? `Supabase REST timeout after ${timeoutMs}ms`
+        : `Supabase REST transport failed: ${detail}`,
+    },
+    count: null,
+  } satisfies AdminResult;
+}
+
 class SupabaseRestQuery implements PromiseLike<AdminResult> {
   private readonly params = new URLSearchParams();
   private count: "exact" | undefined;
@@ -107,13 +133,22 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     if (this.count === "exact") preferences.push("count=exact");
     if (this.method === "PATCH") preferences.push("return=representation");
     if (preferences.length > 0) headers.Prefer = preferences.join(",");
-    const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
-      method: this.head ? "HEAD" : this.method,
-      headers,
-      body: this.method === "PATCH" ? JSON.stringify(this.requestBody ?? {}) : undefined,
-      cache: "no-store",
-    });
-    return readAdminResponse(response);
+    const timeoutMs =
+      this.method === "PATCH"
+        ? SUPABASE_ADMIN_WRITE_TIMEOUT_MS
+        : SUPABASE_ADMIN_READ_TIMEOUT_MS;
+    try {
+      const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
+        method: this.head ? "HEAD" : this.method,
+        headers,
+        body: this.method === "PATCH" ? JSON.stringify(this.requestBody ?? {}) : undefined,
+        cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return readAdminResponse(response);
+    } catch (error) {
+      return adminTransportError(error, timeoutMs);
+    }
   }
 }
 
@@ -125,13 +160,18 @@ export async function createSupabaseAdminClient() {
 
   return {
     rpc: async (name: string, parameters: Record<string, unknown>): Promise<AdminResult> => {
-      const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
-        method: "POST",
-        headers: createSupabaseAdminHeaders(supabaseSecretKey),
-        body: JSON.stringify(parameters),
-        cache: "no-store",
-      });
-      return readAdminResponse(response);
+      try {
+        const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${encodeURIComponent(name)}`, {
+          method: "POST",
+          headers: createSupabaseAdminHeaders(supabaseSecretKey),
+          body: JSON.stringify(parameters),
+          cache: "no-store",
+          signal: AbortSignal.timeout(SUPABASE_ADMIN_RPC_TIMEOUT_MS),
+        });
+        return readAdminResponse(response);
+      } catch (error) {
+        return adminTransportError(error, SUPABASE_ADMIN_RPC_TIMEOUT_MS);
+      }
     },
     from: (table: string) => new SupabaseRestQuery(supabaseUrl, supabaseSecretKey, table),
   };

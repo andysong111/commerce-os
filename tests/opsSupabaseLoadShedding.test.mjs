@@ -17,30 +17,47 @@ function minuteSet(schedule) {
   return new Set(values);
 }
 
-test("latency-sensitive price, detail and durable SEO workers remain every minute", () => {
+test("only the actively processing durable SEO worker remains every minute", () => {
   const everyMinute = vercel.crons
     .filter((cron) => cron.schedule === "* * * * *")
     .map((cron) => cron.path)
     .sort();
-  assert.deepEqual(everyMinute, [
-    "/api/cron/detail-page-jobs",
-    "/api/cron/seo-run-worker",
-    "/api/cron/shopling-price-bulk-auto",
-  ]);
+  assert.deepEqual(everyMinute, ["/api/cron/seo-run-worker"]);
+
+  const shopling = vercel.crons.find(
+    (cron) => cron.path === "/api/cron/shopling-price-bulk-auto",
+  );
+  const detail = vercel.crons.find(
+    (cron) => cron.path === "/api/cron/detail-page-jobs",
+  );
+  assert.ok(shopling);
+  assert.ok(detail);
+  const shoplingMinutes = minuteSet(shopling.schedule);
+  const detailMinutes = minuteSet(detail.schedule);
+  assert.equal(shoplingMinutes.size, 12);
+  assert.equal(detailMinutes.size, 12);
+  assert.equal(
+    [...shoplingMinutes].filter((minute) => detailMinutes.has(minute)).length,
+    0,
+    "detail and Shopling fallback workers must not wake on the same minute",
+  );
 });
 
-test("heavy OPS cron wakeups are staggered instead of thundering at minute zero", () => {
+test("heavy OPS cron wakeups are staggered instead of creating a constant four-worker fanout", () => {
   const paths = vercel.crons.map((cron) => cron.path);
   assert.equal(new Set(paths).size, paths.length, "duplicate cron path detected");
 
   const perMinute = Array.from({ length: 60 }, () => []);
   for (const cron of vercel.crons) {
-    if (cron.schedule === "* * * * *") continue;
     for (const minute of minuteSet(cron.schedule)) perMinute[minute].push(cron.path);
   }
 
   const busiest = Math.max(...perMinute.map((entries) => entries.length));
-  assert.ok(busiest <= 1, `noncritical cron collision detected: ${busiest}`);
+  assert.ok(busiest <= 3, `cron fanout is still too high: ${busiest}`);
+  assert.ok(
+    perMinute.every((entries) => entries.includes("/api/cron/seo-run-worker")),
+    "durable SEO worker must stay continuously scheduled",
+  );
 
   const longRunningPaths = [
     "/api/cron/product-master-shopling-diagnostic",

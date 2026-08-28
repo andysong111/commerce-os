@@ -5,16 +5,22 @@ on:
     paths:
       - "vercel.json"
       - "src/lib/commerceOperationsDashboard.ts"
+      - "src/lib/supabase/admin.ts"
       - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
+      - "supabase/migrations/202608280007_reduce_seo_run_supabase_wakeup_pressure.sql"
       - "tests/opsSupabaseLoadShedding.test.mjs"
+      - "tests/supabaseServerTimeoutLoadShedding.test.mjs"
       - ".github/workflows/ops-supabase-load-shedding.yml"
   push:
     branches: [main]
     paths:
       - "vercel.json"
       - "src/lib/commerceOperationsDashboard.ts"
+      - "src/lib/supabase/admin.ts"
       - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
+      - "supabase/migrations/202608280007_reduce_seo_run_supabase_wakeup_pressure.sql"
       - "tests/opsSupabaseLoadShedding.test.mjs"
+      - "tests/supabaseServerTimeoutLoadShedding.test.mjs"
       - ".github/workflows/ops-supabase-load-shedding.yml"
 
 jobs:
@@ -29,6 +35,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Validate OPS Supabase load shedding contracts
-        run: node --test tests/opsSupabaseLoadShedding.test.mjs
-      - name: Lint dashboard read model
-        run: npx eslint src/lib/commerceOperationsDashboard.ts
+        run: >-
+          node --test
+          tests/opsSupabaseLoadShedding.test.mjs
+          tests/supabaseServerTimeoutLoadShedding.test.mjs
+      - name: Lint Supabase fail-fast and dashboard read models
+        run: >-
+          npx eslint
+          src/lib/supabase/admin.ts
+          src/lib/commerceOperationsDashboard.ts
+          tests/supabaseServerTimeoutLoadShedding.test.mjs
