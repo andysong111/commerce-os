@@ -52,11 +52,17 @@ export async function POST(request: Request) {
     const result = await recordInternalChinaForwarderCost(
       await request.json().catch(() => ({})),
     );
+    const reconciliation = result.receiptCostReconciliation;
+    const receiptMessage = reconciliation?.productMasterSynced
+      ? ` 같은 월의 입고원가 ${reconciliation.updatedRows.toLocaleString("ko-KR")}행도 1.45를 제거한 상품대금·중국내 운임 기준으로 재동기화했습니다.`
+      : reconciliation?.productMasterError
+        ? ` 배송대행 비용은 저장했지만 상품 매입원가 재동기화는 확인이 필요합니다: ${reconciliation.productMasterError}`
+        : "";
     return Response.json(
       {
         ok: true,
         result,
-        message: `배송대행지 실제비용 ${result.actualCostKrw?.toLocaleString("ko-KR")}원을 ${result.cycleMonth} 월 발주비용으로 별도 마감했습니다. 상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다.`,
+        message: `배송대행지 실제비용 ${result.actualCostKrw?.toLocaleString("ko-KR")}원을 ${result.cycleMonth} 월 발주비용으로 별도 마감했습니다. 상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다.${receiptMessage}`,
       },
       { headers: { "cache-control": "no-store" } },
     );
