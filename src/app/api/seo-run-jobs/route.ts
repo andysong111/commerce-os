@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const MAX_ENQUEUE_RUNS = 50;
+const MAX_ENQUEUE_RUNS = 250;
 const CUSTOM_BLOCKED_LIMIT = 200;
 
 type UnknownRecord = Record<string, unknown>;
@@ -42,7 +42,7 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function stringList(value: unknown, limit = 200) {
+function stringList(value: unknown, limit = 500) {
   if (!Array.isArray(value)) return [];
   const result: string[] = [];
   const seen = new Set<string>();
@@ -150,7 +150,7 @@ function sourceUrl(item: UnknownRecord) {
 }
 
 function runIds(value: unknown) {
-  return stringList(value, 200).filter((value) => value.length <= 180);
+  return stringList(value, 500).filter((value) => value.length <= 180);
 }
 
 export async function GET(request: NextRequest) {
@@ -159,7 +159,7 @@ export async function GET(request: NextRequest) {
   const includeArchived = request.nextUrl.searchParams.get("includeArchived") === "true";
   const jobs = await listSeoRunJobs(authenticated.value, {
     includeArchived,
-    limit: includeArchived ? 1000 : 300,
+    limit: includeArchived ? 1000 : 600,
   });
   return Response.json({ ok: true, jobs });
 }
@@ -307,6 +307,52 @@ export async function POST(request: NextRequest) {
   if (action === "archive") {
     const jobs = await archiveSeoRunJobs(context, runIds(body.runIds));
     return Response.json({ ok: true, jobs });
+  }
+
+  if (action === "queue_registration") {
+    const ids = runIds(body.runIds);
+    if (!ids.length) {
+      return Response.json(
+        { ok: false, message: "Shopling 서버 등록큐에 넣을 RUN이 없습니다." },
+        { status: 400 },
+      );
+    }
+    const current = await listSeoRunJobs(context, {
+      runIds: ids,
+      includeArchived: false,
+      limit: ids.length,
+    });
+    const eligible = current
+      .filter((job) => job.status === "ready")
+      .filter(
+        (job) =>
+          !["submitting", "queued", "running", "success"].includes(
+            job.registration_status,
+          ),
+      )
+      .map((job) => job.run_id);
+    if (!eligible.length) {
+      return Response.json({
+        ok: true,
+        requestedCount: ids.length,
+        queuedCount: 0,
+        skippedCount: ids.length,
+        jobs: current,
+      });
+    }
+    const jobs = await patchOwnedSeoRunJobs(context, eligible, {
+      registration_status: "queued",
+      registration_job_id: "",
+      registration_request_id: "",
+    });
+    return Response.json({
+      ok: true,
+      requestedCount: ids.length,
+      queuedCount: jobs.length,
+      skippedCount: Math.max(0, ids.length - jobs.length),
+      jobs,
+      message: `${jobs.length}개 RUN을 서버 Shopling 등록큐에 넣었습니다. 브라우저를 닫아도 계속 처리됩니다.`,
+    });
   }
 
   if (action === "update_registration") {
