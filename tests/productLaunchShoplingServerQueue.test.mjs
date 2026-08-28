@@ -35,9 +35,15 @@ test("SEO RUN API는 200건 이상 배치를 수용하고 등록 요청을 한 �
 
 test("Shopling 전용 서버 pulse는 bounded 등록큐를 먼저 소화한 뒤 실제 성공 대조와 후처리를 이어간다", async () => {
   const source = await readFile(pulseUrl, "utf8");
-  const queueIndex = source.indexOf("processSeoRunShoplingRegistrationQueue");
-  const truthIndex = source.indexOf("reconcileVerifiedShoplingRegistrations");
-  const postprocessIndex = source.indexOf("processProductLaunchShoplingPostprocessQueue");
+  const queueIndex = source.indexOf(
+    "registrationQueue = await processSeoRunShoplingRegistrationQueue",
+  );
+  const truthIndex = source.indexOf(
+    "registrationTruth = await reconcileVerifiedShoplingRegistrations",
+  );
+  const postprocessIndex = source.indexOf(
+    "postprocess = await processProductLaunchShoplingPostprocessQueue",
+  );
   assert.ok(queueIndex >= 0);
   assert.ok(truthIndex > queueIndex);
   assert.ok(postprocessIndex > truthIndex);
