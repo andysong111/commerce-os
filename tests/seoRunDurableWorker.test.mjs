@@ -53,14 +53,16 @@ test("Supabase SEO RUN 원장은 RLS·service_role·SKIP LOCKED lease와 실패 
   );
 });
 
-test("SEO RUN API는 브라우저 localStorage 회차를 서버 원장에 넣고 after worker를 시작한다", async () => {
+test("SEO RUN API는 enqueue·retry 즉시 실행도 예약 worker와 같은 전역 pulse를 사용한다", async () => {
   const route = await source("src/app/api/seo-run-jobs/route.ts");
   assert.match(route, /requireSeoTitleLedgerContext/);
   assert.match(route, /readProductLaunchNormalizedItems/);
   assert.match(route, /insertSeoRunJobs/);
   assert.match(route, /action === "enqueue"/);
   assert.match(route, /after\(async \(\) =>/);
-  assert.match(route, /processSeoRunQueue/);
+  assert.match(route, /runCoalescedSeoRunWorkerPulse/);
+  assert.match(route, /leaseSeconds: 300/);
+  assert.doesNotMatch(route, /processSeoRunQueue/);
   assert.match(route, /variationSeed: run\.runId/);
   assert.match(route, /excludedMallTitles/);
   assert.match(route, /action === "retry"/);
