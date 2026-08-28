@@ -7,7 +7,10 @@ const clientUrl = new URL(
   import.meta.url,
 );
 const apiUrl = new URL("../src/app/api/seo-run-jobs/route.ts", import.meta.url);
-const pulseUrl = new URL("../src/app/api/seo-run-wakeup/route.ts", import.meta.url);
+const pulseUrl = new URL(
+  "../src/app/api/seo-run-shopling-wakeup/route.ts",
+  import.meta.url,
+);
 const workerUrl = new URL(
   "../src/lib/seoRunShoplingRegistrationQueue.ts",
   import.meta.url,
@@ -30,16 +33,18 @@ test("SEO RUN API는 200건 이상 배치를 수용하고 등록 요청을 한 �
   assert.match(source, /registration_job_id: ""/);
 });
 
-test("서버 pulse는 bounded Shopling 등록큐를 먼저 소화한 뒤 실제 성공 대조와 후처리를 이어간다", async () => {
+test("Shopling 전용 서버 pulse는 bounded 등록큐를 먼저 소화한 뒤 실제 성공 대조와 후처리를 이어간다", async () => {
   const source = await readFile(pulseUrl, "utf8");
   const queueIndex = source.indexOf("processSeoRunShoplingRegistrationQueue");
   const truthIndex = source.indexOf("reconcileVerifiedShoplingRegistrations");
+  const postprocessIndex = source.indexOf("processProductLaunchShoplingPostprocessQueue");
   assert.ok(queueIndex >= 0);
-  assert.ok(truthIndex >= 0);
+  assert.ok(truthIndex > queueIndex);
+  assert.ok(postprocessIndex > truthIndex);
   assert.match(source, /maxStarts: 5/);
   assert.match(source, /maxMonitors: 100/);
-  assert.match(source, /maxRuns: 40/);
-  assert.match(source, /maxItems: 8/);
+  assert.match(source, /maxRuns: 60/);
+  assert.match(source, /maxItems: 10/);
 });
 
 test("등록큐는 같은 상품의 여러 RUN을 순차 처리하고 외부 workflow만 병렬화한다", async () => {
