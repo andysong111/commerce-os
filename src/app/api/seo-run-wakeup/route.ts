@@ -7,6 +7,7 @@ import {
 import { processSeoRunQueue } from "@/lib/seoRunWorker";
 import { processProductLaunchShoplingPostprocessQueue } from "@/lib/productLaunchShoplingPostprocessWorker";
 import { reconcileVerifiedShoplingRegistrations } from "@/lib/productLaunchShoplingRegistrationTruth";
+import { rearmFailedDurableSeoRegistrationRuns } from "@/lib/productLaunchShoplingRetryRearm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,21 @@ export async function GET() {
       };
     }
 
+    let registrationRearmResult: Record<string, unknown> = {};
+    try {
+      registrationRearmResult = await rearmFailedDurableSeoRegistrationRuns({
+        maxRuns: 6,
+      });
+    } catch (error) {
+      console.error("[seo-run-wakeup] Shopling registration retry rearm failed", error);
+      registrationRearmResult = {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Shopling registration retry rearm failed",
+      };
+    }
+
     let postprocessResult: Record<string, unknown> = {};
     try {
       postprocessResult = await processProductLaunchShoplingPostprocessQueue({
@@ -75,6 +91,7 @@ export async function GET() {
       ok: true,
       ...result,
       shoplingRegistrationTruth: registrationTruthResult,
+      shoplingRegistrationRearm: registrationRearmResult,
       shoplingPostprocess: postprocessResult,
     };
     return NextResponse.json({
@@ -84,6 +101,7 @@ export async function GET() {
       failedCount: result.failedCount,
       queuedCount: result.queuedCount,
       shoplingRegistrationTruth: registrationTruthResult,
+      shoplingRegistrationRearm: registrationRearmResult,
       shoplingPostprocess: postprocessResult,
     });
   } catch (error) {
