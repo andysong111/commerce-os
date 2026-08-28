@@ -1,7 +1,6 @@
--- Long-term OPS scheduler: one Vercel heartbeat claims at most one bounded task.
--- This replaces independent cron fan-out with DB-backed priority, backpressure,
--- global recovery mode and per-task leases. The tables retain only current state,
--- not an ever-growing execution history.
+-- One lightweight Vercel heartbeat claims at most one bounded OPS task.
+-- The scheduler keeps only current task state, applies global backpressure, and
+-- pauses noncritical analysis while the shared database is degraded.
 
 create table if not exists public.ops_dispatch_state (
   singleton boolean primary key default true check (singleton),
@@ -55,15 +54,7 @@ create table if not exists public.ops_dispatch_tasks (
 );
 
 create index if not exists ops_dispatch_tasks_due_idx
-  on public.ops_dispatch_tasks (enabled, next_run_at, priority, task_key)
-  where lease_until is null or lease_until <= now();
-
--- The partial predicate above cannot contain volatile expressions on every
--- Postgres build. Keep a stable due-order index as the guaranteed planner path.
-drop index if exists public.ops_dispatch_tasks_due_idx;
-create index if not exists ops_dispatch_tasks_due_idx
   on public.ops_dispatch_tasks (enabled, next_run_at, priority, task_key);
-
 create index if not exists ops_dispatch_tasks_lease_idx
   on public.ops_dispatch_tasks (lease_until)
   where lease_until is not null;
@@ -76,16 +67,9 @@ grant select, insert, update, delete on table public.ops_dispatch_state to servi
 grant select, insert, update, delete on table public.ops_dispatch_tasks to service_role;
 
 insert into public.ops_dispatch_tasks (
-  task_key,
-  route_path,
-  workload_class,
-  priority,
-  enabled,
-  normal_interval_seconds,
-  busy_interval_seconds,
-  recovery_interval_seconds,
-  timeout_seconds,
-  next_run_at
+  task_key, route_path, workload_class, priority, enabled,
+  normal_interval_seconds, busy_interval_seconds,
+  recovery_interval_seconds, timeout_seconds, next_run_at
 )
 values
   ('seo-run-worker', '/api/cron/seo-run-worker', 'critical', 10, true, 300, 60, 300, 280, now()),
@@ -128,6 +112,7 @@ declare
   v_now timestamptz := now();
   v_state public.ops_dispatch_state;
   v_task public.ops_dispatch_tasks;
+  v_lease_seconds integer;
 begin
   if p_worker_id is null or p_worker_id !~ '^[A-Za-z0-9._:-]{1,160}$' then
     raise exception 'invalid dispatcher worker id';
@@ -179,7 +164,10 @@ begin
   if v_task.task_key is null then
     return jsonb_build_object(
       'claimed', false,
-      'reason', case when v_state.mode = 'recovery' then 'recovery_no_critical_due' else 'no_task_due' end,
+      'reason', case
+        when v_state.mode = 'recovery' then 'recovery_no_critical_due'
+        else 'no_task_due'
+      end,
       'mode', v_state.mode,
       'recovery_until', v_state.recovery_until,
       'next_due_at', (
@@ -191,9 +179,14 @@ begin
     );
   end if;
 
+  v_lease_seconds := least(
+    p_lease_seconds,
+    greatest(30, v_task.timeout_seconds + 15)
+  );
+
   update public.ops_dispatch_tasks
   set lease_owner = p_worker_id,
-      lease_until = v_now + make_interval(secs => p_lease_seconds),
+      lease_until = v_now + make_interval(secs => v_lease_seconds),
       last_started_at = v_now,
       run_count = run_count + 1,
       updated_at = v_now
@@ -201,7 +194,7 @@ begin
 
   update public.ops_dispatch_state
   set lease_owner = p_worker_id,
-      lease_until = v_now + make_interval(secs => p_lease_seconds),
+      lease_until = v_now + make_interval(secs => v_lease_seconds),
       last_task_key = v_task.task_key,
       last_started_at = v_now,
       last_error = '',
@@ -312,8 +305,10 @@ begin
       last_result = coalesce(p_result, '{}'::jsonb),
       last_error = left(coalesce(p_error, ''), 2000),
       consecutive_failures = v_failures,
-      success_count = success_count + case when p_outcome in ('success', 'skipped') then 1 else 0 end,
-      failure_count = failure_count + case when p_outcome = 'failure' then 1 else 0 end,
+      success_count = success_count + case
+        when p_outcome in ('success', 'skipped') then 1 else 0 end,
+      failure_count = failure_count + case
+        when p_outcome = 'failure' then 1 else 0 end,
       updated_at = v_now
   where task_key = p_task_key;
 
@@ -335,18 +330,21 @@ begin
   else
     update public.ops_dispatch_state
     set mode = case
-          when mode = 'recovery' and recovery_until is not null and recovery_until > v_now
-            then 'recovery'
+          when mode = 'recovery'
+               and recovery_until is not null
+               and recovery_until > v_now then 'recovery'
           else 'normal'
         end,
         recovery_until = case
-          when mode = 'recovery' and recovery_until is not null and recovery_until > v_now
-            then recovery_until
+          when mode = 'recovery'
+               and recovery_until is not null
+               and recovery_until > v_now then recovery_until
           else null
         end,
         consecutive_database_failures = case
-          when mode = 'recovery' and recovery_until is not null and recovery_until > v_now
-            then consecutive_database_failures
+          when mode = 'recovery'
+               and recovery_until is not null
+               and recovery_until > v_now then consecutive_database_failures
           else 0
         end,
         lease_owner = null,
@@ -362,7 +360,7 @@ begin
     'task_key', p_task_key,
     'status', v_status,
     'next_run_at', v_now + make_interval(secs => v_interval_seconds),
-    'mode', case when p_database_pressure then 'recovery' else null end,
+    'mode', case when p_database_pressure then 'recovery' else v_state.mode end,
     'recovery_until', v_recovery_until
   );
 end;
@@ -388,7 +386,10 @@ begin
   end if;
 
   update public.ops_dispatch_tasks
-  set next_run_at = least(next_run_at, now() + make_interval(secs => p_delay_seconds)),
+  set next_run_at = least(
+        next_run_at,
+        now() + make_interval(secs => p_delay_seconds)
+      ),
       updated_at = now()
   where task_key = p_task_key
     and enabled = true
@@ -404,15 +405,20 @@ $function$;
 
 revoke all on function public.claim_next_ops_dispatch_task(text, integer)
   from public, anon, authenticated;
-revoke all on function public.finish_ops_dispatch_task(text, text, text, integer, boolean, boolean, jsonb, text)
-  from public, anon, authenticated;
+revoke all on function public.finish_ops_dispatch_task(
+  text, text, text, integer, boolean, boolean, jsonb, text
+) from public, anon, authenticated;
 revoke all on function public.wake_ops_dispatch_task(text, integer)
   from public, anon, authenticated;
-grant execute on function public.claim_next_ops_dispatch_task(text, integer) to service_role;
-grant execute on function public.finish_ops_dispatch_task(text, text, text, integer, boolean, boolean, jsonb, text) to service_role;
-grant execute on function public.wake_ops_dispatch_task(text, integer) to service_role;
+grant execute on function public.claim_next_ops_dispatch_task(text, integer)
+  to service_role;
+grant execute on function public.finish_ops_dispatch_task(
+  text, text, text, integer, boolean, boolean, jsonb, text
+) to service_role;
+grant execute on function public.wake_ops_dispatch_task(text, integer)
+  to service_role;
 
 comment on table public.ops_dispatch_tasks is
-  'Bounded adaptive scheduler catalog. One task is claimed per Vercel heartbeat; no per-run history is accumulated here.';
+  'Adaptive scheduler catalog. One task is claimed per heartbeat; no per-run history is accumulated.';
 comment on table public.ops_dispatch_state is
-  'Global OPS dispatcher lease and database-pressure circuit breaker.';
+  'Global OPS dispatcher lease and shared-database recovery circuit breaker.';
