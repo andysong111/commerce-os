@@ -41,16 +41,18 @@ test("bootstrap result exposes only read-only summary counts", () => {
   );
 });
 
-test("cron is bearer protected and scheduled every five minutes", () => {
+test("cron is bearer protected, read-only, and hourly during DB recovery", () => {
   assert.match(cron, /Bearer \$\{expected\}/);
   assert.match(cron, /runPriceGradeReceiptShadowBootstrap/);
   assert.match(cron, /maxDuration = 120/);
   assert.match(cron, /writesEnabled: false/);
-  assert.ok(
-    vercel.crons.some(
-      (entry) =>
-        entry.path === "/api/cron/price-grade-receipt-shadow-bootstrap" &&
-        entry.schedule === "*/5 * * * *",
+  assert.deepEqual(
+    vercel.crons.find(
+      (entry) => entry.path === "/api/cron/price-grade-receipt-shadow-bootstrap",
     ),
+    {
+      path: "/api/cron/price-grade-receipt-shadow-bootstrap",
+      schedule: "57 * * * *",
+    },
   );
 });
