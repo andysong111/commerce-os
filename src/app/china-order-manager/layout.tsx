@@ -34,6 +34,10 @@ async function timebox<T>(
   }
 }
 
+async function timeboxNullable<T>(task: Promise<T>, timeoutMs: number) {
+  return timebox<T | null>(task, timeoutMs, null);
+}
+
 async function loadInternalDraftsForReceiptClose() {
   const timeoutState: Awaited<ReturnType<typeof loadFastPurchaseInternalDrafts>> = {
     drafts: [],
@@ -80,16 +84,14 @@ export default async function ChinaOrderManagerLayout({
   const forwarderCostRows = await Promise.all(
     currentCycleDrafts.map(async (draft) => {
       try {
-        const timeoutMarker = Symbol("FORWARDER_TIMEOUT");
-        const result = await timebox(
+        const result = await timeboxNullable(
           loadInternalChinaForwarderCostSummary(
             draft.draftId,
             draft.cycleMonth,
           ),
           FORWARDER_SUMMARY_TIMEBOX_MS,
-          timeoutMarker,
         );
-        if (result === timeoutMarker) {
+        if (!result) {
           return {
             draftId: draft.draftId,
             summary: null,
