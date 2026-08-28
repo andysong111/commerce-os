@@ -22,7 +22,7 @@ on:
       - 'src/lib/opsWorkspace.ts'
       - 'src/lib/productLaunchTracker*.ts'
       - 'src/lib/productLaunchShopling*.ts'
-      - 'src/lib/seoRunShopling*.ts'
+      - 'src/lib/seoRun*.ts'
       - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
@@ -31,6 +31,7 @@ on:
       - 'supabase/migrations/*seo_run_shopling*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - 'tests/productLaunchShopling*.test.mjs'
+      - 'tests/productLaunchSeoRun*.test.mjs'
       - 'tests/productLaunchOptionBarcodeRegistry.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
@@ -64,6 +65,7 @@ jobs:
           tests/productLaunchShoplingRegistrationTruth.test.mjs
           tests/productLaunchShoplingServerQueue.test.mjs
           tests/productLaunchShoplingWorkerSplit.test.mjs
+          tests/productLaunchSeoRunStorageResilience.test.mjs
           tests/productLaunchOptionBarcodeRegistry.test.mjs
           tests/productLaunchShoplingMallSeo.test.mjs
           tests/productLaunchTrackerUploadClaim.test.mjs
