@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [sync, recovery, route, cron, vercel] = await Promise.all([
+const [sync, recovery, route, cron, scheduler] = await Promise.all([
   readFile("src/lib/productMasterShoplingSalesEventSync.ts", "utf8"),
   readFile("src/lib/productMasterShoplingSalesEventRecovery.ts", "utf8"),
   readFile("src/app/api/product-master/shopling-sales-events/route.ts", "utf8"),
   readFile("src/app/api/cron/product-master-shopling-sales-events/route.ts", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("360-day request pins one Product Master planning fingerprint and bounded ranges", () => {
@@ -18,7 +18,6 @@ test("360-day request pins one Product Master planning fingerprint and bounded r
   assert.match(sync, /splitShoplingDateRange\(analysisStartDate, analysisEndDate, RANGE_DAYS\)/);
   assert.match(sync, /SALES_EVENT_PLANNING_CHANGED/);
 });
-
 
 test("each source chunk applies the one pinned analysisAsOf instead of its fetch partition", () => {
   assert.match(sync, /aggregateProductMasterShoplingSalesEventChunk\([\s\S]*analysisAsOf: request\.analysisAsOf/);
@@ -91,18 +90,12 @@ test("reused chunks remain operation-ledger evidence and never become a hidden b
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
 });
 
-test("cron only collects or recovers requests, stays read-only, and is recovery-staggered", () => {
+test("cron only collects or recovers requests and is an operational dispatcher task", () => {
   assert.match(cron, /runProductMasterShoplingSalesEventSyncStep/);
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
-  const config = JSON.parse(vercel);
-  assert.deepEqual(
-    config.crons.find(
-      (entry) => entry.path === "/api/cron/product-master-shopling-sales-events",
-    ),
-    {
-      path: "/api/cron/product-master-shopling-sales-events",
-      schedule: "22 * * * *",
-    },
+  assert.match(
+    scheduler,
+    /'product-master-shopling-sales-events', '\/api\/cron\/product-master-shopling-sales-events', 'operational', 130, true, 3600, 300, 21600/,
   );
 });
 
