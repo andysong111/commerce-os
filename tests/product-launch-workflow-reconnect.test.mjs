@@ -23,7 +23,15 @@ test("상품출시 Workflow gate는 normalized fast read를 사용하고 짧게 
   assert.doesNotMatch(source, /const IDLE_RETRY_MS = 30_000;/);
 });
 
+test("normalized probe 결과를 optimized UI 첫 조회에도 warm handoff한다", async () => {
+  const source = await readFile(gateUrl, "utf8");
+  assert.match(source, /WORKFLOW_COMPATIBLE_PATHS/);
+  assert.match(source, /\/api\/product-launch-tracker\/optimized/);
+  assert.match(source, /WORKFLOW_COMPATIBLE_PATHS\.has\(left\.pathname\)/);
+  assert.match(source, /WORKFLOW_COMPATIBLE_PATHS\.has\(right\.pathname\)/);
+});
+
 test("상품출시 페이지 asset version은 Workflow reconnect 수정본을 구분한다", async () => {
   const source = await readFile(pageUrl, "utf8");
-  assert.match(source, /workflow-reconnect-v1/);
+  assert.match(source, /workflow-reconnect-v2/);
 });
