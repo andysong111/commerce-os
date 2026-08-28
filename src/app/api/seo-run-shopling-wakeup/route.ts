@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProductLaunchAdminConfig } from "@/lib/productLaunchTrackerServer";
-import { processProductLaunchShoplingPostprocessQueue } from "@/lib/productLaunchShoplingPostprocessWorker";
-import { reconcileVerifiedShoplingRegistrations } from "@/lib/productLaunchShoplingRegistrationTruth";
-import { rearmFailedDurableSeoRegistrationRuns } from "@/lib/productLaunchShoplingRetryRearm";
-import { processSeoRunShoplingRegistrationQueue } from "@/lib/seoRunShoplingRegistrationQueue";
+import { runSeoRunShoplingPulseWork } from "@/lib/seoRunShoplingPulseWork";
 import {
   claimSeoRunShoplingWorkerPulse,
   finishSeoRunShoplingWorkerPulse,
@@ -37,42 +34,8 @@ export async function GET() {
 
   let storedResult: Record<string, unknown> = {};
   try {
-    const registrationQueue = await processSeoRunShoplingRegistrationQueue({
-      maxStarts: 5,
-      maxMonitors: 100,
-    }).catch((error) => ({
-      error:
-        error instanceof Error ? error.message : "Shopling registration queue failed",
-    }));
-
-    const registrationTruth = await reconcileVerifiedShoplingRegistrations({
-      maxRuns: 60,
-    }).catch((error) => ({
-      error:
-        error instanceof Error ? error.message : "Shopling registration truth failed",
-    }));
-
-    const registrationRearm = await rearmFailedDurableSeoRegistrationRuns({
-      maxRuns: 30,
-    }).catch((error) => ({
-      error:
-        error instanceof Error ? error.message : "Shopling registration rearm failed",
-    }));
-
-    const postprocess = await processProductLaunchShoplingPostprocessQueue({
-      maxItems: 10,
-    }).catch((error) => ({
-      error:
-        error instanceof Error ? error.message : "Shopling postprocess failed",
-    }));
-
-    storedResult = {
-      ok: true,
-      registrationQueue,
-      registrationTruth,
-      registrationRearm,
-      postprocess,
-    };
+    const work = await runSeoRunShoplingPulseWork();
+    storedResult = { ok: true, ...work };
     return NextResponse.json(storedResult);
   } catch (error) {
     console.error("[seo-run-shopling-wakeup] worker failed", error);
