@@ -57,6 +57,7 @@ jobs:
           tests/productLaunchShoplingRetry.test.mjs
           tests/productLaunchShoplingReadback.test.mjs
           tests/productLaunchShoplingPostprocessWorker.test.mjs
+          tests/productLaunchShoplingRegistrationTruth.test.mjs
           tests/productLaunchOptionBarcodeRegistry.test.mjs
           tests/productLaunchShoplingMallSeo.test.mjs
           tests/productLaunchTrackerUploadClaim.test.mjs
