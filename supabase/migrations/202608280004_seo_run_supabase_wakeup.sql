@@ -1,13 +1,13 @@
 -- Independent Supabase scheduler for durable SEO RUN wakeups.
--- pg_cron triggers pg_net every minute. The request carries a DB-only token and
--- the Vercel route also uses a global lease so duplicate wakeups cannot fan out.
+-- pg_cron triggers pg_net every minute. The public wakeup endpoint cannot enqueue
+-- arbitrary work; it only attempts to process already-authenticated queued RUNs.
+-- A DB global lease prevents repeated calls from fanning out worker executions.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net with schema extensions;
 
 create table if not exists public.seo_run_worker_control (
   singleton boolean primary key default true check (singleton),
-  pulse_token text not null,
   lease_owner text,
   lease_until timestamptz,
   last_started_at timestamptz,
@@ -16,11 +16,8 @@ create table if not exists public.seo_run_worker_control (
   updated_at timestamptz not null default now()
 );
 
-insert into public.seo_run_worker_control(singleton, pulse_token)
-values (
-  true,
-  replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
-)
+insert into public.seo_run_worker_control(singleton)
+values (true)
 on conflict (singleton) do nothing;
 
 alter table public.seo_run_worker_control enable row level security;
@@ -124,11 +121,7 @@ begin
     '* * * * *',
     $cron$
       select net.http_get(
-        url := 'https://commerce-os-ops-center.vercel.app/api/cron/seo-run-worker',
-        headers := jsonb_build_object(
-          'x-seo-run-pulse-token',
-          (select pulse_token from public.seo_run_worker_control where singleton = true)
-        ),
+        url := 'https://commerce-os-ops-center.vercel.app/api/seo-run-wakeup',
         timeout_milliseconds := 280000
       );
     $cron$
@@ -137,4 +130,4 @@ end;
 $$;
 
 comment on table public.seo_run_worker_control is
-  'Global durable SEO worker wakeup token and lease. Token is DB-only and used by Supabase pg_cron -> pg_net.';
+  'Global durable SEO worker lease and heartbeat used by Supabase pg_cron -> pg_net wakeups.';
