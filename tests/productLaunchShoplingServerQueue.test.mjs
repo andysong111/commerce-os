@@ -60,3 +60,19 @@ test("서버 등록큐는 기존 exact-item 옵션 복구와 readback 기반 진
   assert.match(source, /attachedExistingJob/);
   assert.match(source, /previous_same_self_code_job_failed/);
 });
+
+test("workflow dispatch 직전 job/selfCode를 RUN 원장에 먼저 저장해 응답 단절 후 중복 재등록을 막는다", async () => {
+  const source = await readFile(workerUrl, "utf8");
+  const jobInsert = source.indexOf("await insertUploadJob(config, jobRow)");
+  const dispatchIdentity = source.indexOf("dispatchJobId: jobId");
+  const runPatch = source.indexOf("registration_job_id: jobId", dispatchIdentity);
+  const dispatchCall = source.indexOf("await dispatchLaunchWorkflow(jobId, requestId)");
+  assert.ok(jobInsert >= 0);
+  assert.ok(dispatchIdentity > jobInsert);
+  assert.ok(runPatch > dispatchIdentity);
+  assert.ok(dispatchCall > runPatch);
+  assert.match(source, /let latestPayload: UnknownRecord/);
+  assert.match(source, /\.\.\.latestPayload/);
+  assert.match(source, /registration_job_id: text\(latestPayload\.dispatchJobId\)/);
+  assert.match(source, /registration_request_id: text\(latestPayload\.dispatchRequestId\)/);
+});
