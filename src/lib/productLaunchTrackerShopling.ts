@@ -188,7 +188,11 @@ export function buildProductLaunchShoplingPayload(
       errors.push(`${name} 옵션바코드NO는 숫자 12자리여야 합니다. 상품 상세에서 자동발급 상태를 확인하세요.`);
     }
     if (option.baseSalePriceKrw <= 0) errors.push(`${name} 기준 판매가가 없습니다.`);
-    if (option.unitCostKrw <= 0) errors.push(`${name} 원가가 없습니다.`);
+    // unitCostKrw is intentionally not a Shopling upload gate. The generated
+    // Shopling payload never consumes purchase cost; pricing is based only on
+    // baseSalePriceKrw + channel multipliers. Missing purchase cost remains a
+    // separate purchasing/price-engine data-quality concern and must not be
+    // fabricated from a selling price just to pass registration.
     if (option.barcode) {
       if (seenBarcodes.has(option.barcode)) errors.push(`옵션 B코드 ${option.barcode}가 중복되었습니다.`);
       seenBarcodes.add(option.barcode);
