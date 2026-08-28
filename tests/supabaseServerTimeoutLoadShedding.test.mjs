@@ -18,21 +18,27 @@ test("Ops Supabase admin reads fail fast before a Vercel invocation can hang", a
   assert.match(admin, /adminTransportError/);
 });
 
-test("duplicate Supabase SEO HTTP wakeup is retired while Vercel keeps bounded durable recovery", async () => {
-  const migration = await source(
+test("duplicate DB HTTP wakeup is retired and one Vercel dispatcher owns every schedule", async () => {
+  const retirement = await source(
     "supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql",
+  );
+  const scheduler = await source(
+    "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
   );
   const vercel = JSON.parse(await source("vercel.json"));
 
-  assert.match(migration, /cron\.unschedule/);
-  assert.doesNotMatch(migration, /cron\.schedule\s*\(/);
-  assert.doesNotMatch(migration, /net\.http_get/);
+  assert.match(retirement, /cron\.unschedule/);
+  assert.doesNotMatch(retirement, /cron\.schedule\s*\(/);
+  assert.doesNotMatch(retirement, /net\.http_get/);
+  assert.match(scheduler, /claim_next_ops_dispatch_task/);
+  assert.match(scheduler, /wake_ops_dispatch_task/);
+  assert.deepEqual(vercel.crons, [
+    { path: "/api/cron/ops-dispatcher", schedule: "* * * * *" },
+  ]);
+});
 
-  assert.deepEqual(
-    vercel.crons.find((row) => row.path === "/api/cron/seo-run-worker"),
-    {
-      path: "/api/cron/seo-run-worker",
-      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
-    },
-  );
+test("SEO pulse lease RPCs are also bounded by the shared admin timeout", async () => {
+  const control = await source("src/lib/seoRunWorkerControl.ts");
+  assert.match(control, /SUPABASE_ADMIN_RPC_TIMEOUT_MS/);
+  assert.match(control, /AbortSignal\.timeout\(SUPABASE_ADMIN_RPC_TIMEOUT_MS\)/);
 });
