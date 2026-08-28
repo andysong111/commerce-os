@@ -355,6 +355,12 @@ async function startRegistrationRun(
 ) {
   const now = new Date().toISOString();
   const currentPayload = record(run.registration_payload);
+  let latestPayload: UnknownRecord = {
+    ...currentPayload,
+    error: "",
+    serverQueue: true,
+    serverSubmittingAt: now,
+  };
   const retryCount = Math.max(0, Math.floor(numeric(currentPayload.retryCount)));
   const nextRetryAt = Date.parse(text(currentPayload.nextRetryAt));
   if (Number.isFinite(nextRetryAt) && nextRetryAt > Date.now()) {
@@ -363,12 +369,7 @@ async function startRegistrationRun(
 
   await patchRun(config, run.run_id, {
     registration_status: "submitting",
-    registration_payload: {
-      ...currentPayload,
-      error: "",
-      serverQueue: true,
-      serverSubmittingAt: now,
-    },
+    registration_payload: latestPayload,
   });
 
   try {
@@ -405,9 +406,7 @@ async function startRegistrationRun(
         };
 
     let registrationPayload: UnknownRecord = {
-      ...currentPayload,
-      error: "",
-      serverQueue: true,
+      ...latestPayload,
       queuedAt: text(currentPayload.queuedAt) || now,
       reservedAt: text(currentPayload.reservedAt) || now,
       hasExistingGoods,
@@ -426,6 +425,7 @@ async function startRegistrationRun(
             shoplingRegistrationHistory: previousHistory,
           },
     };
+    latestPayload = registrationPayload;
 
     item = {
       ...item,
@@ -473,6 +473,11 @@ async function startRegistrationRun(
     if (sameCodeJob) {
       const sameStatus = text(sameCodeJob.status);
       if (["queued", "running", "success"].includes(sameStatus)) {
+        latestPayload = {
+          ...registrationPayload,
+          attachedExistingJob: true,
+          attachedAt: now,
+        };
         await persistPreparedItem(
           config,
           { userId: run.owner_id, email: run.owner_email },
@@ -485,11 +490,7 @@ async function startRegistrationRun(
           registration_status: sameStatus === "running" ? "running" : "queued",
           registration_job_id: text(sameCodeJob.id),
           registration_request_id: text(sameCodeJob.request_id),
-          registration_payload: {
-            ...registrationPayload,
-            attachedExistingJob: true,
-            attachedAt: now,
-          },
+          registration_payload: latestPayload,
         });
         return { started: false, attached: true };
       }
@@ -506,6 +507,7 @@ async function startRegistrationRun(
         previousAttemptSelfCodeBase: registrationPayload.newSelfCodeBase,
         newSelfCodeBase,
       };
+      latestPayload = registrationPayload;
     }
 
     if (needsShoplingSelfCodeRotation(item)) {
@@ -527,6 +529,7 @@ async function startRegistrationRun(
           rotatedAt: now,
         },
       };
+      latestPayload = registrationPayload;
     }
 
     await persistPreparedItem(
@@ -556,6 +559,21 @@ async function startRegistrationRun(
       updated_at: now,
     };
     await insertUploadJob(config, jobRow);
+    latestPayload = {
+      ...registrationPayload,
+      newSelfCodeBase,
+      dispatchJobId: jobId,
+      dispatchRequestId: requestId,
+      dispatchPreparedAt: new Date().toISOString(),
+      error: "",
+    };
+    await patchRun(config, run.run_id, {
+      registration_status: "queued",
+      registration_job_id: jobId,
+      registration_request_id: requestId,
+      registration_payload: latestPayload,
+    });
+
     try {
       await dispatchLaunchWorkflow(jobId, requestId);
     } catch (error) {
@@ -564,16 +582,16 @@ async function startRegistrationRun(
       throw error;
     }
 
+    latestPayload = {
+      ...latestPayload,
+      dispatchedAt: new Date().toISOString(),
+      error: "",
+    };
     await patchRun(config, run.run_id, {
       registration_status: "queued",
       registration_job_id: jobId,
       registration_request_id: requestId,
-      registration_payload: {
-        ...registrationPayload,
-        newSelfCodeBase,
-        dispatchedAt: new Date().toISOString(),
-        error: "",
-      },
+      registration_payload: latestPayload,
     });
     return { started: true, jobId, requestId };
   } catch (error) {
@@ -583,10 +601,10 @@ async function startRegistrationRun(
     const retryable = transient && nextRetryCount <= MAX_TRANSIENT_RETRIES;
     await patchRun(config, run.run_id, {
       registration_status: retryable ? "queued" : "failed",
-      registration_job_id: "",
-      registration_request_id: "",
+      registration_job_id: text(latestPayload.dispatchJobId),
+      registration_request_id: text(latestPayload.dispatchRequestId),
       registration_payload: {
-        ...currentPayload,
+        ...latestPayload,
         serverQueue: true,
         error: message,
         retryCount: nextRetryCount,
