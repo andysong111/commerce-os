@@ -1,5 +1,6 @@
 import { after, NextRequest } from "next/server";
 import { validate1688Url } from "@/lib/keywordEngineElonLabV2";
+import { wakeOpsDispatchTask } from "@/lib/opsAdaptiveDispatcher";
 import { readProductLaunchNormalizedItems } from "@/lib/productLaunchTrackerNormalizedStore";
 import { requireSeoTitleLedgerContext } from "@/lib/seoTitleLedgerServer";
 import {
@@ -10,6 +11,7 @@ import {
   retrySeoRunJobs,
   type SeoRunJobInsert,
 } from "@/lib/seoRunJobServer";
+import { runCoalescedSeoRunShoplingWorkerPulse } from "@/lib/seoRunShoplingWorkerPulse";
 import { runCoalescedSeoRunWorkerPulse } from "@/lib/seoRunWorkerPulse";
 
 export const dynamic = "force-dynamic";
@@ -164,6 +166,21 @@ function scheduleSeoRunWorker(
       maxJobs: Math.max(1, Math.min(2, maxJobs)),
       timeBudgetMs: 240_000,
       leaseSeconds: 300,
+    }).catch((error) => {
+      console.error(`${logPrefix} background worker failed`, error);
+    });
+  });
+}
+
+function scheduleShoplingRegistrationWorker(
+  workerId: string,
+  logPrefix: string,
+) {
+  after(async () => {
+    await wakeOpsDispatchTask("seo-run-worker", 0).catch(() => false);
+    await runCoalescedSeoRunShoplingWorkerPulse({
+      workerId,
+      leaseSeconds: 150,
     }).catch((error) => {
       console.error(`${logPrefix} background worker failed`, error);
     });
@@ -331,6 +348,13 @@ export async function POST(request: NextRequest) {
       includeArchived: false,
       limit: ids.length,
     });
+    const queuedOrActive = current.filter(
+      (job) =>
+        job.status === "ready" &&
+        ["submitting", "queued", "running"].includes(
+          job.registration_status,
+        ),
+    );
     const eligible = current
       .filter((job) => job.status === "ready")
       .filter(
@@ -341,12 +365,21 @@ export async function POST(request: NextRequest) {
       )
       .map((job) => job.run_id);
     if (!eligible.length) {
+      if (queuedOrActive.length) {
+        scheduleShoplingRegistrationWorker(
+          `queue-wakeup:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
+          "[seo-run-shopling-wakeup]",
+        );
+      }
       return Response.json({
         ok: true,
         requestedCount: ids.length,
         queuedCount: 0,
         skippedCount: ids.length,
         jobs: current,
+        message: queuedOrActive.length
+          ? `${queuedOrActive.length}개 RUN이 이미 서버 등록큐에 있습니다. worker를 다시 깨웠습니다.`
+          : "이미 처리 중이거나 등록 완료된 RUN입니다.",
       });
     }
     const jobs = await patchOwnedSeoRunJobs(context, eligible, {
@@ -354,13 +387,17 @@ export async function POST(request: NextRequest) {
       registration_job_id: "",
       registration_request_id: "",
     });
+    scheduleShoplingRegistrationWorker(
+      `queue:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
+      "[seo-run-shopling-queue]",
+    );
     return Response.json({
       ok: true,
       requestedCount: ids.length,
       queuedCount: jobs.length,
       skippedCount: Math.max(0, ids.length - jobs.length),
       jobs,
-      message: `${jobs.length}개 RUN을 서버 Shopling 등록큐에 넣었습니다. 브라우저를 닫아도 계속 처리됩니다.`,
+      message: `${jobs.length}개 RUN을 서버 Shopling 등록큐에 넣고 worker를 시작했습니다. 브라우저를 닫아도 계속 처리됩니다.`,
     });
   }
 
