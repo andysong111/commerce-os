@@ -9,6 +9,53 @@ import {
 export const SEO_RUN_JOB_TABLE = "seo_run_jobs";
 export const SEO_RUN_JOB_MAX_ACTIVE = 200;
 
+const SEO_RUN_READ_ATTEMPTS = 4;
+const SEO_RUN_READ_TIMEOUT_MS = 8_000;
+const SEO_RUN_READ_RETRY_DELAYS_MS = [1_500, 3_000, 6_000];
+const SEO_RUN_TRANSIENT_STORAGE_STATUSES = new Set([
+  408,
+  425,
+  429,
+  500,
+  502,
+  503,
+  504,
+  521,
+]);
+const SEO_RUN_LIST_SELECT = [
+  "run_id",
+  "owner_id",
+  "owner_email",
+  "batch_id",
+  "launch_item_id",
+  "tracker_row_number",
+  "model_number",
+  "product_name",
+  "source_url",
+  "status",
+  "stage",
+  "stage_index",
+  "progress_percent",
+  "message",
+  "result_payload",
+  "error_message",
+  "attempt_count",
+  "max_attempts",
+  "not_before",
+  "lease_owner",
+  "lease_until",
+  "registration_status",
+  "registration_job_id",
+  "registration_request_id",
+  "registration_payload",
+  "run_created_at",
+  "started_at",
+  "completed_at",
+  "archived_at",
+  "created_at",
+  "updated_at",
+].join(",");
+
 export type SeoRunJobStatus =
   | "queued"
   | "running"
@@ -103,6 +150,10 @@ export type SeoRunJobInsert = Pick<
 
 type UnknownRecord = Record<string, unknown>;
 
+type StorageRequestOptions = {
+  retryRead?: boolean;
+};
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -119,22 +170,107 @@ function postgrestIn(values: string[]) {
     .join(",");
 }
 
+function sleep(delayMs: number) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function normalizeStorageError(error: unknown) {
+  if (error instanceof Error) return error;
+  return new Error(
+    typeof error === "string" ? error : "SEO RUN 저장소 요청에 실패했습니다.",
+  );
+}
+
+function isTransientStorageError(error: unknown) {
+  const message = normalizeStorageError(error).message.toLowerCase();
+  return [
+    "pgrst002",
+    "schema cache",
+    "could not query the database",
+    "database system is not accepting connections",
+    "connection terminated",
+    "connection timeout",
+    "connection refused",
+    "connection reset",
+    "fetch failed",
+    "network",
+    "timed out",
+    "timeout",
+    "aborted",
+    "econnreset",
+    "econnrefused",
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+    "http 521",
+  ].some((token) => message.includes(token));
+}
+
+function isTransientStorageFailure(status: number, body: unknown, error: Error) {
+  if (SEO_RUN_TRANSIENT_STORAGE_STATUSES.has(status)) return true;
+  const code = text(record(body).code).toLowerCase();
+  return code === "pgrst002" || isTransientStorageError(error);
+}
+
 async function requestStorage<T>(
   config: ProductLaunchAdminConfig,
   path: string,
   init: RequestInit = {},
+  options: StorageRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      ...createSupabaseAdminHeaders(config.secretKey),
-      ...(init.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-  const body = await readResponseJson(response);
-  if (!response.ok) throw new Error(readProductLaunchError(body, response.status));
-  return body as T;
+  const method = String(init.method ?? "GET").toUpperCase();
+  const retryRead = options.retryRead === true && ["GET", "HEAD"].includes(method);
+  const attempts = retryRead ? SEO_RUN_READ_ATTEMPTS : 1;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEO_RUN_READ_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
+        ...init,
+        headers: {
+          ...createSupabaseAdminHeaders(config.secretKey),
+          ...(init.headers ?? {}),
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      const body = await readResponseJson(response);
+      if (response.ok) return body as T;
+
+      const error = new Error(readProductLaunchError(body, response.status));
+      lastError = error;
+      if (
+        attempt >= attempts ||
+        !retryRead ||
+        !isTransientStorageFailure(response.status, body, error)
+      ) {
+        throw error;
+      }
+    } catch (error) {
+      const normalized = normalizeStorageError(error);
+      lastError = normalized;
+      if (
+        attempt >= attempts ||
+        !retryRead ||
+        !isTransientStorageError(normalized)
+      ) {
+        throw normalized;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const delayMs =
+      SEO_RUN_READ_RETRY_DELAYS_MS[
+        Math.min(attempt - 1, SEO_RUN_READ_RETRY_DELAYS_MS.length - 1)
+      ] ?? 0;
+    if (delayMs > 0) await sleep(delayMs);
+  }
+
+  throw lastError ?? new Error("SEO RUN 저장소를 읽지 못했습니다.");
 }
 
 export async function insertSeoRunJobs(
@@ -177,7 +313,7 @@ export async function listSeoRunJobs(
   } = {},
 ) {
   const params = new URLSearchParams({
-    select: "*",
+    select: SEO_RUN_LIST_SELECT,
     owner_id: `eq.${context.identity.userId}`,
     order: "run_created_at.asc,created_at.asc",
     limit: String(
@@ -199,6 +335,8 @@ export async function listSeoRunJobs(
   const rows = await requestStorage<SeoRunJobRow[]>(
     context.config,
     `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
+    {},
+    { retryRead: true },
   );
   return Array.isArray(rows) ? rows : [];
 }
@@ -211,6 +349,7 @@ export async function patchOwnedSeoRunJobs(
   const ids = [...new Set(runIds.map(text).filter(Boolean))].slice(0, 200);
   if (!ids.length) return [];
   const params = new URLSearchParams({
+    select: SEO_RUN_LIST_SELECT,
     owner_id: `eq.${context.identity.userId}`,
     run_id: `in.(${postgrestIn(ids)})`,
   });
@@ -308,6 +447,8 @@ export async function readSeoRunJobById(
   const rows = await requestStorage<SeoRunJobRow[]>(
     config,
     `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
+    {},
+    { retryRead: true },
   );
   return Array.isArray(rows) ? rows[0] ?? null : null;
 }
