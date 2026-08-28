@@ -17,9 +17,9 @@ test("Product Master v2 is core-first and hands OPS UI a verified full first pag
   assert.doesNotMatch(app, /await import\("\.\/optimized-app\.js"\)/);
   assert.match(controlPlane, /MASTER_FALLBACK_DELAY_MS = 0/);
 
+  assert.match(gate, /WORKFLOW_API = "\/api\/product-launch-tracker\/recovery-page"/);
   assert.match(gate, /INITIAL_WORKFLOW_PAGE_SIZE = 25/);
   assert.match(gate, /unfinishedOnly: "true"/);
-  assert.match(gate, /WORKFLOW_API = "\/api\/product-launch-tracker\/recovery-page"/);
   assert.match(gate, /PROBE_TIMEOUT_MS = 5_000/);
   assert.match(gate, /Array\.isArray\(body\?\.items\)/);
   assert.match(gate, /installWarmWorkflowPage/);
@@ -30,6 +30,21 @@ test("Product Master v2 is core-first and hands OPS UI a verified full first pag
   const standalone = app.split("} else {")[1] ?? "";
   const beforeLazyInstaller = standalone.split("function installLazyDetailPageIntegrations")[0] ?? "";
   assert.doesNotMatch(beforeLazyInstaller, /await import\("\.\/detail-page-dock\.js"\)/);
+});
+
+test("Supabase REST 장애 중에도 최근 정상 OPS 캐시가 있는 Product Master 행은 SEO 선택을 허용한다", () => {
+  const app = read("public/product-launch-tracker-app/app.js");
+  const fallback = read("public/product-launch-tracker-app/seo-fallback-cache-selection.js");
+
+  assert.match(app, /await import\("\.\/seo-fallback-cache-selection\.js"\)/);
+  assert.match(fallback, /MAX_CACHE_AGE_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(fallback, /tr\.master-core-fallback-row/);
+  assert.match(fallback, /checkbox\.classList\.add\("row-check"\)/);
+  assert.match(fallback, /checkbox\.disabled = false/);
+  assert.match(fallback, /row\.dataset\.id/);
+  assert.match(fallback, /NORMALIZED_ITEM_PATH/);
+  assert.match(fallback, /browser-last-known-good-cache/);
+  assert.match(fallback, /document\.body\.dataset\.productMasterFallback === "true"/);
 });
 
 test("global work assistant does not poll the full detail job list every 2.5 seconds", () => {
