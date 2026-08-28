@@ -18,22 +18,21 @@ test("Ops Supabase admin reads fail fast before a Vercel invocation can hang", a
   assert.match(admin, /adminTransportError/);
 });
 
-test("Supabase SEO wakeup remains a bounded fallback while Vercel stays the primary minute worker", async () => {
+test("duplicate Supabase SEO HTTP wakeup is retired while Vercel keeps bounded durable recovery", async () => {
   const migration = await source(
-    "supabase/migrations/202608280007_reduce_seo_run_supabase_wakeup_pressure.sql",
+    "supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql",
   );
   const vercel = JSON.parse(await source("vercel.json"));
 
   assert.match(migration, /cron\.unschedule/);
-  assert.match(migration, /'\*\/5 \* \* \* \*'/);
-  assert.match(migration, /timeout_milliseconds := 15000/);
-  assert.doesNotMatch(migration, /280000/);
+  assert.doesNotMatch(migration, /cron\.schedule\s*\(/);
+  assert.doesNotMatch(migration, /net\.http_get/);
 
   assert.deepEqual(
     vercel.crons.find((row) => row.path === "/api/cron/seo-run-worker"),
     {
       path: "/api/cron/seo-run-worker",
-      schedule: "* * * * *",
+      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
     },
   );
 });

@@ -46,12 +46,20 @@ test("parity worker is read-only for business data and only records operation ev
   assert.match(page, /발주·가격·재고 쓰기는 없습니다/);
 });
 
-test("cron and same-origin API can resume the durable read-only comparison", () => {
+test("cron and same-origin API can resume the durable read-only comparison at recovery cadence", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /runCanonicalDemandParityStep/);
   assert.match(api, /isSameOriginOpsRequest/);
   assert.match(api, /run-next/);
   assert.match(api, /createCanonicalDemandParityRequest/);
-  assert.match(vercel, /\/api\/cron\/stage8-canonical-demand-parity/);
-  assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+  const config = JSON.parse(vercel);
+  assert.deepEqual(
+    config.crons.find(
+      (entry) => entry.path === "/api/cron/stage8-canonical-demand-parity",
+    ),
+    {
+      path: "/api/cron/stage8-canonical-demand-parity",
+      schedule: "27 */6 * * *",
+    },
+  );
 });

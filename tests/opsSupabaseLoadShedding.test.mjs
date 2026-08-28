@@ -17,33 +17,24 @@ function minuteSet(schedule) {
   return new Set(values);
 }
 
-test("only the actively processing durable SEO worker remains every minute", () => {
-  const everyMinute = vercel.crons
-    .filter((cron) => cron.schedule === "* * * * *")
-    .map((cron) => cron.path)
-    .sort();
-  assert.deepEqual(everyMinute, ["/api/cron/seo-run-worker"]);
+test("DB recovery mode bounds queue wakeups instead of continuously polling empty queues", () => {
+  const everyMinute = vercel.crons.filter((cron) => cron.schedule === "* * * * *");
+  assert.deepEqual(everyMinute, []);
 
+  const seo = vercel.crons.find((cron) => cron.path === "/api/cron/seo-run-worker");
+  const detail = vercel.crons.find((cron) => cron.path === "/api/cron/detail-page-jobs");
   const shopling = vercel.crons.find(
     (cron) => cron.path === "/api/cron/shopling-price-bulk-auto",
   );
-  const detail = vercel.crons.find(
-    (cron) => cron.path === "/api/cron/detail-page-jobs",
-  );
-  assert.ok(shopling);
+  assert.ok(seo);
   assert.ok(detail);
-  const shoplingMinutes = minuteSet(shopling.schedule);
-  const detailMinutes = minuteSet(detail.schedule);
-  assert.equal(shoplingMinutes.size, 12);
-  assert.equal(detailMinutes.size, 12);
-  assert.equal(
-    [...shoplingMinutes].filter((minute) => detailMinutes.has(minute)).length,
-    0,
-    "detail and Shopling fallback workers must not wake on the same minute",
-  );
+  assert.ok(shopling);
+  assert.equal(minuteSet(seo.schedule).size, 12, "SEO durable recovery stays within 5 minutes");
+  assert.equal(minuteSet(detail.schedule).size, 12, "detail-page recovery stays within 5 minutes");
+  assert.equal(minuteSet(shopling.schedule).size, 4, "idle price worker is capped at four wakeups per hour");
 });
 
-test("heavy OPS cron wakeups are staggered instead of creating a constant four-worker fanout", () => {
+test("all OPS cron wakeups are minute-staggered during Supabase recovery", () => {
   const paths = vercel.crons.map((cron) => cron.path);
   assert.equal(new Set(paths).size, paths.length, "duplicate cron path detected");
 
@@ -53,13 +44,10 @@ test("heavy OPS cron wakeups are staggered instead of creating a constant four-w
   }
 
   const busiest = Math.max(...perMinute.map((entries) => entries.length));
-  assert.ok(busiest <= 3, `cron fanout is still too high: ${busiest}`);
-  assert.ok(
-    perMinute.every((entries) => entries.includes("/api/cron/seo-run-worker")),
-    "durable SEO worker must stay continuously scheduled",
-  );
+  assert.ok(busiest <= 1, `background workers still collide in the same minute: ${busiest}`);
 
-  const longRunningPaths = [
+  for (const path of [
+    "/api/cron/product-decision-live-refresh",
     "/api/cron/product-master-shopling-diagnostic",
     "/api/cron/product-master-shopling-sales-backfill",
     "/api/cron/product-master-shopling-sales-incremental",
@@ -68,11 +56,13 @@ test("heavy OPS cron wakeups are staggered instead of creating a constant four-w
     "/api/cron/stage8-canonical-sales-event-incremental-shadow",
     "/api/cron/stage8-canonical-event-mismatch-evidence",
     "/api/cron/stage8-canonical-sales-event-full-audit",
-  ];
-  for (const path of longRunningPaths) {
+    "/api/cron/receipt-live-price-proposals",
+    "/api/cron/receipt-live-price-canary-preflight",
+    "/api/cron/price-grade-receipt-shadow-bootstrap",
+  ]) {
     const cron = vercel.crons.find((entry) => entry.path === path);
     assert.ok(cron, `missing cron: ${path}`);
-    assert.notEqual(cron.schedule, "* * * * *", `${path} must not run every minute`);
+    assert.equal(minuteSet(cron.schedule).size, 1, `${path} should have one minute slot per eligible hour`);
   }
 });
 

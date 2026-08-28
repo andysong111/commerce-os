@@ -91,11 +91,19 @@ test("reused chunks remain operation-ledger evidence and never become a hidden b
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
 });
 
-test("cron only collects or recovers requests and never performs canary or full business writes", () => {
+test("cron only collects or recovers requests, stays read-only, and is recovery-staggered", () => {
   assert.match(cron, /runProductMasterShoplingSalesEventSyncStep/);
   assert.doesNotMatch(cron, /applyProductMasterShoplingSalesEvents/);
-  assert.match(vercel, /\/api\/cron\/product-master-shopling-sales-events/);
-  assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+  const config = JSON.parse(vercel);
+  assert.deepEqual(
+    config.crons.find(
+      (entry) => entry.path === "/api/cron/product-master-shopling-sales-events",
+    ),
+    {
+      path: "/api/cron/product-master-shopling-sales-events",
+      schedule: "22 * * * *",
+    },
+  );
 });
 
 test("full apply keeps Product Master writes in bounded verified batches", () => {

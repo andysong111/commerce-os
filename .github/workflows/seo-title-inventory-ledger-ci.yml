@@ -33,6 +33,7 @@ on:
       - "supabase/migrations/202608280003_seo_run_retry_and_title_chaining.sql"
       - "supabase/migrations/202608280004_seo_run_supabase_wakeup.sql"
       - "supabase/migrations/202608280005_seo_run_opaque_secret_rpc_compat.sql"
+      - "supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
       - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
       - "tests/seoTitleV4MinLengthContract.test.mjs"
@@ -43,6 +44,7 @@ on:
       - "tests/seoBulkCloudParallel.test.mjs"
       - "tests/seoBulkLongTitleV6UpgradeBridge.test.mjs"
       - "tests/seoRunDurableWorker.test.mjs"
+      - "tests/seoRunClaimLoadShedding.test.mjs"
       - "tests/seoCloudPerformance.test.mjs"
       - "vercel.json"
       - ".github/workflows/seo-title-inventory-ledger-ci.yml"
@@ -97,6 +99,7 @@ jobs:
           src/lib/shoplingSeoDispatchModule.ts
           src/lib/keywordEngineElonLabModule.ts
           src/lib/opsModuleRegistry.ts
+          tests/seoRunClaimLoadShedding.test.mjs
       - name: Test title inventory, durable RUN, no-reuse and performance contracts
         run: >-
           node --experimental-strip-types --test
@@ -110,6 +113,7 @@ jobs:
           tests/seoBulkCloudParallel.test.mjs
           tests/seoBulkLongTitleV6UpgradeBridge.test.mjs
           tests/seoRunDurableWorker.test.mjs
+          tests/seoRunClaimLoadShedding.test.mjs
           tests/seoCloudPerformance.test.mjs
       - name: Build
         run: npm run build

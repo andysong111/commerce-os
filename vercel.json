@@ -2,63 +2,63 @@
   "crons": [
     {
       "path": "/api/cron/shopling-price-bulk-auto",
-      "schedule": "0,5,10,15,20,25,30,35,40,45,50,55 * * * *"
-    },
-    {
-      "path": "/api/cron/detail-page-jobs",
-      "schedule": "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
-    },
-    {
-      "path": "/api/cron/seo-run-worker",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/product-decision-live-refresh",
-      "schedule": "2,17,32,47 * * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-diagnostic",
-      "schedule": "3,18,33,48 * * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-sales-backfill",
-      "schedule": "4,14,24,34,44,54 * * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-sales-incremental",
       "schedule": "5,20,35,50 * * * *"
     },
     {
-      "path": "/api/cron/product-master-shopling-sales-events",
-      "schedule": "7,22,37,52 * * * *"
+      "path": "/api/cron/detail-page-jobs",
+      "schedule": "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
     },
     {
-      "path": "/api/cron/stage8-canonical-demand-parity",
-      "schedule": "8,23,38,53 * * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-sales-event-incremental-shadow",
-      "schedule": "9,19,29,39,49,59 * * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-event-mismatch-evidence",
-      "schedule": "10,25,40,55 * * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-sales-event-full-audit",
-      "schedule": "12,27,42,57 * * * *"
-    },
-    {
-      "path": "/api/cron/receipt-live-price-proposals",
+      "path": "/api/cron/seo-run-worker",
       "schedule": "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
     },
     {
+      "path": "/api/cron/product-decision-live-refresh",
+      "schedule": "2 * * * *"
+    },
+    {
+      "path": "/api/cron/product-master-shopling-diagnostic",
+      "schedule": "7 */6 * * *"
+    },
+    {
+      "path": "/api/cron/product-master-shopling-sales-backfill",
+      "schedule": "12 */6 * * *"
+    },
+    {
+      "path": "/api/cron/product-master-shopling-sales-incremental",
+      "schedule": "17 * * * *"
+    },
+    {
+      "path": "/api/cron/product-master-shopling-sales-events",
+      "schedule": "22 * * * *"
+    },
+    {
+      "path": "/api/cron/stage8-canonical-demand-parity",
+      "schedule": "27 */6 * * *"
+    },
+    {
+      "path": "/api/cron/stage8-canonical-sales-event-incremental-shadow",
+      "schedule": "32 * * * *"
+    },
+    {
+      "path": "/api/cron/stage8-canonical-event-mismatch-evidence",
+      "schedule": "37 */6 * * *"
+    },
+    {
+      "path": "/api/cron/stage8-canonical-sales-event-full-audit",
+      "schedule": "42 2 * * *"
+    },
+    {
+      "path": "/api/cron/receipt-live-price-proposals",
+      "schedule": "47 * * * *"
+    },
+    {
       "path": "/api/cron/receipt-live-price-canary-preflight",
-      "schedule": "13,28,43,58 * * * *"
+      "schedule": "52 */6 * * *"
     },
     {
       "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
-      "schedule": "0,15,30,45 * * * *"
+      "schedule": "57 * * * *"
     }
   ]
 }

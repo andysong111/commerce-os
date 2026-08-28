@@ -118,7 +118,7 @@ test("cron is bearer protected, idles when credentials are missing and stays aut
     vercel.crons.some(
       (entry) =>
         entry.path === "/api/cron/product-decision-live-refresh" &&
-        entry.schedule === "2,17,32,47 * * * *",
+        entry.schedule === "2 * * * *",
     ),
   );
 });

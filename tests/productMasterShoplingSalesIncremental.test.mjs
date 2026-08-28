@@ -18,7 +18,7 @@ const recoveryApi = await readFile(
   "src/app/api/product-master/shopling-sales-incremental/route.ts",
   "utf8",
 );
-const vercel = await readFile("vercel.json", "utf8");
+const vercel = JSON.parse(await readFile("vercel.json", "utf8"));
 
 test("incremental sync cannot start before the initial 24-month ledger is completed", () => {
   assert.match(workflow, /loadProductMasterShoplingSalesStatus/);
@@ -77,14 +77,21 @@ test("range failures reduce from seven days to two without an infinite retry loo
   assert.match(workflow, /2일 단위로 안전 재접수/);
 });
 
-test("cron is secret-protected, bounded, and registered every minute", () => {
+test("cron is secret-protected, bounded, and recovery-staggered hourly", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /MAX_STEPS_PER_INVOCATION = 6/);
   assert.match(cron, /EXTRA_STEP_START_BUDGET_MS = 10_000/);
   assert.match(cron, /ensureProductMasterShoplingSalesIncrementalRequest/);
   assert.match(cron, /runProductMasterShoplingSalesIncrementalStep/);
-  assert.match(vercel, /product-master-shopling-sales-incremental/);
-  assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+  assert.deepEqual(
+    vercel.crons.find(
+      (entry) => entry.path === "/api/cron/product-master-shopling-sales-incremental",
+    ),
+    {
+      path: "/api/cron/product-master-shopling-sales-incremental",
+      schedule: "17 * * * *",
+    },
+  );
 });
 
 test("same-origin recovery API can advance only an already-created incremental request", () => {
