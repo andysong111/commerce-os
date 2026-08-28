@@ -6,6 +6,7 @@ import {
 } from "@/lib/seoRunWorkerControl";
 import { processSeoRunQueue } from "@/lib/seoRunWorker";
 import { processProductLaunchShoplingPostprocessQueue } from "@/lib/productLaunchShoplingPostprocessWorker";
+import { reconcileVerifiedShoplingRegistrations } from "@/lib/productLaunchShoplingRegistrationTruth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +36,21 @@ export async function GET() {
 
   let storedResult: Record<string, unknown> = {};
   try {
+    let registrationTruthResult: Record<string, unknown> = {};
+    try {
+      registrationTruthResult = await reconcileVerifiedShoplingRegistrations({
+        maxRuns: 6,
+      });
+    } catch (error) {
+      console.error("[seo-run-wakeup] Shopling registration truth recovery failed", error);
+      registrationTruthResult = {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Shopling registration truth recovery failed",
+      };
+    }
+
     let postprocessResult: Record<string, unknown> = {};
     try {
       postprocessResult = await processProductLaunchShoplingPostprocessQueue({
@@ -58,6 +74,7 @@ export async function GET() {
     storedResult = {
       ok: true,
       ...result,
+      shoplingRegistrationTruth: registrationTruthResult,
       shoplingPostprocess: postprocessResult,
     };
     return NextResponse.json({
@@ -66,6 +83,7 @@ export async function GET() {
       completedCount: result.completedCount,
       failedCount: result.failedCount,
       queuedCount: result.queuedCount,
+      shoplingRegistrationTruth: registrationTruthResult,
       shoplingPostprocess: postprocessResult,
     });
   } catch (error) {
