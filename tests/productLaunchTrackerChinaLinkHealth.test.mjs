@@ -40,10 +40,14 @@ test("고정링크 1 삭제 후 후순위 링크가 순서대로 승격된다", 
 });
 
 test("링크 검사는 페이지 로딩과 분리된 단일창 저속 배치 방식이다", async () => {
-  const panel = await read("public/product-launch-tracker-app/china-link-health-panel.js");
+  const wrapper = await read("public/product-launch-tracker-app/china-link-health-panel.js");
+  const panel = await read("public/product-launch-tracker-app/china-link-health-panel-full.js");
   const handoff = await read("public/product-launch-tracker-app/seo-title-ledger-handoff.js");
   const runState = await read("public/product-launch-tracker-app/china-link-health-run-state.js");
 
+  assert.match(wrapper, /china-link-health-panel-full\.js/);
+  assert.match(wrapper, /1688 링크 진단 열기/);
+  assert.doesNotMatch(wrapper, /HEALTH_API/);
   assert.match(panel, /const RESULT_BATCH_SIZE = 10/);
   assert.match(panel, /const BETWEEN_LINK_DELAY_MS = 1_200/);
   assert.match(panel, /window\.open\("about:blank", WORKER_NAME/);
@@ -62,7 +66,7 @@ test("링크 검사는 페이지 로딩과 분리된 단일창 저속 배치 방
 });
 
 test("상품출시 iframe은 상위 Ops 문서의 Collector 버전을 재사용한다", async () => {
-  const panel = await read("public/product-launch-tracker-app/china-link-health-panel.js");
+  const panel = await read("public/product-launch-tracker-app/china-link-health-panel-full.js");
   assert.match(panel, /window\.parent\.document\.documentElement\.dataset/);
   assert.match(panel, /parentCollectorDocument\.addEventListener/);
   assert.match(panel, /commerce-os-keyword-lab-collector-ready/);
