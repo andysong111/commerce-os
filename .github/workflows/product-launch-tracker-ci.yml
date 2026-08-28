@@ -28,6 +28,7 @@ on:
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/*product_launch*.sql'
       - 'supabase/migrations/*option_barcode*.sql'
+      - 'supabase/migrations/*seo_run_shopling*.sql'
       - 'tests/productLaunchTracker*.test.mjs'
       - 'tests/productLaunchShopling*.test.mjs'
       - 'tests/productLaunchOptionBarcodeRegistry.test.mjs'
@@ -62,6 +63,7 @@ jobs:
           tests/productLaunchShoplingPostprocessWorker.test.mjs
           tests/productLaunchShoplingRegistrationTruth.test.mjs
           tests/productLaunchShoplingServerQueue.test.mjs
+          tests/productLaunchShoplingWorkerSplit.test.mjs
           tests/productLaunchOptionBarcodeRegistry.test.mjs
           tests/productLaunchShoplingMallSeo.test.mjs
           tests/productLaunchTrackerUploadClaim.test.mjs
