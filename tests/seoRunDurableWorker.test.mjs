@@ -93,7 +93,7 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /composeKeywordElonBulkFinal/);
 });
 
-test("durable SEO 복구는 Vercel 독립 매분 cron으로 실행되고 receipt cron과 분리된다", async () => {
+test("durable SEO 복구는 Vercel 독립 5분 이내 cron으로 실행되고 receipt cron과 분리된다", async () => {
   const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
   const shared = await source(
     "src/app/api/cron/receipt-live-price-proposals/route.ts",
@@ -111,14 +111,17 @@ test("durable SEO 복구는 Vercel 독립 매분 cron으로 실행되고 receipt
     vercel.crons.find((row) => row.path === "/api/cron/seo-run-worker"),
     {
       path: "/api/cron/seo-run-worker",
-      schedule: "* * * * *",
+      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
     },
   );
 });
 
-test("Supabase pg_cron과 pg_net도 SEO RUN wakeup을 매분 이중화하고 전역 lease로 fanout을 막는다", async () => {
-  const migration = await source(
+test("과거 Supabase wakeup 안전장치는 전역 lease를 보존하되 DB HTTP cron은 최종적으로 제거된다", async () => {
+  const originalWakeupMigration = await source(
     "supabase/migrations/202608280004_seo_run_supabase_wakeup.sql",
+  );
+  const retirementMigration = await source(
+    "supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql",
   );
   const opaqueSecretCompat = await source(
     "supabase/migrations/202608280005_seo_run_opaque_secret_rpc_compat.sql",
@@ -126,16 +129,17 @@ test("Supabase pg_cron과 pg_net도 SEO RUN wakeup을 매분 이중화하고 전
   const wakeup = await source("src/app/api/seo-run-wakeup/route.ts");
   const control = await source("src/lib/seoRunWorkerControl.ts");
 
-  assert.match(migration, /create extension if not exists pg_cron/);
-  assert.match(migration, /create extension if not exists pg_net/);
-  assert.match(migration, /create table if not exists public\.seo_run_worker_control/);
-  assert.match(migration, /claim_seo_run_worker_pulse/);
-  assert.match(migration, /finish_seo_run_worker_pulse/);
-  assert.match(migration, /cron\.schedule/);
-  assert.match(migration, /commerce-os-seo-run-wakeup/);
-  assert.match(migration, /\/api\/seo-run-wakeup/);
-  assert.match(migration, /net\.http_get/);
-  assert.match(migration, /'\* \* \* \* \*'/);
+  assert.match(originalWakeupMigration, /create extension if not exists pg_cron/);
+  assert.match(originalWakeupMigration, /create extension if not exists pg_net/);
+  assert.match(originalWakeupMigration, /create table if not exists public\.seo_run_worker_control/);
+  assert.match(originalWakeupMigration, /claim_seo_run_worker_pulse/);
+  assert.match(originalWakeupMigration, /finish_seo_run_worker_pulse/);
+  assert.match(originalWakeupMigration, /commerce-os-seo-run-wakeup/);
+
+  assert.match(retirementMigration, /cron\.unschedule/);
+  assert.match(retirementMigration, /commerce-os-seo-run-wakeup/);
+  assert.doesNotMatch(retirementMigration, /cron\.schedule\s*\(/);
+  assert.doesNotMatch(retirementMigration, /net\.http_get/);
 
   assert.match(opaqueSecretCompat, /claim_seo_run_worker_pulse/);
   assert.match(opaqueSecretCompat, /finish_seo_run_worker_pulse/);
