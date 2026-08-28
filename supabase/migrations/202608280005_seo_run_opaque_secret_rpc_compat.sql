@@ -1,5 +1,5 @@
 -- Opaque sb_secret_ server keys are not JWTs. PostgREST still authorizes them as
--- the service_role database role, but request.jwt.claim.role may be absent.
+-- the service_role database role even when a JWT role claim is absent.
 -- These RPCs are already EXECUTE-revoked from public/anon/authenticated, so rely
 -- on database function privileges instead of a redundant JWT-claim check.
 
