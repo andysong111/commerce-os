@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { InternalChinaForwarderCostSummary } from "@/lib/internalChinaForwarderCost";
 
@@ -67,18 +67,6 @@ export function InternalChinaReceiptPanel({
   const [forwarderCostInput, setForwarderCostInput] = useState(
     forwarderCost.actualCostKrw ? String(forwarderCost.actualCostKrw) : "",
   );
-
-  useEffect(() => {
-    setQuantities(
-      Object.fromEntries(openLines.map((line) => [line.barcode, line.openQuantity])),
-    );
-  }, [openLines]);
-
-  useEffect(() => {
-    setForwarderCostInput(
-      forwarderCost.actualCostKrw ? String(forwarderCost.actualCostKrw) : "",
-    );
-  }, [forwarderCost.actualCostKrw]);
 
   const selected = openLines
     .map((line) => ({
