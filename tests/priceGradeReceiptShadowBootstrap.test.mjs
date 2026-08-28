@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [bootstrap, cron, vercel] = await Promise.all([
+const [bootstrap, cron, scheduler] = await Promise.all([
   readFile("src/lib/priceGradeReceiptShadowBootstrap.ts", "utf8"),
   readFile(
     "src/app/api/cron/price-grade-receipt-shadow-bootstrap/route.ts",
     "utf8",
   ),
-  readFile("vercel.json", "utf8").then(JSON.parse),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("bootstrap reuses only a result whose receipt-augmented content fingerprint is current", () => {
@@ -41,18 +41,13 @@ test("bootstrap result exposes only read-only summary counts", () => {
   );
 });
 
-test("cron is bearer protected, read-only, and hourly during DB recovery", () => {
+test("cron is bearer protected, read-only, and an operational dispatcher task", () => {
   assert.match(cron, /Bearer \$\{expected\}/);
   assert.match(cron, /runPriceGradeReceiptShadowBootstrap/);
   assert.match(cron, /maxDuration = 120/);
   assert.match(cron, /writesEnabled: false/);
-  assert.deepEqual(
-    vercel.crons.find(
-      (entry) => entry.path === "/api/cron/price-grade-receipt-shadow-bootstrap",
-    ),
-    {
-      path: "/api/cron/price-grade-receipt-shadow-bootstrap",
-      schedule: "57 * * * *",
-    },
+  assert.match(
+    scheduler,
+    /'price-grade-receipt-shadow-bootstrap', '\/api\/cron\/price-grade-receipt-shadow-bootstrap', 'operational', 150, true, 3600, 300, 21600/,
   );
 });
