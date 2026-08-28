@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { InternalChinaForwarderCostFallback } from "@/components/china-order-manager/InternalChinaForwarderCostFallback";
 import { InternalChinaReceiptPanel } from "@/components/china-order-manager/InternalChinaReceiptPanel";
 import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadInternalChinaForwarderCostSummary } from "@/lib/internalChinaForwarderCost";
@@ -95,7 +96,7 @@ export default async function ChinaOrderManagerLayout({
           return {
             draftId: draft.draftId,
             summary: null,
-            warning: `${draft.draftId} 배송대행 비용 요약 조회가 4.5초를 넘어 화면에서만 일시 보류됐습니다. 원장 데이터는 변경되지 않았습니다.`,
+            warning: `${draft.draftId} 배송대행 비용 요약 조회가 4.5초를 넘어 요약값만 일시 보류됐습니다. 실제비용 입력 기능은 계속 사용할 수 있습니다.`,
           };
         }
         return {
@@ -109,22 +110,17 @@ export default async function ChinaOrderManagerLayout({
           summary: null,
           warning:
             error instanceof Error
-              ? `${draft.draftId} 배송대행 비용 화면: ${error.message}`
-              : `${draft.draftId} 배송대행 비용 화면을 불러오지 못했습니다.`,
+              ? `${draft.draftId} 배송대행 비용 요약: ${error.message}`
+              : `${draft.draftId} 배송대행 비용 요약을 불러오지 못했습니다.`,
         };
       }
     }),
-  );
-  const forwarderCostByDraft = new Map(
-    forwarderCostRows
-      .filter((row) => row.summary)
-      .map((row) => [row.draftId, row.summary!] as const),
   );
   const forwarderWarnings = forwarderCostRows
     .map((row) => row.warning)
     .filter(Boolean);
   const pendingForwarderCostCount = forwarderCostRows.filter(
-    (row) => row.summary && !row.summary.actualCostKrw,
+    (row) => !row.summary?.actualCostKrw,
   ).length;
 
   return (
@@ -159,14 +155,26 @@ export default async function ChinaOrderManagerLayout({
       ) : null}
 
       {currentCycleDrafts.map((draft) => {
-        const forwarderCost = forwarderCostByDraft.get(draft.draftId);
-        if (!forwarderCost) return null;
+        const forwarderRow = forwarderCostRows.find(
+          (row) => row.draftId === draft.draftId,
+        );
+        if (!forwarderRow) return null;
+        if (!forwarderRow.summary) {
+          return (
+            <InternalChinaForwarderCostFallback
+              key={draft.draftId}
+              draftId={draft.draftId}
+              cycleMonth={draft.cycleMonth}
+              warning={forwarderRow.warning}
+            />
+          );
+        }
         return (
           <InternalChinaReceiptPanel
             key={draft.draftId}
             draftId={draft.draftId}
             cycleMonth={draft.cycleMonth}
-            forwarderCost={forwarderCost}
+            forwarderCost={forwarderRow.summary}
             lines={draft.lines.map((line) => {
               const display = metadata.byBarcode[line.barcode];
               return {
