@@ -92,10 +92,10 @@ test("one-click creation API is Production-only, session-owned, confirmation-gat
   assert.doesNotMatch(route, /approve_shopling_price_bulk_failed_retry/);
 });
 
-test("cron is production GET, exact Bearer authenticated, fail-closed, bounded, and recovery-staggered", async () => {
-  const [route, vercel] = await Promise.all([
+test("cron remains exact-Bearer protected and is a critical adaptive-dispatcher task", async () => {
+  const [route, scheduler] = await Promise.all([
     read("src/app/api/cron/shopling-price-bulk-auto/route.ts"),
-    read("vercel.json"),
+    read("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql"),
   ]);
   assert.match(route, /export async function GET/);
   assert.match(route, /process\.env\.VERCEL_ENV !== "production"/);
@@ -109,22 +109,10 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, bounded, 
   assert.match(route, /LEASE_SECONDS = 75/);
   assert.doesNotMatch(route, /user-agent/i);
   assert.doesNotMatch(route, /createSupabaseServerClient|auth\.getUser/);
-
-  const config = JSON.parse(vercel);
-  assert.ok(Array.isArray(config.crons));
-  const target = config.crons.filter(
-    (cron) => cron?.path === "/api/cron/shopling-price-bulk-auto",
+  assert.match(
+    scheduler,
+    /'shopling-price-bulk-auto', '\/api\/cron\/shopling-price-bulk-auto', 'critical', 30, true, 900, 60, 1800/,
   );
-  assert.deepEqual(target, [
-    {
-      path: "/api/cron/shopling-price-bulk-auto",
-      schedule: "5,20,35,50 * * * *",
-    },
-  ]);
-  const minutes = target[0].schedule.split(" ")[0].split(",").map(Number);
-  assert.deepEqual(minutes, [5, 20, 35, 50]);
-  const paths = config.crons.map((cron) => cron?.path).filter(Boolean);
-  assert.equal(new Set(paths).size, paths.length, "cron paths must stay unique");
 });
 
 test("orchestrator reconciles same request IDs, honors pause, and never auto-approves failed-item retry", async () => {
