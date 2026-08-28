@@ -92,7 +92,7 @@ test("one-click creation API is Production-only, session-owned, confirmation-gat
   assert.doesNotMatch(route, /approve_shopling_price_bulk_failed_retry/);
 });
 
-test("cron is production GET, exact Bearer authenticated, fail-closed, bounded, and five-minute staggered", async () => {
+test("cron is production GET, exact Bearer authenticated, fail-closed, bounded, and recovery-staggered", async () => {
   const [route, vercel] = await Promise.all([
     read("src/app/api/cron/shopling-price-bulk-auto/route.ts"),
     read("vercel.json"),
@@ -118,12 +118,11 @@ test("cron is production GET, exact Bearer authenticated, fail-closed, bounded, 
   assert.deepEqual(target, [
     {
       path: "/api/cron/shopling-price-bulk-auto",
-      schedule: "0,5,10,15,20,25,30,35,40,45,50,55 * * * *",
+      schedule: "5,20,35,50 * * * *",
     },
   ]);
   const minutes = target[0].schedule.split(" ")[0].split(",").map(Number);
-  assert.equal(minutes.length, 12);
-  assert.deepEqual(minutes.map((value, index) => index === 0 ? value : value - minutes[index - 1]), [0,5,5,5,5,5,5,5,5,5,5,5]);
+  assert.deepEqual(minutes, [5, 20, 35, 50]);
   const paths = config.crons.map((cron) => cron?.path).filter(Boolean);
   assert.equal(new Set(paths).size, paths.length, "cron paths must stay unique");
 });
