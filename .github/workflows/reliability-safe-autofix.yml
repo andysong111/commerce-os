@@ -127,8 +127,47 @@ jobs:
       - name: Install dependencies without repository write credentials
         run: npm ci
 
-      - name: Full repository tests
-        run: npm test
+      - name: Full repository tests must not regress from baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch=/tmp/reliability-autofix-bundle/autofix.patch
+
+          # Capture unpatched baseline full-test result. Existing unrelated failures are evidence,
+          # not permission for the generated patch to create another failure.
+          git apply --check --reverse "$patch"
+          git apply --reverse "$patch"
+          set +e
+          npm test > /tmp/reliability-autofix-baseline.tap 2>&1
+          baseline_status=$?
+          set -e
+          cat /tmp/reliability-autofix-baseline.tap
+          if [[ "$baseline_status" -gt 1 ]]; then
+            echo "baseline test command did not finish normally"
+            exit "$baseline_status"
+          fi
+
+          git apply --check "$patch"
+          git apply "$patch"
+          git diff --check
+
+          # Candidate full repository tests must not add failures, cancellations, skips, or todos.
+          set +e
+          npm test > /tmp/reliability-autofix-candidate.tap 2>&1
+          candidate_status=$?
+          set -e
+          cat /tmp/reliability-autofix-candidate.tap
+          if [[ "$candidate_status" -gt 1 ]]; then
+            echo "candidate test command did not finish normally"
+            exit "$candidate_status"
+          fi
+          node scripts/reliability-autofix-test-delta.mjs \
+            /tmp/reliability-autofix-baseline.tap \
+            /tmp/reliability-autofix-candidate.tap
+          if [[ "$baseline_status" -eq 0 && "$candidate_status" -ne 0 ]]; then
+            echo "clean baseline became failing after autofix"
+            exit 1
+          fi
 
       - name: Production build safety gate
         env:
