@@ -52,6 +52,16 @@ test("Product Master receipt cost excludes the temporary 1.45 estimate", () => {
   assert.equal(receiptEngine.includes("draft.internalOrderCostMultiplier"), false);
 });
 
+test("closing the forwarding expense repairs same-cycle receipt cache rows before Product Master sync", () => {
+  assert.ok(engine.includes("readPriceAdjustmentReceiptCache"));
+  assert.ok(engine.includes("mergePriceAdjustmentReceiptCachePage"));
+  assert.ok(engine.includes('row.id.startsWith("china-receipt:")'));
+  assert.ok(engine.includes("row.batchId !== cycleBatchId"));
+  assert.ok(engine.includes("unitCostKrw: nextUnitCostKrw"));
+  assert.ok(engine.includes("pushCanonicalProductMasterSnapshotFromTrackerState"));
+  assert.ok(route.includes("1.45를 제거한 상품대금·중국내 운임 기준"));
+});
+
 test("the forwarder regression suite is permanently wired into China Order Ledger CI", () => {
   assert.ok(workflow.includes('src/lib/internalChinaForwarderCost.ts'));
   assert.ok(workflow.includes('src/app/api/china-order-manager/forwarder-cost/route.ts'));

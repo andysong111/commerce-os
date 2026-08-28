@@ -5,6 +5,17 @@ import {
   type InternalChinaPurchaseDraft,
 } from "@/lib/internalChinaPurchaseDraft";
 import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
+import { temporaryOpsIdentity } from "@/lib/opsLoginBypass";
+import {
+  mergePriceAdjustmentReceiptCachePage,
+  readPriceAdjustmentReceiptCache,
+  type PriceAdjustmentReceipt,
+} from "@/lib/priceAdjustmentReceiptCache";
+import { pushCanonicalProductMasterSnapshotFromTrackerState } from "@/lib/productMasterCanonicalSync";
+import {
+  getProductLaunchAdminConfig,
+  readProductLaunchState,
+} from "@/lib/productLaunchTrackerServer";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
 export const INTERNAL_CHINA_FORWARDER_COST_OPERATION_TYPE =
@@ -27,6 +38,13 @@ export type InternalChinaForwarderCostInput = {
   actualCostKrw?: unknown;
 };
 
+export type InternalChinaReceiptCostReconciliation = {
+  matchedRows: number;
+  updatedRows: number;
+  productMasterSynced: boolean;
+  productMasterError: string | null;
+};
+
 export type InternalChinaForwarderCostSummary = {
   draftId: string;
   cycleMonth: string;
@@ -40,6 +58,7 @@ export type InternalChinaForwarderCostSummary = {
   closedAt: string | null;
   appliesToProductUnitCost: false;
   appliesToPriceGrade: false;
+  receiptCostReconciliation?: InternalChinaReceiptCostReconciliation | null;
 };
 
 function text(value: unknown) {
@@ -106,7 +125,7 @@ function supabaseConnection() {
   return { baseUrl, secret };
 }
 
-function productPurchaseCostKrw(draft: InternalChinaPurchaseDraft) {
+function productUnitCostByBarcode(draft: InternalChinaPurchaseDraft) {
   const groups = new Map<string, { quantity: number; freight: number }>();
   for (const line of draft.lines) {
     const key = line.freightGroupId.trim() || `__${line.barcode}`;
@@ -116,16 +135,28 @@ function productPurchaseCostKrw(draft: InternalChinaPurchaseDraft) {
     groups.set(key, current);
   }
 
-  let total = 0;
+  const result = new Map<string, number>();
   for (const line of draft.lines) {
     const key = line.freightGroupId.trim() || `__${line.barcode}`;
     const group = groups.get(key) ?? { quantity: line.quantity, freight: 0 };
     const freightPerUnitCny =
       group.quantity > 0 ? group.freight / group.quantity : 0;
     const unitCny = decimal(line.unitPriceCny) + freightPerUnitCny;
-    total += unitCny * line.quantity * draft.exchangeRateKrwPerCny;
+    result.set(
+      line.barcode,
+      Math.max(1, Math.round(unitCny * draft.exchangeRateKrwPerCny)),
+    );
   }
-  return Math.max(0, Math.round(total));
+  return result;
+}
+
+function productPurchaseCostKrw(draft: InternalChinaPurchaseDraft) {
+  const unitCosts = productUnitCostByBarcode(draft);
+  return draft.lines.reduce(
+    (total, line) =>
+      total + (unitCosts.get(line.barcode) ?? 0) * line.quantity,
+    0,
+  );
 }
 
 function summaryFrom(
@@ -133,6 +164,7 @@ function summaryFrom(
   cycleMonth: string,
   actualCostKrw: number | null,
   closedAt: string | null,
+  receiptCostReconciliation: InternalChinaReceiptCostReconciliation | null = null,
 ): InternalChinaForwarderCostSummary {
   const productCost = productPurchaseCostKrw(draft);
   const estimatedTotal = Math.max(
@@ -160,7 +192,94 @@ function summaryFrom(
     closedAt,
     appliesToProductUnitCost: false,
     appliesToPriceGrade: false,
+    receiptCostReconciliation,
   };
+}
+
+async function syncReceiptCostsToProductMaster() {
+  const config = getProductLaunchAdminConfig();
+  if (!config.ok) throw new Error(config.body.message);
+  const identity = temporaryOpsIdentity();
+  const stored = await readProductLaunchState(config.value, identity.userId);
+  if (!stored?.state_payload || typeof stored.state_payload !== "object") {
+    throw new Error("PRODUCT_LAUNCH_STATE_REQUIRED");
+  }
+  return pushCanonicalProductMasterSnapshotFromTrackerState(stored.state_payload);
+}
+
+async function reconcileProductOnlyReceiptCosts(
+  draft: InternalChinaPurchaseDraft,
+  cycleMonth: string,
+): Promise<InternalChinaReceiptCostReconciliation> {
+  const cache = await readPriceAdjustmentReceiptCache();
+  if (!cache) {
+    return {
+      matchedRows: 0,
+      updatedRows: 0,
+      productMasterSynced: false,
+      productMasterError: "PRICE_ADJUSTMENT_RECEIPT_CACHE_REQUIRED",
+    };
+  }
+
+  const unitCosts = productUnitCostByBarcode(draft);
+  const cycleBatchId = Number(cycleMonth.replace("-", ""));
+  const corrections: PriceAdjustmentReceipt[] = [];
+  let matchedRows = 0;
+
+  for (const line of draft.lines) {
+    const nextUnitCostKrw = unitCosts.get(line.barcode);
+    if (!nextUnitCostKrw) continue;
+    const rows = cache.receiptsByBarcode[line.barcode] ?? [];
+    for (const row of rows) {
+      if (
+        row.batchId !== cycleBatchId ||
+        !row.id.startsWith("china-receipt:")
+      ) {
+        continue;
+      }
+      matchedRows += 1;
+      corrections.push({
+        ...row,
+        unitCostKrw: nextUnitCostKrw,
+      });
+    }
+  }
+
+  if (!corrections.length) {
+    return {
+      matchedRows,
+      updatedRows: 0,
+      productMasterSynced: false,
+      productMasterError: "PRODUCT_ONLY_RECEIPT_ROWS_NOT_FOUND",
+    };
+  }
+
+  await mergePriceAdjustmentReceiptCachePage({
+    snapshotId: cache.snapshotId,
+    generatedAt: new Date().toISOString(),
+    complete: cache.complete,
+    receipts: corrections,
+  });
+
+  try {
+    await syncReceiptCostsToProductMaster();
+    return {
+      matchedRows,
+      updatedRows: corrections.length,
+      productMasterSynced: true,
+      productMasterError: null,
+    };
+  } catch (error) {
+    return {
+      matchedRows,
+      updatedRows: corrections.length,
+      productMasterSynced: false,
+      productMasterError:
+        error instanceof Error
+          ? error.message
+          : "PRODUCT_MASTER_PRODUCT_ONLY_RECEIPT_SYNC_FAILED",
+    };
+  }
 }
 
 async function readStoredCost(draftId: string) {
@@ -250,12 +369,31 @@ export async function recordInternalChinaForwarderCost(
   const draft = await loadInternalChinaDraftWithQuantityOverrides(
     await loadInternalChinaPurchaseDraft(draftId),
   );
+  let reconciliation: InternalChinaReceiptCostReconciliation;
+  try {
+    reconciliation = await reconcileProductOnlyReceiptCosts(
+      draft,
+      actualCycleMonth,
+    );
+  } catch (error) {
+    reconciliation = {
+      matchedRows: 0,
+      updatedRows: 0,
+      productMasterSynced: false,
+      productMasterError:
+        error instanceof Error
+          ? error.message
+          : "PRODUCT_ONLY_RECEIPT_RECONCILIATION_FAILED",
+    };
+  }
+
   const now = new Date().toISOString();
   const summary = summaryFrom(
     draft,
     actualCycleMonth,
     actualCostKrw,
     now,
+    reconciliation,
   );
   const { baseUrl, secret } = supabaseConnection();
   const response = await fetch(
@@ -269,7 +407,7 @@ export async function recordInternalChinaForwarderCost(
       body: JSON.stringify([
         {
           operation_type: INTERNAL_CHINA_FORWARDER_COST_OPERATION_TYPE,
-          status: "SUCCEEDED",
+          status: reconciliation.productMasterSynced ? "SUCCEEDED" : "PARTIAL",
           source: SOURCE,
           source_event_id: sourceEventId(draftId),
           correlation_id: correlationId(draftId),
@@ -280,7 +418,7 @@ export async function recordInternalChinaForwarderCost(
             actualCostKrw,
           },
           result_snapshot: summary,
-          error_message: null,
+          error_message: reconciliation.productMasterError,
           started_at: now,
           finished_at: now,
           updated_at: now,
