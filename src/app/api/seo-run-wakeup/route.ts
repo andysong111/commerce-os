@@ -8,6 +8,7 @@ import { processSeoRunQueue } from "@/lib/seoRunWorker";
 import { processProductLaunchShoplingPostprocessQueue } from "@/lib/productLaunchShoplingPostprocessWorker";
 import { reconcileVerifiedShoplingRegistrations } from "@/lib/productLaunchShoplingRegistrationTruth";
 import { rearmFailedDurableSeoRegistrationRuns } from "@/lib/productLaunchShoplingRetryRearm";
+import { processSeoRunShoplingRegistrationQueue } from "@/lib/seoRunShoplingRegistrationQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,10 +38,26 @@ export async function GET() {
 
   let storedResult: Record<string, unknown> = {};
   try {
+    let registrationQueueResult: Record<string, unknown> = {};
+    try {
+      registrationQueueResult = await processSeoRunShoplingRegistrationQueue({
+        maxStarts: 5,
+        maxMonitors: 100,
+      });
+    } catch (error) {
+      console.error("[seo-run-wakeup] Shopling registration queue failed", error);
+      registrationQueueResult = {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Shopling registration queue failed",
+      };
+    }
+
     let registrationTruthResult: Record<string, unknown> = {};
     try {
       registrationTruthResult = await reconcileVerifiedShoplingRegistrations({
-        maxRuns: 6,
+        maxRuns: 40,
       });
     } catch (error) {
       console.error("[seo-run-wakeup] Shopling registration truth recovery failed", error);
@@ -55,7 +72,7 @@ export async function GET() {
     let registrationRearmResult: Record<string, unknown> = {};
     try {
       registrationRearmResult = await rearmFailedDurableSeoRegistrationRuns({
-        maxRuns: 6,
+        maxRuns: 20,
       });
     } catch (error) {
       console.error("[seo-run-wakeup] Shopling registration retry rearm failed", error);
@@ -70,7 +87,7 @@ export async function GET() {
     let postprocessResult: Record<string, unknown> = {};
     try {
       postprocessResult = await processProductLaunchShoplingPostprocessQueue({
-        maxItems: 3,
+        maxItems: 8,
       });
     } catch (error) {
       console.error("[seo-run-wakeup] Shopling postprocess recovery failed", error);
@@ -85,11 +102,12 @@ export async function GET() {
     const result = await processSeoRunQueue({
       workerId,
       maxJobs: 2,
-      timeBudgetMs: 210_000,
+      timeBudgetMs: 190_000,
     });
     storedResult = {
       ok: true,
       ...result,
+      shoplingRegistrationQueue: registrationQueueResult,
       shoplingRegistrationTruth: registrationTruthResult,
       shoplingRegistrationRearm: registrationRearmResult,
       shoplingPostprocess: postprocessResult,
@@ -100,6 +118,7 @@ export async function GET() {
       completedCount: result.completedCount,
       failedCount: result.failedCount,
       queuedCount: result.queuedCount,
+      shoplingRegistrationQueue: registrationQueueResult,
       shoplingRegistrationTruth: registrationTruthResult,
       shoplingRegistrationRearm: registrationRearmResult,
       shoplingPostprocess: postprocessResult,
