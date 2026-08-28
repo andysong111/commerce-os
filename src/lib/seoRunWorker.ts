@@ -31,6 +31,7 @@ import {
 } from "@/lib/keywordEngineElonLabV2Selection";
 import {
   claimNextSeoRunJob,
+  isSeoRunLeaseLostError,
   patchClaimedSeoRunJob,
   type SeoRunJobRow,
 } from "@/lib/seoRunJobServer";
@@ -52,6 +53,13 @@ type Step4FilterResult = {
   removedKeys: string[];
   decisions: unknown[];
   warnings?: string[];
+};
+
+type SeoRunProcessResult = {
+  runId: string;
+  status: SeoRunJobRow["status"];
+  stage: SeoRunJobRow["stage"];
+  error?: string;
 };
 
 function record(value: unknown): UnknownRecord {
@@ -164,6 +172,20 @@ function retryDelayMs(attemptCount: number) {
   return Math.min(15 * 60_000, 30_000 * 2 ** Math.max(0, attemptCount - 1));
 }
 
+function minimumStageStartBudgetMs(stage: SeoRunJobRow["stage"]) {
+  return {
+    collect_source: 50_000,
+    analyze_identity: 70_000,
+    discover_keywords: 130_000,
+    score_keywords: 190_000,
+    expand_keywords: 190_000,
+    filter_keywords: 100_000,
+    generate_title: 75_000,
+    compose_final: 25_000,
+    completed: 0,
+  }[stage];
+}
+
 async function checkpoint(
   config: ProductLaunchAdminConfig,
   job: SeoRunJobRow,
@@ -172,6 +194,7 @@ async function checkpoint(
 ) {
   return patchClaimedSeoRunJob(config, job.run_id, workerId, {
     ...patch,
+    error_message: "",
     lease_until: nextLease(),
   });
 }
@@ -422,6 +445,7 @@ async function executeStage(
     stage: "completed",
     progress_percent: 100,
     message: "서버 FINAL 완료",
+    error_message: "",
     lease_owner: null,
     lease_until: null,
     completed_at: job.completed_at ?? new Date().toISOString(),
@@ -436,6 +460,7 @@ async function requeueAtBudgetBoundary(
   return patchClaimedSeoRunJob(config, job.run_id, workerId, {
     status: "queued",
     message: `${job.message || job.stage} · 체크포인트 저장 완료, 다음 서버 실행에서 이어갑니다.`,
+    error_message: "",
     not_before: new Date().toISOString(),
     lease_owner: null,
     lease_until: null,
@@ -479,13 +504,13 @@ async function processClaimedJob(
   initialJob: SeoRunJobRow,
   workerId: string,
   deadline: number,
-) {
+): Promise<SeoRunProcessResult> {
   let job = initialJob;
   try {
     while (
       job.status === "running" &&
       job.stage !== "completed" &&
-      Date.now() < deadline - 5_000
+      Date.now() + minimumStageStartBudgetMs(job.stage) < deadline
     ) {
       job = await executeStage(config, job, workerId);
     }
@@ -494,13 +519,41 @@ async function processClaimedJob(
     }
     return { runId: job.run_id, status: job.status, stage: job.stage };
   } catch (error) {
-    const failed = await failOrRetry(config, job, workerId, error);
-    return {
-      runId: failed.run_id,
-      status: failed.status,
-      stage: failed.stage,
-      error: failed.error_message,
-    };
+    if (isSeoRunLeaseLostError(error)) {
+      return {
+        runId: job.run_id,
+        status: "running",
+        stage: job.stage,
+        error: "lease transferred",
+      };
+    }
+    try {
+      const failed = await failOrRetry(config, job, workerId, error);
+      return {
+        runId: failed.run_id,
+        status: failed.status,
+        stage: failed.stage,
+        error: failed.error_message,
+      };
+    } catch (persistError) {
+      console.error("[seo-run-worker] failed to persist retry state", {
+        runId: job.run_id,
+        stage: job.stage,
+        error:
+          persistError instanceof Error
+            ? persistError.message
+            : String(persistError),
+      });
+      return {
+        runId: job.run_id,
+        status: "running",
+        stage: job.stage,
+        error:
+          persistError instanceof Error
+            ? persistError.message
+            : String(persistError),
+      };
+    }
   }
 }
 
@@ -536,11 +589,28 @@ export async function processSeoRunQueue(options: {
     if (!job) break;
     claimed.push(job);
   }
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     claimed.map((job, index) =>
       processClaimedJob(config, job, `${workerId}:${index + 1}`, deadline),
     ),
   );
+  const results: SeoRunProcessResult[] = settled.map((entry, index) => {
+    if (entry.status === "fulfilled") return entry.value;
+    const job = claimed[index];
+    const message =
+      entry.reason instanceof Error ? entry.reason.message : String(entry.reason);
+    console.error("[seo-run-worker] isolated job rejection", {
+      runId: job.run_id,
+      stage: job.stage,
+      error: message,
+    });
+    return {
+      runId: job.run_id,
+      status: "running",
+      stage: job.stage,
+      error: message,
+    };
+  });
   return {
     workerId,
     claimedCount: claimed.length,

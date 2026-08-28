@@ -69,7 +69,23 @@ test("SEO RUN API는 enqueue·retry 즉시 실행도 예약 worker와 같은 전
   assert.match(route, /action === "archive"/);
 });
 
-test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 단계에서 이어간다", async () => {
+test("SEO 체크포인트 저장은 읽기보다 긴 write timeout과 모호한 응답 재확인을 사용한다", async () => {
+  const storage = await source("src/lib/seoRunJobServer.ts");
+  assert.match(storage, /const SEO_RUN_READ_TIMEOUT_MS = 12_000/);
+  assert.match(storage, /const SEO_RUN_WRITE_TIMEOUT_MS = 30_000/);
+  assert.match(storage, /const SEO_RUN_PATCH_RECONCILE_ATTEMPTS = 2/);
+  assert.match(storage, /storageTimeoutError/);
+  assert.match(storage, /SEO_RUN_STORAGE_\$\{method\}_TIMEOUT/);
+  assert.match(storage, /readSeoRunJobByIdWithOptions/);
+  assert.match(storage, /patchWasApplied/);
+  assert.match(storage, /sameInstant/);
+  assert.match(storage, /SeoRunLeaseLostError/);
+  assert.match(storage, /attempts: 2/);
+  assert.match(storage, /timeoutMs: 10_000/);
+  assert.match(storage, /timeoutMs: 15_000/);
+});
+
+test("Vercel worker는 STEP별 체크포인트를 저장하고 한 RUN 오류가 전체 큐를 중단시키지 않는다", async () => {
   const worker = await source("src/lib/seoRunWorker.ts");
   for (const stage of [
     "collect_source",
@@ -93,6 +109,11 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /result_payload: result/);
   assert.match(worker, /collectKeywordElonBulkSource/);
   assert.match(worker, /composeKeywordElonBulkFinal/);
+  assert.match(worker, /minimumStageStartBudgetMs/);
+  assert.match(worker, /Promise\.allSettled/);
+  assert.match(worker, /isSeoRunLeaseLostError/);
+  assert.match(worker, /failed to persist retry state/);
+  assert.match(worker, /error_message: ""/);
 });
 
 test("durable SEO 복구는 단일 adaptive dispatcher의 critical task로 실행된다", async () => {
