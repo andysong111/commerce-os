@@ -11,8 +11,37 @@ import { filterKeywordElonProhibitedKeywords } from "@/lib/keywordEngineElonLabV
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 35_000;
 const DEFAULT_MODEL = "gpt-5-mini";
-const TARGET_CANDIDATES = 18;
+const TARGET_CANDIDATES = 24;
 const SEARCH_TERM_BYTE_LIMIT = 30;
+const FACTUAL_TOKEN_BYTE_LIMIT = 18;
+const FACTUAL_PAIR_TOKEN_LIMIT = 12;
+
+const FACTUAL_TOKEN_STOPWORDS = new Set([
+  "상품",
+  "제품",
+  "용품",
+  "옵션",
+  "모델",
+  "모델번호",
+  "번호",
+  "단품",
+  "세트",
+  "구성",
+  "기타",
+  "일반",
+  "사용",
+  "사용용",
+  "관련",
+  "배가",
+  "둥근",
+  "큰",
+  "작은",
+  "대형",
+  "중형",
+  "소형",
+  "모양",
+  "오려진",
+]);
 
 type OpenAiPayload = {
   output_text?: unknown;
@@ -20,7 +49,7 @@ type OpenAiPayload = {
   error?: { message?: unknown };
 };
 
-type RecoveryInput = {
+export type KeywordElonBulkKeywordRecoveryInput = {
   identity: KeywordElonIdentity;
   source: KeywordElonSourceDraft;
   productName: string;
@@ -49,13 +78,14 @@ function outputText(payload: OpenAiPayload) {
   return "";
 }
 
-function uniqueKeys(values: unknown[], limit = 40) {
+function uniqueKeys(values: unknown[], limit = 60) {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
     const key = compactKeywordElonKey(value);
     if (
       key.length < 2
+      || /\d/.test(key)
       || keywordElonUtf8Bytes(key) > SEARCH_TERM_BYTE_LIMIT
       || seen.has(key)
     ) continue;
@@ -66,30 +96,85 @@ function uniqueKeys(values: unknown[], limit = 40) {
   return out;
 }
 
-function deterministicSeeds(input: RecoveryInput) {
+function normalizeFactualToken(value: unknown) {
+  let key = compactKeywordElonKey(value);
+  if (key.endsWith("형") && key.length >= 5) key = key.slice(0, -1);
+  if (
+    key.length < 2
+    || /\d/.test(key)
+    || !/[가-힣]/.test(key)
+    || keywordElonUtf8Bytes(key) > FACTUAL_TOKEN_BYTE_LIMIT
+    || FACTUAL_TOKEN_STOPWORDS.has(key)
+  ) {
+    return "";
+  }
+  return key;
+}
+
+function factualTokens(input: KeywordElonBulkKeywordRecoveryInput) {
   const identity = input.identity;
-  const core = normalizeKeywordElonText(identity.coreProduct);
-  const seeds = [
-    core,
-    identity.koreanProductIdentity,
+  const phrases = [
+    input.productName,
+    identity.coreProduct,
     identity.identityAnchor,
-    ...(identity.primarySeeds ?? []),
-    ...(identity.conditionalSeeds ?? []),
+    ...identity.primarySeeds,
+    identity.koreanProductIdentity,
+    ...identity.conditionalSeeds,
+    ...identity.functionModifiers,
+    ...identity.designShapeModifiers,
+    ...identity.specAttributes,
+    input.source.chineseTitle,
+    input.source.optionText,
   ];
-  const modifiers = [
-    ...(identity.functionModifiers ?? []),
-    ...(identity.designShapeModifiers ?? []),
-    ...(identity.specAttributes ?? []),
-  ];
-  if (core) {
-    for (const modifier of modifiers) {
-      const clean = normalizeKeywordElonText(modifier);
-      if (!clean) continue;
-      seeds.push(`${clean}${core}`);
-      seeds.push(`${core}${clean}`);
+  const tokens: string[] = [];
+  for (const phrase of phrases) {
+    for (const token of normalizeKeywordElonText(phrase)
+      .replace(/[^0-9A-Za-z가-힣]+/g, " ")
+      .split(/\s+/)) {
+      const normalized = normalizeFactualToken(token);
+      if (normalized) tokens.push(normalized);
     }
   }
-  return uniqueKeys(seeds, 30);
+  return uniqueKeys(tokens, 30);
+}
+
+export function buildDeterministicBulkKeywordRecoverySeeds(
+  input: KeywordElonBulkKeywordRecoveryInput,
+) {
+  const identity = input.identity;
+  const core = compactKeywordElonKey(identity.coreProduct);
+  const seeds: unknown[] = [
+    core,
+    identity.identityAnchor,
+    ...identity.primarySeeds,
+    identity.koreanProductIdentity,
+    ...identity.conditionalSeeds,
+    ...identity.functionModifiers,
+    ...identity.designShapeModifiers,
+    ...identity.specAttributes,
+  ];
+  const tokens = factualTokens(input);
+  const modifiers = tokens
+    .filter(
+      (token) =>
+        token !== core &&
+        !token.includes(core) &&
+        !core.includes(token),
+    )
+    .slice(0, FACTUAL_PAIR_TOKEN_LIMIT);
+
+  if (core) {
+    for (const token of modifiers) {
+      seeds.push(`${token}${core}`);
+    }
+    for (let left = 0; left < modifiers.length; left += 1) {
+      for (let right = left + 1; right < modifiers.length; right += 1) {
+        seeds.push(`${modifiers[left]}${modifiers[right]}${core}`);
+      }
+    }
+  }
+
+  return uniqueKeys(seeds, 60);
 }
 
 function recoverySchema() {
@@ -108,7 +193,7 @@ function recoverySchema() {
   };
 }
 
-async function aiSeeds(input: RecoveryInput) {
+async function aiSeeds(input: KeywordElonBulkKeywordRecoveryInput) {
   const apiKey = normalizeKeywordElonText(process.env.KEYWORD_ENGINE_OPENAI_API_KEY);
   if (!apiKey) return [] as string[];
   const controller = new AbortController();
@@ -123,7 +208,7 @@ async function aiSeeds(input: RecoveryInput) {
       body: JSON.stringify({
         model: openAiModel(),
         store: false,
-        max_output_tokens: 1_800,
+        max_output_tokens: 2_200,
         input: [
           {
             role: "system",
@@ -165,7 +250,7 @@ async function aiSeeds(input: RecoveryInput) {
         text: {
           format: {
             type: "json_schema",
-            name: "keyword_elon_bulk_keyword_recovery_v1",
+            name: "keyword_elon_bulk_keyword_recovery_v2",
             strict: true,
             schema: recoverySchema(),
           },
@@ -218,10 +303,15 @@ function asCandidates(keywords: string[]): KeywordElonCandidate[] {
   }));
 }
 
-export async function generateSafeBulkKeywordSupplements(input: RecoveryInput) {
-  const deterministic = deterministicSeeds(input);
-  const generated = await aiSeeds(input);
-  const candidates = uniqueKeys([...deterministic, ...generated], 40);
+export async function generateSafeBulkKeywordSupplements(
+  input: KeywordElonBulkKeywordRecoveryInput,
+) {
+  const deterministic = buildDeterministicBulkKeywordRecoverySeeds(input);
+  const generated =
+    deterministic.length >= TARGET_CANDIDATES
+      ? []
+      : await aiSeeds(input);
+  const candidates = uniqueKeys([...deterministic, ...generated], 60);
   if (!candidates.length) return [];
 
   const filtered = await filterKeywordElonProhibitedKeywords({
@@ -230,5 +320,7 @@ export async function generateSafeBulkKeywordSupplements(input: RecoveryInput) {
     customBlockedTerms: input.customBlockedTerms,
   });
   const allowed = new Set(filtered.allowedKeys.map((value) => compactKeywordElonKey(value)));
-  return candidates.filter((keyword) => allowed.has(compactKeywordElonKey(keyword))).slice(0, 20);
+  return candidates
+    .filter((keyword) => allowed.has(compactKeywordElonKey(keyword)))
+    .slice(0, 30);
 }

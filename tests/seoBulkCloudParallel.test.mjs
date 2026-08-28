@@ -71,7 +71,7 @@ test("검색어 부족은 AI+결정형 후보를 STEP4 안전필터에 통과시
   assert.match(route, /supplementalSearchKeywords/);
   assert.match(recovery, /KEYWORD_ENGINE_OPENAI_API_KEY/);
   assert.match(recovery, /filterKeywordElonProhibitedKeywords/);
-  assert.match(recovery, /deterministicSeeds/);
+  assert.match(recovery, /buildDeterministicBulkKeywordRecoverySeeds/);
 });
 
 test("aborted/failed fetch와 일시적 5xx는 키워드 API에서만 제한 병렬로 자동 재시도한다", async () => {
