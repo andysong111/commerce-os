@@ -19,12 +19,13 @@ test("Product Master v2 is core-first and hands OPS UI a verified full first pag
 
   assert.match(gate, /INITIAL_WORKFLOW_PAGE_SIZE = 25/);
   assert.match(gate, /unfinishedOnly: "true"/);
-  assert.match(gate, /PROBE_TIMEOUT_MS = 4_500/);
+  assert.match(gate, /WORKFLOW_API = "\/api\/product-launch-tracker\/recovery-page"/);
+  assert.match(gate, /PROBE_TIMEOUT_MS = 5_000/);
   assert.match(gate, /Array\.isArray\(body\?\.items\)/);
   assert.match(gate, /installWarmWorkflowPage/);
   assert.match(gate, /X-Commerce-Workflow-Warm-Handoff/);
   assert.match(gate, /optimizedAppPromise = import\("\.\/optimized-app\.js"\)/);
-  assert.match(gate, /IDLE_RETRY_MS = 30_000/);
+  assert.match(gate, /IDLE_RETRY_MS = 5_000/);
 
   const standalone = app.split("} else {")[1] ?? "";
   const beforeLazyInstaller = standalone.split("function installLazyDetailPageIntegrations")[0] ?? "";
