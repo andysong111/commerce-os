@@ -116,6 +116,17 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 한 RUN 오류가
   assert.match(worker, /error_message: ""/);
 });
 
+test("durable worker도 검색어가 10개 미만이면 기존 STEP4 안전복구를 사용한다", async () => {
+  const worker = await source("src/lib/seoRunWorker.ts");
+  assert.match(worker, /generateSafeBulkKeywordSupplements/);
+  assert.match(worker, /composeFinalWithRecovery/);
+  assert.match(worker, /FINAL 검색어가 10개가 아닙니다/);
+  assert.match(worker, /supplementalSearchKeywords/);
+  assert.match(worker, /customBlockedTerms: input\.customBlockedTerms \?\? \[\]/);
+  assert.match(worker, /compose_final: 100_000/);
+  assert.match(worker, /const result = await composeFinalWithRecovery/);
+});
+
 test("durable SEO 복구는 단일 adaptive dispatcher의 critical task로 실행된다", async () => {
   const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
   const shared = await source(
