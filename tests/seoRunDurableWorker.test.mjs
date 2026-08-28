@@ -81,7 +81,7 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /composeKeywordElonBulkFinal/);
 });
 
-test("durable SEO 복구는 독립 매분 cron으로 실행되고 receipt cron과 분리된다", async () => {
+test("durable SEO 복구는 Vercel 독립 매분 cron으로 실행되고 receipt cron과 분리된다", async () => {
   const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
   const shared = await source(
     "src/app/api/cron/receipt-live-price-proposals/route.ts",
@@ -102,6 +102,33 @@ test("durable SEO 복구는 독립 매분 cron으로 실행되고 receipt cron�
       schedule: "* * * * *",
     },
   );
+});
+
+test("Supabase pg_cron과 pg_net도 SEO RUN wakeup을 매분 이중화하고 전역 lease로 fanout을 막는다", async () => {
+  const migration = await source(
+    "supabase/migrations/202608280004_seo_run_supabase_wakeup.sql",
+  );
+  const wakeup = await source("src/app/api/seo-run-wakeup/route.ts");
+  const control = await source("src/lib/seoRunWorkerControl.ts");
+
+  assert.match(migration, /create extension if not exists pg_cron/);
+  assert.match(migration, /create extension if not exists pg_net/);
+  assert.match(migration, /create table if not exists public\.seo_run_worker_control/);
+  assert.match(migration, /claim_seo_run_worker_pulse/);
+  assert.match(migration, /finish_seo_run_worker_pulse/);
+  assert.match(migration, /cron\.schedule/);
+  assert.match(migration, /commerce-os-seo-run-wakeup/);
+  assert.match(migration, /\/api\/seo-run-wakeup/);
+  assert.match(migration, /net\.http_get/);
+  assert.match(migration, /schedule:|\* \* \* \* \*/);
+
+  assert.match(wakeup, /claimSeoRunWorkerPulse/);
+  assert.match(wakeup, /processSeoRunQueue/);
+  assert.match(wakeup, /finishSeoRunWorkerPulse/);
+  assert.match(wakeup, /throttled: true/);
+  assert.doesNotMatch(wakeup, /results:\s*result\.results/);
+  assert.match(control, /rpc\/claim_seo_run_worker_pulse/);
+  assert.match(control, /rpc\/finish_seo_run_worker_pulse/);
 });
 
 test("SEO 클라우드는 서버 원장을 polling하고 인계 완료 후 localStorage 실행본을 제거한다", async () => {
