@@ -3,10 +3,10 @@ import { installProductLaunchDetailStability } from "./detail-state-stability.js
 import { installOptionBarcodeColumnAlignment } from "./option-barcode-column-alignment.js";
 import { installTwoStageProductLaunchWorkflow } from "./workflow-stage-pruner.js";
 
-const WORKFLOW_API = "/api/product-launch-tracker/optimized";
-const PROBE_TIMEOUT_MS = 4_500;
-const IDLE_RETRY_MS = 30_000;
-const HIDDEN_RETRY_MS = 60_000;
+const WORKFLOW_API = "/api/product-launch-tracker/normalized-optimized";
+const PROBE_TIMEOUT_MS = 8_000;
+const IDLE_RETRY_MS = 5_000;
+const HIDDEN_RETRY_MS = 30_000;
 const INITIAL_WORKFLOW_PAGE_SIZE = 25;
 const WARM_HANDOFF_TTL_MS = 8_000;
 
@@ -25,7 +25,7 @@ export function installWorkflowUiGate() {
 
   const onVisible = () => {
     if (document.visibilityState === "visible" && !optimizedAppPromise) {
-      scheduleProbe(500);
+      scheduleProbe(300);
     }
   };
   window.addEventListener("online", onVisible);
