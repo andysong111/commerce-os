@@ -22,6 +22,39 @@ const SEO_RUN_TRANSIENT_STORAGE_STATUSES = new Set([
   504,
   521,
 ]);
+const SEO_RUN_LIST_SELECT = [
+  "run_id",
+  "owner_id",
+  "owner_email",
+  "batch_id",
+  "launch_item_id",
+  "tracker_row_number",
+  "model_number",
+  "product_name",
+  "source_url",
+  "status",
+  "stage",
+  "stage_index",
+  "progress_percent",
+  "message",
+  "result_payload",
+  "error_message",
+  "attempt_count",
+  "max_attempts",
+  "not_before",
+  "lease_owner",
+  "lease_until",
+  "registration_status",
+  "registration_job_id",
+  "registration_request_id",
+  "registration_payload",
+  "run_created_at",
+  "started_at",
+  "completed_at",
+  "archived_at",
+  "created_at",
+  "updated_at",
+].join(",");
 
 export type SeoRunJobStatus =
   | "queued"
@@ -280,7 +313,7 @@ export async function listSeoRunJobs(
   } = {},
 ) {
   const params = new URLSearchParams({
-    select: "*",
+    select: SEO_RUN_LIST_SELECT,
     owner_id: `eq.${context.identity.userId}`,
     order: "run_created_at.asc,created_at.asc",
     limit: String(
@@ -316,6 +349,7 @@ export async function patchOwnedSeoRunJobs(
   const ids = [...new Set(runIds.map(text).filter(Boolean))].slice(0, 200);
   if (!ids.length) return [];
   const params = new URLSearchParams({
+    select: SEO_RUN_LIST_SELECT,
     owner_id: `eq.${context.identity.userId}`,
     run_id: `in.(${postgrestIn(ids)})`,
   });
