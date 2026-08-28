@@ -10,7 +10,7 @@ import {
   retrySeoRunJobs,
   type SeoRunJobInsert,
 } from "@/lib/seoRunJobServer";
-import { processSeoRunQueue } from "@/lib/seoRunWorker";
+import { runCoalescedSeoRunWorkerPulse } from "@/lib/seoRunWorkerPulse";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -153,6 +153,23 @@ function runIds(value: unknown) {
   return stringList(value, 500).filter((value) => value.length <= 180);
 }
 
+function scheduleSeoRunWorker(
+  workerId: string,
+  maxJobs: number,
+  logPrefix: string,
+) {
+  after(async () => {
+    await runCoalescedSeoRunWorkerPulse({
+      workerId,
+      maxJobs: Math.max(1, Math.min(2, maxJobs)),
+      timeBudgetMs: 240_000,
+      leaseSeconds: 300,
+    }).catch((error) => {
+      console.error(`${logPrefix} background worker failed`, error);
+    });
+  });
+}
+
 export async function GET(request: NextRequest) {
   const authenticated = await requireSeoTitleLedgerContext(request);
   if (!authenticated.ok) return authenticated.response;
@@ -270,15 +287,11 @@ export async function POST(request: NextRequest) {
       includeArchived: true,
       limit: rows.length,
     });
-    after(async () => {
-      await processSeoRunQueue({
-        workerId: `enqueue:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
-        maxJobs: Math.min(2, rows.length),
-        timeBudgetMs: 240_000,
-      }).catch((error) => {
-        console.error("[seo-run-enqueue] background worker failed", error);
-      });
-    });
+    scheduleSeoRunWorker(
+      `enqueue:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
+      rows.length,
+      "[seo-run-enqueue]",
+    );
     return Response.json({
       ok: true,
       requestedCount: requested.length,
@@ -292,15 +305,11 @@ export async function POST(request: NextRequest) {
   if (action === "retry") {
     const ids = runIds(body.runIds);
     const jobs = await retrySeoRunJobs(context, ids);
-    after(async () => {
-      await processSeoRunQueue({
-        workerId: `retry:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
-        maxJobs: Math.min(2, Math.max(1, ids.length)),
-        timeBudgetMs: 240_000,
-      }).catch((error) => {
-        console.error("[seo-run-retry] background worker failed", error);
-      });
-    });
+    scheduleSeoRunWorker(
+      `retry:${context.identity.userId.slice(0, 8)}:${crypto.randomUUID()}`,
+      Math.max(1, ids.length),
+      "[seo-run-retry]",
+    );
     return Response.json({ ok: true, jobs });
   }
 
