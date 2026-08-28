@@ -4,6 +4,10 @@ import { installOptionBarcodeColumnAlignment } from "./option-barcode-column-ali
 import { installTwoStageProductLaunchWorkflow } from "./workflow-stage-pruner.js";
 
 const WORKFLOW_API = "/api/product-launch-tracker/normalized-optimized";
+const WORKFLOW_COMPATIBLE_PATHS = new Set([
+  WORKFLOW_API,
+  "/api/product-launch-tracker/optimized",
+]);
 const PROBE_TIMEOUT_MS = 8_000;
 const IDLE_RETRY_MS = 5_000;
 const HIDDEN_RETRY_MS = 30_000;
@@ -171,7 +175,16 @@ function installWarmWorkflowPage(targetUrl, body) {
 }
 
 function sameWorkflowPage(left, right) {
-  if (left.origin !== right.origin || left.pathname !== right.pathname) return false;
+  if (left.origin !== right.origin) return false;
+  if (
+    left.pathname !== right.pathname &&
+    !(
+      WORKFLOW_COMPATIBLE_PATHS.has(left.pathname) &&
+      WORKFLOW_COMPATIBLE_PATHS.has(right.pathname)
+    )
+  ) {
+    return false;
+  }
   const keys = [
     "mode",
     "page",
