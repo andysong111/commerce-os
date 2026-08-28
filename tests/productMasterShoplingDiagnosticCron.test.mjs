@@ -4,11 +4,11 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("Product Master Shopling cron auto-starts only the initial read-only diagnostic", async () => {
-  const [route, worker, vercel] = await Promise.all([
+test("Product Master Shopling diagnostic remains read-only behind the adaptive dispatcher", async () => {
+  const [route, worker, scheduler] = await Promise.all([
     read("src/app/api/cron/product-master-shopling-diagnostic/route.ts"),
     read("src/lib/productMasterShoplingDiagnostic.ts"),
-    read("vercel.json"),
+    read("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql"),
   ]);
 
   assert.match(route, /export async function GET/);
@@ -31,11 +31,8 @@ test("Product Master Shopling cron auto-starts only the initial read-only diagno
   assert.doesNotMatch(worker, /method:\s*"(?:PUT|PATCH|DELETE)"/);
   assert.doesNotMatch(worker, /shopling-price|price-modify|1688/i);
 
-  const config = JSON.parse(vercel);
-  assert.equal(
-    config.crons.filter(
-      (entry) => entry.path === "/api/cron/product-master-shopling-diagnostic",
-    ).length,
-    1,
+  assert.match(
+    scheduler,
+    /'product-master-shopling-diagnostic', '\/api\/cron\/product-master-shopling-diagnostic', 'diagnostic', 220, true, 21600, 1800, 43200/,
   );
 });
