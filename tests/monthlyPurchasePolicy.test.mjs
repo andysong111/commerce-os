@@ -9,7 +9,7 @@ import {
   monthlyPurchaseCycleFor,
 } from "../src/lib/monthlyPurchasePolicy.ts";
 
-const [liveRoute, liveControl, fastDraft, canonicalShadow, vercel] =
+const [liveRoute, liveControl, fastDraft, canonicalShadow, scheduler] =
   await Promise.all([
     readFile("src/app/api/product-decision-agent/live-refresh/route.ts", "utf8"),
     readFile(
@@ -18,7 +18,10 @@ const [liveRoute, liveControl, fastDraft, canonicalShadow, vercel] =
     ),
     readFile("src/lib/fastPurchaseInternalDraft.ts", "utf8"),
     readFile("src/lib/stage8CanonicalPurchaseShadow.ts", "utf8"),
-    readFile("vercel.json", "utf8"),
+    readFile(
+      "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
+      "utf8",
+    ),
   ]);
 
 test("purchase cycle follows Seoul calendar month and budgets from the prior full month", () => {
@@ -99,8 +102,13 @@ test("operational purchase allocation uses previous calendar-month revenue, not 
 });
 
 test("daily sales and price-grade pipelines remain independent from the monthly purchase lock", () => {
-  assert.match(vercel, /product-master-shopling-sales-incremental/);
-  assert.match(vercel, /product-master-shopling-sales-events/);
-  assert.match(vercel, /receipt-live-price-proposals/);
-  assert.match(vercel, /price-grade-receipt-shadow-bootstrap/);
+  for (const task of [
+    "product-master-shopling-sales-incremental",
+    "product-master-shopling-sales-events",
+    "receipt-live-price-proposals",
+    "price-grade-receipt-shadow-bootstrap",
+  ]) {
+    assert.match(scheduler, new RegExp(task));
+  }
+  assert.match(scheduler, /workload_class in \('critical', 'operational', 'diagnostic', 'maintenance'\)/);
 });
