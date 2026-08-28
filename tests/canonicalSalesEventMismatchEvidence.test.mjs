@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, cron, page, vercel] = await Promise.all([
+const [engine, cron, page, scheduler] = await Promise.all([
   readFile("src/lib/canonicalSalesEventMismatchEvidence.ts", "utf8"),
   readFile("src/app/api/cron/stage8-canonical-event-mismatch-evidence/route.ts", "utf8"),
   readFile("src/app/stage8-canonical-event-mismatch-evidence/page.tsx", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("mismatch evidence only rereads persisted state and never writes sales events", () => {
@@ -53,8 +53,11 @@ test("no-change shadow produces durable zero evidence without Product Master det
   assert.match(engine, /CANONICAL_EVENT_MISMATCH_EVIDENCE_REPORT/);
 });
 
-test("cron is protected and scheduled while business writes remain disabled", () => {
+test("cron is protected, read-only and a diagnostic dispatcher task", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /writesEnabled: false/);
-  assert.match(vercel, /stage8-canonical-event-mismatch-evidence/);
+  assert.match(
+    scheduler,
+    /'stage8-canonical-event-mismatch-evidence', '\/api\/cron\/stage8-canonical-event-mismatch-evidence', 'diagnostic', 250, true, 21600, 1800, 43200/,
+  );
 });
