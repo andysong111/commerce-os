@@ -1,4 +1,9 @@
 import {
+  mergePriceAdjustmentReceiptCachePage,
+  readPriceAdjustmentReceiptCache,
+  type PriceAdjustmentReceipt,
+} from "@/lib/priceAdjustmentReceiptCache";
+import {
   processReceiptAutomationEvent,
   validateReceiptAutomationEvent,
   type ReceiptAutomationEvent,
@@ -15,6 +20,7 @@ const STALE_RUNNING_MINUTES = 10;
 
 export type InternalChinaReceiptDownstreamItem = {
   externalId: string;
+  orderItemId: number;
   barcode: string;
   modelNumber: string;
   productName: string;
@@ -50,11 +56,6 @@ function object(value: unknown): Record<string, unknown> {
 function positiveInteger(value: unknown) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function iso(value: unknown) {
-  const parsed = Date.parse(text(value));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
 }
 
 function sourceEventId(eventId: string) {
@@ -118,6 +119,7 @@ export function buildInternalChinaReceiptDownstreamOperation(
     input_snapshot: event,
     result_snapshot: {
       attempts: 0,
+      receiptCacheSynced: false,
       productMasterImported: false,
       priceAnalysisTriggered: false,
     },
@@ -140,6 +142,7 @@ export function validateInternalChinaReceiptDownstreamEvent(
   const items = raw.items.map((value, index) => {
     const row = object(value);
     const externalId = text(row.externalId);
+    const orderItemId = positiveInteger(row.orderItemId);
     const barcode = text(row.barcode).toUpperCase().replace(/\s+/g, "");
     const modelNumber = text(row.modelNumber) || barcode;
     const productName = text(row.productName) || modelNumber;
@@ -157,13 +160,14 @@ export function validateInternalChinaReceiptDownstreamEvent(
         `INTERNAL_CHINA_RECEIPT_DOWNSTREAM_BARCODE_INVALID:${index + 1}`,
       );
     }
-    if (!quantity || !unitCostKrw) {
+    if (!orderItemId || !quantity || !unitCostKrw) {
       throw new Error(
         `INTERNAL_CHINA_RECEIPT_DOWNSTREAM_ITEM_VALUE_INVALID:${barcode}`,
       );
     }
     return {
       externalId,
+      orderItemId,
       barcode,
       modelNumber,
       productName,
@@ -253,6 +257,34 @@ async function updateOperation(
   });
 }
 
+async function syncReceiptCache(event: InternalChinaReceiptDownstreamEvent) {
+  const current = await readPriceAdjustmentReceiptCache();
+  const snapshotId = current?.snapshotId || "ops-confirmed-receipts-live-v1";
+  const receipts: PriceAdjustmentReceipt[] = event.items.map((item) => ({
+    id: item.externalId,
+    receiptId: event.receiptId,
+    batchId: event.batchId,
+    orderItemId: item.orderItemId,
+    barcode: item.barcode,
+    modelNumber: item.modelNumber,
+    optionName: item.optionName,
+    quantity: item.quantity,
+    unitCostKrw: item.unitCostKrw,
+    receivedAt: event.occurredAt,
+  }));
+  const cache = await mergePriceAdjustmentReceiptCachePage({
+    snapshotId,
+    generatedAt: event.occurredAt,
+    complete: true,
+    receipts,
+  });
+  return {
+    snapshotId: cache.snapshotId,
+    barcodeCount: cache.barcodeCount,
+    receiptCount: cache.receiptCount,
+  };
+}
+
 async function pushConfirmedReceiptToProductMaster(
   event: InternalChinaReceiptDownstreamEvent,
 ) {
@@ -310,6 +342,7 @@ export async function runInternalChinaReceiptDownstreamStep() {
     const event = validateInternalChinaReceiptDownstreamEvent(
       claimed.input_snapshot,
     );
+    const receiptCache = await syncReceiptCache(event);
     const productMaster = await pushConfirmedReceiptToProductMaster(event);
     const priceAutomation = await processReceiptAutomationEvent(event);
     const completedAt = new Date().toISOString();
@@ -317,6 +350,8 @@ export async function runInternalChinaReceiptDownstreamStep() {
       status: "SUCCEEDED",
       result_snapshot: {
         attempts,
+        receiptCacheSynced: true,
+        receiptCache,
         productMasterImported: true,
         productMaster,
         priceAnalysisTriggered: true,
@@ -334,10 +369,11 @@ export async function runInternalChinaReceiptDownstreamStep() {
       eventId: event.eventId,
       itemCount: event.items.length,
       quantity: event.totals.good,
+      receiptCache,
       productMaster,
       priceAutomation,
       message:
-        "Product Master 입고재고·입고원가와 가격분석 후속 처리를 완료했습니다.",
+        "입고원가 캐시, Product Master 입고재고·입고원가, 가격분석 후속 처리를 완료했습니다.",
     };
   } catch (error) {
     const failedAt = new Date().toISOString();
