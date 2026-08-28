@@ -12,11 +12,7 @@ const [engine, route, panel, layout, receiptEngine, workflow] = await Promise.al
 ]);
 
 test("actual forwarder charges are persisted as a separate monthly cash-out ledger", () => {
-  assert.ok(
-    engine.includes(
-      'INTERNAL_CHINA_FORWARDER_COST_CLOSE',
-    ),
-  );
+  assert.ok(engine.includes('INTERNAL_CHINA_FORWARDER_COST_CLOSE'));
   assert.ok(engine.includes("actualCostKrw"));
   assert.ok(engine.includes("estimatedForwarderCostKrw"));
   assert.ok(engine.includes("actualTotalOutflowKrw"));
@@ -41,13 +37,14 @@ test("completed monthly drafts remain visible until forwarder cost is closed", (
   assert.ok(layout.includes("loadInternalChinaForwarderCostSummary"));
 });
 
-test("transient Supabase schema-cache errors are retried before hiding the completed draft close panel", () => {
-  assert.ok(layout.includes("TRANSIENT_LEDGER_RETRY_DELAYS_MS"));
-  assert.ok(layout.includes('"schema cache"'));
-  assert.ok(layout.includes('"pgrst002"'));
-  assert.ok(layout.includes('"connection timeout"'));
-  assert.ok(layout.includes("loadInternalDraftsForReceiptClose"));
-  assert.ok(layout.includes("await loadFastPurchaseInternalDrafts()"));
+test("China order manager fails fast instead of exhausting the Vercel function timeout", () => {
+  assert.ok(layout.includes("RECEIPT_LEDGER_TIMEBOX_MS = 4_500"));
+  assert.ok(layout.includes("DISPLAY_METADATA_TIMEBOX_MS = 2_500"));
+  assert.ok(layout.includes("FORWARDER_SUMMARY_TIMEBOX_MS = 4_500"));
+  assert.ok(layout.includes("Promise.race"));
+  assert.ok(layout.includes("발주원장 실시간 조회 지연"));
+  assert.ok(layout.includes("실제 원장 데이터는 변경되지 않았습니다"));
+  assert.ok(layout.includes("상품 표시정보 조회가 지연되어 B-code 중심으로 먼저 화면을 열었습니다"));
 });
 
 test("forwarder cost API is same-origin protected and never claims price inclusion", () => {
@@ -75,9 +72,5 @@ test("the forwarder regression suite is permanently wired into China Order Ledge
   assert.ok(workflow.includes('src/lib/internalChinaForwarderCost.ts'));
   assert.ok(workflow.includes('src/app/api/china-order-manager/forwarder-cost/route.ts'));
   assert.ok(workflow.includes('tests/internalChinaForwarderCost.test.mjs'));
-  assert.ok(
-    workflow.includes(
-      'node --experimental-strip-types --test',
-    ),
-  );
+  assert.ok(workflow.includes('node --experimental-strip-types --test'));
 });

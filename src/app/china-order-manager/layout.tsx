@@ -10,33 +10,45 @@ import { loadMonthlyDraftDisplayMetadata } from "@/lib/monthlyPurchaseDraftDispl
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 180;
+export const maxDuration = 30;
 
-const TRANSIENT_LEDGER_RETRY_DELAYS_MS = [250, 750, 1_500] as const;
+const RECEIPT_LEDGER_TIMEBOX_MS = 4_500;
+const DISPLAY_METADATA_TIMEBOX_MS = 2_500;
+const FORWARDER_SUMMARY_TIMEBOX_MS = 4_500;
 
-function transientLedgerError(message: string | null | undefined) {
-  const normalized = String(message ?? "").toLowerCase();
-  return [
-    "schema cache",
-    "pgrst002",
-    "connection timeout",
-    "connection terminated",
-    "timed out",
-    "timeout",
-    "fetch failed",
-    "temporarily unavailable",
-    "retrying",
-  ].some((token) => normalized.includes(token));
+async function timebox<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  timeoutValue: T,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      task,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(timeoutValue), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function timeboxNullable<T>(task: Promise<T>, timeoutMs: number) {
+  return timebox<T | null>(task, timeoutMs, null);
 }
 
 async function loadInternalDraftsForReceiptClose() {
-  let state = await loadFastPurchaseInternalDrafts();
-  for (const delayMs of TRANSIENT_LEDGER_RETRY_DELAYS_MS) {
-    if (!state.error || !transientLedgerError(state.error)) return state;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    state = await loadFastPurchaseInternalDrafts();
-  }
-  return state;
+  const timeoutState: Awaited<ReturnType<typeof loadFastPurchaseInternalDrafts>> = {
+    drafts: [],
+    error:
+      "Supabase 발주원장 응답이 지연되어 4.5초 안에 화면용 조회를 끝냈습니다. 실제 원장 데이터는 변경되지 않았습니다. 잠시 뒤 새로고침하세요.",
+  };
+  return timebox(
+    loadFastPurchaseInternalDrafts(),
+    RECEIPT_LEDGER_TIMEBOX_MS,
+    timeoutState,
+  );
 }
 
 export default async function ChinaOrderManagerLayout({
@@ -57,18 +69,38 @@ export default async function ChinaOrderManagerLayout({
     draft.lines.map((line) => line.barcode),
   );
   const metadata = barcodes.length
-    ? await loadMonthlyDraftDisplayMetadata(barcodes)
+    ? await timebox(
+        loadMonthlyDraftDisplayMetadata(barcodes),
+        DISPLAY_METADATA_TIMEBOX_MS,
+        {
+          byBarcode: {},
+          warnings: [
+            "상품 표시정보 조회가 지연되어 B-code 중심으로 먼저 화면을 열었습니다.",
+          ],
+        },
+      )
     : { byBarcode: {}, warnings: [] as string[] };
 
   const forwarderCostRows = await Promise.all(
     currentCycleDrafts.map(async (draft) => {
       try {
-        return {
-          draftId: draft.draftId,
-          summary: await loadInternalChinaForwarderCostSummary(
+        const result = await timeboxNullable(
+          loadInternalChinaForwarderCostSummary(
             draft.draftId,
             draft.cycleMonth,
           ),
+          FORWARDER_SUMMARY_TIMEBOX_MS,
+        );
+        if (!result) {
+          return {
+            draftId: draft.draftId,
+            summary: null,
+            warning: `${draft.draftId} 배송대행 비용 요약 조회가 4.5초를 넘어 화면에서만 일시 보류됐습니다. 원장 데이터는 변경되지 않았습니다.`,
+          };
+        }
+        return {
+          draftId: draft.draftId,
+          summary: result,
           warning: "",
         };
       } catch (error) {
@@ -119,6 +151,12 @@ export default async function ChinaOrderManagerLayout({
           </div>
         </div>
       </section>
+
+      {internalDraftState.error ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">
+          발주원장 실시간 조회 지연 · {internalDraftState.error}
+        </section>
+      ) : null}
 
       {currentCycleDrafts.map((draft) => {
         const forwarderCost = forwarderCostByDraft.get(draft.draftId);
