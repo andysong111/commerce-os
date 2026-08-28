@@ -5,9 +5,8 @@ import {
   needsShoplingSelfCodeRotation,
   rotateShoplingSelfCodeForRetry,
 } from "@/lib/productLaunchShoplingRetry";
-import {
-  buildProductLaunchShoplingPayload,
-} from "@/lib/productLaunchTrackerShopling";
+import { recoverProductLaunchOrderOptionsFromSuccessfulUpload } from "@/lib/productLaunchShoplingHistoricalOptionRecovery";
+import { buildProductLaunchShoplingPayload } from "@/lib/productLaunchTrackerShopling";
 import {
   getProductLaunchAdminConfig,
   readProductLaunchError,
@@ -66,9 +65,49 @@ export async function POST(request: NextRequest) {
     }
 
     let item = asRecord(items[itemIndex]);
-    const currentProducts = Object.values(
-      asRecord(item.shoplingProducts),
-    ).map(asRecord);
+    let historicalOptionRecovery:
+      | Awaited<ReturnType<typeof recoverProductLaunchOrderOptionsFromSuccessfulUpload>>
+      | null = null;
+    const seoRunDispatch = asRecord(item.seoRunDispatch);
+    const durableSeoRunPrepared =
+      String(seoRunDispatch.status ?? "").trim() === "prepared" &&
+      Boolean(String(seoRunDispatch.seoRunId ?? "").trim());
+
+    // Durable SEO RUN registration may revisit an item whose option rows were lost
+    // during the legacy/normalized cutover. Recover only from this exact launch item
+    // and only from its own latest successful Shopling upload. Never broaden by model
+    // number, so a manually edited/deleted option set on another item is not revived.
+    if (
+      durableSeoRunPrepared &&
+      (!Array.isArray(item.orderOptions) || item.orderOptions.length === 0)
+    ) {
+      historicalOptionRecovery =
+        await recoverProductLaunchOrderOptionsFromSuccessfulUpload(
+          config.value,
+          input.itemId,
+          state.policy,
+        );
+      if (historicalOptionRecovery) {
+        item = {
+          ...item,
+          orderOptions: historicalOptionRecovery.options,
+        };
+      }
+    }
+
+    if (!Array.isArray(item.orderOptions) || item.orderOptions.length === 0) {
+      return Response.json(
+        {
+          ok: false,
+          code: "PRODUCT_LAUNCH_ORDER_OPTIONS_REQUIRED",
+          message:
+            "발주·입고 옵션가격이 없습니다. 신규 상품은 상품출시 진행관리에서 발주·입고 데이터를 먼저 불러오세요. 동일 카드의 과거 Shopling 성공 등록이 있으면 SEO RUN 등록에서 자동 복구합니다.",
+        },
+        { status: 422 },
+      );
+    }
+
+    const currentProducts = Object.values(asRecord(item.shoplingProducts)).map(asRecord);
     if (
       !input.force &&
       currentProducts.some((product) => String(product.goodsKey ?? "").trim())
@@ -112,9 +151,15 @@ export async function POST(request: NextRequest) {
       state.policy,
       requestId,
     );
-    const payload = selfCodeRotation
+    const recoveredPayload = historicalOptionRecovery
       ? {
           ...basePayload,
+          optionRecovery: historicalOptionRecovery.evidence,
+        }
+      : basePayload;
+    const payload = selfCodeRotation
+      ? {
+          ...recoveredPayload,
           retrySelfCode: {
             previousSelfCodeBase: selfCodeRotation.previousSelfCodeBase,
             selfCodeBase: selfCodeRotation.selfCodeBase,
@@ -122,7 +167,7 @@ export async function POST(request: NextRequest) {
             rotatedAt: selfCodeRotation.rotatedAt,
           },
         }
-      : basePayload;
+      : recoveredPayload;
     const now = new Date().toISOString();
     const jobRow = {
       id: jobId,
@@ -177,9 +222,12 @@ export async function POST(request: NextRequest) {
       selfCodeRotated: Boolean(selfCodeRotation),
       previousSelfCodeBase: selfCodeRotation?.previousSelfCodeBase ?? "",
       selfCodeBase: selfCodeRotation?.selfCodeBase ?? String(item.selfCodeBase ?? ""),
+      optionRecovery: historicalOptionRecovery?.evidence ?? null,
       message: selfCodeRotation
         ? `샵플링 자사상품코드 중복을 감지해 ${selfCodeRotation.selfCodeBase}로 새 코드를 사용해 6채널 재등록을 시작했습니다.`
-        : "샵플링 6채널 등록 작업을 시작했습니다.",
+        : historicalOptionRecovery
+          ? `과거 동일 카드의 성공 등록 옵션 ${historicalOptionRecovery.options.length}개를 복구해 샵플링 6채널 등록을 시작했습니다.`
+          : "샵플링 6채널 등록 작업을 시작했습니다.",
     });
   } catch (error) {
     return Response.json(
