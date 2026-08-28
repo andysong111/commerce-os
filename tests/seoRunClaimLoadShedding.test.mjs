@@ -33,7 +33,7 @@ test("SEO claim has narrow candidate and same-item lease indexes", async () => {
   assert.match(sql, /\(owner_id, launch_item_id, lease_until\)/i);
 });
 
-test("Vercel remains the durable minute worker and the duplicate Supabase HTTP wakeup is removed", async () => {
+test("Vercel remains the bounded durable primary and the duplicate Supabase HTTP wakeup is removed", async () => {
   const [sql, vercelSource] = await Promise.all([
     read("supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql"),
     read("vercel.json"),
@@ -44,6 +44,9 @@ test("Vercel remains the durable minute worker and the duplicate Supabase HTTP w
   assert.doesNotMatch(sql, /cron\.schedule\s*\(/i);
   assert.deepEqual(
     vercel.crons.find((cron) => cron.path === "/api/cron/seo-run-worker"),
-    { path: "/api/cron/seo-run-worker", schedule: "* * * * *" },
+    {
+      path: "/api/cron/seo-run-worker",
+      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
+    },
   );
 });
