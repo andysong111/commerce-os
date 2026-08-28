@@ -127,6 +127,22 @@ test("durable worker도 검색어가 10개 미만이면 기존 STEP4 안전복�
   assert.match(worker, /const result = await composeFinalWithRecovery/);
 });
 
+test("희소 상품 복구는 사실 토큰과 핵심상품어 조합을 충분히 만든 뒤 STEP4를 다시 통과한다", async () => {
+  const recovery = await source("src/lib/keywordEngineElonBulkKeywordRecovery.ts");
+  assert.match(recovery, /TARGET_CANDIDATES = 24/);
+  assert.match(recovery, /factualTokens/);
+  assert.match(recovery, /buildDeterministicBulkKeywordRecoverySeeds/);
+  assert.match(recovery, /seeds\.push\(`\$\{token\}\$\{core\}`\)/);
+  assert.match(
+    recovery,
+    /seeds\.push\(`\$\{modifiers\[left\]\}\$\{modifiers\[right\]\}\$\{core\}`\)/,
+  );
+  assert.match(recovery, /deterministic\.length >= TARGET_CANDIDATES/);
+  assert.match(recovery, /filterKeywordElonProhibitedKeywords/);
+  assert.match(recovery, /\.slice\(0, 30\)/);
+  assert.match(recovery, /\/\\d\/\.test\(key\)/);
+});
+
 test("durable SEO 복구는 단일 adaptive dispatcher의 critical task로 실행된다", async () => {
   const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
   const shared = await source(
