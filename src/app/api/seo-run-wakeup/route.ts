@@ -5,6 +5,7 @@ import {
   finishSeoRunWorkerPulse,
 } from "@/lib/seoRunWorkerControl";
 import { processSeoRunQueue } from "@/lib/seoRunWorker";
+import { processProductLaunchShoplingPostprocessQueue } from "@/lib/productLaunchShoplingPostprocessWorker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,18 +35,38 @@ export async function GET() {
 
   let storedResult: Record<string, unknown> = {};
   try {
+    let postprocessResult: Record<string, unknown> = {};
+    try {
+      postprocessResult = await processProductLaunchShoplingPostprocessQueue({
+        maxItems: 3,
+      });
+    } catch (error) {
+      console.error("[seo-run-wakeup] Shopling postprocess recovery failed", error);
+      postprocessResult = {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Shopling postprocess recovery failed",
+      };
+    }
+
     const result = await processSeoRunQueue({
       workerId,
       maxJobs: 2,
-      timeBudgetMs: 240_000,
+      timeBudgetMs: 210_000,
     });
-    storedResult = { ok: true, ...result };
+    storedResult = {
+      ok: true,
+      ...result,
+      shoplingPostprocess: postprocessResult,
+    };
     return NextResponse.json({
       ok: true,
       claimedCount: result.claimedCount,
       completedCount: result.completedCount,
       failedCount: result.failedCount,
       queuedCount: result.queuedCount,
+      shoplingPostprocess: postprocessResult,
     });
   } catch (error) {
     console.error("[seo-run-wakeup] durable worker failed", error);
