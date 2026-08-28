@@ -70,8 +70,17 @@ test("proposal worker and cron never write Shopling prices", () => {
   );
 });
 
-test("protected cron runs the durable proposal step every minute", () => {
+test("protected cron keeps the durable proposal worker at an hourly recovery cadence", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /runReceiptLivePriceProposalStep/);
-  assert.match(vercel, /receipt-live-price-proposals/);
+  const config = JSON.parse(vercel);
+  assert.deepEqual(
+    config.crons.find(
+      (entry) => entry.path === "/api/cron/receipt-live-price-proposals",
+    ),
+    {
+      path: "/api/cron/receipt-live-price-proposals",
+      schedule: "47 * * * *",
+    },
+  );
 });
