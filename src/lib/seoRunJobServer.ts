@@ -10,8 +10,11 @@ export const SEO_RUN_JOB_TABLE = "seo_run_jobs";
 export const SEO_RUN_JOB_MAX_ACTIVE = 200;
 
 const SEO_RUN_READ_ATTEMPTS = 4;
-const SEO_RUN_READ_TIMEOUT_MS = 8_000;
+const SEO_RUN_READ_TIMEOUT_MS = 12_000;
+const SEO_RUN_WRITE_TIMEOUT_MS = 30_000;
+const SEO_RUN_PATCH_RECONCILE_ATTEMPTS = 2;
 const SEO_RUN_READ_RETRY_DELAYS_MS = [1_500, 3_000, 6_000];
+const SEO_RUN_PATCH_RETRY_DELAYS_MS = [1_500];
 const SEO_RUN_TRANSIENT_STORAGE_STATUSES = new Set([
   408,
   425,
@@ -152,7 +155,23 @@ type UnknownRecord = Record<string, unknown>;
 
 type StorageRequestOptions = {
   retryRead?: boolean;
+  timeoutMs?: number;
+  attempts?: number;
 };
+
+export class SeoRunLeaseLostError extends Error {
+  constructor(runId: string) {
+    super(`SEO RUN ${runId} lease ownership was lost.`);
+    this.name = "SeoRunLeaseLostError";
+  }
+}
+
+export function isSeoRunLeaseLostError(error: unknown) {
+  return (
+    error instanceof SeoRunLeaseLostError ||
+    (error instanceof Error && error.name === "SeoRunLeaseLostError")
+  );
+}
 
 function text(value: unknown) {
   return String(value ?? "").trim();
@@ -179,6 +198,16 @@ function normalizeStorageError(error: unknown) {
   return new Error(
     typeof error === "string" ? error : "SEO RUN 저장소 요청에 실패했습니다.",
   );
+}
+
+function storageTimeoutError(method: string, timeoutMs: number) {
+  const error = new Error(
+    `SEO_RUN_STORAGE_${method}_TIMEOUT: Supabase가 ${Math.round(
+      timeoutMs / 1000,
+    )}초 안에 응답하지 않았습니다.`,
+  );
+  error.name = "SeoRunStorageTimeoutError";
+  return error;
 }
 
 function isTransientStorageError(error: unknown) {
@@ -213,6 +242,12 @@ function isTransientStorageFailure(status: number, body: unknown, error: Error) 
   return code === "pgrst002" || isTransientStorageError(error);
 }
 
+function boundedTimeout(value: unknown, fallback: number) {
+  const parsed = Math.trunc(Number(value));
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1_000, Math.min(60_000, parsed));
+}
+
 async function requestStorage<T>(
   config: ProductLaunchAdminConfig,
   path: string,
@@ -220,13 +255,26 @@ async function requestStorage<T>(
   options: StorageRequestOptions = {},
 ): Promise<T> {
   const method = String(init.method ?? "GET").toUpperCase();
-  const retryRead = options.retryRead === true && ["GET", "HEAD"].includes(method);
-  const attempts = retryRead ? SEO_RUN_READ_ATTEMPTS : 1;
+  const readMethod = ["GET", "HEAD"].includes(method);
+  const retryRead = options.retryRead === true && readMethod;
+  const attempts = retryRead
+    ? Math.max(
+        1,
+        Math.min(
+          SEO_RUN_READ_ATTEMPTS,
+          Math.trunc(options.attempts ?? SEO_RUN_READ_ATTEMPTS),
+        ),
+      )
+    : 1;
+  const timeoutMs = boundedTimeout(
+    options.timeoutMs,
+    readMethod ? SEO_RUN_READ_TIMEOUT_MS : SEO_RUN_WRITE_TIMEOUT_MS,
+  );
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEO_RUN_READ_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
         ...init,
@@ -250,7 +298,10 @@ async function requestStorage<T>(
         throw error;
       }
     } catch (error) {
-      const normalized = normalizeStorageError(error);
+      const normalized =
+        error instanceof Error && error.name === "AbortError"
+          ? storageTimeoutError(method, timeoutMs)
+          : normalizeStorageError(error);
       lastError = normalized;
       if (
         attempt >= attempts ||
@@ -271,6 +322,79 @@ async function requestStorage<T>(
   }
 
   throw lastError ?? new Error("SEO RUN 저장소를 읽지 못했습니다.");
+}
+
+function sameInstant(left: unknown, right: unknown) {
+  const leftTime = Date.parse(text(left));
+  const rightTime = Date.parse(text(right));
+  return (
+    Number.isFinite(leftTime) &&
+    Number.isFinite(rightTime) &&
+    Math.abs(leftTime - rightTime) <= 5
+  );
+}
+
+function patchValueMatches(key: string, actual: unknown, expected: unknown) {
+  if (key.endsWith("_at") || key === "not_before" || key === "lease_until") {
+    if (actual === null || expected === null) return actual === expected;
+    return sameInstant(actual, expected);
+  }
+  return actual === expected;
+}
+
+function patchWasApplied(
+  row: SeoRunJobRow,
+  marker: string,
+  patch: Record<string, unknown>,
+) {
+  if (sameInstant(row.updated_at, marker)) return true;
+  const comparableKeys = [
+    "status",
+    "stage",
+    "stage_index",
+    "progress_percent",
+    "message",
+    "error_message",
+    "attempt_count",
+    "max_attempts",
+    "not_before",
+    "lease_owner",
+    "lease_until",
+    "registration_status",
+    "registration_job_id",
+    "registration_request_id",
+    "completed_at",
+    "archived_at",
+  ].filter((key) => Object.prototype.hasOwnProperty.call(patch, key));
+  return (
+    comparableKeys.length > 0 &&
+    comparableKeys.every((key) =>
+      patchValueMatches(
+        key,
+        (row as unknown as UnknownRecord)[key],
+        patch[key],
+      ),
+    )
+  );
+}
+
+async function readSeoRunJobByIdWithOptions(
+  config: ProductLaunchAdminConfig,
+  runId: string,
+  options: StorageRequestOptions,
+) {
+  const params = new URLSearchParams({
+    select: "*",
+    run_id: `eq.${runId}`,
+    limit: "1",
+  });
+  const rows = await requestStorage<SeoRunJobRow[]>(
+    config,
+    `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
+    {},
+    options,
+  );
+  return Array.isArray(rows) ? rows[0] ?? null : null;
 }
 
 export async function insertSeoRunJobs(
@@ -405,6 +529,7 @@ export async function claimNextSeoRunJob(
         p_lease_seconds: leaseSeconds,
       }),
     },
+    { timeoutMs: 15_000 },
   );
   if (body.claimed !== true) return null;
   const job = record(body.job) as SeoRunJobRow;
@@ -421,34 +546,59 @@ export async function patchClaimedSeoRunJob(
     run_id: `eq.${runId}`,
     lease_owner: `eq.${workerId}`,
   });
-  const rows = await requestStorage<SeoRunJobRow[]>(
-    config,
-    `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
-    {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
-    },
-  );
-  const saved = Array.isArray(rows) ? rows[0] ?? null : null;
-  if (!saved) throw new Error(`SEO RUN ${runId} lease ownership was lost.`);
-  return saved;
+  const marker = new Date().toISOString();
+  const payload = { ...patch, updated_at: marker };
+  let lastError: Error | null = null;
+
+  for (
+    let attempt = 1;
+    attempt <= SEO_RUN_PATCH_RECONCILE_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const rows = await requestStorage<SeoRunJobRow[]>(
+        config,
+        `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const saved = Array.isArray(rows) ? rows[0] ?? null : null;
+      if (saved) return saved;
+    } catch (error) {
+      const normalized = normalizeStorageError(error);
+      lastError = normalized;
+      if (!isTransientStorageError(normalized)) throw normalized;
+    }
+
+    const current = await readSeoRunJobByIdWithOptions(config, runId, {
+      retryRead: true,
+      attempts: 2,
+      timeoutMs: 10_000,
+    }).catch(() => null);
+    if (current && patchWasApplied(current, marker, patch)) return current;
+    if (current && current.lease_owner !== workerId) {
+      throw new SeoRunLeaseLostError(runId);
+    }
+    if (attempt >= SEO_RUN_PATCH_RECONCILE_ATTEMPTS) break;
+    const delayMs =
+      SEO_RUN_PATCH_RETRY_DELAYS_MS[
+        Math.min(attempt - 1, SEO_RUN_PATCH_RETRY_DELAYS_MS.length - 1)
+      ] ?? 0;
+    if (delayMs > 0) await sleep(delayMs);
+  }
+
+  if (lastError) throw lastError;
+  throw new SeoRunLeaseLostError(runId);
 }
 
 export async function readSeoRunJobById(
   config: ProductLaunchAdminConfig,
   runId: string,
 ) {
-  const params = new URLSearchParams({
-    select: "*",
-    run_id: `eq.${runId}`,
-    limit: "1",
+  return readSeoRunJobByIdWithOptions(config, runId, {
+    retryRead: true,
   });
-  const rows = await requestStorage<SeoRunJobRow[]>(
-    config,
-    `${SEO_RUN_JOB_TABLE}?${params.toString()}`,
-    {},
-    { retryRead: true },
-  );
-  return Array.isArray(rows) ? rows[0] ?? null : null;
 }
