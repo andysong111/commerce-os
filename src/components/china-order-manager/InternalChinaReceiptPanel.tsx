@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { InternalChinaForwarderCostSummary } from "@/lib/internalChinaForwarderCost";
 
 export type InternalChinaReceiptPanelLine = {
   barcode: string;
@@ -27,26 +28,57 @@ function clamp(value: unknown, maximum: number) {
   return Math.min(maximum, Math.max(0, parsed));
 }
 
+function won(value: unknown) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, parsed);
+}
+
+type ForwarderCostResponse = {
+  ok?: boolean;
+  message?: string;
+  result?: InternalChinaForwarderCostSummary;
+};
+
 export function InternalChinaReceiptPanel({
   draftId,
   cycleMonth,
   lines,
+  forwarderCost,
 }: {
   draftId: string;
   cycleMonth: string;
   lines: InternalChinaReceiptPanelLine[];
+  forwarderCost: InternalChinaForwarderCostSummary;
 }) {
   const router = useRouter();
   const openLines = useMemo(
     () => lines.filter((line) => line.openQuantity > 0),
     [lines],
   );
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(
+    () => openLines.length === 0 && !forwarderCost.actualCostKrw,
+  );
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [quantities, setQuantities] = useState<Record<string, number>>(() =>
     Object.fromEntries(openLines.map((line) => [line.barcode, line.openQuantity])),
   );
+  const [forwarderCostInput, setForwarderCostInput] = useState(
+    forwarderCost.actualCostKrw ? String(forwarderCost.actualCostKrw) : "",
+  );
+
+  useEffect(() => {
+    setQuantities(
+      Object.fromEntries(openLines.map((line) => [line.barcode, line.openQuantity])),
+    );
+  }, [openLines]);
+
+  useEffect(() => {
+    setForwarderCostInput(
+      forwarderCost.actualCostKrw ? String(forwarderCost.actualCostKrw) : "",
+    );
+  }, [forwarderCost.actualCostKrw]);
 
   const selected = openLines
     .map((line) => ({
@@ -56,6 +88,12 @@ export function InternalChinaReceiptPanel({
     .filter((line) => line.quantity > 0);
   const selectedQuantity = selected.reduce((sum, line) => sum + line.quantity, 0);
   const remainingTotal = openLines.reduce((sum, line) => sum + line.openQuantity, 0);
+  const actualForwarderCostKrw = won(forwarderCostInput);
+  const existingForwarderCostKrw = forwarderCost.actualCostKrw ?? 0;
+  const actualTotalOutflowKrw =
+    actualForwarderCostKrw > 0
+      ? forwarderCost.productPurchaseCostKrw + actualForwarderCostKrw
+      : null;
 
   function fillAll() {
     setQuantities(
@@ -69,16 +107,83 @@ export function InternalChinaReceiptPanel({
     setNotice("이번 입고수량을 모두 0으로 초기화했습니다.");
   }
 
+  async function persistForwarderCost() {
+    const response = await fetch("/api/china-order-manager/forwarder-cost", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      credentials: "same-origin",
+      cache: "no-store",
+      body: JSON.stringify({
+        draftId,
+        cycleMonth,
+        actualCostKrw: actualForwarderCostKrw,
+      }),
+    });
+    const body = (await response.json().catch(() => ({}))) as ForwarderCostResponse;
+    if (!response.ok || body.ok !== true || !body.result) {
+      throw new Error(
+        body.message || `배송대행 비용 마감 실패 (${response.status})`,
+      );
+    }
+    return body;
+  }
+
+  async function saveForwarderCost() {
+    if (openLines.length > 0) {
+      setNotice("남은 미입고를 전량 입고확정할 때 배송대행 비용도 함께 마감합니다.");
+      return;
+    }
+    if (actualForwarderCostKrw <= 0) {
+      setNotice("배송대행지에서 실제 청구된 총비용을 원 단위로 입력하세요.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 별도 월 발주비용으로 마감할까요?\n\n이 금액은 상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다.`,
+      )
+    ) {
+      return;
+    }
+
+    setSaving(true);
+    setNotice("");
+    try {
+      const body = await persistForwarderCost();
+      setNotice(body.message || "배송대행 비용을 마감했습니다.");
+      router.refresh();
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "배송대행 비용을 마감하지 못했습니다.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function confirmReceipt() {
     if (!selected.length || selectedQuantity <= 0) {
       setNotice("이번에 실제 입고된 품목의 수량을 1개 이상 입력하세요.");
       return;
     }
     const fullReceipt = selectedQuantity === remainingTotal;
+    if (fullReceipt && actualForwarderCostKrw <= 0) {
+      setNotice(
+        "전량 입고 마감에는 배송대행지에서 실제 청구된 총비용 입력이 필요합니다.",
+      );
+      return;
+    }
     const prompt = fullReceipt
-      ? `${monthLabel(cycleMonth)} 발주 건의 남은 ${number.format(remainingTotal)}개를 전량 입고확정할까요?`
+      ? `${monthLabel(cycleMonth)} 발주 건의 남은 ${number.format(remainingTotal)}개를 전량 입고확정하고 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 별도 마감할까요?`
       : `${monthLabel(cycleMonth)} 발주 건에서 ${number.format(selected.length)} SKU · ${number.format(selectedQuantity)}개를 부분입고로 확정할까요?`;
-    if (!window.confirm(`${prompt}\n\n확정 즉시 중국 발주·입고 원장의 미입고 수량이 차감됩니다.`)) return;
+    const detail = fullReceipt
+      ? "입고수량은 원장과 Product Master에 반영하고, 배송대행 비용은 월 발주비용으로만 별도 저장합니다. 상품 매입원가·판매가·상품등급에는 합산하지 않습니다."
+      : "확정 즉시 중국 발주·입고 원장의 미입고 수량이 차감됩니다. 배송대행 비용은 최종 전량 입고 시 입력합니다.";
+    if (!window.confirm(`${prompt}\n\n${detail}`)) return;
 
     setSaving(true);
     setNotice("");
@@ -104,17 +209,40 @@ export function InternalChinaReceiptPanel({
       if (!response.ok || body.ok !== true) {
         throw new Error(body.message || `입고확정 실패 (${response.status})`);
       }
-      setNotice(body.message || "입고확정을 완료했습니다.");
+
+      if (
+        fullReceipt &&
+        (existingForwarderCostKrw <= 0 ||
+          existingForwarderCostKrw !== actualForwarderCostKrw)
+      ) {
+        try {
+          const costBody = await persistForwarderCost();
+          setNotice(
+            `${body.message || "입고확정을 완료했습니다."} ${costBody.message || "배송대행 비용도 별도 마감했습니다."}`,
+          );
+        } catch (error) {
+          setNotice(
+            `${body.message || "입고확정을 완료했습니다."} 다만 배송대행 비용 마감은 실패했습니다. 아래 입력값을 확인해 다시 저장하세요: ${
+              error instanceof Error ? error.message : "재시도 필요"
+            }`,
+          );
+          setExpanded(true);
+          router.refresh();
+          return;
+        }
+      } else {
+        setNotice(body.message || "입고확정을 완료했습니다.");
+      }
       setExpanded(false);
       router.refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "입고확정을 완료하지 못했습니다.");
+      setNotice(
+        error instanceof Error ? error.message : "입고확정을 완료하지 못했습니다.",
+      );
     } finally {
       setSaving(false);
     }
   }
-
-  if (!openLines.length) return null;
 
   return (
     <section className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
@@ -127,10 +255,19 @@ export function InternalChinaReceiptPanel({
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
               월 1회 발주·입고
             </span>
+            {forwarderCost.actualCostKrw ? (
+              <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-800">
+                배송대행 비용 마감완료
+              </span>
+            ) : null}
           </div>
-          <h2 className="mt-3 text-lg font-black text-slate-950">입고 처리</h2>
+          <h2 className="mt-3 text-lg font-black text-slate-950">
+            {openLines.length ? "입고 처리" : "배송대행지 비용 마감"}
+          </h2>
           <p className="mt-1 text-sm text-slate-600">
-            {openLines.length.toLocaleString("ko-KR")} SKU · 남은 미입고 {number.format(remainingTotal)}개. 전량 도착했다면 기본값 그대로 확정하고, 일부만 왔다면 실제 도착수량만 수정하세요.
+            {openLines.length
+              ? `${openLines.length.toLocaleString("ko-KR")} SKU · 남은 미입고 ${number.format(remainingTotal)}개. 전량 도착했다면 실제 배송대행지 총비용을 입력한 뒤 그대로 확정하고, 일부만 왔다면 실제 도착수량만 수정하세요.`
+              : `입고수량은 모두 마감됐습니다. 관세·부가세·바코드 스티커 작업 등을 포함한 배송대행지 실제 청구 총액을 월 발주비용으로 별도 저장하세요.`}
           </p>
           <p className="mt-1 font-mono text-[11px] text-slate-400">{draftId}</p>
         </div>
@@ -139,92 +276,192 @@ export function InternalChinaReceiptPanel({
           onClick={() => setExpanded((value) => !value)}
           className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-800"
         >
-          {expanded ? "입고 입력 닫기" : "입고 처리 열기"}
+          {expanded
+            ? "입력 닫기"
+            : openLines.length
+              ? "입고 처리 열기"
+              : "배송대행 비용 입력"}
         </button>
       </div>
 
       {expanded ? (
         <div className="mt-5 space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={fillAll}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
-            >
-              남은 수량 전부 채우기
-            </button>
-            <button
-              type="button"
-              onClick={clearAll}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
-            >
-              전체 0으로 초기화
-            </button>
-            <span className="self-center text-xs font-bold text-emerald-800">
-              이번 입고 예정 · {number.format(selected.length)} SKU · {number.format(selectedQuantity)}개
-            </span>
-          </div>
-
-          <div className="max-h-[560px] overflow-auto rounded-xl border border-slate-200">
-            <table className="min-w-[980px] text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold text-slate-500">
-                <tr>
-                  <th className="px-3 py-3">B-code / 상품</th>
-                  <th className="px-3 py-3">옵션</th>
-                  <th className="px-3 py-3 text-right">실주문</th>
-                  <th className="px-3 py-3 text-right">누적 입고</th>
-                  <th className="px-3 py-3 text-right">남은 미입고</th>
-                  <th className="px-3 py-3 text-right">이번 입고수량</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {openLines.map((line) => (
-                  <tr key={line.barcode}>
-                    <td className="px-3 py-3">
-                      <strong className="font-mono text-slate-950">{line.barcode}</strong>
-                      <span className="mt-1 block text-xs text-slate-600">
-                        {[line.modelNo, line.modelName].filter(Boolean).join(" · ") || "상품정보 확인 중"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-slate-700">{line.saleOption || "-"}</td>
-                    <td className="px-3 py-3 text-right font-semibold">{number.format(line.orderedQuantity)}</td>
-                    <td className="px-3 py-3 text-right font-semibold">{number.format(line.receivedQuantity)}</td>
-                    <td className="px-3 py-3 text-right font-black text-blue-700">{number.format(line.openQuantity)}</td>
-                    <td className="px-3 py-3 text-right">
-                      <input
-                        type="number"
-                        min={0}
-                        max={line.openQuantity}
-                        step={1}
-                        value={quantities[line.barcode] ?? 0}
-                        onChange={(event) =>
-                          setQuantities((current) => ({
-                            ...current,
-                            [line.barcode]: clamp(event.target.value, line.openQuantity),
-                          }))
-                        }
-                        className="w-28 rounded-lg border border-slate-300 px-2.5 py-2 text-right font-black outline-none focus:border-emerald-500"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-xs leading-5 text-emerald-950">
-              일부만 입력하면 PARTIALLY_RECEIVED, 남은 수량까지 모두 입고되면 RECEIVED로 자동 전환합니다. 확정 입고수량과 내부기준원가는 Product Master 입고원가에도 연결합니다.
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <CostMetric
+                label="상품 실주문 원가"
+                value={`${number.format(forwarderCost.productPurchaseCostKrw)}원`}
+                note="상품대금 + 중국내 운임"
+              />
+              <CostMetric
+                label={`기존 ${forwarderCost.estimatedMultiplier.toFixed(2)} 추정 배대지 비용`}
+                value={`${number.format(forwarderCost.estimatedForwarderCostKrw)}원`}
+                note={`예상 총지출 ${number.format(forwarderCost.estimatedTotalOutflowKrw)}원`}
+              />
+              <div className="rounded-lg border border-blue-200 bg-white p-3">
+                <label
+                  htmlFor={`forwarder-cost-${draftId}`}
+                  className="block text-xs font-bold text-slate-600"
+                >
+                  배송대행지 실제비용(원)
+                </label>
+                <input
+                  id={`forwarder-cost-${draftId}`}
+                  type="number"
+                  min={1}
+                  max={1_000_000_000}
+                  step={1}
+                  value={forwarderCostInput}
+                  onChange={(event) => setForwarderCostInput(event.target.value)}
+                  placeholder="예: 780000"
+                  className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-right font-black outline-none focus:border-blue-500"
+                />
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  관세·부가세·스티커 작업 등 청구 총액
+                </span>
+              </div>
+              <CostMetric
+                label="실제 총 지출"
+                value={
+                  actualTotalOutflowKrw === null
+                    ? "입력 대기"
+                    : `${number.format(actualTotalOutflowKrw)}원`
+                }
+                note="상품 실주문 원가 + 배송대행지 실제비용"
+              />
+            </div>
+            <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-bold leading-5 text-blue-950">
+              배송대행지 실제비용은 월 발주비용·현금지출 정산에만 사용합니다. SKU별 상품 매입원가, 판매가, 가격조정, 상품등급 계산에는 배분하거나 합산하지 않습니다.
             </p>
-            <button
-              type="button"
-              disabled={saving || selectedQuantity <= 0}
-              onClick={confirmReceipt}
-              className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {saving ? "입고확정 중…" : `입고확정 · ${number.format(selectedQuantity)}개`}
-            </button>
+            {forwarderCost.closedAt ? (
+              <p className="mt-2 text-xs text-blue-800">
+                최근 마감 · {new Date(forwarderCost.closedAt).toLocaleString("ko-KR")}
+              </p>
+            ) : null}
+            {!openLines.length ? (
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  disabled={saving || actualForwarderCostKrw <= 0}
+                  onClick={() => void saveForwarderCost()}
+                  className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {saving
+                    ? "배송대행 비용 저장 중…"
+                    : forwarderCost.actualCostKrw
+                      ? "배송대행 비용 수정 저장"
+                      : "배송대행 비용 마감"}
+                </button>
+              </div>
+            ) : null}
           </div>
+
+          {openLines.length ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={fillAll}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                >
+                  남은 수량 전부 채우기
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                >
+                  전체 0으로 초기화
+                </button>
+                <span className="self-center text-xs font-bold text-emerald-800">
+                  이번 입고 예정 · {number.format(selected.length)} SKU · {number.format(selectedQuantity)}개
+                </span>
+              </div>
+
+              <div className="max-h-[560px] overflow-auto rounded-xl border border-slate-200">
+                <table className="min-w-[980px] text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold text-slate-500">
+                    <tr>
+                      <th className="px-3 py-3">B-code / 상품</th>
+                      <th className="px-3 py-3">옵션</th>
+                      <th className="px-3 py-3 text-right">실주문</th>
+                      <th className="px-3 py-3 text-right">누적 입고</th>
+                      <th className="px-3 py-3 text-right">남은 미입고</th>
+                      <th className="px-3 py-3 text-right">이번 입고수량</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {openLines.map((line) => (
+                      <tr key={line.barcode}>
+                        <td className="px-3 py-3">
+                          <strong className="font-mono text-slate-950">
+                            {line.barcode}
+                          </strong>
+                          <span className="mt-1 block text-xs text-slate-600">
+                            {[line.modelNo, line.modelName]
+                              .filter(Boolean)
+                              .join(" · ") || "상품정보 확인 중"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-slate-700">
+                          {line.saleOption || "-"}
+                        </td>
+                        <td className="px-3 py-3 text-right font-semibold">
+                          {number.format(line.orderedQuantity)}
+                        </td>
+                        <td className="px-3 py-3 text-right font-semibold">
+                          {number.format(line.receivedQuantity)}
+                        </td>
+                        <td className="px-3 py-3 text-right font-black text-blue-700">
+                          {number.format(line.openQuantity)}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <input
+                            type="number"
+                            min={0}
+                            max={line.openQuantity}
+                            step={1}
+                            value={quantities[line.barcode] ?? 0}
+                            onChange={(event) =>
+                              setQuantities((current) => ({
+                                ...current,
+                                [line.barcode]: clamp(
+                                  event.target.value,
+                                  line.openQuantity,
+                                ),
+                              }))
+                            }
+                            className="w-28 rounded-lg border border-slate-300 px-2.5 py-2 text-right font-black outline-none focus:border-emerald-500"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-xs leading-5 text-emerald-950">
+                  일부만 입력하면 PARTIALLY_RECEIVED, 남은 수량까지 모두 입고되면 RECEIVED로 자동 전환합니다. Product Master에는 중국 상품대금과 중국내 운임 기준 상품 매입원가만 연결하고, 배송대행지 비용은 별도 월 비용으로 마감합니다.
+                </p>
+                <button
+                  type="button"
+                  disabled={
+                    saving ||
+                    selectedQuantity <= 0 ||
+                    (selectedQuantity === remainingTotal &&
+                      actualForwarderCostKrw <= 0)
+                  }
+                  onClick={() => void confirmReceipt()}
+                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {saving
+                    ? "입고확정 중…"
+                    : `입고확정 · ${number.format(selectedQuantity)}개`}
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -234,5 +471,25 @@ export function InternalChinaReceiptPanel({
         </p>
       ) : null}
     </section>
+  );
+}
+
+function CostMetric({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="rounded-lg border border-blue-200 bg-white p-3">
+      <span className="block text-xs font-bold text-slate-600">{label}</span>
+      <strong className="mt-2 block text-right text-base font-black text-slate-950">
+        {value}
+      </strong>
+      <span className="mt-1 block text-[11px] text-slate-500">{note}</span>
+    </div>
   );
 }
