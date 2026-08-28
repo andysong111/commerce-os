@@ -253,13 +253,13 @@ export async function recordInternalChinaReceipt(
     const group = groupStats.get(groupKey) ?? { quantity: line.quantity, freight: 0 };
     const freightPerUnitCny = group.quantity > 0 ? group.freight / group.quantity : 0;
     const actualUnitCny = Math.max(0, Number(line.unitPriceCny) || 0) + freightPerUnitCny;
+
+    // 배송대행지 청구액(관세·부가세·스티커 작업 등)은 월 발주비용으로
+    // 별도 마감한다. 상품 매입원가와 가격·등급 계산에는 1.45 추정계수를
+    // 섞지 않고, 중국 상품대금과 중국내 운임만 원화로 환산한다.
     const unitCostKrw = Math.max(
       1,
-      Math.round(
-        actualUnitCny *
-          draft.exchangeRateKrwPerCny *
-          draft.internalOrderCostMultiplier,
-      ),
+      Math.round(actualUnitCny * draft.exchangeRateKrwPerCny),
     );
     receiptCosts.push({
       id: `china-receipt:${receiptId}:${code}`,

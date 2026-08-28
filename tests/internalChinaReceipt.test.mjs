@@ -32,16 +32,18 @@ test("receipt engine never receives more than the current open quantity", () => 
   assert.ok(engine.includes("commitment.receivedQuantity + receivedNow"));
 });
 
-test("receipt engine writes ledger status and confirmed receipt cost for Product Master", () => {
+test("receipt engine writes ledger status and product purchase cost without the 1.45 forwarder estimate", () => {
   assert.ok(engine.includes('status: finished ? "RECEIVED" : "PARTIALLY_RECEIVED"'));
   assert.ok(engine.includes("mergePriceAdjustmentReceiptCachePage"));
   assert.ok(engine.includes("pushCanonicalProductMasterSnapshotFromTrackerState"));
-  assert.ok(engine.includes("draft.internalOrderCostMultiplier"));
-  assert.ok(engine.includes("draft.exchangeRateKrwPerCny"));
+  assert.ok(engine.includes("actualUnitCny * draft.exchangeRateKrwPerCny"));
+  assert.equal(engine.includes("draft.internalOrderCostMultiplier"), false);
+  assert.ok(engine.includes("배송대행지 청구액"));
 });
 
-test("receipt API is same-origin protected and returns a user-facing receipt result", () => {
+test("receipt API is same-origin protected and reports product purchase cost separately", () => {
   assert.ok(route.includes("isSameOriginOpsRequest"));
   assert.ok(route.includes("recordInternalChinaReceipt"));
-  assert.ok(route.includes("Product Master 입고원가"));
+  assert.ok(route.includes("상품 매입원가"));
+  assert.equal(route.includes("내부기준원가"), false);
 });

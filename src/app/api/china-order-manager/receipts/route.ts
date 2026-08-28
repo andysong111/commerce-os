@@ -57,8 +57,8 @@ export async function POST(request: Request) {
         ok: true,
         result,
         message: result.productMasterSynced
-          ? `${result.lineCount.toLocaleString("ko-KR")} SKU · ${result.receivedNow.toLocaleString("ko-KR")}개 입고를 확정하고 Product Master 입고원가까지 반영했습니다.`
-          : `${result.lineCount.toLocaleString("ko-KR")} SKU · ${result.receivedNow.toLocaleString("ko-KR")}개 입고는 원장에 확정했습니다. Product Master 후속 동기화는 다시 확인이 필요합니다: ${result.productMasterError}`,
+          ? `${result.lineCount.toLocaleString("ko-KR")} SKU · ${result.receivedNow.toLocaleString("ko-KR")}개 입고를 확정하고 중국 상품대금·중국내 운임 기준 상품 매입원가까지 Product Master에 반영했습니다.`
+          : `${result.lineCount.toLocaleString("ko-KR")} SKU · ${result.receivedNow.toLocaleString("ko-KR")}개 입고는 원장에 확정했습니다. Product Master 상품 매입원가 후속 동기화는 다시 확인이 필요합니다: ${result.productMasterError}`,
       },
       { headers: { "cache-control": "no-store" } },
     );
