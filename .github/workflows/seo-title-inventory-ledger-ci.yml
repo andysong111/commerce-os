@@ -6,6 +6,7 @@ on:
       - "src/app/api/seo-title-ledger/**"
       - "src/app/api/seo-title-dispatch/**"
       - "src/app/api/seo-run-jobs/**"
+      - "src/app/api/seo-run-wakeup/**"
       - "src/app/api/cron/seo-run-worker/**"
       - "src/app/api/keyword-engine-elon-lab/route.ts"
       - "src/app/keyword-engine-elon-lab/SeoTitleLedger*.tsx"
@@ -29,6 +30,9 @@ on:
       - "supabase/migrations/202608220002_fix_seo_title_inventory_trigger.sql"
       - "supabase/migrations/202608280001_seo_run_durable_jobs.sql"
       - "supabase/migrations/202608280002_seo_run_same_item_serial_claim.sql"
+      - "supabase/migrations/202608280003_seo_run_retry_and_title_chaining.sql"
+      - "supabase/migrations/202608280004_seo_run_supabase_wakeup.sql"
+      - "supabase/migrations/202608280005_seo_run_opaque_secret_rpc_compat.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
       - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
       - "tests/seoTitleV4MinLengthContract.test.mjs"
@@ -64,6 +68,7 @@ jobs:
           src/app/api/seo-title-ledger/route.ts
           src/app/api/seo-title-dispatch/route.ts
           src/app/api/seo-run-jobs/route.ts
+          src/app/api/seo-run-wakeup/route.ts
           src/app/api/cron/seo-run-worker/route.ts
           src/app/api/keyword-engine-elon-lab/route.ts
           src/app/keyword-engine-elon-lab/SeoTitleLedgerControlPanel.tsx
@@ -79,6 +84,7 @@ jobs:
           src/lib/seoRunJobServer.ts
           src/lib/seoRunJobHistory.ts
           src/lib/seoRunWorker.ts
+          src/lib/seoRunWorkerControl.ts
           src/lib/keywordEngineElonBulkFinal.ts
           src/lib/keywordEngineElonLabV2Scoring.ts
           src/lib/keywordEngineElonTitleExpansion.ts
