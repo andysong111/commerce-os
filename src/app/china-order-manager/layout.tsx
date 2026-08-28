@@ -12,13 +12,40 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 180;
 
+const TRANSIENT_LEDGER_RETRY_DELAYS_MS = [250, 750, 1_500] as const;
+
+function transientLedgerError(message: string | null | undefined) {
+  const normalized = String(message ?? "").toLowerCase();
+  return [
+    "schema cache",
+    "pgrst002",
+    "connection timeout",
+    "connection terminated",
+    "timed out",
+    "timeout",
+    "fetch failed",
+    "temporarily unavailable",
+    "retrying",
+  ].some((token) => normalized.includes(token));
+}
+
+async function loadInternalDraftsForReceiptClose() {
+  let state = await loadFastPurchaseInternalDrafts();
+  for (const delayMs of TRANSIENT_LEDGER_RETRY_DELAYS_MS) {
+    if (!state.error || !transientLedgerError(state.error)) return state;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    state = await loadFastPurchaseInternalDrafts();
+  }
+  return state;
+}
+
 export default async function ChinaOrderManagerLayout({
   children,
 }: {
   children: ReactNode;
 }) {
   const currentCycleMonth = seoulCalendarMonth(new Date());
-  const internalDraftState = await loadFastPurchaseInternalDrafts();
+  const internalDraftState = await loadInternalDraftsForReceiptClose();
   const currentCycleDrafts = internalDraftState.drafts.filter(
     (draft) =>
       draft.cycleMonth === currentCycleMonth && draft.orderedQuantity > 0,

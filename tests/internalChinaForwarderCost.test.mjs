@@ -41,6 +41,15 @@ test("completed monthly drafts remain visible until forwarder cost is closed", (
   assert.ok(layout.includes("loadInternalChinaForwarderCostSummary"));
 });
 
+test("transient Supabase schema-cache errors are retried before hiding the completed draft close panel", () => {
+  assert.ok(layout.includes("TRANSIENT_LEDGER_RETRY_DELAYS_MS"));
+  assert.ok(layout.includes('"schema cache"'));
+  assert.ok(layout.includes('"pgrst002"'));
+  assert.ok(layout.includes('"connection timeout"'));
+  assert.ok(layout.includes("loadInternalDraftsForReceiptClose"));
+  assert.ok(layout.includes("await loadFastPurchaseInternalDrafts()"));
+});
+
 test("forwarder cost API is same-origin protected and never claims price inclusion", () => {
   assert.ok(route.includes("isSameOriginOpsRequest"));
   assert.ok(route.includes("recordInternalChinaForwarderCost"));
