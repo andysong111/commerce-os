@@ -6,10 +6,21 @@ on:
       - "vercel.json"
       - "src/lib/commerceOperationsDashboard.ts"
       - "src/lib/supabase/admin.ts"
+      - "src/lib/opsAdaptiveDispatcher.ts"
+      - "src/lib/seoRunWorkerControl.ts"
+      - "src/lib/seoRunWorkerPulse.ts"
+      - "src/app/api/cron/ops-dispatcher/**"
+      - "src/app/api/cron/ops-storage-maintenance/**"
+      - "src/app/api/product-launch-tracker/recovery-page/**"
       - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
       - "supabase/migrations/202608280007_reduce_seo_run_supabase_wakeup_pressure.sql"
+      - "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql"
+      - "supabase/migrations/202608280010_product_launch_list_snapshot_read_model.sql"
+      - "supabase/migrations/202608280011_ops_storage_maintenance.sql"
       - "tests/opsSupabaseLoadShedding.test.mjs"
       - "tests/supabaseServerTimeoutLoadShedding.test.mjs"
+      - "tests/opsAdaptiveDispatcher.test.mjs"
+      - "tests/productLaunchListSnapshotReadModel.test.mjs"
       - ".github/workflows/ops-supabase-load-shedding.yml"
   push:
     branches: [main]
@@ -17,16 +28,27 @@ on:
       - "vercel.json"
       - "src/lib/commerceOperationsDashboard.ts"
       - "src/lib/supabase/admin.ts"
+      - "src/lib/opsAdaptiveDispatcher.ts"
+      - "src/lib/seoRunWorkerControl.ts"
+      - "src/lib/seoRunWorkerPulse.ts"
+      - "src/app/api/cron/ops-dispatcher/**"
+      - "src/app/api/cron/ops-storage-maintenance/**"
+      - "src/app/api/product-launch-tracker/recovery-page/**"
       - "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql"
       - "supabase/migrations/202608280007_reduce_seo_run_supabase_wakeup_pressure.sql"
+      - "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql"
+      - "supabase/migrations/202608280010_product_launch_list_snapshot_read_model.sql"
+      - "supabase/migrations/202608280011_ops_storage_maintenance.sql"
       - "tests/opsSupabaseLoadShedding.test.mjs"
       - "tests/supabaseServerTimeoutLoadShedding.test.mjs"
+      - "tests/opsAdaptiveDispatcher.test.mjs"
+      - "tests/productLaunchListSnapshotReadModel.test.mjs"
       - ".github/workflows/ops-supabase-load-shedding.yml"
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,14 +56,31 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Validate OPS Supabase load shedding contracts
+      - name: Validate OPS adaptive scheduling and storage contracts
         run: >-
           node --test
           tests/opsSupabaseLoadShedding.test.mjs
           tests/supabaseServerTimeoutLoadShedding.test.mjs
-      - name: Lint Supabase fail-fast and dashboard read models
+          tests/opsAdaptiveDispatcher.test.mjs
+          tests/productLaunchListSnapshotReadModel.test.mjs
+      - name: Lint dispatcher, fail-fast and read-model code
         run: >-
           npx eslint
           src/lib/supabase/admin.ts
           src/lib/commerceOperationsDashboard.ts
+          src/lib/opsAdaptiveDispatcher.ts
+          src/lib/seoRunWorkerControl.ts
+          src/lib/seoRunWorkerPulse.ts
+          src/app/api/cron/ops-dispatcher/route.ts
+          src/app/api/cron/ops-storage-maintenance/route.ts
+          src/app/api/product-launch-tracker/recovery-page/route.ts
           tests/supabaseServerTimeoutLoadShedding.test.mjs
+          tests/opsAdaptiveDispatcher.test.mjs
+          tests/productLaunchListSnapshotReadModel.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://ops-load-shedding-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ops_load_shedding_build_check
+          PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
+          PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36

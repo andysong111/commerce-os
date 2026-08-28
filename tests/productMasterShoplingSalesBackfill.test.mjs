@@ -14,7 +14,10 @@ const cron = await readFile(
   "src/app/api/cron/product-master-shopling-sales-backfill/route.ts",
   "utf8",
 );
-const vercel = await readFile("vercel.json", "utf8");
+const scheduler = await readFile(
+  "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
+  "utf8",
+);
 
 test("sales backfill keeps Shopling read-only and writes only Product Master salesMonthly", () => {
   assert.match(workflow, /new ShoplingReadClient\(config\)\.read\("orders", nextRange\)/);
@@ -54,14 +57,16 @@ test("browser write API is same-origin only", () => {
   assert.match(api, /applyProductMasterShoplingSales/);
 });
 
-test("one-minute worker auto-starts and adaptively reduces failed Shopling ranges", () => {
+test("adaptive-range worker is a low-frequency diagnostic dispatcher task", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /PRODUCT_MASTER_SHOPLING_SALES_DEFAULT_CHUNK_DAYS/);
   assert.match(cron, /PRODUCT_MASTER_SHOPLING_SALES_FALLBACK_CHUNK_DAYS/);
   assert.match(cron, /PRODUCT_MASTER_SHOPLING_SALES_MINIMUM_CHUNK_DAYS/);
   assert.match(cron, /current\.state === "IDLE"/);
-  assert.match(vercel, /product-master-shopling-sales-backfill/);
-  assert.match(vercel, /"schedule": "\* \* \* \* \*"/);
+  assert.match(
+    scheduler,
+    /'product-master-shopling-sales-backfill', '\/api\/cron\/product-master-shopling-sales-backfill', 'diagnostic', 230, true, 21600, 1800, 43200/,
+  );
 });
 
 test("successful Shopling chunks may burst only inside a strict serverless time budget", () => {
@@ -72,7 +77,6 @@ test("successful Shopling chunks may burst only inside a strict serverless time 
   assert.match(cron, /Date\.now\(\) - startedAt < EXTRA_STEP_START_BUDGET_MS/);
   assert.match(cron, /burstElapsedMs/);
 });
-
 
 test("verified full baseline remains completed after rolling incremental values change", () => {
   assert.match(workflow, /readOperations\(PRODUCT_MASTER_SHOPLING_SALES_FULL, cid, 5\)/);

@@ -1,4 +1,7 @@
-import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
+import {
+  SUPABASE_ADMIN_RPC_TIMEOUT_MS,
+  createSupabaseAdminHeaders,
+} from "@/lib/supabase/admin";
 import {
   readProductLaunchError,
   readResponseJson,
@@ -19,6 +22,7 @@ async function requestStorage<T>(
       ...(init.headers ?? {}),
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(SUPABASE_ADMIN_RPC_TIMEOUT_MS),
   });
   const body = await readResponseJson(response);
   if (!response.ok) throw new Error(readProductLaunchError(body, response.status));

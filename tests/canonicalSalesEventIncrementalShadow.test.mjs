@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, cron, page, vercel] = await Promise.all([
+const [engine, cron, page, scheduler] = await Promise.all([
   readFile("src/lib/canonicalSalesEventIncrementalShadow.ts", "utf8"),
   readFile("src/app/api/cron/stage8-canonical-sales-event-incremental-shadow/route.ts", "utf8"),
   readFile("src/app/stage8-canonical-sales-event-incremental-shadow/page.tsx", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("exact-event incremental shadow only verifies persisted events and never writes them", () => {
@@ -44,15 +44,18 @@ test("unmapped or identity conflicts fail closed before Product Master verificat
   assert.match(engine, /CANONICAL_EVENT_VERIFY_FOREIGN_MISMATCH_ID/);
 });
 
-test("shadow is durable, periodic, and keeps full refresh as an explicit residual requirement", () => {
+test("shadow is durable, periodic and a diagnostic dispatcher task", () => {
   assert.match(engine, /commerce_operation_runs/);
   assert.match(engine, /CANONICAL_EVENT_INCREMENTAL_SHADOW_INTERVAL_MS = 6 \* 60 \* 60 \* 1000/);
   assert.match(engine, /fullRefreshStillRequired: true/);
   assert.match(engine, /pendingMismatchCount/);
   assert.match(page, /전체 360일 전수검증/);
-  assert.match(vercel, /stage8-canonical-sales-event-incremental-shadow/);
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /writesEnabled: false/);
+  assert.match(
+    scheduler,
+    /'stage8-canonical-sales-event-incremental-shadow', '\/api\/cron\/stage8-canonical-sales-event-incremental-shadow', 'diagnostic', 210, true, 3600, 600, 21600/,
+  );
 });
 
 test("the shadow reuses the proven exact-event resolver rather than monthly sales aggregation", () => {

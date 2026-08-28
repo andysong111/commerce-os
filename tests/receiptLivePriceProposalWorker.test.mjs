@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [worker, cron, page, vercel] = await Promise.all([
+const [worker, cron, page, scheduler] = await Promise.all([
   readFile("src/lib/receiptLivePriceProposalWorker.ts", "utf8"),
   readFile("src/app/api/cron/receipt-live-price-proposals/route.ts", "utf8"),
   readFile("src/app/stage8-receipt-live-price-proposals/page.tsx", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("worker creates a rollout marker so historical receipt events are never backfilled automatically", () => {
@@ -70,17 +70,11 @@ test("proposal worker and cron never write Shopling prices", () => {
   );
 });
 
-test("protected cron keeps the durable proposal worker at an hourly recovery cadence", () => {
+test("protected cron is an operational adaptive-dispatcher task", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /runReceiptLivePriceProposalStep/);
-  const config = JSON.parse(vercel);
-  assert.deepEqual(
-    config.crons.find(
-      (entry) => entry.path === "/api/cron/receipt-live-price-proposals",
-    ),
-    {
-      path: "/api/cron/receipt-live-price-proposals",
-      schedule: "47 * * * *",
-    },
+  assert.match(
+    scheduler,
+    /'receipt-live-price-proposals', '\/api\/cron\/receipt-live-price-proposals', 'operational', 140, true, 3600, 300, 21600/,
   );
 });

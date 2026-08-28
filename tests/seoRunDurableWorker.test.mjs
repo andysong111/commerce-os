@@ -93,27 +93,34 @@ test("Vercel worker는 STEP별 체크포인트를 저장하고 마지막 성공 
   assert.match(worker, /composeKeywordElonBulkFinal/);
 });
 
-test("durable SEO 복구는 Vercel 독립 5분 이내 cron으로 실행되고 receipt cron과 분리된다", async () => {
+test("durable SEO 복구는 단일 adaptive dispatcher의 critical task로 실행된다", async () => {
   const standalone = await source("src/app/api/cron/seo-run-worker/route.ts");
   const shared = await source(
     "src/app/api/cron/receipt-live-price-proposals/route.ts",
+  );
+  const pulse = await source("src/lib/seoRunWorkerPulse.ts");
+  const scheduler = await source(
+    "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
   );
   const vercel = JSON.parse(await source("vercel.json"));
 
   assert.match(standalone, /CRON_SECRET/);
   assert.match(standalone, /timingSafeEqual/);
   assert.match(standalone, /maxDuration = 300/);
-  assert.match(standalone, /processSeoRunQueue/);
+  assert.match(standalone, /runCoalescedSeoRunWorkerPulse/);
+  assert.match(pulse, /processSeoRunQueue/);
+  assert.match(pulse, /claimSeoRunWorkerPulse/);
+  assert.match(pulse, /finishSeoRunWorkerPulse/);
 
   assert.doesNotMatch(shared, /processSeoRunQueue/);
   assert.doesNotMatch(shared, /scheduleDurableSeoRunRecovery/);
-  assert.deepEqual(
-    vercel.crons.find((row) => row.path === "/api/cron/seo-run-worker"),
-    {
-      path: "/api/cron/seo-run-worker",
-      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
-    },
+  assert.match(
+    scheduler,
+    /'seo-run-worker', '\/api\/cron\/seo-run-worker', 'critical', 10, true, 300, 60, 300/,
   );
+  assert.deepEqual(vercel.crons, [
+    { path: "/api/cron/ops-dispatcher", schedule: "* * * * *" },
+  ]);
 });
 
 test("과거 Supabase wakeup 안전장치는 전역 lease를 보존하되 DB HTTP cron은 최종적으로 제거된다", async () => {
@@ -153,6 +160,7 @@ test("과거 Supabase wakeup 안전장치는 전역 lease를 보존하되 DB HTT
   assert.doesNotMatch(wakeup, /results:\s*result\.results/);
   assert.match(control, /rpc\/claim_seo_run_worker_pulse/);
   assert.match(control, /rpc\/finish_seo_run_worker_pulse/);
+  assert.match(control, /AbortSignal\.timeout/);
 });
 
 test("SEO 클라우드는 서버 원장을 polling하고 인계 완료 후 localStorage 실행본을 제거한다", async () => {

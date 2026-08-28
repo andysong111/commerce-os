@@ -30,7 +30,10 @@ const control = await readFile(
   "src/app/product-decision-agent/live-refresh/LiveRefreshControl.tsx",
   "utf8",
 );
-const vercel = JSON.parse(await readFile("vercel.json", "utf8"));
+const scheduler = await readFile(
+  "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
+  "utf8",
+);
 
 test("live refresh stores immutable request, chunk, failure and final operation types", () => {
   for (const operation of [
@@ -110,16 +113,13 @@ test("same-origin operator API creates requests and exposes a manual one-step fa
   assert.doesNotMatch(api, /x-commerce-os-integration-secret/);
 });
 
-test("cron is bearer protected, idles when credentials are missing and stays automatically scheduled without minute-level DB pressure", () => {
+test("cron is bearer protected, bounded, and an operational dispatcher task", () => {
   assert.match(cron, /Bearer \$\{expected\}/);
   assert.match(cron, /productDecisionLiveRefreshConfigured/);
   assert.match(cron, /configured: false/);
-  assert.ok(
-    vercel.crons.some(
-      (entry) =>
-        entry.path === "/api/cron/product-decision-live-refresh" &&
-        entry.schedule === "2 * * * *",
-    ),
+  assert.match(
+    scheduler,
+    /'product-decision-live-refresh', '\/api\/cron\/product-decision-live-refresh', 'operational', 110, true, 3600, 300, 21600/,
   );
 });
 

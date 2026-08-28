@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, page, api, cron, vercel] = await Promise.all([
+const [engine, page, api, cron, scheduler] = await Promise.all([
   readFile("src/lib/stage8CanonicalDemandParity.ts", "utf8"),
   readFile("src/app/stage8-demand-parity/page.tsx", "utf8"),
   readFile("src/app/api/stage8/canonical-demand-parity/route.ts", "utf8"),
   readFile("src/app/api/cron/stage8-canonical-demand-parity/route.ts", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("parity pins Product Master canonical sales and direct Shopling to one analysisAsOf", () => {
@@ -46,20 +46,14 @@ test("parity worker is read-only for business data and only records operation ev
   assert.match(page, /발주·가격·재고 쓰기는 없습니다/);
 });
 
-test("cron and same-origin API can resume the durable read-only comparison at recovery cadence", () => {
+test("cron and same-origin API resume the comparison through a diagnostic dispatcher task", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /runCanonicalDemandParityStep/);
   assert.match(api, /isSameOriginOpsRequest/);
   assert.match(api, /run-next/);
   assert.match(api, /createCanonicalDemandParityRequest/);
-  const config = JSON.parse(vercel);
-  assert.deepEqual(
-    config.crons.find(
-      (entry) => entry.path === "/api/cron/stage8-canonical-demand-parity",
-    ),
-    {
-      path: "/api/cron/stage8-canonical-demand-parity",
-      schedule: "27 */6 * * *",
-    },
+  assert.match(
+    scheduler,
+    /'stage8-canonical-demand-parity', '\/api\/cron\/stage8-canonical-demand-parity', 'diagnostic', 240, true, 21600, 1800, 43200/,
   );
 });

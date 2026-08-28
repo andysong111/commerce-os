@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { processSeoRunQueue } from "@/lib/seoRunWorker";
+import { runCoalescedSeoRunWorkerPulse } from "@/lib/seoRunWorkerPulse";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -33,10 +33,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await processSeoRunQueue({
+    const result = await runCoalescedSeoRunWorkerPulse({
       workerId: `cron:${process.env.VERCEL_REGION || "unknown"}:${crypto.randomUUID()}`,
       maxJobs: 2,
       timeBudgetMs: 240_000,
+      leaseSeconds: 300,
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {

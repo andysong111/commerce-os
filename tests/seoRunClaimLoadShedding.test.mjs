@@ -33,20 +33,21 @@ test("SEO claim has narrow candidate and same-item lease indexes", async () => {
   assert.match(sql, /\(owner_id, launch_item_id, lease_until\)/i);
 });
 
-test("Vercel remains the bounded durable primary and the duplicate Supabase HTTP wakeup is removed", async () => {
-  const [sql, vercelSource] = await Promise.all([
+test("duplicate DB wakeup stays removed and the optimized worker is a critical dispatcher task", async () => {
+  const [retirement, scheduler, vercelSource] = await Promise.all([
     read("supabase/migrations/202608280008_optimize_seo_claim_and_remove_duplicate_wakeup.sql"),
+    read("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql"),
     read("vercel.json"),
   ]);
   const vercel = JSON.parse(vercelSource);
 
-  assert.match(sql, /cron\.unschedule/i);
-  assert.doesNotMatch(sql, /cron\.schedule\s*\(/i);
-  assert.deepEqual(
-    vercel.crons.find((cron) => cron.path === "/api/cron/seo-run-worker"),
-    {
-      path: "/api/cron/seo-run-worker",
-      schedule: "1,6,11,16,21,26,31,36,41,46,51,56 * * * *",
-    },
+  assert.match(retirement, /cron\.unschedule/i);
+  assert.doesNotMatch(retirement, /cron\.schedule\s*\(/i);
+  assert.match(
+    scheduler,
+    /'seo-run-worker', '\/api\/cron\/seo-run-worker', 'critical', 10, true, 300, 60, 300/,
   );
+  assert.deepEqual(vercel.crons, [
+    { path: "/api/cron/ops-dispatcher", schedule: "* * * * *" },
+  ]);
 });

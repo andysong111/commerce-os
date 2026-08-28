@@ -1,64 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/shopling-price-bulk-auto",
-      "schedule": "5,20,35,50 * * * *"
-    },
-    {
-      "path": "/api/cron/detail-page-jobs",
-      "schedule": "3,8,13,18,23,28,33,38,43,48,53,58 * * * *"
-    },
-    {
-      "path": "/api/cron/seo-run-worker",
-      "schedule": "1,6,11,16,21,26,31,36,41,46,51,56 * * * *"
-    },
-    {
-      "path": "/api/cron/product-decision-live-refresh",
-      "schedule": "2 * * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-diagnostic",
-      "schedule": "7 */6 * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-sales-backfill",
-      "schedule": "12 */6 * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-sales-incremental",
-      "schedule": "17 * * * *"
-    },
-    {
-      "path": "/api/cron/product-master-shopling-sales-events",
-      "schedule": "22 * * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-demand-parity",
-      "schedule": "27 */6 * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-sales-event-incremental-shadow",
-      "schedule": "32 * * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-event-mismatch-evidence",
-      "schedule": "37 */6 * * *"
-    },
-    {
-      "path": "/api/cron/stage8-canonical-sales-event-full-audit",
-      "schedule": "42 2 * * *"
-    },
-    {
-      "path": "/api/cron/receipt-live-price-proposals",
-      "schedule": "47 * * * *"
-    },
-    {
-      "path": "/api/cron/receipt-live-price-canary-preflight",
-      "schedule": "52 */6 * * *"
-    },
-    {
-      "path": "/api/cron/price-grade-receipt-shadow-bootstrap",
-      "schedule": "57 * * * *"
+      "path": "/api/cron/ops-dispatcher",
+      "schedule": "* * * * *"
     }
   ]
 }

@@ -4,66 +4,60 @@ import test from "node:test";
 
 const vercel = JSON.parse(readFileSync("vercel.json", "utf8"));
 const dashboard = readFileSync("src/lib/commerceOperationsDashboard.ts", "utf8");
-const migration = readFileSync(
+const scheduler = readFileSync(
+  "supabase/migrations/202608280009_ops_adaptive_dispatcher.sql",
+  "utf8",
+);
+const operationIndexes = readFileSync(
   "supabase/migrations/202608170004_commerce_operation_runs_read_indexes.sql",
   "utf8",
 );
 
-function minuteSet(schedule) {
-  const minute = String(schedule).trim().split(/\s+/)[0];
-  if (minute === "*") return new Set(Array.from({ length: 60 }, (_, index) => index));
-  const values = minute.split(",").map((value) => Number(value));
-  assert.ok(values.every((value) => Number.isInteger(value) && value >= 0 && value < 60));
-  return new Set(values);
-}
+const ROUTES = [
+  "/api/cron/seo-run-worker",
+  "/api/cron/detail-page-jobs",
+  "/api/cron/shopling-price-bulk-auto",
+  "/api/cron/product-decision-live-refresh",
+  "/api/cron/product-master-shopling-diagnostic",
+  "/api/cron/product-master-shopling-sales-backfill",
+  "/api/cron/product-master-shopling-sales-incremental",
+  "/api/cron/product-master-shopling-sales-events",
+  "/api/cron/stage8-canonical-demand-parity",
+  "/api/cron/stage8-canonical-sales-event-incremental-shadow",
+  "/api/cron/stage8-canonical-event-mismatch-evidence",
+  "/api/cron/stage8-canonical-sales-event-full-audit",
+  "/api/cron/receipt-live-price-proposals",
+  "/api/cron/receipt-live-price-canary-preflight",
+  "/api/cron/price-grade-receipt-shadow-bootstrap",
+  "/api/cron/ops-storage-maintenance",
+];
 
-test("DB recovery mode bounds queue wakeups instead of continuously polling empty queues", () => {
-  const everyMinute = vercel.crons.filter((cron) => cron.schedule === "* * * * *");
-  assert.deepEqual(everyMinute, []);
-
-  const seo = vercel.crons.find((cron) => cron.path === "/api/cron/seo-run-worker");
-  const detail = vercel.crons.find((cron) => cron.path === "/api/cron/detail-page-jobs");
-  const shopling = vercel.crons.find(
-    (cron) => cron.path === "/api/cron/shopling-price-bulk-auto",
-  );
-  assert.ok(seo);
-  assert.ok(detail);
-  assert.ok(shopling);
-  assert.equal(minuteSet(seo.schedule).size, 12, "SEO durable recovery stays within 5 minutes");
-  assert.equal(minuteSet(detail.schedule).size, 12, "detail-page recovery stays within 5 minutes");
-  assert.equal(minuteSet(shopling.schedule).size, 4, "idle price worker is capped at four wakeups per hour");
+test("Vercel has one lightweight heartbeat and no independent worker fanout", () => {
+  assert.deepEqual(vercel.crons, [
+    { path: "/api/cron/ops-dispatcher", schedule: "* * * * *" },
+  ]);
 });
 
-test("all OPS cron wakeups are minute-staggered during Supabase recovery", () => {
-  const paths = vercel.crons.map((cron) => cron.path);
-  assert.equal(new Set(paths).size, paths.length, "duplicate cron path detected");
-
-  const perMinute = Array.from({ length: 60 }, () => []);
-  for (const cron of vercel.crons) {
-    for (const minute of minuteSet(cron.schedule)) perMinute[minute].push(cron.path);
+test("all former cron routes are durable DB tasks with one global lease", () => {
+  assert.match(scheduler, /create table if not exists public\.ops_dispatch_state/);
+  assert.match(scheduler, /create table if not exists public\.ops_dispatch_tasks/);
+  assert.match(scheduler, /claim_next_ops_dispatch_task/);
+  assert.match(scheduler, /finish_ops_dispatch_task/);
+  assert.match(scheduler, /for update of task skip locked/);
+  for (const route of ROUTES) {
+    assert.ok(scheduler.includes(`'${route}'`), `missing dispatcher route: ${route}`);
   }
+});
 
-  const busiest = Math.max(...perMinute.map((entries) => entries.length));
-  assert.ok(busiest <= 1, `background workers still collide in the same minute: ${busiest}`);
-
-  for (const path of [
-    "/api/cron/product-decision-live-refresh",
-    "/api/cron/product-master-shopling-diagnostic",
-    "/api/cron/product-master-shopling-sales-backfill",
-    "/api/cron/product-master-shopling-sales-incremental",
-    "/api/cron/product-master-shopling-sales-events",
-    "/api/cron/stage8-canonical-demand-parity",
-    "/api/cron/stage8-canonical-sales-event-incremental-shadow",
-    "/api/cron/stage8-canonical-event-mismatch-evidence",
-    "/api/cron/stage8-canonical-sales-event-full-audit",
-    "/api/cron/receipt-live-price-proposals",
-    "/api/cron/receipt-live-price-canary-preflight",
-    "/api/cron/price-grade-receipt-shadow-bootstrap",
-  ]) {
-    const cron = vercel.crons.find((entry) => entry.path === path);
-    assert.ok(cron, `missing cron: ${path}`);
-    assert.equal(minuteSet(cron.schedule).size, 1, `${path} should have one minute slot per eligible hour`);
-  }
+test("database recovery mode runs only critical queues and backs off background analysis", () => {
+  assert.match(scheduler, /v_state\.mode <> 'recovery' or task\.workload_class = 'critical'/);
+  assert.match(scheduler, /interval '15 minutes'/);
+  assert.match(scheduler, /normal_interval_seconds/);
+  assert.match(scheduler, /busy_interval_seconds/);
+  assert.match(scheduler, /recovery_interval_seconds/);
+  assert.match(scheduler, /'seo-run-worker'.*'critical'/s);
+  assert.match(scheduler, /'detail-page-jobs'.*'critical'/s);
+  assert.match(scheduler, /'shopling-price-bulk-auto'.*'critical'/s);
 });
 
 test("operations dashboard shares a short server snapshot instead of hitting Supabase per tab", () => {
@@ -76,8 +70,8 @@ test("operations dashboard shares a short server snapshot instead of hitting Sup
 });
 
 test("operation ledger has correlation-aware recency indexes for worker read models", () => {
-  assert.match(migration, /commerce_operation_runs_correlation_started_idx/);
-  assert.match(migration, /\(correlation_id, started_at desc\)/);
-  assert.match(migration, /commerce_operation_runs_type_correlation_started_idx/);
-  assert.match(migration, /\(operation_type, correlation_id, started_at desc\)/);
+  assert.match(operationIndexes, /commerce_operation_runs_correlation_started_idx/);
+  assert.match(operationIndexes, /\(correlation_id, started_at desc\)/);
+  assert.match(operationIndexes, /commerce_operation_runs_type_correlation_started_idx/);
+  assert.match(operationIndexes, /\(operation_type, correlation_id, started_at desc\)/);
 });

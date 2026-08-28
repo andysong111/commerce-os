@@ -5,6 +5,7 @@ import {
   getProductLaunchAdminConfig,
   readProductLaunchStorageJson,
   resolveProductLaunchIdentity,
+  type ProductLaunchAdminConfig,
 } from "@/lib/productLaunchTrackerServer";
 import {
   PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD,
@@ -17,12 +18,15 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const RECOVERY_READ_TIMEOUT_MS = 3_000;
-const TABLE_NAME = "product_launch_tracker_states";
+const SNAPSHOT_TABLE = "product_launch_list_snapshots";
+const LEGACY_TABLE = "product_launch_tracker_states";
 
 type SnapshotRow = {
-  list_snapshot?: unknown;
+  snapshot_payload?: unknown;
+  source_state_updated_at?: unknown;
   updated_at?: unknown;
   schema_version?: unknown;
+  list_source?: unknown;
 };
 
 export async function GET(request: NextRequest) {
@@ -32,27 +36,11 @@ export async function GET(request: NextRequest) {
   const config = getProductLaunchAdminConfig();
   if (!config.ok) return Response.json(config.body, { status: config.status });
 
-  const params = new URLSearchParams({
-    select: `list_snapshot:state_payload->${PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD},updated_at,schema_version`,
-    owner_id: `eq.${identity.value.userId}`,
-    limit: "1",
-  });
-
   try {
-    const { body } = await readProductLaunchStorageJson(
-      `${config.value.supabaseUrl}/rest/v1/${TABLE_NAME}?${params.toString()}`,
-      {
-        headers: createSupabaseAdminHeaders(config.value.secretKey),
-        cache: "no-store",
-      },
-      {
-        attempts: 1,
-        timeoutMs: RECOVERY_READ_TIMEOUT_MS,
-        retryDelaysMs: [],
-      },
+    const row = await readSnapshotRow(
+      config.value,
+      identity.value.userId,
     );
-
-    const row = Array.isArray(body) ? (body[0] as SnapshotRow | undefined) : undefined;
     if (!row) {
       return Response.json(
         {
@@ -65,7 +53,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const snapshot = parseProductLaunchListSnapshot(row.list_snapshot);
+    const snapshot = parseProductLaunchListSnapshot(row.snapshot_payload);
     if (!snapshot) {
       return Response.json(
         {
@@ -80,6 +68,7 @@ export async function GET(request: NextRequest) {
 
     const index = buildProductLaunchListIndex(snapshot);
     const page = queryProductLaunchListPage(index, pageQuery(request));
+    const source = nullableText(row.list_source) || "snapshot-read-model";
 
     return Response.json(
       {
@@ -88,15 +77,16 @@ export async function GET(request: NextRequest) {
         ...page,
         policy: index.snapshot.policy ?? null,
         sourceImportedAt: index.snapshot.sourceImportedAt ?? null,
-        updatedAt: nullableText(row.updated_at),
+        updatedAt:
+          nullableText(row.source_state_updated_at) ?? nullableText(row.updated_at),
         schemaVersion: numberOrNull(row.schema_version),
-        listSource: "snapshot-recovery",
-        workflowSource: "snapshot-recovery",
+        listSource: source,
+        workflowSource: source,
       },
       {
         headers: {
           "Cache-Control": "private, no-store",
-          "X-Commerce-Workflow-Recovery": "snapshot",
+          "X-Commerce-Workflow-Recovery": source,
         },
       },
     );
@@ -121,6 +111,55 @@ export async function GET(request: NextRequest) {
       },
     );
   }
+}
+
+async function readSnapshotRow(
+  config: ProductLaunchAdminConfig,
+  ownerId: string,
+): Promise<SnapshotRow | null> {
+  try {
+    const params = new URLSearchParams({
+      select: "snapshot_payload,source_state_updated_at,updated_at,schema_version",
+      owner_id: `eq.${ownerId}`,
+      limit: "1",
+    });
+    const { body } = await readProductLaunchStorageJson(
+      `${config.supabaseUrl}/rest/v1/${SNAPSHOT_TABLE}?${params.toString()}`,
+      {
+        headers: createSupabaseAdminHeaders(config.secretKey),
+        cache: "no-store",
+      },
+      {
+        attempts: 1,
+        timeoutMs: RECOVERY_READ_TIMEOUT_MS,
+        retryDelaysMs: [],
+      },
+    );
+    const row = Array.isArray(body) ? (body[0] as SnapshotRow | undefined) : undefined;
+    if (row) return { ...row, list_source: "snapshot-read-model" };
+  } catch (error) {
+    console.warn("[product-launch-recovery-page] compact snapshot fallback", error);
+  }
+
+  const params = new URLSearchParams({
+    select: `snapshot_payload:state_payload->${PRODUCT_LAUNCH_LIST_SNAPSHOT_FIELD},source_state_updated_at:updated_at,updated_at,schema_version`,
+    owner_id: `eq.${ownerId}`,
+    limit: "1",
+  });
+  const { body } = await readProductLaunchStorageJson(
+    `${config.supabaseUrl}/rest/v1/${LEGACY_TABLE}?${params.toString()}`,
+    {
+      headers: createSupabaseAdminHeaders(config.secretKey),
+      cache: "no-store",
+    },
+    {
+      attempts: 1,
+      timeoutMs: RECOVERY_READ_TIMEOUT_MS,
+      retryDelaysMs: [],
+    },
+  );
+  const row = Array.isArray(body) ? (body[0] as SnapshotRow | undefined) : undefined;
+  return row ? { ...row, list_source: "legacy-snapshot-fallback" } : null;
 }
 
 function pageQuery(request: NextRequest) {
