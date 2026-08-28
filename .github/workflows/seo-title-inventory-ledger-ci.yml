@@ -32,6 +32,7 @@ on:
       - "supabase/migrations/202608280002_seo_run_same_item_serial_claim.sql"
       - "supabase/migrations/202608280003_seo_run_retry_and_title_chaining.sql"
       - "supabase/migrations/202608280004_seo_run_supabase_wakeup.sql"
+      - "supabase/migrations/202608280005_seo_run_opaque_secret_rpc_compat.sql"
       - "tests/seoTitleInventoryLedger.test.mjs"
       - "tests/seoTitleFinalKeywordInventoryGenerator.test.mjs"
       - "tests/seoTitleV4MinLengthContract.test.mjs"
