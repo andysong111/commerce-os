@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, cron, page, vercel] = await Promise.all([
+const [engine, cron, page, scheduler] = await Promise.all([
   readFile("src/lib/receiptLivePriceCanaryPreflight.ts", "utf8"),
   readFile("src/app/api/cron/receipt-live-price-canary-preflight/route.ts", "utf8"),
   readFile("src/app/stage8-receipt-live-price-canary-preflight/page.tsx", "utf8"),
-  readFile("vercel.json", "utf8"),
+  readFile("supabase/migrations/202608280009_ops_adaptive_dispatcher.sql", "utf8"),
 ]);
 
 test("preflight deterministically selects exactly one eligible goods key", () => {
@@ -50,7 +50,7 @@ test("preflight pins the exact stale-check inputs needed by the future option-aw
   assert.match(engine, /SHA256\.test\(optionSignature\)/);
 });
 
-test("preflight cron is protected, periodic, and never performs a price write", () => {
+test("preflight cron is protected, read-only and dispatcher-managed", () => {
   assert.match(cron, /CRON_SECRET/);
   assert.match(cron, /runReceiptLivePriceCanaryPreflightStep/);
   assert.match(cron, /actualShoplingPriceWrites: 0/);
@@ -58,5 +58,8 @@ test("preflight cron is protected, periodic, and never performs a price write", 
   assert.match(page, /실제 가격 write/);
   assert.match(page, /Canary write/);
   assert.match(page, /OPERATOR APPROVAL NOT OPEN/);
-  assert.match(vercel, /receipt-live-price-canary-preflight/);
+  assert.match(
+    scheduler,
+    /'receipt-live-price-canary-preflight', '\/api\/cron\/receipt-live-price-canary-preflight', 'diagnostic', 260, true, 21600, 1800, 43200/,
+  );
 });
