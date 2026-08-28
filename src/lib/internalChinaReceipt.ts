@@ -5,6 +5,11 @@ import {
   normalizeChinaOrderCommitmentEvent,
 } from "@/lib/chinaOrderLedger";
 import {
+  buildInternalChinaReceiptDownstreamOperation,
+  type InternalChinaReceiptDownstreamEvent,
+  type InternalChinaReceiptDownstreamItem,
+} from "@/lib/internalChinaReceiptDownstream";
+import {
   loadInternalChinaDraftWithQuantityOverrides,
 } from "@/lib/internalChinaDraftQuantityOverride";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
@@ -17,12 +22,7 @@ import {
   readPriceAdjustmentReceiptCache,
   type PriceAdjustmentReceipt,
 } from "@/lib/priceAdjustmentReceiptCache";
-import { pushCanonicalProductMasterSnapshotFromTrackerState } from "@/lib/productMasterCanonicalSync";
 import { temporaryOpsIdentity } from "@/lib/opsLoginBypass";
-import {
-  getProductLaunchAdminConfig,
-  readProductLaunchState,
-} from "@/lib/productLaunchTrackerServer";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
 const SOURCE_SYSTEM = "fast-purchase-mvp";
@@ -44,14 +44,16 @@ export type InternalChinaReceiptInput = {
 
 export type InternalChinaReceiptResult = {
   receiptId: string;
+  downstreamEventId: string;
+  downstreamQueued: true;
   draftId: string;
   cycleMonth: string;
   lineCount: number;
   receivedNow: number;
   fullyReceivedCount: number;
   partiallyReceivedCount: number;
-  productMasterSynced: boolean;
-  productMasterError: string | null;
+  receiptCacheSynced: boolean;
+  receiptCacheError: string | null;
 };
 
 function text(value: unknown) {
@@ -104,17 +106,6 @@ function orderItemId(draftId: string, code: string) {
 
 function batchId(cycleMonth: string) {
   return Number(cycleMonth.replace("-", ""));
-}
-
-async function syncReceiptCostsToProductMaster() {
-  const config = getProductLaunchAdminConfig();
-  if (!config.ok) throw new Error(config.body.message);
-  const identity = temporaryOpsIdentity();
-  const stored = await readProductLaunchState(config.value, identity.userId);
-  if (!stored?.state_payload || typeof stored.state_payload !== "object") {
-    throw new Error("PRODUCT_LAUNCH_STATE_REQUIRED");
-  }
-  return pushCanonicalProductMasterSnapshotFromTrackerState(stored.state_payload);
 }
 
 export async function recordInternalChinaReceipt(
@@ -188,6 +179,7 @@ export async function recordInternalChinaReceipt(
   const now = new Date().toISOString();
   const operations: Record<string, unknown>[] = [];
   const receiptCosts: PriceAdjustmentReceipt[] = [];
+  const downstreamItems: InternalChinaReceiptDownstreamItem[] = [];
   let fullyReceivedCount = 0;
   let partiallyReceivedCount = 0;
   let receivedNowTotal = 0;
@@ -261,8 +253,9 @@ export async function recordInternalChinaReceipt(
           draft.internalOrderCostMultiplier,
       ),
     );
+    const externalId = `china-receipt:${receiptId}:${code}`;
     receiptCosts.push({
-      id: `china-receipt:${receiptId}:${code}`,
+      id: externalId,
       receiptId,
       batchId: batchId(actualCycleMonth),
       orderItemId: orderItemId(draftId, code),
@@ -273,7 +266,37 @@ export async function recordInternalChinaReceipt(
       unitCostKrw,
       receivedAt: now,
     });
+    downstreamItems.push({
+      externalId,
+      barcode: code,
+      modelNumber: line.modelNo,
+      productName: line.productName || line.modelName || line.modelNo,
+      optionName: line.saleOption,
+      quantity: receivedNow,
+      unitCostKrw,
+    });
   }
+
+  const identity = temporaryOpsIdentity();
+  const downstreamEvent: InternalChinaReceiptDownstreamEvent = {
+    eventId: receiptId,
+    eventType: "receipt.confirmed.v1",
+    occurredAt: now,
+    receiptId,
+    batchId: batchId(actualCycleMonth),
+    ownerEmail: identity.email,
+    workflowState: "RECEIVED",
+    totals: {
+      good: receivedNowTotal,
+      damaged: 0,
+      missing: 0,
+    },
+    barcodes: [...byBarcode.keys()],
+    items: downstreamItems,
+  };
+  operations.push(
+    buildInternalChinaReceiptDownstreamOperation(downstreamEvent, now),
+  );
 
   const { baseUrl, secret } = supabaseConnection();
   const response = await fetch(
@@ -295,8 +318,8 @@ export async function recordInternalChinaReceipt(
     );
   }
 
-  let productMasterSynced = false;
-  let productMasterError: string | null = null;
+  let receiptCacheSynced = false;
+  let receiptCacheError: string | null = null;
   try {
     const currentCache = await readPriceAdjustmentReceiptCache();
     const snapshotId = currentCache?.snapshotId || "ops-confirmed-receipts-live-v1";
@@ -306,22 +329,23 @@ export async function recordInternalChinaReceipt(
       complete: true,
       receipts: receiptCosts,
     });
-    await syncReceiptCostsToProductMaster();
-    productMasterSynced = true;
+    receiptCacheSynced = true;
   } catch (error) {
-    productMasterError =
-      error instanceof Error ? error.message : "PRODUCT_MASTER_RECEIPT_SYNC_FAILED";
+    receiptCacheError =
+      error instanceof Error ? error.message : "RECEIPT_CACHE_SYNC_FAILED";
   }
 
   return {
     receiptId,
+    downstreamEventId: downstreamEvent.eventId,
+    downstreamQueued: true,
     draftId,
     cycleMonth: actualCycleMonth,
     lineCount: byBarcode.size,
     receivedNow: receivedNowTotal,
     fullyReceivedCount,
     partiallyReceivedCount,
-    productMasterSynced,
-    productMasterError,
+    receiptCacheSynced,
+    receiptCacheError,
   };
 }
