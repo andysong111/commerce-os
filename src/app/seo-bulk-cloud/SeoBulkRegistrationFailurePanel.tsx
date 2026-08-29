@@ -94,7 +94,9 @@ function actionHint(errorMessage: string) {
     hints.push("대표이미지를 입력한 뒤 저장하세요.");
   }
   if (/옵션바코드no|12자리|barcode/.test(message)) {
-    hints.push("옵션바코드NO가 숫자 12자리인지 확인하고 자동발급/저장을 완료하세요.");
+    hints.push(
+      "옵션바코드NO는 운영자가 입력하는 값이 아닙니다. 서버가 등록 직전에 12자리 번호를 자동발급·저장합니다. 같은 오류가 남으면 데이터 수정 없이 다시시도하세요.",
+    );
   }
   if (/카테고리/.test(message)) {
     hints.push("Shopling 카테고리를 확인하고 저장하세요.");
