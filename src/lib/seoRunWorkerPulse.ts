@@ -22,6 +22,8 @@ type PulseOptions = {
   leaseSeconds?: number;
 };
 
+const SEO_RUN_BUSY_MAX_JOBS = 4;
+
 let localPulsePromise: Promise<SeoRunWorkerPulseResult> | null = null;
 
 export function runCoalescedSeoRunWorkerPulse(options: PulseOptions) {
@@ -68,7 +70,8 @@ export async function runSeoRunWorkerPulse(
     });
     const shouldWakeSoon =
       result.queuedCount > 0 ||
-      result.claimedCount >= Math.max(1, Math.trunc(options.maxJobs ?? 2));
+      result.claimedCount >=
+        Math.max(1, Math.trunc(options.maxJobs ?? SEO_RUN_BUSY_MAX_JOBS));
     if (shouldWakeSoon) {
       await wakeOpsDispatchTask("seo-run-worker", 30).catch(() => false);
     }
