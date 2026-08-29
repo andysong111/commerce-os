@@ -89,7 +89,7 @@ test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29�
   }
 });
 
-test("실제 SEO bulk 경로는 FINAL10을 유지하고 검색의도 포트폴리오로 긴 상품명을 분산한다", async () => {
+test("실제 SEO bulk 경로는 우수 직접키워드를 상품명에 먼저 쓰고 검색어 10개를 보완 영역으로 분리한다", async () => {
   const composer = await source(
     "src/lib/keywordEngineElonMallTitleSafeComposer.ts",
   );
@@ -98,6 +98,9 @@ test("실제 SEO bulk 경로는 FINAL10을 유지하고 검색의도 포트폴�
   );
   const portfolio = await source(
     "src/lib/keywordEngineElonMallTitleIntentPortfolioV7.ts",
+  );
+  const keywordPortfolio = await source(
+    "src/lib/keywordEngineElonKeywordPortfolioV8.ts",
   );
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
   const expansion = await source("src/lib/keywordEngineElonTitleExpansion.ts");
@@ -126,13 +129,19 @@ test("실제 SEO bulk 경로는 FINAL10을 유지하고 검색의도 포트폴�
   assert.match(expansion, /KEYWORD_ELON_CATEGORY_MATCH_GATE = 85/);
   assert.match(expansion, /competitionOpportunity/);
   assert.match(expansion, /intentClass/);
-  assert.match(bulk, /const searchKeywords = recoveredSearchKeywords/);
-  assert.match(bulk, /buildKeywordElonTitleExpansionPool/);
-  assert.match(bulk, /finalKeywords: searchKeywords/);
+  assert.match(bulk, /const fallbackSearchKeywords = recoveredSearchKeywords/);
+  assert.match(bulk, /buildKeywordElonTitleKeywordReservoirV8/);
+  assert.match(bulk, /selectKeywordElonComplementSearchKeywordsV8/);
+  assert.match(bulk, /finalKeywords: titleKeywords/);
+  assert.match(bulk, /searchKeywords: titleKeywords/);
   assert.match(bulk, /titleExpansionPool/);
   assert.match(bulk, /\.\.\.mallComposition\.warnings/);
   assert.match(bulk, /TITLE_MALL_NAME_POLICY:INTENT_PORTFOLIO_V7/);
-  assert.match(bulk, /final10-plus-intent-portfolio-long-title-v7/);
+  assert.match(bulk, /SEO_KEYWORD_POLICY:TITLE_FIRST_SEARCH_COMPLEMENT_V8/);
+  assert.match(bulk, /excellent-direct-title-reservoir/);
+  assert.match(keywordPortfolio, /SEO_KEYWORD_V8_EXCELLENT_TITLE_POOL/);
+  assert.match(keywordPortfolio, /SEO_KEYWORD_V8_SEARCH_NON_OVERLAP/);
+  assert.match(keywordPortfolio, /directNonOverlap/);
   assert.match(fresh, /composeKeywordElonIntentPortfolioV7/);
   assert.match(fresh, /SEO_RUN_INTENT_PORTFOLIO_V7/);
   assert.match(portfolio, /similarityPenalty/);
