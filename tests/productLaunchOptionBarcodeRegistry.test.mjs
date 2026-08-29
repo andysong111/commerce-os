@@ -112,3 +112,18 @@ test("SEO 실패 화면은 옵션바코드NO를 운영자 입력값으로 안내
   assert.match(panel, /서버가 등록 직전에 12자리 번호를 자동발급·저장합니다/);
   assert.doesNotMatch(panel, /옵션바코드NO가 숫자 12자리인지 확인하고 자동발급\/저장을 완료하세요/);
 });
+
+test("직접 Shopling 업로드도 payload 생성 전에 옵션바코드NO 자동발급 preflight를 실행한다", async () => {
+  const route = await source(
+    "src/app/api/product-launch-tracker/shopling-upload/route.ts",
+  );
+  const preflight = route.indexOf("await ensureOptionBarcodeNos(");
+  const readState = route.indexOf("const stateRow = await readProductLaunchState(");
+  const buildPayload = route.indexOf("buildProductLaunchShoplingPayload(");
+  assert.ok(preflight >= 0);
+  assert.ok(readState > preflight);
+  assert.ok(buildPayload > readState);
+  assert.match(route, /rpc\/ensure_product_launch_item_option_barcode_nos/);
+  assert.match(route, /p_owner_id: ownerId/);
+  assert.match(route, /p_item_id: itemId/);
+});

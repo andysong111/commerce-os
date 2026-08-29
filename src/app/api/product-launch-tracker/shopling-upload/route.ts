@@ -44,6 +44,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // OptionBarcodeNO is system-owned. Repair/allocate it before *every* Shopling
+    // entry point, not only durable SEO registration. The RPC also synchronizes
+    // normalized options back to the legacy state that the payload builder reads.
+    await ensureOptionBarcodeNos(
+      config.value,
+      identity.value.userId,
+      input.itemId,
+    );
+
     const stateRow = await readProductLaunchState(
       config.value,
       identity.value.userId,
@@ -291,6 +300,30 @@ export async function GET(request: NextRequest) {
     );
   }
   return Response.json({ ok: true, job });
+}
+
+async function ensureOptionBarcodeNos(
+  config: { supabaseUrl: string; secretKey: string },
+  ownerId: string,
+  itemId: string,
+) {
+  const response = await fetch(
+    `${config.supabaseUrl}/rest/v1/rpc/ensure_product_launch_item_option_barcode_nos`,
+    {
+      method: "POST",
+      headers: createSupabaseAdminHeaders(config.secretKey),
+      body: JSON.stringify({
+        p_owner_id: ownerId,
+        p_item_id: itemId,
+      }),
+      cache: "no-store",
+    },
+  );
+  const body = await readResponseJson(response);
+  if (!response.ok) {
+    throw new Error(readProductLaunchError(body, response.status));
+  }
+  return body;
 }
 
 async function dispatchLaunchWorkflow(jobId: string, requestId: string) {
