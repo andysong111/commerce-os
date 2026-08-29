@@ -20,6 +20,7 @@ export const maxDuration = 300;
 
 const MAX_ENQUEUE_RUNS = 250;
 const CUSTOM_BLOCKED_LIMIT = 200;
+const SEO_RUN_BUSY_MAX_JOBS = 4;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -163,7 +164,7 @@ function scheduleSeoRunWorker(
   after(async () => {
     await runCoalescedSeoRunWorkerPulse({
       workerId,
-      maxJobs: Math.max(1, Math.min(2, maxJobs)),
+      maxJobs: Math.max(1, Math.min(SEO_RUN_BUSY_MAX_JOBS, maxJobs)),
       timeBudgetMs: 240_000,
       leaseSeconds: 300,
     }).catch((error) => {
@@ -337,6 +338,7 @@ export async function POST(request: NextRequest) {
 
   if (action === "queue_registration") {
     const ids = runIds(body.runIds);
+    const retryFailed = body.retryFailed === true;
     if (!ids.length) {
       return Response.json(
         { ok: false, message: "Shopling 서버 등록큐에 넣을 RUN이 없습니다." },
@@ -355,14 +357,18 @@ export async function POST(request: NextRequest) {
           job.registration_status,
         ),
     );
+    const failedRows = current.filter(
+      (job) => job.status === "ready" && job.registration_status === "failed",
+    );
     const eligible = current
       .filter((job) => job.status === "ready")
-      .filter(
-        (job) =>
-          !["submitting", "queued", "running", "success"].includes(
-            job.registration_status,
-          ),
-      )
+      .filter((job) => {
+        if (["submitting", "queued", "running", "success"].includes(job.registration_status)) {
+          return false;
+        }
+        if (job.registration_status === "failed") return retryFailed;
+        return job.registration_status === "idle";
+      })
       .map((job) => job.run_id);
     if (!eligible.length) {
       if (queuedOrActive.length) {
@@ -377,9 +383,12 @@ export async function POST(request: NextRequest) {
         queuedCount: 0,
         skippedCount: ids.length,
         jobs: current,
-        message: queuedOrActive.length
-          ? `${queuedOrActive.length}개 RUN이 이미 서버 등록큐에 있습니다. worker를 다시 깨웠습니다.`
-          : "이미 처리 중이거나 등록 완료된 RUN입니다.",
+        message:
+          !retryFailed && failedRows.length
+            ? `${failedRows.length}개 등록 실패 건은 일반 일괄등록에서 제외했습니다. 실패 패널에서 원인을 수정한 뒤 명시적으로 다시시도하세요.`
+            : queuedOrActive.length
+              ? `${queuedOrActive.length}개 RUN이 이미 서버 등록큐에 있습니다. worker를 다시 깨웠습니다.`
+              : "이미 처리 중이거나 등록 완료된 RUN입니다.",
       });
     }
     const jobs = await patchOwnedSeoRunJobs(context, eligible, {
@@ -397,7 +406,7 @@ export async function POST(request: NextRequest) {
       queuedCount: jobs.length,
       skippedCount: Math.max(0, ids.length - jobs.length),
       jobs,
-      message: `${jobs.length}개 RUN을 서버 Shopling 등록큐에 넣고 worker를 시작했습니다. 브라우저를 닫아도 계속 처리됩니다.`,
+      message: `${jobs.length}개 RUN을 서버 Shopling 등록큐에 넣고 worker를 시작했습니다. 브라우저를 닫아도 계속 처리됩니다.${!retryFailed && failedRows.length ? ` 등록 실패 ${failedRows.length}개는 자동 재시도에서 제외했습니다.` : ""}`,
     });
   }
 
