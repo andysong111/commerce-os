@@ -96,12 +96,12 @@ const AAA447_KEYWORDS = [
   "휘핑기",
 ];
 
-test("V9은 AAA447처럼 안전 직접키워드가 6개뿐이어도 검증 모델명을 제목 보조재료로만 사용해 29개 장문 제목을 만든다", () => {
+test("V9은 AAA447처럼 안전 직접키워드가 6개뿐이고 검증 모델명이 30bytes를 넘어도 연속 구문만 잘라 29개 장문 제목을 만든다", () => {
   const result = composeFreshKeywordElonMallTitles({
     markets: markets(),
     finalKeywords: AAA447_KEYWORDS,
     titleExpansionPool: [],
-    modelName: "계란 노른자 믹서",
+    modelName: "스피너형 계란 노른자 믹서",
     context: {
       modelNumber: "AAA447",
       productName: "계란노른자섞기 스피너",
@@ -118,10 +118,11 @@ test("V9은 AAA447처럼 안전 직접키워드가 6개뿐이어도 검증 모�
     const bytes = Buffer.byteLength(row.title, "utf8");
     assert.ok(bytes >= 30 && bytes <= 50, `${bytes} ${row.title}`);
   }
-  assert.ok(
-    result.warnings.some((warning) =>
-      warning.startsWith("SEO_RUN_SPARSE_TITLE_MODEL_SUPPORT:계란 노른자 믹서"),
-    ),
-    JSON.stringify(result.warnings),
+  const supportWarning = result.warnings.find((warning) =>
+    warning.startsWith("SEO_RUN_SPARSE_TITLE_MODEL_SUPPORTS:"),
   );
+  assert.ok(supportWarning, JSON.stringify(result.warnings));
+  assert.match(supportWarning, /스피너형 계란/);
+  assert.match(supportWarning, /계란 노른자/);
+  assert.match(supportWarning, /노른자 믹서/);
 });
