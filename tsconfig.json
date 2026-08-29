@@ -23,6 +23,9 @@
       }
     ],
     "paths": {
+      "@/lib/keywordEngineElonLabV2Server": [
+        "./src/lib/keywordEngineElonLabV2ServerGuardedV9.ts"
+      ],
       "@/*": [
         "./src/*"
       ]
