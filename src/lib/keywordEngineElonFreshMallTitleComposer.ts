@@ -81,21 +81,53 @@ function safeWarning(value: unknown) {
   return text(value).replace(/[\r\n]+/g, " ").slice(0, 300);
 }
 
-function buildSparseModelSupport(input: {
+function verifiedModelFragments(modelName: string) {
+  const normalized = text(modelName);
+  const modelKey = keywordElonSeoCanonical(normalized);
+  if (!modelKey || modelKey.includes("상품명확인필요")) return [];
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const phrases: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const phrase = text(value);
+    const key = keywordElonSeoCanonical(phrase);
+    const bytes = keywordElonSeoUtf8Bytes(phrase);
+    if (
+      !key ||
+      key.length < 2 ||
+      seen.has(key) ||
+      bytes > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT
+    ) {
+      return;
+    }
+    seen.add(key);
+    phrases.push(phrase);
+  };
+
+  // The entire verified model name is preferred when it already fits.
+  add(normalized);
+
+  // If it is too long, keep only contiguous phrases from the verified model name.
+  // This broadens the combinatorial title pool without inventing any new meaning.
+  const maxWindow = Math.min(3, words.length);
+  for (let width = maxWindow; width >= 2; width -= 1) {
+    for (let start = 0; start + width <= words.length; start += 1) {
+      add(words.slice(start, start + width).join(" "));
+    }
+  }
+  for (const word of words) {
+    if (keywordElonSeoUtf8Bytes(word) >= 6) add(word);
+  }
+  return phrases.slice(0, 8);
+}
+
+function buildSparseModelSupports(input: {
   finals: string[];
   expansion: KeywordElonTitleExpansionMaterial[];
   modelName: string;
 }) {
-  if (input.finals.length > 7) return null;
-  const modelName = text(input.modelName);
-  const modelKey = keywordElonSeoCanonical(modelName);
-  if (
-    !modelKey ||
-    modelKey.includes("상품명확인필요") ||
-    keywordElonSeoUtf8Bytes(modelName) > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT
-  ) {
-    return null;
-  }
+  if (input.finals.length > 7) return [];
   const used = new Set(
     [
       ...input.finals,
@@ -104,22 +136,27 @@ function buildSparseModelSupport(input: {
       .map(keywordElonSeoCanonical)
       .filter(Boolean),
   );
-  if (used.has(modelKey)) return null;
 
-  const row: KeywordElonTitleExpansionMaterial = {
-    keyword: modelName,
-    intentClass: "core_synonym",
-    categoryAligned: true,
-    categoryMatch: 100,
-    relevance: 100,
-    shoppingIntent: 90,
-    specificity: 95,
-    qualityScore: 90,
-    competitionOpportunity: 50,
-    totalSearch: null,
-    expansionScore: 96,
-  };
-  return row;
+  const supports: KeywordElonTitleExpansionMaterial[] = [];
+  for (const keyword of verifiedModelFragments(input.modelName)) {
+    const key = keywordElonSeoCanonical(keyword);
+    if (!key || used.has(key)) continue;
+    used.add(key);
+    supports.push({
+      keyword,
+      intentClass: "core_synonym",
+      categoryAligned: true,
+      categoryMatch: 100,
+      relevance: 100,
+      shoppingIntent: 90,
+      specificity: 95,
+      qualityScore: 90,
+      competitionOpportunity: 50,
+      totalSearch: null,
+      expansionScore: Math.max(88, 96 - supports.length),
+    });
+  }
+  return supports;
 }
 
 export function composeFreshKeywordElonMallTitles(input: {
@@ -134,13 +171,13 @@ export function composeFreshKeywordElonMallTitles(input: {
 }): KeywordElonMallTitleSafeComposerResult {
   const finals = [...input.finalKeywords];
   const baseExpansion = [...(input.titleExpansionPool ?? [])];
-  const sparseModelSupport = buildSparseModelSupport({
+  const sparseModelSupports = buildSparseModelSupports({
     finals,
     expansion: baseExpansion,
     modelName: input.modelName,
   });
-  const expansion = sparseModelSupport
-    ? [sparseModelSupport, ...baseExpansion]
+  const expansion = sparseModelSupports.length
+    ? [...sparseModelSupports, ...baseExpansion]
     : baseExpansion;
   const excludedTitles = [
     ...new Set((input.excludedTitles ?? []).map(text).filter(Boolean)),
@@ -221,8 +258,12 @@ export function composeFreshKeywordElonMallTitles(input: {
     ...selected,
     warnings: [
       ...selected.warnings,
-      ...(sparseModelSupport
-        ? [`SEO_RUN_SPARSE_TITLE_MODEL_SUPPORT:${sparseModelSupport.keyword}`]
+      ...(sparseModelSupports.length
+        ? [
+            `SEO_RUN_SPARSE_TITLE_MODEL_SUPPORTS:${sparseModelSupports.length}:${sparseModelSupports
+              .map((row) => row.keyword)
+              .join("|")}`,
+          ]
         : []),
       portfolioWarning,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT:${bestAttempt + 1}/${attempts}`,
