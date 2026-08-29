@@ -1,3 +1,4 @@
+import SeoBulkArchiveSummary from "./SeoBulkArchiveSummary";
 import SeoBulkFetchRecovery from "./SeoBulkFetchRecovery";
 import SeoBulkRunCloudClient from "./SeoBulkDurableRunCloudClient";
 import SeoBulkCustomBlockedTermsPanel from "./SeoBulkCustomBlockedTermsPanel";
@@ -19,6 +20,7 @@ export default function SeoBulkCloudPage() {
       <SeoBulkRegistrationFailurePanel />
       <SeoBulkRegistrationRetryAllControl />
       <SeoBulkCustomBlockedTermsPanel />
+      <SeoBulkArchiveSummary />
       <SeoBulkRunCloudClient />
     </>
   );
