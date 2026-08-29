@@ -772,10 +772,7 @@ export default function SeoBulkDurableRunCloudClient() {
     [jobs],
   );
   const registerableRows = useMemo(
-    () =>
-      readyRows.filter(
-        (job) => !["submitting", "queued", "running", "success"].includes(job.registration_status),
-      ),
+    () => readyRows.filter((job) => job.registration_status === "idle"),
     [readyRows],
   );
   const failedRows = useMemo(
