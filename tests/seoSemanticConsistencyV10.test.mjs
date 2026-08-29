@@ -20,7 +20,7 @@ const gunIdentity = {
   variantNoise: ["실버"],
 };
 
-test("V10은 욕실청소건의 인접 시장어 중 건/분사/샤워 계열은 유지하고 별도 청소도구·미확인 동력 기능은 차단한다", () => {
+test("V10은 욕실청소건의 인접 시장어 중 건/분사/샤워 계열은 유지하고 별도 청소도구·미확인 기능/성능/구성은 차단한다", () => {
   for (const keyword of [
     "욕실용스프레이건",
     "화장실청소샤워기",
@@ -42,6 +42,10 @@ test("V10은 욕실청소건의 인접 시장어 중 건/분사/샤워 계열은
     "전동욕실청소기",
     "무선분사기",
     "자동분무기",
+    "고압세척건",
+    "수압상승샤워건",
+    "절수스프레이건",
+    "욕실스프레이건세트",
     "물기제거스퀴지",
     "물기제거기",
     "욕실청소밀대",
@@ -54,18 +58,32 @@ test("V10은 욕실청소건의 인접 시장어 중 건/분사/샤워 계열은
   }
 });
 
-test("V10은 원문 정체성에 실제 확인된 기능어까지 무조건 차단하지 않는다", () => {
-  const poweredIdentity = {
+test("V10은 원문 정체성에 실제 확인된 기능·성능·구성까지 무조건 차단하지 않는다", () => {
+  const verifiedIdentity = {
     ...gunIdentity,
-    functionModifiers: [...gunIdentity.functionModifiers, "자동 분사"],
+    functionModifiers: [
+      ...gunIdentity.functionModifiers,
+      "자동 분사",
+      "고압 세척",
+      "절수",
+    ],
+    specAttributes: [...gunIdentity.specAttributes, "구성: 스프레이건 세트"],
   };
-  assert.equal(
-    evaluateKeywordElonIdentityConsistencyV10({
-      identity: poweredIdentity,
-      keyword: "자동분사건",
-    }).blocked,
-    false,
-  );
+  for (const keyword of [
+    "자동분사건",
+    "고압세척건",
+    "절수스프레이건",
+    "욕실스프레이건세트",
+  ]) {
+    assert.equal(
+      evaluateKeywordElonIdentityConsistencyV10({
+        identity: verifiedIdentity,
+        keyword,
+      }).blocked,
+      false,
+      keyword,
+    );
+  }
 });
 
 function candidate(keyword, qualityScore, totalSearch = null) {

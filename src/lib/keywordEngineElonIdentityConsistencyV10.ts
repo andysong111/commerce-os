@@ -28,12 +28,16 @@ const GUN_INCOMPATIBLE_FORMS = [
   "바닥솔",
   "물기제거기",
 ] as const;
-const UNSUPPORTED_CAPABILITY_TERMS = [
+const UNSUPPORTED_FACTUAL_CLAIM_TERMS = [
   "전동",
   "무선",
   "충전",
   "배터리",
   "자동",
+  "고압",
+  "수압상승",
+  "절수",
+  "세트",
 ] as const;
 
 function identityEvidence(identity: KeywordElonIdentity) {
@@ -76,10 +80,10 @@ export function evaluateKeywordElonIdentityConsistencyV10(input: {
   const matchedTerms: string[] = [];
   const evidence = compactKeywordElonKey(identityEvidence(input.identity));
 
-  for (const term of UNSUPPORTED_CAPABILITY_TERMS) {
+  for (const term of UNSUPPORTED_FACTUAL_CLAIM_TERMS) {
     const key = compactKeywordElonKey(term);
     if (!keyword.includes(key) || evidence.includes(key)) continue;
-    reasons.push(`상품 원문·정체성에 확인되지 않은 기능 '${term}' 포함`);
+    reasons.push(`상품 원문·정체성에 확인되지 않은 기능·성능·구성 '${term}' 포함`);
     matchedTerms.push(term);
   }
 
