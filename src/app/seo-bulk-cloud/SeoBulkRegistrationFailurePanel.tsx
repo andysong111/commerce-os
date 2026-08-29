@@ -81,6 +81,29 @@ function registrationError(job: RegistrationJob) {
   );
 }
 
+function actionHint(errorMessage: string) {
+  const message = errorMessage.toLowerCase();
+  const hints: string[] = [];
+  if (/옵션가격|판매가|가격이 없습니다|base.?sale.?price/.test(message)) {
+    hints.push("상품출시 진행관리에서 해당 옵션의 판매가를 입력하고 저장하세요.");
+  }
+  if (/상세페이지 html|상세페이지.*없/.test(message)) {
+    hints.push("상세페이지 HTML을 입력하거나 상세페이지 완료 데이터를 다시 저장하세요.");
+  }
+  if (/대표이미지|main.?image/.test(message)) {
+    hints.push("대표이미지를 입력한 뒤 저장하세요.");
+  }
+  if (/옵션바코드no|12자리|barcode/.test(message)) {
+    hints.push("옵션바코드NO가 숫자 12자리인지 확인하고 자동발급/저장을 완료하세요.");
+  }
+  if (/카테고리/.test(message)) {
+    hints.push("Shopling 카테고리를 확인하고 저장하세요.");
+  }
+  return hints.length
+    ? [...new Set(hints)].join(" ")
+    : "원인을 수정하고 저장한 뒤 아래 ‘등록 실패 다시시도’를 누르세요.";
+}
+
 export default function SeoBulkRegistrationFailurePanel() {
   const [jobs, setJobs] = useState<RegistrationJob[]>([]);
   const [retryingRunId, setRetryingRunId] = useState("");
@@ -180,6 +203,7 @@ export default function SeoBulkRegistrationFailurePanel() {
           <div className="mt-4 grid gap-3">
             {failed.map((job) => {
               const detail = registrationError(job);
+              const hint = actionHint(detail);
               return (
                 <div
                   key={job.run_id}
@@ -203,6 +227,10 @@ export default function SeoBulkRegistrationFailurePanel() {
                         <div className="mt-1 whitespace-pre-wrap break-words text-sm font-bold leading-6 text-rose-900">
                           {detail}
                         </div>
+                      </div>
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold leading-5 text-amber-900">
+                        <span className="font-black">조치 안내 · </span>
+                        {hint}
                       </div>
                       <div className="mt-2 text-[11px] font-semibold text-slate-500">
                         마지막 확인 {job.updated_at ? new Date(job.updated_at).toLocaleString("ko-KR") : "-"}
