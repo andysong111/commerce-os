@@ -6,6 +6,13 @@ import {
   selectKeywordElonComplementSearchKeywordsV8,
 } from "../src/lib/keywordEngineElonKeywordPortfolioV8.ts";
 
+function compact(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[^0-9A-Za-z가-힣]/g, "")
+    .toLowerCase();
+}
+
 function candidate(keyword, score, overrides = {}) {
   return {
     keyword,
@@ -76,7 +83,7 @@ test("V8은 검색어 10개 제한과 별개로 우수 직접키워드를 상품
   assert.ok(!reservoir.titleKeywords.includes("샤워기헤드샤워헤드"));
 });
 
-test("V8 검색어는 상품명에 쓰이지 않은 우수 직접키워드를 먼저 채우고 부족할 때만 겹침을 허용한다", () => {
+test("V8 검색어는 상품명과 겹치지 않는 우수 직접키워드가 있으면 먼저 쓰고 부족할 때만 겹침을 허용한다", () => {
   const reservoir = buildKeywordElonTitleKeywordReservoirV8({
     candidates,
     allowedKeys,
@@ -95,14 +102,31 @@ test("V8 검색어는 상품명에 쓰이지 않은 우수 직접키워드를 �
   });
 
   assert.equal(result.searchKeywords.length, 10);
-  assert.deepEqual(
-    result.searchKeywords.slice(0, 3).sort(),
-    directKeywords.slice(12).sort(),
-  );
   assert.equal(result.syntheticFallbackCount, 0);
   assert.equal(result.directSelectedCount, 10);
-  assert.ok(result.nonOverlapCount >= 3);
-  assert.ok(result.overlapFallbackCount <= 7);
+  assert.ok(result.searchKeywords.every((keyword) => directKeywords.includes(keyword)));
+
+  const titleKeys = titleTexts.map(compact);
+  const selectedNonOverlap = result.searchKeywords.filter((keyword) =>
+    titleKeys.every((title) => !title.includes(compact(keyword))),
+  );
+  const availableNonOverlap = reservoir.rankedDirectKeywords
+    .map((row) => row.keyword)
+    .filter((keyword) => titleKeys.every((title) => !title.includes(compact(keyword))));
+
+  assert.equal(
+    result.nonOverlapCount,
+    Math.min(10, availableNonOverlap.length),
+    JSON.stringify({ availableNonOverlap, result }),
+  );
+  assert.deepEqual(
+    result.searchKeywords.slice(0, selectedNonOverlap.length),
+    selectedNonOverlap,
+  );
+  assert.equal(
+    result.overlapFallbackCount,
+    10 - result.nonOverlapCount,
+  );
 });
 
 test("직접 우수키워드가 적을 때만 합성 검색어를 10칸 보충용으로 쓰고 상품명 재료에는 넣지 않는다", () => {
