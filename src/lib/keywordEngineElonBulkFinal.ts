@@ -31,11 +31,15 @@ import {
   buildKeywordElonTitleExpansionPool,
   type KeywordElonTitleExpansionMaterial,
 } from "@/lib/keywordEngineElonTitleExpansion";
+import {
+  buildKeywordElonTitleKeywordReservoirV8,
+  selectKeywordElonComplementSearchKeywordsV8,
+} from "@/lib/keywordEngineElonKeywordPortfolioV8";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
 // Keep the hidden group key stable so existing stored FINAL payloads remain readable.
 export const SEO_TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV6";
-const SEO_FINAL_SOURCE_V7 = "seo-bulk-cloud-intent-portfolio-v7";
+const SEO_FINAL_SOURCE_V8 = "seo-bulk-cloud-title-first-search-complement-v8";
 const INTERNAL_CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
 const SHOPLING_GROUPS = [
   ["wholesale1", "도매1"],
@@ -248,22 +252,31 @@ export function composeKeywordElonBulkFinal(
     PRODUCT_GROUP_MARKET_REGISTRY,
   );
 
-  const searchKeywords = recoveredSearchKeywords(
+  const fallbackSearchKeywords = recoveredSearchKeywords(
     [...output.commonSearchKeywords],
     input.supplementalSearchKeywords ?? [],
     input.blockedKeys,
     input.customBlockedTerms ?? [],
   );
-  if (searchKeywords.length !== 10) {
+  const titleReservoir = buildKeywordElonTitleKeywordReservoirV8({
+    candidates: input.candidates,
+    allowedKeys: input.allowedKeys,
+    fallbackKeywords: fallbackSearchKeywords,
+    blockedKeys: input.blockedKeys,
+    customBlockedTerms: input.customBlockedTerms ?? [],
+    limit: 12,
+  });
+  const titleKeywords = titleReservoir.titleKeywords;
+  if (titleKeywords.length < 2) {
     throw new Error(
-      `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
+      `상품명용 우수 키워드가 부족합니다. 현재 ${titleKeywords.length}개`,
     );
   }
 
   const titleExpansionCategory = text(input.mallTitleCategory);
   const titleExpansionPool = buildKeywordElonTitleExpansionPool({
     candidates: input.candidates,
-    searchKeywords,
+    searchKeywords: titleKeywords,
     allowedKeys: input.allowedKeys,
     category: titleExpansionCategory,
     limit: 30,
@@ -271,7 +284,7 @@ export function composeKeywordElonBulkFinal(
 
   const mallComposition = composeFreshKeywordElonMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
-    finalKeywords: searchKeywords,
+    finalKeywords: titleKeywords,
     titleExpansionPool,
     modelName: output.modelName,
     context: {
@@ -297,6 +310,22 @@ export function composeKeywordElonBulkFinal(
     );
   }
 
+  const searchSelection = selectKeywordElonComplementSearchKeywordsV8({
+    rankedDirectKeywords: titleReservoir.rankedDirectKeywords,
+    titleTexts: mallTitles.map((row) => row.title),
+    fallbackSearchKeywords,
+    supplementalSearchKeywords: input.supplementalSearchKeywords ?? [],
+    blockedKeys: input.blockedKeys,
+    customBlockedTerms: input.customBlockedTerms ?? [],
+    limit: 10,
+  });
+  const searchKeywords = searchSelection.searchKeywords;
+  if (searchKeywords.length !== 10) {
+    throw new Error(
+      `FINAL 검색어가 10개가 아닙니다. 현재 ${searchKeywords.length}개`,
+    );
+  }
+
   const groupProductNames: Record<string, string> = {};
   for (const [key, label] of SHOPLING_GROUPS) {
     const title = mallTitles.find((row) => row.productGroup === label)?.title;
@@ -304,16 +333,24 @@ export function composeKeywordElonBulkFinal(
     groupProductNames[key] = title;
   }
   groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY] = JSON.stringify({
-    version: 7,
+    version: 8,
     category: titleExpansionCategory,
+    titleKeywords,
     pool: titleExpansionPool,
+    searchComplement: {
+      nonOverlapCount: searchSelection.nonOverlapCount,
+      overlapFallbackCount: searchSelection.overlapFallbackCount,
+      syntheticFallbackCount: searchSelection.syntheticFallbackCount,
+    },
   });
 
   const generatedAt = new Date().toISOString();
-  const recoveredCount = Math.max(
-    0,
-    searchKeywords.length - output.commonSearchKeywords.length,
+  const originalSearchSet = new Set(
+    output.commonSearchKeywords.map(compactKeywordElonKey).filter(Boolean),
   );
+  const recoveredCount = searchKeywords.filter(
+    (keyword) => !originalSearchSet.has(compactKeywordElonKey(keyword)),
+  ).length;
   const sourceWarnings = publicSourceWarnings(input.source);
   return {
     launchItemId: input.launchItemId,
@@ -333,14 +370,14 @@ export function composeKeywordElonBulkFinal(
       groupProductNames,
       searchKeywords,
       searchLine: searchKeywords.join(","),
-      source: SEO_FINAL_SOURCE_V7,
+      source: SEO_FINAL_SOURCE_V8,
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
       titleExpansionCategory,
       titleMaterialPolicy: titleExpansionPool.length
-        ? "final10-plus-intent-portfolio-long-title-v7"
-        : "final10-intent-portfolio-v7-fallback",
+        ? "excellent-direct-title-reservoir-plus-intent-portfolio-v8"
+        : "excellent-direct-title-reservoir-v8-fallback",
       titleExpansionPool,
       mallTitles: mallTitles.map((row) => ({
         productGroup: row.productGroup,
@@ -352,11 +389,15 @@ export function composeKeywordElonBulkFinal(
     },
     warnings: [
       ...output.warnings,
+      ...titleReservoir.warnings,
       ...mallComposition.warnings,
+      ...searchSelection.warnings,
       ...sourceWarnings,
       `TITLE_EXPANSION_CATEGORY:${titleExpansionCategory || "none"}`,
       `TITLE_EXPANSION_POOL_COUNT:${titleExpansionPool.length}`,
+      `TITLE_PRIMARY_KEYWORD_COUNT:${titleKeywords.length}`,
       "TITLE_MALL_NAME_POLICY:INTENT_PORTFOLIO_V7",
+      "SEO_KEYWORD_POLICY:TITLE_FIRST_SEARCH_COMPLEMENT_V8",
       `SEO_RUN_VARIATION_SEED:${text(input.variationSeed) || "none"}`,
       ...(recoveredCount
         ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`]
