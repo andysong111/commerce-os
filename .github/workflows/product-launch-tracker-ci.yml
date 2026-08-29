@@ -24,6 +24,8 @@ on:
       - 'src/lib/productLaunchShopling*.ts'
       - 'src/lib/seoRun*.ts'
       - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
+      - 'src/lib/keywordEngineElonFreshMallTitleComposer.ts'
+      - 'src/lib/keywordEngineElonMallTitleIntentPortfolioV7.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/*product_launch*.sql'
@@ -33,6 +35,7 @@ on:
       - 'tests/productLaunchShopling*.test.mjs'
       - 'tests/productLaunchSeoRun*.test.mjs'
       - 'tests/productLaunchOptionBarcodeRegistry.test.mjs'
+      - 'tests/seoTitleIntentPortfolioV7.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -78,6 +81,7 @@ jobs:
           tests/productLaunchTrackerModelBcodeAuthority.test.mjs
           tests/productLaunchTrackerManualPriceSave.test.mjs
           tests/productLaunchTrackerNormalizedCutover.test.mjs
+          tests/seoTitleIntentPortfolioV7.test.mjs
           tests/detailPageAssetStorageRetry.test.mjs
           tests/detailPageManualDecision.test.mjs
           tests/shoplingCategoryCatalog.test.mjs
