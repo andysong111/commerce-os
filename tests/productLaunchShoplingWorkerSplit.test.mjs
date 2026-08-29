@@ -86,3 +86,17 @@ test("복구 migration은 lease만 복원하고 별도 pg_cron·HTTP fanout은 �
     { path: "/api/cron/ops-dispatcher", schedule: "* * * * *" },
   ]);
 });
+
+test("SEO 대량등록 클라우드는 Shopling 등록 실패 사유와 상품별 재시도 버튼을 보여준다", async () => {
+  const page = await read("src/app/seo-bulk-cloud/page.tsx");
+  const panel = await read(
+    "src/app/seo-bulk-cloud/SeoBulkRegistrationFailurePanel.tsx",
+  );
+  assert.match(page, /SeoBulkRegistrationFailurePanel/);
+  assert.match(panel, /registration_status === "failed"/);
+  assert.match(panel, /registration_payload/);
+  assert.match(panel, /실패 사유/);
+  assert.match(panel, /등록 실패 다시시도/);
+  assert.match(panel, /action: "queue_registration"/);
+  assert.match(panel, /SEO FINAL 결과는 그대로 보존/);
+});
