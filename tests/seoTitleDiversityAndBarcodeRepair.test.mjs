@@ -89,9 +89,15 @@ test("레거시 다양화 함수도 AAA491처럼 키워드 폭이 좁을 때 29�
   }
 });
 
-test("실제 SEO bulk 경로는 FINAL10을 바꾸지 않고 검증 확장재료로 긴 상품명을 우선한다", async () => {
+test("실제 SEO bulk 경로는 FINAL10을 유지하고 검색의도 포트폴리오로 긴 상품명을 분산한다", async () => {
   const composer = await source(
     "src/lib/keywordEngineElonMallTitleSafeComposer.ts",
+  );
+  const fresh = await source(
+    "src/lib/keywordEngineElonFreshMallTitleComposer.ts",
+  );
+  const portfolio = await source(
+    "src/lib/keywordEngineElonMallTitleIntentPortfolioV7.ts",
   );
   const bulk = await source("src/lib/keywordEngineElonBulkFinal.ts");
   const expansion = await source("src/lib/keywordEngineElonTitleExpansion.ts");
@@ -125,7 +131,14 @@ test("실제 SEO bulk 경로는 FINAL10을 바꾸지 않고 검증 확장재료�
   assert.match(bulk, /finalKeywords: searchKeywords/);
   assert.match(bulk, /titleExpansionPool/);
   assert.match(bulk, /\.\.\.mallComposition\.warnings/);
-  assert.match(bulk, /TITLE_MALL_NAME_POLICY:LONG_TITLE_PRIORITY_V6/);
+  assert.match(bulk, /TITLE_MALL_NAME_POLICY:INTENT_PORTFOLIO_V7/);
+  assert.match(bulk, /final10-plus-intent-portfolio-long-title-v7/);
+  assert.match(fresh, /composeKeywordElonIntentPortfolioV7/);
+  assert.match(fresh, /SEO_RUN_INTENT_PORTFOLIO_V7/);
+  assert.match(portfolio, /similarityPenalty/);
+  assert.match(portfolio, /value >= 0\.8/);
+  assert.match(portfolio, /SEO_MALL_TITLE_V7_FINAL_MIN_USAGE/);
+  assert.match(portfolio, /SEO_MALL_TITLE_V7_NON_CORE_INTENT_ROWS/);
   assert.doesNotMatch(bulk, /diversifyKeywordElonMallTitles/);
   assert.doesNotMatch(page, /SeoBulkMallTitleFactBridge/);
 });
