@@ -8,6 +8,7 @@ export const maxDuration = 300;
 
 const SAFE_INVOCATION_BUDGET_MS = 275_000;
 const MIN_SEO_BUDGET_MS = 30_000;
+const SEO_RUN_BUSY_MAX_JOBS = 4;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -76,7 +77,7 @@ export async function GET(request: Request) {
 
     const result = await runCoalescedSeoRunWorkerPulse({
       workerId: `cron:${process.env.VERCEL_REGION || "unknown"}:${crypto.randomUUID()}`,
-      maxJobs: 2,
+      maxJobs: SEO_RUN_BUSY_MAX_JOBS,
       timeBudgetMs: Math.min(240_000, remainingMs),
       leaseSeconds: 300,
     });

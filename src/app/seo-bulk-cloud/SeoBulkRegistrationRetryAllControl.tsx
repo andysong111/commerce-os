@@ -126,6 +126,7 @@ export default function SeoBulkRegistrationRetryAllControl() {
         body: JSON.stringify({
           action: "queue_registration",
           runIds: failed.map((job) => job.run_id),
+          retryFailed: true,
         }),
       });
       setMessage(

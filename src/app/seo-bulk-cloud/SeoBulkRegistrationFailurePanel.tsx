@@ -153,6 +153,7 @@ export default function SeoBulkRegistrationFailurePanel() {
           body: JSON.stringify({
             action: "queue_registration",
             runIds: [job.run_id],
+            retryFailed: true,
           }),
         });
         setMessage(
