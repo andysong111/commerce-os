@@ -33,8 +33,9 @@ import {
 } from "@/lib/keywordEngineElonTitleExpansion";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "@/lib/productGroupMarketRegistry";
 
+// Keep the hidden group key stable so existing stored FINAL payloads remain readable.
 export const SEO_TITLE_EXPANSION_META_GROUP_KEY = "__seoTitleExpansionV6";
-const SEO_FINAL_SOURCE_V6 = "seo-bulk-cloud-long-title-priority-v6";
+const SEO_FINAL_SOURCE_V7 = "seo-bulk-cloud-intent-portfolio-v7";
 const INTERNAL_CATEGORY_META_PREFIX = "SHOPLING_CATEGORY=";
 const SHOPLING_GROUPS = [
   ["wholesale1", "도매1"],
@@ -303,7 +304,7 @@ export function composeKeywordElonBulkFinal(
     groupProductNames[key] = title;
   }
   groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY] = JSON.stringify({
-    version: 6,
+    version: 7,
     category: titleExpansionCategory,
     pool: titleExpansionPool,
   });
@@ -332,14 +333,14 @@ export function composeKeywordElonBulkFinal(
       groupProductNames,
       searchKeywords,
       searchLine: searchKeywords.join(","),
-      source: SEO_FINAL_SOURCE_V6,
+      source: SEO_FINAL_SOURCE_V7,
       sourceUrl: input.sourceUrl,
       offerId: input.source.offerId || parse1688OfferId(input.sourceUrl),
       generatedAt,
       titleExpansionCategory,
       titleMaterialPolicy: titleExpansionPool.length
-        ? "final10-plus-priority-expansion-long-title-v6"
-        : "final10-long-title-v6-fallback",
+        ? "final10-plus-intent-portfolio-long-title-v7"
+        : "final10-intent-portfolio-v7-fallback",
       titleExpansionPool,
       mallTitles: mallTitles.map((row) => ({
         productGroup: row.productGroup,
@@ -355,7 +356,7 @@ export function composeKeywordElonBulkFinal(
       ...sourceWarnings,
       `TITLE_EXPANSION_CATEGORY:${titleExpansionCategory || "none"}`,
       `TITLE_EXPANSION_POOL_COUNT:${titleExpansionPool.length}`,
-      "TITLE_MALL_NAME_POLICY:LONG_TITLE_PRIORITY_V6",
+      "TITLE_MALL_NAME_POLICY:INTENT_PORTFOLIO_V7",
       `SEO_RUN_VARIATION_SEED:${text(input.variationSeed) || "none"}`,
       ...(recoveredCount
         ? [`FINAL_SEARCH_KEYWORD_RECOVERY:${recoveredCount}`]
