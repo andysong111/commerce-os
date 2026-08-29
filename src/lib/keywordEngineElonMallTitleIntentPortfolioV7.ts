@@ -228,6 +228,41 @@ function availableNonCoreIntentCount(
   ).size;
 }
 
+function preferredCandidates(input: {
+  candidates: PortfolioCandidate[];
+  requiredFinalKey: string;
+  targetIntent: KeywordElonTitleIntentClass;
+  selectedTitles: string[];
+  usedCanonical: Set<string>;
+}) {
+  let rows = input.candidates.filter(
+    (candidate) => !input.usedCanonical.has(candidate.canonical),
+  );
+  const requiredFinalRows = rows.filter((candidate) =>
+    candidate.finalKeys.includes(input.requiredFinalKey),
+  );
+  if (requiredFinalRows.length) rows = requiredFinalRows;
+
+  const longRows = rows.filter(
+    (candidate) =>
+      candidate.row.byteLength >= KEYWORD_ELON_LONG_TITLE_RECOMMENDED_MIN_BYTES,
+  );
+  if (longRows.length) rows = longRows;
+
+  if (input.targetIntent !== "core_synonym") {
+    const intentRows = rows.filter((candidate) =>
+      candidate.intentClasses.includes(input.targetIntent),
+    );
+    if (intentRows.length) rows = intentRows;
+  }
+
+  const lowSimilarityRows = rows.filter(
+    (candidate) => maxSimilarity(candidate.row.title, input.selectedTitles) < 0.8,
+  );
+  if (lowSimilarityRows.length) rows = lowSimilarityRows;
+  return rows;
+}
+
 export function composeKeywordElonIntentPortfolioV7(input: {
   attempts: KeywordElonMallTitleSafeComposerResult[];
   finalKeywords: string[];
@@ -285,11 +320,17 @@ export function composeKeywordElonIntentPortfolioV7(input: {
     const requiredFinalKey = keywordElonSeoCanonical(finals[rowIndex % finals.length]);
     const targetIntent = intentCycle[rowIndex % intentCycle.length];
     const selectedTitles = selected.map((candidate) => candidate.row.title);
+    const eligible = preferredCandidates({
+      candidates: candidateRows[rowIndex],
+      requiredFinalKey,
+      targetIntent,
+      selectedTitles,
+      usedCanonical,
+    });
     let best: PortfolioCandidate | null = null;
     let bestScore = Number.POSITIVE_INFINITY;
 
-    for (const candidate of candidateRows[rowIndex]) {
-      if (usedCanonical.has(candidate.canonical)) continue;
+    for (const candidate of eligible) {
       const score = candidateScore({
         candidate,
         requiredFinalKey,
@@ -338,6 +379,12 @@ export function composeKeywordElonIntentPortfolioV7(input: {
   const minimumFinalUsage = Math.min(
     ...finals.map((keyword) => finalUsage.get(keywordElonSeoCanonical(keyword)) ?? 0),
   );
+  const targetMinimumFinalUsage = Math.max(1, Math.floor(rowCount / finals.length));
+  if (minimumFinalUsage < targetMinimumFinalUsage) {
+    throw new Error(
+      `V7 상품명 FINAL 키워드 활용량이 부족합니다. 최소 ${targetMinimumFinalUsage}회 필요, 현재 ${minimumFinalUsage}회`,
+    );
+  }
   const uniqueTitleCount = new Set(rows.map((row) => keywordElonSeoCanonical(row.title))).size;
   if (uniqueTitleCount !== rows.length) {
     throw new Error("V7 상품명 포트폴리오에 중복 상품명이 발생했습니다.");
@@ -383,6 +430,7 @@ export function composeKeywordElonIntentPortfolioV7(input: {
       "SEO_MALL_TITLE_SOURCE:INTENT_PORTFOLIO_V7",
       `SEO_MALL_TITLE_V7_ATTEMPT_POOL:${attempts.length}`,
       `SEO_MALL_TITLE_V7_FINAL_COVERAGE:${coveredFinals.length}/${finals.length}`,
+      `SEO_MALL_TITLE_V7_FINAL_TARGET_MIN_USAGE:${targetMinimumFinalUsage}`,
       `SEO_MALL_TITLE_V7_FINAL_MIN_USAGE:${minimumFinalUsage}`,
       `SEO_MALL_TITLE_V7_NON_CORE_INTENT_ROWS:${nonCoreRows}/${rows.length}`,
       `SEO_MALL_TITLE_V7_EXPANSION_ROWS:${expansionRows}/${rows.length}`,
