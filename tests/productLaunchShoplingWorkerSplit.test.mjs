@@ -96,7 +96,21 @@ test("SEO 대량등록 클라우드는 Shopling 등록 실패 사유와 상품�
   assert.match(panel, /registration_status === "failed"/);
   assert.match(panel, /registration_payload/);
   assert.match(panel, /실패 사유/);
+  assert.match(panel, /조치 안내/);
   assert.match(panel, /등록 실패 다시시도/);
   assert.match(panel, /action: "queue_registration"/);
   assert.match(panel, /SEO FINAL 결과는 그대로 보존/);
+});
+
+test("SEO 대량등록 클라우드는 현재 등록 실패 전체를 한 번에 다시 큐에 넣을 수 있다", async () => {
+  const page = await read("src/app/seo-bulk-cloud/page.tsx");
+  const retryAll = await read(
+    "src/app/seo-bulk-cloud/SeoBulkRegistrationRetryAllControl.tsx",
+  );
+  assert.match(page, /SeoBulkRegistrationRetryAllControl/);
+  assert.match(retryAll, /registration_status === "failed"/);
+  assert.match(retryAll, /failed\.map\(\(job\) => job\.run_id\)/);
+  assert.match(retryAll, /action: "queue_registration"/);
+  assert.match(retryAll, /등록 실패 일괄 재시도 실행/);
+  assert.match(retryAll, /현재 실패 건을 한 번에 다시 서버 등록큐로 보냅니다/);
 });
