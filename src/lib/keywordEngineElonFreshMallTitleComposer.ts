@@ -4,7 +4,12 @@ import {
   type KeywordElonMallTitleSafeComposerResult,
 } from "./keywordEngineElonMallTitleSafeComposer.ts";
 import { composeKeywordElonIntentPortfolioV7 } from "./keywordEngineElonMallTitleIntentPortfolioV7.ts";
-import type { KeywordElonSeoMarket } from "./keywordEngineElonLabSeoOutput.ts";
+import {
+  KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT,
+  keywordElonSeoCanonical,
+  keywordElonSeoUtf8Bytes,
+  type KeywordElonSeoMarket,
+} from "./keywordEngineElonLabSeoOutput.ts";
 import type { KeywordElonTitleExpansionMaterial } from "./keywordEngineElonTitleExpansion.ts";
 
 function text(value: unknown) {
@@ -76,6 +81,47 @@ function safeWarning(value: unknown) {
   return text(value).replace(/[\r\n]+/g, " ").slice(0, 300);
 }
 
+function buildSparseModelSupport(input: {
+  finals: string[];
+  expansion: KeywordElonTitleExpansionMaterial[];
+  modelName: string;
+}) {
+  if (input.finals.length > 7) return null;
+  const modelName = text(input.modelName);
+  const modelKey = keywordElonSeoCanonical(modelName);
+  if (
+    !modelKey ||
+    modelKey.includes("상품명확인필요") ||
+    keywordElonSeoUtf8Bytes(modelName) > KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT
+  ) {
+    return null;
+  }
+  const used = new Set(
+    [
+      ...input.finals,
+      ...input.expansion.map((row) => row.keyword),
+    ]
+      .map(keywordElonSeoCanonical)
+      .filter(Boolean),
+  );
+  if (used.has(modelKey)) return null;
+
+  const row: KeywordElonTitleExpansionMaterial = {
+    keyword: modelName,
+    intentClass: "core_synonym",
+    categoryAligned: true,
+    categoryMatch: 100,
+    relevance: 100,
+    shoppingIntent: 90,
+    specificity: 95,
+    qualityScore: 90,
+    competitionOpportunity: 50,
+    totalSearch: null,
+    expansionScore: 96,
+  };
+  return row;
+}
+
 export function composeFreshKeywordElonMallTitles(input: {
   markets: KeywordElonSeoMarket[];
   finalKeywords: string[];
@@ -87,7 +133,15 @@ export function composeFreshKeywordElonMallTitles(input: {
   variationSeed?: string;
 }): KeywordElonMallTitleSafeComposerResult {
   const finals = [...input.finalKeywords];
-  const expansion = [...(input.titleExpansionPool ?? [])];
+  const baseExpansion = [...(input.titleExpansionPool ?? [])];
+  const sparseModelSupport = buildSparseModelSupport({
+    finals,
+    expansion: baseExpansion,
+    modelName: input.modelName,
+  });
+  const expansion = sparseModelSupport
+    ? [sparseModelSupport, ...baseExpansion]
+    : baseExpansion;
   const excludedTitles = [
     ...new Set((input.excludedTitles ?? []).map(text).filter(Boolean)),
   ].slice(0, 1200);
@@ -167,6 +221,9 @@ export function composeFreshKeywordElonMallTitles(input: {
     ...selected,
     warnings: [
       ...selected.warnings,
+      ...(sparseModelSupport
+        ? [`SEO_RUN_SPARSE_TITLE_MODEL_SUPPORT:${sparseModelSupport.keyword}`]
+        : []),
       portfolioWarning,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT:${bestAttempt + 1}/${attempts}`,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT_POOL:${attemptResults.length}`,
