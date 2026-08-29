@@ -3,6 +3,7 @@ import {
   type KeywordElonMallTitleFactContext,
   type KeywordElonMallTitleSafeComposerResult,
 } from "./keywordEngineElonMallTitleSafeComposer.ts";
+import { composeKeywordElonIntentPortfolioV7 } from "./keywordEngineElonMallTitleIntentPortfolioV7.ts";
 import type { KeywordElonSeoMarket } from "./keywordEngineElonLabSeoOutput.ts";
 import type { KeywordElonTitleExpansionMaterial } from "./keywordEngineElonTitleExpansion.ts";
 
@@ -71,6 +72,10 @@ function freshnessScore(
   return exact * 100_000 + reorderOnly * 20_000 + similarity * 100;
 }
 
+function safeWarning(value: unknown) {
+  return text(value).replace(/[\r\n]+/g, " ").slice(0, 300);
+}
+
 export function composeFreshKeywordElonMallTitles(input: {
   markets: KeywordElonSeoMarket[];
   finalKeywords: string[];
@@ -83,19 +88,27 @@ export function composeFreshKeywordElonMallTitles(input: {
 }): KeywordElonMallTitleSafeComposerResult {
   const finals = [...input.finalKeywords];
   const expansion = [...(input.titleExpansionPool ?? [])];
-  const excludedTitles = [...new Set((input.excludedTitles ?? []).map(text).filter(Boolean))].slice(0, 1200);
+  const excludedTitles = [
+    ...new Set((input.excludedTitles ?? []).map(text).filter(Boolean)),
+  ].slice(0, 1200);
   const deterministicSeed =
     input.variationSeed ||
     `${input.context.modelNumber ?? ""}:${input.modelName}:${finals.join("|")}`;
   const seed = stableHash(deterministicSeed);
-  const attempts = Math.min(18, Math.max(8, finals.length + Math.min(expansion.length, 8)));
+  const attempts = Math.min(
+    18,
+    Math.max(8, finals.length + Math.min(expansion.length, 8)),
+  );
+  const attemptResults: KeywordElonMallTitleSafeComposerResult[] = [];
   let best: KeywordElonMallTitleSafeComposerResult | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   let bestAttempt = 0;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const finalOffset = finals.length ? (seed + attempt * 3) % finals.length : 0;
-    const expansionOffset = expansion.length ? (seed * 7 + attempt * 5) % expansion.length : 0;
+    const expansionOffset = expansion.length
+      ? (seed * 7 + attempt * 5) % expansion.length
+      : 0;
     const result = composeKeywordElonSafeMallTitles({
       markets: input.markets,
       finalKeywords: rotate(finals, finalOffset),
@@ -104,32 +117,59 @@ export function composeFreshKeywordElonMallTitles(input: {
       context: input.context,
       blockedTerms: input.blockedTerms,
     });
+    attemptResults.push(result);
     const score = freshnessScore(result, excludedTitles);
     if (score < bestScore) {
       best = result;
       bestScore = score;
       bestAttempt = attempt;
     }
-    if (score === 0) break;
   }
 
   if (!best) {
     throw new Error("SEO 회차 상품명 후보를 만들지 못했습니다.");
   }
 
-  const excludedCanonical = new Set(excludedTitles.map(canonical).filter(Boolean));
-  const exactReuse = best.rows.filter((row) => excludedCanonical.has(canonical(row.title))).length;
+  let selected = best;
+  let portfolioWarning = "SEO_RUN_INTENT_PORTFOLIO_V7:enabled";
+  try {
+    selected = composeKeywordElonIntentPortfolioV7({
+      attempts: attemptResults,
+      finalKeywords: finals,
+      expansionPool: expansion,
+      excludedTitles,
+    });
+  } catch (error) {
+    portfolioWarning = `SEO_RUN_INTENT_PORTFOLIO_V7_FALLBACK:${safeWarning(
+      error instanceof Error ? error.message : error,
+    )}`;
+  }
+
+  const excludedCanonical = new Set(
+    excludedTitles.map(canonical).filter(Boolean),
+  );
+  const exactReuse = selected.rows.filter((row) =>
+    excludedCanonical.has(canonical(row.title)),
+  ).length;
   let reorderOnly = 0;
-  for (const row of best.rows) {
+  for (const row of selected.rows) {
     if (excludedCanonical.has(canonical(row.title))) continue;
-    if (excludedTitles.some((previous) => jaccard(row.title, previous) >= 0.999)) reorderOnly += 1;
+    if (
+      excludedTitles.some(
+        (previous) => jaccard(row.title, previous) >= 0.999,
+      )
+    ) {
+      reorderOnly += 1;
+    }
   }
 
   return {
-    ...best,
+    ...selected,
     warnings: [
-      ...best.warnings,
+      ...selected.warnings,
+      portfolioWarning,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT:${bestAttempt + 1}/${attempts}`,
+      `SEO_RUN_FRESH_VARIATION_ATTEMPT_POOL:${attemptResults.length}`,
       `SEO_RUN_EXCLUDED_TITLE_COUNT:${excludedTitles.length}`,
       `SEO_RUN_EXACT_TITLE_REUSE:${exactReuse}`,
       `SEO_RUN_REORDER_ONLY_REUSE:${reorderOnly}`,
