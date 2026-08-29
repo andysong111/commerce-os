@@ -26,6 +26,12 @@
       "@/lib/keywordEngineElonLabV2Server": [
         "./src/lib/keywordEngineElonLabV2ServerGuardedV9.ts"
       ],
+      "@/lib/keywordEngineElonLabV2Step4": [
+        "./src/lib/keywordEngineElonLabV2Step4GuardedV10.ts"
+      ],
+      "@/lib/keywordEngineElonKeywordPortfolioV8": [
+        "./src/lib/keywordEngineElonKeywordPortfolioV8SparseGuardV10.ts"
+      ],
       "@/*": [
         "./src/*"
       ]

@@ -26,10 +26,13 @@ on:
       - 'src/lib/productLaunchOptionBarcodeRegistry.ts'
       - 'src/lib/keywordEngineElonBulkFinal.ts'
       - 'src/lib/keywordEngineElonKeywordPortfolioV8.ts'
+      - 'src/lib/keywordEngineElonKeywordPortfolioV8SparseGuardV10.ts'
       - 'src/lib/keywordEngineElonFreshMallTitleComposer.ts'
       - 'src/lib/keywordEngineElonMallTitleIntentPortfolioV7.ts'
       - 'src/lib/keywordEngineElonSourceIdentityGuardV9.ts'
+      - 'src/lib/keywordEngineElonIdentityConsistencyV10.ts'
       - 'src/lib/keywordEngineElonLabV2ServerGuardedV9.ts'
+      - 'src/lib/keywordEngineElonLabV2Step4GuardedV10.ts'
       - 'src/lib/shoplingCategory*.ts'
       - 'src/lib/openAiStructuredOutput.ts'
       - 'supabase/migrations/*product_launch*.sql'
@@ -42,6 +45,7 @@ on:
       - 'tests/seoTitleIntentPortfolioV7.test.mjs'
       - 'tests/seoKeywordTitleSearchComplementV8.test.mjs'
       - 'tests/seoIdentityAndSparseTitleV9.test.mjs'
+      - 'tests/seoSemanticConsistencyV10.test.mjs'
       - 'tests/detailPageAssetStorageRetry.test.mjs'
       - 'tests/detailPageManualDecision.test.mjs'
       - 'tests/shoplingCategory*.test.mjs'
@@ -91,6 +95,7 @@ jobs:
           tests/seoTitleIntentPortfolioV7.test.mjs
           tests/seoKeywordTitleSearchComplementV8.test.mjs
           tests/seoIdentityAndSparseTitleV9.test.mjs
+          tests/seoSemanticConsistencyV10.test.mjs
           tests/detailPageAssetStorageRetry.test.mjs
           tests/detailPageManualDecision.test.mjs
           tests/shoplingCategoryCatalog.test.mjs
