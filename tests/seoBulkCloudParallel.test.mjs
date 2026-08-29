@@ -140,3 +140,20 @@ test("SEO 대량등록은 6개 goods_key 후처리의 pending/failed 상태를 �
   assert.match(recovery, /EXPECTED_MALL_TITLE_COUNT = 29/);
   assert.match(recovery, /\/api\/product-launch-tracker\/shopling-mall-seo/);
 });
+
+test("SEO 대량등록 클라우드는 직접 금지키워드를 입력·저장하고 미등록 RUN을 STEP4부터 재검증할 수 있다", async () => {
+  const page = await source("src/app/seo-bulk-cloud/page.tsx");
+  const panel = await source("src/app/seo-bulk-cloud/SeoBulkCustomBlockedTermsPanel.tsx");
+  const route = await source("src/app/api/seo-run-custom-blocked-terms/route.ts");
+  assert.match(page, /SeoBulkCustomBlockedTermsPanel/);
+  assert.match(panel, /직접 금지키워드/);
+  assert.match(panel, /쉼표 또는 엔터/);
+  assert.match(panel, /기본값 저장/);
+  assert.match(panel, /현재 미등록 RUN에도 적용/);
+  assert.match(panel, /keywordEngineElonLab\.step4\.customBlockedTerms\.v1/);
+  assert.match(route, /customBlockedTerms/);
+  assert.match(route, /stage: "filter_keywords"/);
+  assert.match(route, /stage_index: 5/);
+  assert.match(route, /registration_status/);
+  assert.match(route, /job\.status !== "running"/);
+});
