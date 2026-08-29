@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { importTranspiledTypeScript } from "./transpileTypeScript.mjs";
@@ -10,6 +11,8 @@ const {
 } = await importTranspiledTypeScript(
   new URL("../src/lib/productLaunchOptionBarcodeRegistry.ts", import.meta.url),
 );
+
+const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("B코드는 공백과 대소문자를 제거해 동일 identity로 수렴한다", () => {
   assert.equal(normalizeOptionBCode(" bgb1-1 "), "BGB1-1");
@@ -80,4 +83,32 @@ test("세트 구성은 입력 순서와 무관하게 같은 identity를 만들�
   assert.equal(setA.identityKind, "SET");
   assert.equal(setA.identityKey, setB.identityKey);
   assert.notEqual(setA.identityKey, differentQuantity.identityKey);
+});
+
+test("옵션바코드NO는 Shopling 등록 직전에 DB가 반드시 자동발급하고 legacy payload까지 동기화한다", async () => {
+  const migration = await source(
+    "supabase/migrations/202608290002_option_barcode_auto_issue_guard.sql",
+  );
+  assert.match(migration, /create or replace function public\.sync_product_launch_option_barcode_columns/);
+  assert.match(migration, /resolve_option_barcode_nos/);
+  assert.match(migration, /v_identity := 'B:' \|\| v_bcode/);
+  assert.match(migration, /OPTION_BARCODE_AUTO_ISSUE_FAILED/);
+  assert.match(migration, /ensure_product_launch_item_option_barcode_nos/);
+  assert.match(migration, /product_launch_tracker_states/);
+  assert.match(migration, /optionBarcodeNos/);
+  assert.match(migration, /trg_seo_run_option_barcode_preflight/);
+  assert.match(migration, /before update of registration_status on public\.seo_run_jobs/);
+  assert.match(migration, /registration_status in \('queued', 'submitting'\)/);
+  assert.match(migration, /like '%옵션바코드NO%'/);
+  assert.match(migration, /wake_ops_dispatch_task\('seo-run-worker', 0\)/);
+  assert.doesNotMatch(migration, /cron\.schedule/);
+});
+
+test("SEO 실패 화면은 옵션바코드NO를 운영자 입력값으로 안내하지 않는다", async () => {
+  const panel = await source(
+    "src/app/seo-bulk-cloud/SeoBulkRegistrationFailurePanel.tsx",
+  );
+  assert.match(panel, /옵션바코드NO는 운영자가 입력하는 값이 아닙니다/);
+  assert.match(panel, /서버가 등록 직전에 12자리 번호를 자동발급·저장합니다/);
+  assert.doesNotMatch(panel, /옵션바코드NO가 숫자 12자리인지 확인하고 자동발급\/저장을 완료하세요/);
 });
