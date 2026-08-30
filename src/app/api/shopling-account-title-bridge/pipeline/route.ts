@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 const BRIDGE_VERSION = "v0.5.0";
 const MAX_GROUPS = 50;
+const CANARY_RUN_PREFIX = "canary-";
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -50,6 +51,30 @@ function profileSearchCode(productGroupKey: string) {
   return values[productGroupKey] || null;
 }
 
+function taskFromLedgerRow(raw: unknown) {
+  const row = record(raw);
+  const productGroupKey = text(row.product_group_key);
+  const mapping = profileSearchCode(productGroupKey);
+  if (!mapping) return null;
+  const goodsKey = text(row.goods_key);
+  const ptnGoodsCd = text(row.ptn_goods_cd);
+  if (!/^\d{5,9}$/.test(goodsKey) || !ptnGoodsCd) return null;
+  return {
+    goodsKey,
+    launchItemId: text(row.launch_item_id),
+    modelNumber: text(row.model_number),
+    productGroupKey,
+    searchCode: mapping.searchCode,
+    profile: mapping.profile,
+    ptnGoodsCd,
+    registeredAt: text(row.registry_registered_at),
+  };
+}
+
+function validRunId(runId: string) {
+  return /^[A-Za-z0-9._:-]{12,160}$/.test(runId);
+}
+
 export async function POST(request: Request) {
   const payload = record(await request.json().catch(() => null));
   const bridge = text(payload.bridge);
@@ -61,9 +86,86 @@ export async function POST(request: Request) {
   const supabase = await createSupabaseAdminClient();
   if (!supabase) return json({ ok: false, error: "supabase_admin_unavailable" }, 503);
 
+  if (action === "canary-claim") {
+    const runId = text(payload.runId);
+    if (!runId.startsWith(CANARY_RUN_PREFIX) || !validRunId(runId)) {
+      return json({ ok: false, error: "invalid_canary_run_id" }, 400);
+    }
+
+    const recovered = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .select("owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at")
+      .eq("claim_run_id", runId)
+      .eq("status", "claimed")
+      .eq("product_group_key", "wholesale1")
+      .limit(1)
+      .maybeSingle();
+    if (recovered.error) {
+      return json({ ok: false, error: "canary_recovery_failed", message: recovered.error.message }, 503);
+    }
+    if (recovered.data) {
+      const task = taskFromLedgerRow(recovered.data);
+      if (!task || task.searchCode !== "DM1" || task.profile !== "도매1") {
+        return json({ ok: false, error: "canary_recovery_payload_invalid" }, 503);
+      }
+      return json({ ok: true, bridge: BRIDGE_VERSION, runId, task, recovered: true });
+    }
+
+    const candidate = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .select("owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at")
+      .eq("status", "queued")
+      .eq("market_status", "pending")
+      .eq("product_group_key", "wholesale1")
+      .order("registry_registered_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (candidate.error) {
+      return json({ ok: false, error: "canary_candidate_failed", message: candidate.error.message }, 503);
+    }
+    if (!candidate.data) {
+      return json({ ok: true, bridge: BRIDGE_VERSION, runId, task: null, empty: true });
+    }
+
+    const candidateRow = record(candidate.data);
+    const ownerId = text(candidateRow.owner_id);
+    const goodsKey = text(candidateRow.goods_key);
+    if (!ownerId || !/^\d{5,9}$/.test(goodsKey)) {
+      return json({ ok: false, error: "canary_candidate_invalid" }, 503);
+    }
+
+    const claimedAt = new Date().toISOString();
+    const claimed = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .update({
+        status: "claimed",
+        claim_run_id: runId,
+        claimed_at: claimedAt,
+        updated_at: claimedAt,
+      })
+      .eq("owner_id", ownerId)
+      .eq("goods_key", goodsKey)
+      .eq("status", "queued")
+      .eq("market_status", "pending")
+      .select("owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at")
+      .maybeSingle();
+    if (claimed.error) {
+      return json({ ok: false, error: "canary_claim_failed", message: claimed.error.message }, 503);
+    }
+    if (!claimed.data) {
+      return json({ ok: false, error: "canary_claim_race", message: "Canary 대상이 동시에 변경되어 아무 것도 전송하지 않았습니다." }, 409);
+    }
+
+    const task = taskFromLedgerRow(claimed.data);
+    if (!task || task.searchCode !== "DM1" || task.profile !== "도매1") {
+      return json({ ok: false, error: "canary_claim_payload_invalid" }, 503);
+    }
+    return json({ ok: true, bridge: BRIDGE_VERSION, runId, task, recovered: false });
+  }
+
   if (action === "claim") {
     const runId = text(payload.runId);
-    if (!/^[A-Za-z0-9._:-]{12,160}$/.test(runId)) {
+    if (!validRunId(runId)) {
       return json({ ok: false, error: "invalid_run_id" }, 400);
     }
     const requestedGroups = Number(payload.groupLimit || MAX_GROUPS);
@@ -90,26 +192,7 @@ export async function POST(request: Request) {
 
     const recoveryRows = Array.isArray(recovery.data) ? recovery.data : [];
     const rawRows = mergeClaimRows(rpcRows, recoveryRows);
-    const rows = rawRows
-      .map((row) => {
-        const productGroupKey = text(row.product_group_key);
-        const mapping = profileSearchCode(productGroupKey);
-        if (!mapping) return null;
-        const goodsKey = text(row.goods_key);
-        const ptnGoodsCd = text(row.ptn_goods_cd);
-        if (!/^\d{5,9}$/.test(goodsKey) || !ptnGoodsCd) return null;
-        return {
-          goodsKey,
-          launchItemId: text(row.launch_item_id),
-          modelNumber: text(row.model_number),
-          productGroupKey,
-          searchCode: mapping.searchCode,
-          profile: mapping.profile,
-          ptnGoodsCd,
-          registeredAt: text(row.registry_registered_at),
-        };
-      })
-      .filter(Boolean);
+    const rows = rawRows.map(taskFromLedgerRow).filter(Boolean);
 
     if (rawRows.length > 0 && rows.length !== rawRows.length) {
       return json({
@@ -163,6 +246,39 @@ export async function POST(request: Request) {
     if (!["sent", "already_registered", "confirm_needed", "title_failed", "failed"].includes(outcome)) {
       return json({ ok: false, error: "invalid_outcome" }, 400);
     }
+
+    if (runId.startsWith(CANARY_RUN_PREFIX) && outcome === "failed") {
+      const releasedAt = new Date().toISOString();
+      const released = await supabase
+        .from("shopling_market_pipeline_ledger")
+        .update({
+          status: "queued",
+          claim_run_id: "",
+          claimed_at: null,
+          reason_code: "",
+          message: "",
+          updated_at: releasedAt,
+        })
+        .eq("claim_run_id", runId)
+        .eq("goods_key", goodsKey)
+        .eq("status", "claimed")
+        .eq("market_status", "pending")
+        .is("submit_armed_at", null)
+        .select("goods_key")
+        .maybeSingle();
+      if (released.error) {
+        return json({ ok: false, error: "canary_release_failed", message: released.error.message }, 503);
+      }
+      if (!released.data) {
+        return json({
+          ok: false,
+          error: "canary_release_rejected",
+          message: "송신 경계를 지났을 가능성이 있어 자동 원복하지 않았습니다. 확인필요로 보존합니다.",
+        }, 409);
+      }
+      return json({ ok: true, recorded: true, released: true, goodsKey, outcome: "canary_released" });
+    }
+
     const result = await supabase.rpc("report_shopling_market_pipeline_task", {
       p_run_id: runId,
       p_goods_key: goodsKey,
