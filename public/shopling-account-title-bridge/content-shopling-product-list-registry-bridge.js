@@ -5,14 +5,23 @@
   const STATUS_ID = `${PANEL_ID}-status`;
   const BUTTON_ID = `${PANEL_ID}-button`;
   const DETAILS_ID = `${PANEL_ID}-details`;
-  const TITLE_REGISTRY_MESSAGE = "commerce-os-shopling-title-registry-keys";
+  const RETRY_BUTTON_ID = `${PANEL_ID}-retry`;
+  const TITLE_LEDGER_CLAIM_MESSAGE = "commerce-os-shopling-title-ledger-claim";
+  const TITLE_LEDGER_REPORT_MESSAGE = "commerce-os-shopling-title-ledger-report";
+  const TITLE_LEDGER_RETRY_MESSAGE = "commerce-os-shopling-title-ledger-retry";
+  const TITLE_LEDGER_STATS_MESSAGE = "commerce-os-shopling-title-ledger-stats";
   const BATCH_START_MESSAGE = "commerce-os-shopling-title-batch-start";
   const BATCH_PROGRESS_MESSAGE = "commerce-os-shopling-title-batch-progress";
-  const REGISTRY_RUN_KEY = "commerceOsShoplingRegistryTitleRun";
+  const LAST_RUN_STORAGE_KEY = "commerceOsShoplingTitleBatchLastRun";
+  const LEDGER_RUN_KEY = "commerceOsShoplingTitleLedgerUiRun";
   const CHUNK_SIZE = 500;
 
   function text(value) {
     return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+  }
+
+  function newRunId() {
+    return `title-ledger-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   function sendRuntimeMessage(payload) {
@@ -28,21 +37,21 @@
     });
   }
 
-  async function loadRegistryRun() {
+  async function loadUiRun() {
     try {
-      const stored = await chrome.storage.session.get(REGISTRY_RUN_KEY);
-      return stored?.[REGISTRY_RUN_KEY] || null;
+      const stored = await chrome.storage.session.get(LEDGER_RUN_KEY);
+      return stored?.[LEDGER_RUN_KEY] || null;
     } catch {
       return null;
     }
   }
 
-  async function saveRegistryRun(run) {
+  async function saveUiRun(run) {
     try {
-      if (!run) await chrome.storage.session.remove(REGISTRY_RUN_KEY);
-      else await chrome.storage.session.set({ [REGISTRY_RUN_KEY]: run });
+      if (!run) await chrome.storage.session.remove(LEDGER_RUN_KEY);
+      else await chrome.storage.session.set({ [LEDGER_RUN_KEY]: run });
     } catch {
-      // UI orchestration only; title worker itself keeps its own run state.
+      // Server ledger remains authoritative.
     }
   }
 
@@ -51,7 +60,6 @@
     const params = new URLSearchParams(location.search);
     if (params.has("prod_id") || params.get("popup") === "Y") return false;
     if (["modify", "nm_chg"].includes(params.get("mode") || "")) return false;
-
     const body = text(document.body?.innerText || document.body?.textContent || "");
     const listSignal = /총\s*조회수|상품그룹변경|선택상품변경|EXCEL\s*저장/i.test(body);
     if (!listSignal) return false;
@@ -73,7 +81,15 @@
     if (!button) return;
     button.disabled = Boolean(busy);
     button.style.opacity = busy ? "0.6" : "1";
-    button.textContent = label || (busy ? "OPS CENTER 등록상품 확인 중..." : "미분산 상품 일괄 처리");
+    button.textContent = label || (busy ? "신규 미분산 처리 중..." : "미분산 상품 일괄 처리");
+  }
+
+  function setRetryState(retryable) {
+    const button = document.getElementById(RETRY_BUTTON_ID);
+    if (!button) return;
+    const count = Math.max(0, Number(retryable || 0));
+    button.style.display = count ? "block" : "none";
+    button.textContent = `실패/중단건 재시도 ${count}건`;
   }
 
   function renderFailures(failures) {
@@ -85,185 +101,245 @@
     const details = document.createElement("details");
     details.style.cssText = "margin-top:8px;border-top:1px solid #ede9fe;padding-top:7px";
     const summary = document.createElement("summary");
-    summary.textContent = `최종 확인필요 ${rows.length}건 · goods key/사유 보기`;
+    summary.textContent = `확인필요 ${rows.length}건 · goods key/사유 보기`;
     summary.style.cssText = "cursor:pointer;font-weight:700;color:#b91c1c";
     details.appendChild(summary);
-    const list = document.createElement("div");
-    list.style.cssText = "margin-top:6px;max-height:180px;overflow:auto;font:11px/1.5 Arial,sans-serif;color:#475569";
     for (const failure of rows) {
-      const item = document.createElement("div");
-      item.style.cssText = "padding:4px 0;border-bottom:1px dotted #e2e8f0";
-      item.textContent = `${text(failure?.goodsKey) || "goods key 미상"} · ${text(failure?.message || failure?.reasonCode) || "확인 필요"}`;
-      list.appendChild(item);
+      const row = document.createElement("div");
+      row.style.cssText = "padding:4px 0;border-bottom:1px dotted #e2e8f0;font-size:11px;color:#475569";
+      row.textContent = `${text(failure?.goodsKey) || "goods key 미상"} · ${text(failure?.message || failure?.reasonCode) || "확인 필요"}`;
+      details.appendChild(row);
     }
-    details.appendChild(list);
     host.appendChild(details);
   }
 
-  function mountFallbackPanel() {
-    if (document.getElementById(PANEL_ID) || !looksLikeProductListUi()) return;
-    const box = document.createElement("div");
-    box.id = PANEL_ID;
-    box.style.cssText = [
-      "position:fixed",
-      "right:18px",
-      "bottom:18px",
-      "z-index:2147483647",
-      "width:370px",
-      "padding:12px",
-      "border:1px solid #c4b5fd",
-      "border-radius:10px",
-      "background:#ffffff",
-      "box-shadow:0 8px 30px rgba(15,23,42,.18)",
-      "font:12px/1.45 Arial,sans-serif",
-      "color:#0f172a",
-    ].join(";");
+  function ensurePanel() {
+    if (!looksLikeProductListUi()) return;
+    let box = document.getElementById(PANEL_ID);
+    if (!box) {
+      box = document.createElement("div");
+      box.id = PANEL_ID;
+      box.style.cssText = [
+        "position:fixed", "right:18px", "bottom:18px", "z-index:2147483647", "width:370px",
+        "padding:12px", "border:1px solid #c4b5fd", "border-radius:10px", "background:#fff",
+        "box-shadow:0 8px 30px rgba(15,23,42,.18)", "font:12px/1.45 Arial,sans-serif", "color:#0f172a",
+      ].join(";");
+      const title = document.createElement("div");
+      title.textContent = "Commerce OS · 조회상품 일괄 분산";
+      title.style.cssText = "font-weight:700;margin-bottom:6px";
+      const status = document.createElement("div");
+      status.id = STATUS_ID;
+      status.style.cssText = "margin-bottom:8px;color:#475569";
+      const button = document.createElement("button");
+      button.id = BUTTON_ID;
+      button.type = "button";
+      button.style.cssText = "width:100%;padding:9px;border:0;border-radius:7px;background:#7c3aed;color:#fff;font-weight:700;cursor:pointer";
+      const details = document.createElement("div");
+      details.id = DETAILS_ID;
+      box.append(title, status, button, details);
+      document.documentElement.appendChild(box);
+    }
 
-    const title = document.createElement("div");
-    title.textContent = "Commerce OS · 조회상품 일괄 분산";
-    title.style.cssText = "font-weight:700;margin-bottom:6px";
-    const status = document.createElement("div");
-    status.id = STATUS_ID;
-    status.textContent = "OPS CENTER에 등록된 goods key 기준 · 현재 조회조건/화면출력 수와 무관하게 미분산 여부를 검사합니다.";
-    status.style.cssText = "margin-bottom:8px;color:#475569";
-    const button = document.createElement("button");
-    button.id = BUTTON_ID;
-    button.type = "button";
-    button.textContent = "미분산 상품 일괄 처리";
-    button.style.cssText = "width:100%;padding:9px;border:0;border-radius:7px;background:#7c3aed;color:#fff;font-weight:700;cursor:pointer";
-    const details = document.createElement("div");
-    details.id = DETAILS_ID;
-    box.append(title, status, button, details);
-    document.documentElement.appendChild(box);
+    const button = document.getElementById(BUTTON_ID);
+    if (button && !button.disabled) button.textContent = "미분산 상품 일괄 처리";
+    let retry = document.getElementById(RETRY_BUTTON_ID);
+    if (!retry) {
+      retry = document.createElement("button");
+      retry.id = RETRY_BUTTON_ID;
+      retry.type = "button";
+      retry.style.cssText = "display:none;width:100%;margin-top:6px;padding:7px;border:1px solid #c4b5fd;border-radius:7px;background:#fff;color:#6d28d9;font-weight:700;cursor:pointer";
+      const details = document.getElementById(DETAILS_ID);
+      if (details?.parentElement) details.parentElement.insertBefore(retry, details);
+      else box.appendChild(retry);
+    }
   }
 
-  async function startChunk(run) {
-    const chunk = run.goodsKeys.slice(run.nextIndex, run.nextIndex + CHUNK_SIZE);
-    if (!chunk.length) return false;
-    run.activeChunkSize = chunk.length;
-    run.activeChunkStart = run.nextIndex;
-    await saveRegistryRun(run);
-    setButtonBusy(true, `OPS 원장 분산 ${run.completed}/${run.goodsKeys.length}`);
-    setStatus(`OPS CENTER 등록 goods key ${run.goodsKeys.length}건 중 ${run.completed}건 완료 · 다음 ${chunk.length}건 검사 시작`, "info");
-    const response = await sendRuntimeMessage({ type: BATCH_START_MESSAGE, goodsKeys: chunk });
-    if (!response?.ok) {
-      setButtonBusy(false, "미분산 상품 일괄 처리");
-      setStatus(response?.message || "상품명 일괄 처리를 시작하지 못했습니다.", "error");
-      await saveRegistryRun(null);
-      return false;
+  async function refreshStats() {
+    const run = await loadUiRun();
+    if (run?.status === "running") return;
+    const stats = await sendRuntimeMessage({ type: TITLE_LEDGER_STATS_MESSAGE });
+    if (!stats?.ok) return;
+    setRetryState(stats.retryable);
+    if (Number(stats.pending || 0) === 0) {
+      setStatus(`신규 미분산 0건 · 처리기준선 ${Number(stats.baseline || 0)}건 · 완료누적 ${Number(stats.completed || 0)}건`, "success");
+    } else {
+      setStatus(`신규 미분산 ${Number(stats.pending || 0)}건 · 이전 처리상품 자동 제외 · 화면출력/검색조건 무관`, "info");
     }
-    return true;
   }
 
-  async function runRegistryBatch() {
-    const existing = await loadRegistryRun();
-    if (existing?.status === "running") {
-      setStatus("이미 OPS CENTER goods key 기준 상품명 분산이 진행 중입니다.", "error");
-      return;
+  async function reportActiveResults(run) {
+    let stored;
+    try {
+      const result = await chrome.storage.local.get(LAST_RUN_STORAGE_KEY);
+      stored = result?.[LAST_RUN_STORAGE_KEY] || null;
+    } catch {
+      stored = null;
     }
-    renderFailures([]);
-    setButtonBusy(true, "OPS CENTER goods key 확인 중...");
-    setStatus("Shopling 현재 검색결과를 사용하지 않고 OPS CENTER 등록 원장에서 goods key를 불러옵니다.", "info");
+    const itemResults = Array.isArray(stored?.itemResults) ? stored.itemResults : [];
+    const byKey = new Map(itemResults.map((item) => [text(item?.goodsKey), item]));
+    const responses = [];
+    for (const goodsKey of run.activeGoodsKeys) {
+      const item = byKey.get(goodsKey);
+      const outcome = ["changed", "skipped", "failed"].includes(text(item?.outcome)) ? text(item.outcome) : "failed";
+      responses.push(await sendRuntimeMessage({
+        type: TITLE_LEDGER_REPORT_MESSAGE,
+        runId: run.claimRunId,
+        goodsKey,
+        outcome,
+        reasonCode: text(item?.reasonCode) || (item ? "" : "title_result_missing"),
+        message: text(item?.message) || (item ? "" : "상품명 처리 결과 원본을 찾지 못해 재시도 대상으로 보관했습니다."),
+      }));
+    }
+    return responses.every((response) => response?.ok === true);
+  }
 
-    const registry = await sendRuntimeMessage({ type: TITLE_REGISTRY_MESSAGE });
-    if (!registry?.ok) {
-      setButtonBusy(false, "미분산 상품 일괄 처리");
-      setStatus(`OPS CENTER goods key 조회 실패: ${text(registry?.message) || "원인 미상"}`, "error");
+  async function claimAndStart(run) {
+    const claimRunId = newRunId();
+    setButtonBusy(true, "신규 미분산 확인 중...");
+    const claim = await sendRuntimeMessage({
+      type: TITLE_LEDGER_CLAIM_MESSAGE,
+      runId: claimRunId,
+      limit: CHUNK_SIZE,
+    });
+    if (!claim?.ok) {
+      setButtonBusy(false);
+      setStatus(`상품명 분산 원장 조회 실패: ${text(claim?.message || claim?.error)}`, "error");
+      await saveUiRun(null);
       return;
     }
-    const goodsKeys = [...new Set((Array.isArray(registry.goodsKeys) ? registry.goodsKeys : [])
+
+    const goodsKeys = [...new Set((Array.isArray(claim.goodsKeys) ? claim.goodsKeys : [])
       .map((value) => text(value))
       .filter((value) => /^\d{5,9}$/.test(value)))];
     if (!goodsKeys.length) {
-      setButtonBusy(false, "미분산 상품 일괄 처리");
-      setStatus("OPS CENTER에 Shopling 등록완료 goods key가 없습니다.", "success");
+      setButtonBusy(false);
+      const finalRun = run || { completed: 0, changed: 0, skipped: 0, failed: 0, failures: [] };
+      if (finalRun.completed) {
+        setStatus(`완료 · 이번 신규 ${finalRun.completed}건 · 분산저장 ${finalRun.changed} · 기존정상 ${finalRun.skipped} · 확인필요 ${finalRun.failed}`, finalRun.failed ? "error" : "success");
+        renderFailures(finalRun.failures || []);
+      }
+      await saveUiRun(null);
+      await refreshStats();
       return;
     }
 
-    const run = {
+    const nextRun = run || {
       status: "running",
-      goodsKeys,
-      nextIndex: 0,
       completed: 0,
       changed: 0,
-      autoRecovered: 0,
       skipped: 0,
       failed: 0,
-      retryCount: 0,
+      autoRecovered: 0,
       failures: [],
-      activeChunkSize: 0,
-      activeChunkStart: 0,
       startedAt: new Date().toISOString(),
     };
-    await saveRegistryRun(run);
-    await startChunk(run);
+    nextRun.status = "running";
+    nextRun.claimRunId = claimRunId;
+    nextRun.activeGoodsKeys = goodsKeys;
+    nextRun.activeTotal = goodsKeys.length;
+    await saveUiRun(nextRun);
+    setButtonBusy(true, `신규 분산 0/${goodsKeys.length}`);
+    setStatus(`신규 미처리 goods key ${goodsKeys.length}건만 분산 검사합니다. 이전 처리상품은 열지 않습니다.`, "info");
+
+    const batch = await sendRuntimeMessage({ type: BATCH_START_MESSAGE, goodsKeys });
+    if (!batch?.ok) {
+      for (const goodsKey of goodsKeys) {
+        await sendRuntimeMessage({
+          type: TITLE_LEDGER_REPORT_MESSAGE,
+          runId: claimRunId,
+          goodsKey,
+          outcome: "failed",
+          reasonCode: "title_batch_start_failed",
+          message: text(batch?.message) || "상품명 분산 작업을 시작하지 못했습니다.",
+        });
+      }
+      setButtonBusy(false);
+      setStatus("상품명 분산 시작 실패 · 해당 건만 실패 원장에 보관했습니다.", "error");
+      await saveUiRun(null);
+      await refreshStats();
+    }
+  }
+
+  async function runLedgerBatch() {
+    const existing = await loadUiRun();
+    if (existing?.status === "running") {
+      setStatus("이미 신규 미분산 상품 처리가 진행 중입니다.", "error");
+      return;
+    }
+    renderFailures([]);
+    await claimAndStart(null);
+  }
+
+  async function retryFailures() {
+    const existing = await loadUiRun();
+    if (existing?.status === "running") return;
+    const response = await sendRuntimeMessage({ type: TITLE_LEDGER_RETRY_MESSAGE, limit: CHUNK_SIZE });
+    if (!response?.ok) {
+      setStatus(`실패건 재시도 준비 실패: ${text(response?.message || response?.error)}`, "error");
+      return;
+    }
+    if (!Number(response.requeued || 0)) {
+      setStatus("재시도할 실패/중단건이 없습니다.", "success");
+      await refreshStats();
+      return;
+    }
+    setStatus(`실패/중단 ${Number(response.requeued)}건을 명시적으로 재시도합니다.`, "info");
+    await runLedgerBatch();
   }
 
   document.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target.closest(`#${BUTTON_ID}`) : null;
-    if (!target) return;
+    const element = event.target instanceof Element ? event.target : null;
+    const main = element?.closest(`#${BUTTON_ID}`);
+    const retry = element?.closest(`#${RETRY_BUTTON_ID}`);
+    if (!main && !retry) return;
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    void runRegistryBatch();
+    if (retry) void retryFailures();
+    else void runLedgerBatch();
   }, true);
 
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || message.type !== BATCH_PROGRESS_MESSAGE) return;
     void (async () => {
-      const run = await loadRegistryRun();
-      if (!run || run.status !== "running") return;
-      const chunkDone = Number(message.done || 0);
-      const totalDone = Math.min(run.goodsKeys.length, run.completed + chunkDone);
-      const changed = run.changed + Number(message.changed || 0);
-      const skipped = run.skipped + Number(message.skipped || 0);
-      const failed = run.failed + Number(message.failed || 0);
-      const autoRecovered = run.autoRecovered + Number(message.autoRecovered || 0);
-
+      const run = await loadUiRun();
+      if (!run || run.status !== "running" || !Array.isArray(run.activeGoodsKeys)) return;
+      const total = Number(message.total || run.activeTotal || 0);
+      const done = Number(message.done || 0);
       if (message.status !== "completed") {
-        setButtonBusy(true, `OPS 원장 분산 ${totalDone}/${run.goodsKeys.length}`);
-        setStatus(`OPS 원장 진행 ${totalDone}/${run.goodsKeys.length} · 분산저장 ${changed} · 기존정상 ${skipped} · 확인필요 ${failed}${message.goodsKey ? ` · ${message.goodsKey}` : ""}`, "info");
+        setButtonBusy(true, `신규 분산 ${done}/${total}`);
+        setStatus(`신규 상품명 분산 ${done}/${total} · 분산저장 ${Number(message.changed || 0)} · 기존정상 ${Number(message.skipped || 0)} · 확인필요 ${Number(message.failed || 0)}`, "info");
         return;
       }
 
-      run.completed += Number(message.done || run.activeChunkSize || 0);
+      const recorded = await reportActiveResults(run);
+      if (!recorded) {
+        setButtonBusy(false);
+        setStatus("상품명 결과의 영구 원장 기록이 일부 실패했습니다. 자동 다음 작업을 중단했습니다.", "error");
+        await saveUiRun(null);
+        return;
+      }
+
+      run.completed += Number(message.done || run.activeGoodsKeys.length || 0);
       run.changed += Number(message.changed || 0);
-      run.autoRecovered += Number(message.autoRecovered || 0);
       run.skipped += Number(message.skipped || 0);
       run.failed += Number(message.failed || 0);
-      run.retryCount += Number(message.retryCount || 0);
+      run.autoRecovered += Number(message.autoRecovered || 0);
       run.failures.push(...(Array.isArray(message.failures) ? message.failures : []));
-      run.nextIndex = run.activeChunkStart + run.activeChunkSize;
-      await saveRegistryRun(run);
-
-      if (run.nextIndex < run.goodsKeys.length) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
-        await startChunk(run);
-        return;
-      }
-
-      run.status = "completed";
-      run.finishedAt = new Date().toISOString();
-      setButtonBusy(false, "미분산 상품 일괄 처리");
-      setStatus(
-        `완료 · OPS 등록 ${run.completed}/${run.goodsKeys.length} · 분산저장 ${run.changed}${run.autoRecovered ? ` (자동복구 ${run.autoRecovered})` : ""} · 기존정상 ${run.skipped} · 최종확인 ${run.failed}`,
-        run.failed ? "error" : "success",
-      );
-      renderFailures(run.failures);
-      await saveRegistryRun(null);
+      run.activeGoodsKeys = [];
+      run.activeTotal = 0;
+      run.claimRunId = "";
+      await saveUiRun(run);
+      await claimAndStart(run);
     })();
   });
 
   let attempts = 0;
   const timer = setInterval(() => {
     attempts += 1;
-    mountFallbackPanel();
-    const status = document.getElementById(STATUS_ID);
-    const button = document.getElementById(BUTTON_ID);
-    if (status && button && !button.disabled) {
-      status.textContent = "OPS CENTER에 등록된 goods key 기준 · 현재 조회조건/화면출력 수와 무관하게 미분산 여부를 검사합니다.";
-    }
+    ensurePanel();
     if (document.getElementById(PANEL_ID) || attempts >= 30) clearInterval(timer);
   }, 400);
-  mountFallbackPanel();
+  ensurePanel();
+  setTimeout(() => void refreshStats(), 900);
 })();
