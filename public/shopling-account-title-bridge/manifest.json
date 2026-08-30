@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.5.3",
-  "description": "상품명 분산도 영구 원장으로 신규 goods key만 처리하고, 신규상품 마켓 송신은 기존 영구 잠금으로 중복등록을 차단합니다.",
+  "version": "0.5.4",
+  "description": "신규 goods key만 처리하고 상품명 완료 후 마켓 2창 전환을 자동 복구하며, Shopling 미등록 재확인과 영구 잠금으로 중복등록을 차단합니다.",
   "permissions": [
     "storage"
   ],
@@ -42,7 +42,8 @@
       ],
       "js": [
         "content-shopling-pipeline.js",
-        "content-shopling-pipeline-frame-bridge.js"
+        "content-shopling-pipeline-frame-bridge.js",
+        "content-shopling-onebutton-stability-v054.js"
       ],
       "all_frames": true,
       "match_about_blank": true,
