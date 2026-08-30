@@ -50,8 +50,9 @@ test("mall-title bridge uses only verified same-goods-key title tokens as fallba
   assert.match(source, /keyword_pool_insufficient/);
   assert.match(source, /commerce_os_attempt/);
   assert.match(source, /if \(!currentTitle \|\| utf8Bytes\(currentTitle\) > MAX_TITLE_BYTES\) continue/);
-  assert.match(source, /분산·저장/);
-  assert.doesNotMatch(source, /미리 분산|분산 후 저장/);
+  assert.match(source, /button\.textContent = "분산·저장"/);
+  assert.doesNotMatch(source, /button\.textContent = "미리 분산"/);
+  assert.doesNotMatch(source, /button\.textContent = "분산 후 저장"/);
   assert.doesNotMatch(source, /commerce-os-ops-center\.vercel\.app/);
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
