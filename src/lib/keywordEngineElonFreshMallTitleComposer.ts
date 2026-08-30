@@ -4,6 +4,7 @@ import {
   type KeywordElonMallTitleSafeComposerResult,
 } from "./keywordEngineElonMallTitleSafeComposer.ts";
 import { rebalanceKeywordElonMallTitleDiversityV8 } from "./keywordEngineElonMallTitleDiversityV8.ts";
+import { rebalanceKeywordElonSameMallTitleDiversityV9 } from "./keywordEngineElonSameMallTitleDiversityV9.ts";
 import { composeKeywordElonIntentPortfolioV7 } from "./keywordEngineElonMallTitleIntentPortfolioV7.ts";
 import {
   KEYWORD_ELON_SEO_SEARCH_TERM_BYTE_LIMIT,
@@ -251,6 +252,19 @@ export function composeFreshKeywordElonMallTitles(input: {
     )}`;
   }
 
+  let sameMallDiversityWarning = "SEO_RUN_SAME_MALL_DIVERSITY_V9:enabled";
+  try {
+    selected = rebalanceKeywordElonSameMallTitleDiversityV9({
+      attempts: attemptResults,
+      selected,
+      finalKeywords: finals,
+    });
+  } catch (error) {
+    sameMallDiversityWarning = `SEO_RUN_SAME_MALL_DIVERSITY_V9_FALLBACK:${safeWarning(
+      error instanceof Error ? error.message : error,
+    )}`;
+  }
+
   const excludedCanonical = new Set(
     excludedTitles.map(canonical).filter(Boolean),
   );
@@ -282,6 +296,7 @@ export function composeFreshKeywordElonMallTitles(input: {
         : []),
       portfolioWarning,
       diversityWarning,
+      sameMallDiversityWarning,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT:${bestAttempt + 1}/${attempts}`,
       `SEO_RUN_FRESH_VARIATION_ATTEMPT_POOL:${attemptResults.length}`,
       `SEO_RUN_EXCLUDED_TITLE_COUNT:${excludedTitles.length}`,

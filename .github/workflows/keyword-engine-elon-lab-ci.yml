@@ -6,6 +6,9 @@ on:
       - "src/app/api/keyword-engine-elon-lab/**"
       - "src/app/keyword-engine-elon-lab/**"
       - "src/lib/keywordEngineElonLab*"
+      - "src/lib/keywordEngineElonMallTitle*"
+      - "src/lib/keywordEngineElonSameMallTitle*"
+      - "src/lib/keywordEngineElonFreshMallTitleComposer.ts"
       - "src/lib/opsModuleRegistry.ts"
       - "src/components/dashboard/OpsDashboardWithSaasTestClone.tsx"
       - "public/keyword-lab-collector/**"
@@ -19,6 +22,8 @@ on:
       - "tests/keywordEngineElonLabDiversitySupplement.test.mjs"
       - "tests/keywordEngineElonLabRecovery.test.mjs"
       - "tests/keywordEngineElonLabSeoOutput.test.mjs"
+      - "tests/seoTitleDiversityV8.test.mjs"
+      - "tests/seoSameMallTitleDiversityV9.test.mjs"
       - "tests/productLaunchTrackerChinaLinkHealth.test.mjs"
       - ".github/workflows/keyword-engine-elon-lab-ci.yml"
   workflow_dispatch:
@@ -75,6 +80,9 @@ jobs:
           src/lib/keywordEngineElonLabV2Step4.ts
           src/lib/keywordEngineElonLabV2Merge.ts
           src/lib/keywordEngineElonLabV2Selection.ts
+          src/lib/keywordEngineElonFreshMallTitleComposer.ts
+          src/lib/keywordEngineElonMallTitleDiversityV8.ts
+          src/lib/keywordEngineElonSameMallTitleDiversityV9.ts
       - name: Test keyword lab V2 contract
         run: >-
           node --experimental-strip-types --test
@@ -88,6 +96,8 @@ jobs:
           tests/keywordEngineElonLabDiversitySupplement.test.mjs
           tests/keywordEngineElonLabRecovery.test.mjs
           tests/keywordEngineElonLabSeoOutput.test.mjs
+          tests/seoTitleDiversityV8.test.mjs
+          tests/seoSameMallTitleDiversityV9.test.mjs
           tests/productLaunchTrackerChinaLinkHealth.test.mjs
       - name: Build
         run: npm run build
