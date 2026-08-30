@@ -8,7 +8,9 @@ on:
       - "src/lib/shoplingTitleKeywordPool.ts"
       - "supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql"
       - "supabase/migrations/202608300002_shopling_title_diversification_ledger_v053.sql"
+      - "supabase/migrations/202608300003_shopling_bridge_security_definer_acl_lockdown.sql"
       - "tests/shoplingAccountTitleBridge.test.mjs"
+      - "tests/shoplingBridgeRpcAclLockdown.test.mjs"
       - ".github/workflows/shopling-account-title-bridge-ci.yml"
   workflow_dispatch:
 
@@ -39,7 +41,7 @@ jobs:
           node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js &&
           node --check public/shopling-account-title-bridge/background-shopling-pipeline.js
       - name: Test extension safety contract
-        run: node --test tests/shoplingAccountTitleBridge.test.mjs
+        run: node --test tests/shoplingAccountTitleBridge.test.mjs tests/shoplingBridgeRpcAclLockdown.test.mjs
       - name: Build
         run: npm run build
         env:
