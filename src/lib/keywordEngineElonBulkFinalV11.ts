@@ -1,6 +1,7 @@
 import { compactKeywordElonKey } from "./keywordEngineElonLabV2.ts";
 import { generateSafeBulkKeywordSupplements } from "./keywordEngineElonBulkKeywordRecovery.ts";
 import {
+  SEO_TITLE_EXPANSION_META_GROUP_KEY,
   composeKeywordElonBulkFinal as composeKeywordElonBulkFinalBase,
   type KeywordElonBulkComposeInput,
   type KeywordElonBulkFinalResult,
@@ -17,7 +18,7 @@ export type {
   KeywordElonBulkFinalResult,
 } from "./keywordEngineElonBulkFinal.ts";
 
-function uniqueSupplements(values: unknown[], limit = 30) {
+function uniqueSupplements(values: unknown[], limit = 120) {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const value of values) {
@@ -28,6 +29,69 @@ function uniqueSupplements(values: unknown[], limit = 30) {
     if (out.length >= limit) break;
   }
   return out;
+}
+
+function verifiedDirectPool(input: KeywordElonBulkComposeInput) {
+  const allowed = new Set(input.allowedKeys.map(compactKeywordElonKey).filter(Boolean));
+  return uniqueSupplements(
+    input.candidates
+      .filter((row) => row.safetyPass)
+      .map((row) => row.searchKeyword || row.searchKey || row.keyword)
+      .filter((keyword) => allowed.has(compactKeywordElonKey(keyword))),
+    120,
+  );
+}
+
+function finalizeKeywordPools(
+  result: KeywordElonBulkFinalResult,
+  input: KeywordElonBulkComposeInput,
+) {
+  const directPool = verifiedDirectPool(input);
+  const recoveryPool = uniqueSupplements(input.supplementalSearchKeywords ?? [], 120);
+  const rawMeta = result.seoFinal.groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY];
+  let parsedMeta: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(String(rawMeta ?? "{}")) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      parsedMeta = parsed as Record<string, unknown>;
+    }
+  } catch {
+    parsedMeta = {};
+  }
+
+  const verifiedKeywordPool = uniqueSupplements(
+    [...directPool, ...recoveryPool],
+    120,
+  );
+  const groupProductNames = {
+    ...result.seoFinal.groupProductNames,
+    [SEO_TITLE_EXPANSION_META_GROUP_KEY]: JSON.stringify({
+      ...parsedMeta,
+      verifiedDirectKeywordPool: directPool,
+      verifiedRecoveryKeywordPool: recoveryPool,
+      verifiedKeywordPool,
+      shoplingSearchKeywords: result.seoFinal.searchKeywords,
+    }),
+  };
+  const seoFinal = {
+    ...result.seoFinal,
+    groupProductNames,
+    // Runtime persistence for future UI/analysis. Shopling continues to consume only
+    // `searchKeywords` (ten external slots); the larger verified pool is not discarded.
+    verifiedKeywordPool,
+  } as typeof result.seoFinal & { verifiedKeywordPool: string[] };
+
+  return {
+    ...result,
+    seoFinal,
+    warnings: [
+      ...result.warnings,
+      `SEO_KEYWORD_V12_VERIFIED_DIRECT_POOL:${directPool.length}`,
+      `SEO_KEYWORD_V12_VERIFIED_RECOVERY_POOL:${recoveryPool.length}`,
+      `SEO_KEYWORD_V12_VERIFIED_POOL:${verifiedKeywordPool.length}`,
+      "SEO_KEYWORD_V12_SHOPLING_OUTPUT_LIMIT:10",
+    ],
+  } as KeywordElonBulkFinalResult;
 }
 
 function recoverableSparseComposeError(error: unknown) {
@@ -46,14 +110,14 @@ export async function composeKeywordElonBulkFinal(
   input: KeywordElonBulkComposeInput,
 ): Promise<KeywordElonBulkFinalResult> {
   try {
-    return composeKeywordElonBulkFinalBase(input);
+    return finalizeKeywordPools(composeKeywordElonBulkFinalBase(input), input);
   } catch (error) {
     if (!recoverableSparseComposeError(error)) throw error;
 
-    // V11 never lowers the normal search/relevance threshold just to fill a sparse
-    // portfolio. Recovery material is generated from the verified product identity,
-    // then passed through the SAME guarded STEP4 path (built-in risk terms, custom
-    // blocks and V10 semantic consistency) before it can enter FINAL/title compose.
+    // V12 never lowers the normal search/relevance threshold just to fill a sparse
+    // portfolio. Recovery material is generated from verified product facts, screened
+    // for natural marketplace-search form, then passed through the SAME guarded STEP4
+    // path (built-in risk terms, custom blocks and V10 semantic consistency).
     const safeSupplements = await generateSafeBulkKeywordSupplements({
       identity: input.identity,
       source: input.source,
@@ -66,9 +130,13 @@ export async function composeKeywordElonBulkFinal(
     ]);
     if (!supplementalSearchKeywords.length) throw error;
 
-    return composeKeywordElonBulkFinalBase({
+    const recoveredInput: KeywordElonBulkComposeInput = {
       ...input,
       supplementalSearchKeywords,
-    });
+    };
+    return finalizeKeywordPools(
+      composeKeywordElonBulkFinalBase(recoveredInput),
+      recoveredInput,
+    );
   }
 }
