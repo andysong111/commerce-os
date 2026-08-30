@@ -5,4 +5,5 @@ importScripts(
   "background-shopling-title-registry.js",
   "background-shopling-seo-keywords.js",
   "background-shopling-pipeline.js",
+  "background-shopling-market-canary-v055.js",
 );
