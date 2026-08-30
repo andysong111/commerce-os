@@ -162,14 +162,7 @@ async function titleSupervisorAdvanceFailed(run, reasonCode, message) {
   run.index = Number(run.index || 0) + 1;
   run.failures = Array.isArray(run.failures) ? run.failures : [];
   run.itemResults = Array.isArray(run.itemResults) ? run.itemResults : [];
-  run.failures.push({
-    goodsKey,
-    reasonCode,
-    message,
-    attempts,
-    at: new Date().toISOString(),
-    supervisor: true,
-  });
+  run.failures.push({ goodsKey, reasonCode, message, attempts, at: new Date().toISOString(), supervisor: true });
   run.itemResults.push({
     goodsKey,
     outcome: "failed",
@@ -262,6 +255,15 @@ async function titleSupervisorTick() {
   await titleSupervisorRecover(run);
 }
 
+async function titleSupervisorEnsureAlarm() {
+  try {
+    const existing = await chrome.alarms.get(TITLE_SUPERVISOR_ALARM);
+    if (!existing) chrome.alarms.create(TITLE_SUPERVISOR_ALARM, { periodInMinutes: 1 });
+  } catch {
+    chrome.alarms.create(TITLE_SUPERVISOR_ALARM, { periodInMinutes: 1 });
+  }
+}
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "session" || !changes[TITLE_RUN_KEY_V055]?.newValue) return;
   const run = changes[TITLE_RUN_KEY_V055].newValue;
@@ -273,5 +275,5 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void titleSupervisorTick();
 });
 
-chrome.alarms.create(TITLE_SUPERVISOR_ALARM, { periodInMinutes: 1 });
+void titleSupervisorEnsureAlarm();
 void titleSupervisorTick();
