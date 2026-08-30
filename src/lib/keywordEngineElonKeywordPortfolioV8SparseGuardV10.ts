@@ -213,33 +213,16 @@ export function selectKeywordElonComplementSearchKeywordsV8(input: {
   const supplemental = uniqueSearchValues(input.supplementalSearchKeywords ?? []);
   const fallback = uniqueSearchValues(input.fallbackSearchKeywords ?? []);
 
-  // V12 priority: a keyword that was actually discovered, scored and passed STEP4/V10
-  // is better than a synthetic non-overlap keyword. Title/search overlap is therefore
-  // a soft preference only, never a reason to push a verified direct term behind a
-  // low-confidence generated phrase.
+  // V13 priority: semantic/product grounding outranks the old title-overlap heuristic.
+  // 1) direct keywords that survived discovery/scoring/STEP4/V10,
+  // 2) guarded product-grounded recovery in the generator's naturalness order,
+  // 3) generic fallback material.
+  // Overlap with a generated title is only an observability signal; it must never push
+  // a natural product query behind an awkward synthetic phrase just to diversify fields.
   for (const row of directNonOverlap) add(row.keyword, "direct");
   for (const row of directOverlap) add(row.keyword, "direct");
-
-  for (const keyword of supplemental.filter(
-    (value) => !keywordOverlapsTitles(value, input.titleTexts),
-  )) {
-    add(keyword, "fallback");
-  }
-  for (const keyword of fallback.filter(
-    (value) => !keywordOverlapsTitles(value, input.titleTexts),
-  )) {
-    add(keyword, "fallback");
-  }
-  for (const keyword of supplemental.filter((value) =>
-    keywordOverlapsTitles(value, input.titleTexts),
-  )) {
-    add(keyword, "fallback");
-  }
-  for (const keyword of fallback.filter((value) =>
-    keywordOverlapsTitles(value, input.titleTexts),
-  )) {
-    add(keyword, "fallback");
-  }
+  for (const keyword of supplemental) add(keyword, "fallback");
+  for (const keyword of fallback) add(keyword, "fallback");
 
   return {
     searchKeywords: selected.slice(0, limit),
@@ -253,7 +236,7 @@ export function selectKeywordElonComplementSearchKeywordsV8(input: {
       `SEO_KEYWORD_V8_SEARCH_OVERLAP_FALLBACK:${overlapFallbackCount}`,
       `SEO_KEYWORD_V8_SEARCH_DIRECT_COUNT:${directSelectedCount}`,
       `SEO_KEYWORD_V8_SEARCH_SYNTHETIC_FALLBACK:${syntheticFallbackCount}`,
-      `SEO_KEYWORD_V12_SEARCH_PRIORITY:DIRECT_BEFORE_SYNTHETIC`,
+      `SEO_KEYWORD_V13_SEARCH_PRIORITY:DIRECT_THEN_GROUNDED`,
     ],
   };
 }
