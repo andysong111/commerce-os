@@ -60,6 +60,32 @@ function assertSameMallUnique(rows: KeywordElonSafeMallTitleRow[]) {
   }
 }
 
+function assignPortfolioFinals(
+  finals: string[],
+  cursor: number,
+  rowCount: number,
+) {
+  if (!finals.length || rowCount <= 0) return [] as string[];
+  const count = Math.min(finals.length, rowCount);
+  return Array.from(
+    { length: count },
+    (_, offset) => finals[(cursor + offset) % finals.length],
+  );
+}
+
+function coveredFinalKeywords(
+  rows: KeywordElonSafeMallTitleRow[],
+  finals: string[],
+) {
+  const used = new Set(
+    rows
+      .flatMap((row) => row.keywordMaterials ?? [])
+      .map(canonical)
+      .filter(Boolean),
+  );
+  return finals.filter((keyword) => used.has(canonical(keyword)));
+}
+
 export function composeFreshKeywordElonMallTitles(input: {
   markets: KeywordElonSeoMarket[];
   finalKeywords: string[];
@@ -71,51 +97,85 @@ export function composeFreshKeywordElonMallTitles(input: {
   variationSeed?: string;
 }): KeywordElonMallTitleSafeComposerResult {
   try {
-    // Keep the existing strongest policy first: all 29 rows remain globally unique
-    // whenever the verified material pool can support it.
+    // Keep the strongest policy first: all rows globally unique whenever the
+    // verified material pool can support it.
     return composeFreshKeywordElonMallTitlesBase(input);
   } catch (error) {
     if (!mayRecoverBySameMall(error)) throw error;
   }
 
-  // Sparse products should not fail merely because unrelated marketplaces would reuse
-  // the same safe title. The hard uniqueness boundary is the same mallKey/account family.
+  // Sparse products should not fail merely because unrelated marketplaces reuse
+  // a safe title. Same-mall uniqueness stays hard. Keyword coverage, however,
+  // belongs to the WHOLE 29-row portfolio; requiring every one-row mall group to
+  // cover every final keyword is mathematically impossible and caused the V11 canary
+  // failure. Distribute final keywords across mall groups, then assert total coverage.
   const groups = groupsByMallKey(input.markets);
   const partials: KeywordElonMallTitleSafeComposerResult[] = [];
   const rowsByIdentity = new Map<string, KeywordElonSafeMallTitleRow>();
+  let finalCursor = 0;
 
   for (const [mallKey, markets] of groups) {
+    const groupFinalKeywords = assignPortfolioFinals(
+      input.finalKeywords,
+      finalCursor,
+      markets.length,
+    );
+    finalCursor += markets.length;
+    if (!groupFinalKeywords.length) {
+      throw new Error(`V11 ${mallKey} 상품명에 배정할 최종키워드가 없습니다.`);
+    }
     const partial = composeFreshKeywordElonMallTitlesBase({
       ...input,
       markets,
+      finalKeywords: groupFinalKeywords,
       variationSeed: `${text(input.variationSeed) || "seo-v11"}:mall:${mallKey}`,
     });
     partials.push(partial);
     for (const row of partial.rows) rowsByIdentity.set(rowIdentity(row), row);
   }
 
-  const rows = input.markets.map((market) => rowsByIdentity.get(marketIdentity(market))).filter(
-    (row): row is KeywordElonSafeMallTitleRow => Boolean(row),
-  );
+  const rows = input.markets
+    .map((market) => rowsByIdentity.get(marketIdentity(market)))
+    .filter((row): row is KeywordElonSafeMallTitleRow => Boolean(row));
   if (rows.length !== input.markets.length) {
     throw new Error(`V11 쇼핑몰별 상품명 복구 행 수가 맞지 않습니다. 현재 ${rows.length}개`);
   }
   assertSameMallUnique(rows);
 
-  const uniqueTitleCount = new Set(rows.map((row) => canonical(row.title)).filter(Boolean)).size;
+  const coverage = coveredFinalKeywords(rows, input.finalKeywords);
+  if (coverage.length !== input.finalKeywords.length) {
+    const covered = new Set(coverage.map(canonical));
+    const missing = input.finalKeywords.filter(
+      (keyword) => !covered.has(canonical(keyword)),
+    );
+    throw new Error(
+      `V11 전체 쇼핑몰 포트폴리오 최종키워드 커버 실패: ${missing.join(", ")}`,
+    );
+  }
+
+  const uniqueTitleCount = new Set(
+    rows.map((row) => canonical(row.title)).filter(Boolean),
+  ).size;
   const globalReuseCount = Math.max(0, rows.length - uniqueTitleCount);
-  const facts = [...new Set(partials.flatMap((partial) => partial.facts ?? []).map(text).filter(Boolean))];
+  const facts = [
+    ...new Set(
+      partials.flatMap((partial) => partial.facts ?? []).map(text).filter(Boolean),
+    ),
+  ];
   const warnings = [
-    ...new Set(partials.flatMap((partial) => partial.warnings ?? []).map(text).filter(Boolean)),
+    ...new Set(
+      partials.flatMap((partial) => partial.warnings ?? []).map(text).filter(Boolean),
+    ),
     `SEO_RUN_V11_SAME_MALL_UNIQUENESS_FALLBACK:${groups.size}`,
     `SEO_RUN_V11_GLOBAL_TITLE_REUSE:${globalReuseCount}`,
+    `SEO_RUN_V11_PORTFOLIO_KEYWORD_COVERAGE:${coverage.length}/${input.finalKeywords.length}`,
   ];
 
   return {
     rows,
     facts,
-    keywordCoverageCount: partials[0]?.keywordCoverageCount ?? input.finalKeywords.length,
-    keywordCoverageTotal: partials[0]?.keywordCoverageTotal ?? input.finalKeywords.length,
+    keywordCoverageCount: coverage.length,
+    keywordCoverageTotal: input.finalKeywords.length,
     uniqueTitleCount,
     nearDuplicateCount: partials.reduce(
       (sum, partial) => sum + Math.max(0, Number(partial.nearDuplicateCount) || 0),
