@@ -4,10 +4,23 @@
   const PANEL_ID = "commerce-os-shopling-product-list-batch";
   const STATUS_ID = `${PANEL_ID}-status`;
   const BUTTON_ID = `${PANEL_ID}-button`;
+  const DETAILS_ID = `${PANEL_ID}-details`;
   const BATCH_START_MESSAGE = "commerce-os-shopling-title-batch-start";
   const BATCH_PROGRESS_MESSAGE = "commerce-os-shopling-title-batch-progress";
+  const LAST_RUN_STORAGE_KEY = "commerceOsShoplingTitleBatchLastRun";
   const MAX_BATCH_GOODS_KEYS = 500;
   const MAX_LIST_PAGES = 30;
+
+  const REASON_LABELS = {
+    keyword_pool_insufficient: "검증 키워드 재료 부족",
+    save_verify_duplicate: "저장 후 중복 잔존",
+    batch_timeout: "상품명 화면 60초 timeout",
+    verify_timeout: "저장 검증 60초 timeout",
+    save_button_missing: "Shopling 저장 버튼 탐지 실패",
+    open_failed: "Shopling 작업 페이지 열기 실패",
+    worker_failure: "Shopling 작업 처리 실패",
+    unknown: "원인 미분류",
+  };
 
   function text(value) {
     return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -38,7 +51,6 @@
 
   function extractGoodsKeysFromDocument(doc) {
     const result = new Set();
-
     for (const row of doc.querySelectorAll("tr")) {
       if (!looksLikeProductRow(row)) continue;
       let foundInAttributes = false;
@@ -57,14 +69,12 @@
           }
         }
       }
-
       if (!foundInAttributes) {
         const rowText = text(row.innerText || row.textContent || "");
         const fallback = rowText.match(/\b\d{6,7}\b/);
         if (fallback) result.add(fallback[0]);
       }
     }
-
     return [...result].filter((value) => /^\d{5,9}$/.test(value));
   }
 
@@ -147,6 +157,53 @@
     });
   }
 
+  function failureReason(failure) {
+    const code = text(failure?.reasonCode) || "unknown";
+    return REASON_LABELS[code] || failure?.message || code;
+  }
+
+  function renderFailures(failures, labelPrefix = "최종 확인필요") {
+    const host = document.getElementById(DETAILS_ID);
+    if (!host) return;
+    host.replaceChildren();
+    const rows = Array.isArray(failures) ? failures : [];
+    if (!rows.length) return;
+
+    const details = document.createElement("details");
+    details.style.cssText = "margin-top:8px;border-top:1px solid #ede9fe;padding-top:7px";
+    const summary = document.createElement("summary");
+    summary.textContent = `${labelPrefix} ${rows.length}건 · goods key/사유 보기`;
+    summary.style.cssText = "cursor:pointer;font-weight:700;color:#b91c1c";
+    details.appendChild(summary);
+
+    const list = document.createElement("div");
+    list.style.cssText = "margin-top:6px;max-height:180px;overflow:auto;font:11px/1.5 Arial,sans-serif;color:#475569";
+    for (const failure of rows) {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:4px 0;border-bottom:1px dotted #e2e8f0";
+      const goodsKey = text(failure?.goodsKey) || "goods key 미상";
+      const attempts = Number(failure?.attempts || 0);
+      const markets = Array.isArray(failure?.duplicateMarkets) && failure.duplicateMarkets.length
+        ? ` · ${failure.duplicateMarkets.join(",")}`
+        : "";
+      item.textContent = `${goodsKey} · ${failureReason(failure)}${attempts ? ` · ${attempts}회 시도` : ""}${markets}`;
+      list.appendChild(item);
+    }
+    details.appendChild(list);
+    host.appendChild(details);
+  }
+
+  async function showLastRunIfUseful() {
+    try {
+      const stored = await chrome.storage.local.get(LAST_RUN_STORAGE_KEY);
+      const run = stored?.[LAST_RUN_STORAGE_KEY];
+      if (!run || run.status !== "completed") return;
+      if (Number(run.failed || 0) > 0) renderFailures(run.failures, "최근 실행 확인필요");
+    } catch {
+      // Diagnostics are optional; never block the batch button.
+    }
+  }
+
   async function collectBatchGoodsKeys() {
     const expected = expectedResultCount(document);
     const goodsKeys = new Set(extractGoodsKeysFromDocument(document));
@@ -172,7 +229,7 @@
           if (!seenPages.has(nextUrl) && !queue.includes(nextUrl)) queue.push(nextUrl);
         }
       } catch {
-        // Do not destroy the current page result if one pagination request fails.
+        // Incomplete collection is detected against 총 조회수 below.
       }
     }
 
@@ -187,6 +244,7 @@
   }
 
   async function runBatch() {
+    renderFailures([]);
     setButtonBusy(true, "조회결과 수집 중...");
     setStatus("현재 상품조회 조건의 모든 goods key를 수집합니다.", "info");
 
@@ -207,7 +265,7 @@
     }
 
     setStatus(
-      `조회된 상품 ${collected.goodsKeys.length}건을 확보했습니다. 미분산 상품만 순차 처리합니다.`,
+      `조회된 상품 ${collected.goodsKeys.length}건을 확보했습니다. 미분산 상품만 자동복구 포함 순차 처리합니다.`,
       "info",
     );
     const response = await sendRuntimeMessage({
@@ -232,7 +290,7 @@
       "right:18px",
       "bottom:18px",
       "z-index:2147483647",
-      "width:350px",
+      "width:370px",
       "padding:12px",
       "border:1px solid #c4b5fd",
       "border-radius:10px",
@@ -261,8 +319,12 @@
     button.style.cssText = "width:100%;padding:9px;border:0;border-radius:7px;background:#7c3aed;color:#fff;font-weight:700;cursor:pointer";
     button.addEventListener("click", runBatch);
 
-    box.append(title, status, button);
+    const detailHost = document.createElement("div");
+    detailHost.id = DETAILS_ID;
+
+    box.append(title, status, button, detailHost);
     document.documentElement.appendChild(box);
+    void showLastRunIfUseful();
   }
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -271,21 +333,29 @@
     const total = Number(message.total || 0);
     const done = Number(message.done || 0);
     const changed = Number(message.changed || 0);
+    const autoRecovered = Number(message.autoRecovered || 0);
     const skipped = Number(message.skipped || 0);
     const failed = Number(message.failed || 0);
+    const retryCount = Number(message.retryCount || 0);
 
     if (message.status === "completed") {
       setButtonBusy(false, "미분산 상품 일괄 처리");
       setStatus(
-        `완료 · ${done}/${total} · 분산저장 ${changed} · 기존정상 ${skipped} · 확인필요 ${failed}`,
+        `완료 · ${done}/${total} · 분산저장 ${changed}${autoRecovered ? ` (자동복구 ${autoRecovered} 포함)` : ""} · 기존정상 ${skipped} · 최종확인 ${failed}`,
         failed ? "error" : "success",
       );
+      renderFailures(message.failures || []);
       return;
     }
 
+    const retryText = message.retrying
+      ? ` · 자동재시도 ${Number(message.currentAttempt || 0) + 1}/3`
+      : retryCount
+        ? ` · 누적재시도 ${retryCount}`
+        : "";
     setButtonBusy(true, `일괄 처리 중 ${done}/${total}`);
     setStatus(
-      `진행 ${done}/${total} · 분산저장 ${changed} · 기존정상 ${skipped} · 확인필요 ${failed}${message.goodsKey ? ` · ${message.goodsKey}` : ""}`,
+      `진행 ${done}/${total} · 분산저장 ${changed} · 자동복구 ${autoRecovered} · 기존정상 ${skipped} · 확인필요 ${failed}${message.goodsKey ? ` · ${message.goodsKey}` : ""}${retryText}`,
       "info",
     );
   });
