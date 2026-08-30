@@ -12,7 +12,10 @@
       "matches": [
         "https://a.shopling.co.kr/prod/prodShopInfo.phtml*"
       ],
-      "js": ["content-shopling-account-titles.js"],
+      "js": [
+        "content-shopling-account-titles.js",
+        "content-shopling-save-guard.js"
+      ],
       "run_at": "document_idle"
     }
   ]
