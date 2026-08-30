@@ -12,12 +12,13 @@ const FILES = [
   "content-shopling-product-list-registry-bridge.js",
   "content-shopling-pipeline.js",
   "content-shopling-pipeline-frame-bridge.js",
-  "content-shopling-onebutton-stability-v054.js",
+  "content-shopling-onebutton-stability-v055.js",
   "background-shopling-root.js",
   "background-shopling-title-batch.js",
   "background-shopling-title-registry.js",
   "background-shopling-seo-keywords.js",
   "background-shopling-pipeline.js",
+  "background-shopling-title-supervisor-v055.js",
   "README.txt",
 ] as const;
 
@@ -30,13 +31,13 @@ export async function GET() {
     entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.4\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.5\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.4.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.5.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
