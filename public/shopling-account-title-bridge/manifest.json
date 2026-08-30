@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Commerce OS Shopling Account Title Bridge",
+  "short_name": "Shopling Titles",
+  "version": "0.1.0",
+  "description": "Shopling 쇼핑몰별 상품명 화면에서 같은 쇼핑몰의 여러 로그인 계정 제목을 안전하게 분산합니다.",
+  "host_permissions": [
+    "https://a.shopling.co.kr/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://a.shopling.co.kr/prod/prodShopInfo.phtml*"
+      ],
+      "js": [
+        "content-shopling-account-titles.js",
+        "content-shopling-save-guard.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
