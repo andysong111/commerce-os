@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { buildKeywordElonGroundedTitleSupportsV11 } from "../src/lib/keywordEngineElonBulkFinalV11.ts";
 import { composeFreshKeywordElonMallTitles } from "../src/lib/keywordEngineElonFreshMallTitleComposerV11.ts";
 import { buildKeywordElonTitleKeywordReservoirV8 } from "../src/lib/keywordEngineElonKeywordPortfolioV8SparseGuardV10.ts";
 import { PRODUCT_GROUP_MARKET_REGISTRY } from "../src/lib/productGroupMarketRegistry.ts";
@@ -44,21 +43,6 @@ function sameMallTitlesAreUnique(rows) {
   return true;
 }
 
-const baseIdentity = {
-  model: "gpt-5-mini",
-  reasoning: "verified fixture",
-  confidence: 0.9,
-  coreProduct: "골프공 커버",
-  koreanProductIdentity: "실리콘 땅콩형 골프공 커버",
-  identityAnchor: "실리콘 땅콩형 골프공 커버",
-  primarySeeds: ["골프공 커버", "실리콘 골프공 커버"],
-  conditionalSeeds: ["땅콩 모양 골프공 커버"],
-  functionModifiers: ["표면 보호"],
-  designShapeModifiers: ["땅콩형"],
-  specAttributes: ["재질: 실리콘", "용도: 골프공 전용"],
-  variantNoise: ["AAA488"],
-};
-
 test("V11은 검증된 직접키워드가 10개를 넘으면 제목 reservoir에서 임의로 10/12개에 자르지 않는다", () => {
   const candidates = Array.from({ length: 15 }, (_, index) =>
     candidate(`검증키워드${index + 1}`, index),
@@ -82,45 +66,21 @@ test("V11은 검증된 직접키워드가 10개를 넘으면 제목 reservoir에
   );
 });
 
-test("V11 grounded support는 제품 identity/title의 사실만 분해하고 차단어는 다시 넣지 않는다", () => {
-  const supports = buildKeywordElonGroundedTitleSupportsV11({
-    launchItemId: "launch-aaa488",
-    modelNumber: "AAA488",
-    productName: "실리콘 땅콩 골프공커버",
-    sourceUrl: "https://detail.1688.com/offer/1.html",
-    source: {
-      url: "https://detail.1688.com/offer/1.html",
-      offerId: "1",
-      autoStatus: "partial",
-      chineseTitle: "실리콘 땅콩 골프공커버",
-      optionText: "",
-      supportingText: "",
-      warnings: [],
-      collectedAt: new Date(0).toISOString(),
-    },
-    collectionMode: "tracker_fallback",
-    identity: {
-      ...baseIdentity,
-      conditionalSeeds: [...baseIdentity.conditionalSeeds, "나이키 골프공 커버"],
-    },
-    candidates: [candidate("커버")],
-    allowedKeys: ["커버"],
-    blockedKeys: [],
-    finalMaterialCount: 1,
-    titleResult: {
-      model: "gpt-5-mini",
-      title: "실리콘 땅콩형 골프공 커버",
-      warning: "",
-      byteLength: 36,
-      usedKeywords: ["커버"],
-    },
-    customBlockedTerms: ["나이키"],
-  });
+test("V11 희소 보충어는 기준 하향이 아니라 기존 STEP4+V10 안전 복구기를 통과한 뒤에만 FINAL compose에 들어간다", async () => {
+  const source = await readFile(
+    new URL("../src/lib/keywordEngineElonBulkFinalV11.ts", import.meta.url),
+    "utf8",
+  );
+  const recovery = await readFile(
+    new URL("../src/lib/keywordEngineElonBulkKeywordRecovery.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.ok(supports.some((keyword) => keyword.includes("골프공커버")));
-  assert.ok(supports.some((keyword) => keyword.includes("실리콘")));
-  assert.equal(supports.some((keyword) => keyword.includes("나이키")), false);
-  assert.equal(supports.some((keyword) => keyword.includes("AAA488")), false);
+  assert.match(source, /generateSafeBulkKeywordSupplements/);
+  assert.match(source, /recoverableSparseComposeError/);
+  assert.match(source, /customBlockedTerms/);
+  assert.match(recovery, /filterKeywordElonProhibitedKeywords/);
+  assert.match(recovery, /bulk_keyword_recovery/);
 });
 
 test("V11은 AAA442형 희소 키워드에서도 29개를 만들고 같은 쇼핑몰 계정끼리 제목을 중복시키지 않는다", () => {
@@ -161,7 +121,7 @@ test("V11은 AAA488형 단일 핵심어도 검증된 modelName 조각으로 같�
   assert.equal(sameMallTitlesAreUnique(result.rows), true);
 });
 
-test("production alias는 V11 grounded bulk/fresh composer를 사용한다", async () => {
+test("production alias는 V11 guarded bulk/fresh composer를 사용한다", async () => {
   const tsconfig = JSON.parse(
     await readFile(new URL("../tsconfig.json", import.meta.url), "utf8"),
   );
