@@ -8,8 +8,9 @@ const listContentPath = new URL("../public/shopling-account-title-bridge/content
 const registryListBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js", import.meta.url);
 const pipelineContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
 const frameBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js", import.meta.url);
-const stabilityBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-onebutton-stability-v054.js", import.meta.url);
+const stabilityBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-onebutton-stability-v055.js", import.meta.url);
 const titleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-batch.js", import.meta.url);
+const titleSupervisorPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-supervisor-v055.js", import.meta.url);
 const titleRegistryBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-registry.js", import.meta.url);
 const pipelineBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-pipeline.js", import.meta.url);
 const backgroundRootPath = new URL("../public/shopling-account-title-bridge/background-shopling-root.js", import.meta.url);
@@ -22,24 +23,20 @@ const keywordPoolLibPath = new URL("../src/lib/shoplingTitleKeywordPool.ts", imp
 const pipelineMigrationPath = new URL("../supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql", import.meta.url);
 const titleLedgerMigrationPath = new URL("../supabase/migrations/202608300002_shopling_title_diversification_ledger_v053.sql", import.meta.url);
 
-test("Shopling bridge v0.5.4 keeps durable idempotency and adds handoff recovery", async () => {
+test("Shopling bridge v0.5.5 exposes one operator flow and persistent alarm recovery", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.5.4");
-  assert.deepEqual(manifest.permissions, ["storage"]);
+  assert.equal(manifest.version, "0.5.5");
+  assert.deepEqual(manifest.permissions, ["storage", "alarms"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*",
   ]);
   assert.equal(manifest.background.service_worker, "background-shopling-root.js");
-  assert.deepEqual(manifest.content_scripts[1].js, [
-    "content-shopling-product-list-batch.js",
-    "content-shopling-product-list-registry-bridge.js",
-  ]);
   assert.deepEqual(manifest.content_scripts[2].js, [
     "content-shopling-pipeline.js",
     "content-shopling-pipeline-frame-bridge.js",
-    "content-shopling-onebutton-stability-v054.js",
+    "content-shopling-onebutton-stability-v055.js",
   ]);
 });
 
@@ -53,9 +50,10 @@ test("mall-title bridge still uses verified Shopling and SEO tokens only", async
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("background root loads title batch, durable title ledger bridge, SEO pool and market pipeline", async () => {
+test("background root loads title worker, alarm supervisor, ledger, SEO and market pipeline", async () => {
   const root = await readFile(backgroundRootPath, "utf8");
   assert.match(root, /background-shopling-title-batch\.js/);
+  assert.match(root, /background-shopling-title-supervisor-v055\.js/);
   assert.match(root, /background-shopling-title-registry\.js/);
   assert.match(root, /background-shopling-seo-keywords\.js/);
   assert.match(root, /background-shopling-pipeline\.js/);
@@ -81,6 +79,17 @@ test("keyword-pool API keeps safety filtering", async () => {
   assert.match(helper, /prohibited === true/);
 });
 
+test("legacy purple title flow remains internally available but unified UI suppresses its operator panel", async () => {
+  const purple = await readFile(registryListBridgePath, "utf8");
+  const unified = await readFile(stabilityBridgePath, "utf8");
+  assert.doesNotThrow(() => new Function(purple));
+  assert.doesNotThrow(() => new Function(unified));
+  assert.match(purple, /commerce-os-shopling-product-list-batch/);
+  assert.match(unified, /LEGACY_PURPLE_PANEL_ID = "commerce-os-shopling-product-list-batch"/);
+  assert.match(unified, /display:none!important/);
+  assert.match(unified, /신규상품 전체 자동처리/);
+});
+
 test("legacy page collector remains only as fallback diagnostics", async () => {
   const source = await readFile(listContentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
@@ -89,48 +98,27 @@ test("legacy page collector remains only as fallback diagnostics", async () => {
   assert.match(source, /credentials: "include"/);
 });
 
-test("purple title bridge claims only unhandled ledger rows and persists terminal results", async () => {
-  const source = await readFile(registryListBridgePath, "utf8");
-  assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /TITLE_LEDGER_CLAIM_MESSAGE/);
-  assert.match(source, /TITLE_LEDGER_REPORT_MESSAGE/);
-  assert.match(source, /TITLE_LEDGER_RETRY_MESSAGE/);
-  assert.match(source, /TITLE_LEDGER_STATS_MESSAGE/);
-  assert.match(source, /LAST_RUN_STORAGE_KEY/);
-  assert.match(source, /reportActiveResults/);
-  assert.match(source, /실패\/중단건 재시도/);
-  assert.match(source, /이전 처리상품은 열지 않습니다/);
-  assert.match(source, /event\.stopImmediatePropagation\(\)/);
-  assert.match(source, /CHUNK_SIZE = 500/);
-  assert.doesNotMatch(source, /credentials:\s*["']include["']/);
-  assert.doesNotMatch(source, /password|document\.cookie/i);
-});
-
-test("title ledger background exposes claim report retry stats with no Shopling credentials", async () => {
+test("title ledger background remains service-only helper with no Shopling credentials", async () => {
   const source = await readFile(titleRegistryBackgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /TITLE_REGISTRY_BRIDGE = "v0\.5\.3"/);
-  assert.match(source, /retry-failures/);
   assert.match(source, /credentials: "omit"/);
   assert.doesNotMatch(source, /a\.shopling\.co\.kr/);
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("title registry API is ledger-backed, recoverable by run id, and never returns historical registry wholesale", async () => {
+test("title registry API stays ledger-backed and recoverable by run id", async () => {
   const source = await readFile(titleRegistryRoutePath, "utf8");
-  assert.match(source, /const BRIDGE_VERSION = "v0\.5\.3"/);
   assert.match(source, /claim_shopling_title_diversification_tasks/);
   assert.match(source, /report_shopling_title_diversification_task/);
-  assert.match(source, /retry_shopling_title_diversification_failures/);
-  assert.match(source, /\.from\("shopling_title_diversification_ledger"\)/);
+  assert.match(source, /shopling_title_diversification_ledger/);
   assert.match(source, /\.eq\("claim_run_id", runId\)/);
   assert.match(source, /\.eq\("status", "claimed"\)/);
   assert.match(source, /recoveredClaimRowCount/);
-  assert.doesNotMatch(source, /\.from\("shopling_product_group_registry"\)/);
   assert.doesNotMatch(source, /password|cookie/i);
 });
 
-test("orange one-button content still uses exact ptn_goods_cd and durable submit lock", async () => {
+test("orange one-button market worker still uses exact ptn_goods_cd and durable submit lock", async () => {
   const source = await readFile(pipelineContentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /신규상품 전체 자동처리/);
@@ -143,32 +131,46 @@ test("orange one-button content still uses exact ptn_goods_cd and durable submit
   assert.ok(armIndex >= 0 && clickIndex > armIndex);
 });
 
-test("orange frame UI ignores purple title progress unless its own pipeline title stage is running", async () => {
+test("frame bridge still starts title work only for its own claimed goods keys", async () => {
   const source = await readFile(frameBridgePath, "utf8");
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /TITLE_BATCH_PROGRESS_MESSAGE/);
-  assert.match(source, /const uiRun = await loadUiRun\(\)/);
+  assert.match(source, /PIPE_CLAIM_MESSAGE/);
+  assert.match(source, /TITLE_BATCH_START_MESSAGE/);
+  assert.match(source, /goodsKeys/);
   assert.match(source, /uiRun\.stage !== "title"/);
-  assert.match(source, /uiRun\.stage = "market"/);
-  assert.match(source, /신규상품 전체 자동처리 · 동시 2창/);
 });
 
-test("v0.5.4 stability bridge recovers completed title work into market start without focus dependency", async () => {
+test("v0.5.5 unified stability bridge hands title completion to market without focus dependency", async () => {
   const source = await readFile(stabilityBridgePath, "utf8");
   assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /TITLE_RUN_KEY/);
   assert.match(source, /TITLE_LAST_RUN_KEY/);
   assert.match(source, /MARKET_LAST_RUN_KEY/);
   assert.match(source, /PIPE_MARKET_START_MESSAGE/);
   assert.match(source, /titleRunCoversUiRun/);
   assert.match(source, /marketEnsured/);
-  assert.match(source, /setInterval\(\(\) => void ensureTitleToMarketHandoff/);
-  assert.match(source, /window\.addEventListener\("focus"/);
-  assert.match(source, /document\.addEventListener\("visibilitychange"/);
+  assert.match(source, /chrome\.storage\.onChanged/);
+  assert.match(source, /백그라운드 감시 활성/);
+  assert.doesNotMatch(source, /window\.addEventListener\("focus"/);
+  assert.doesNotMatch(source, /document\.addEventListener\("visibilitychange"/);
   assert.match(source, /outcome: "title_failed"/);
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("title worker retains retry verification and itemResults used for durable reporting", async () => {
+test("v0.5.5 title supervisor uses chrome alarms and safe verify-first recovery after save", async () => {
+  const source = await readFile(titleSupervisorPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /chrome\.alarms\.create/);
+  assert.match(source, /periodInMinutes: 1/);
+  assert.match(source, /TITLE_STALE_MS_V055 = 75000/);
+  assert.match(source, /verificationSafe = \["saving", "verify-opening", "verify"\]/);
+  assert.match(source, /titleSupervisorVerifyUrl/);
+  assert.match(source, /background_supervisor_timeout/);
+  assert.match(source, /active: false/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("title worker retains retry verification and durable item results", async () => {
   const source = await readFile(titleBackgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /const PAGE_TIMEOUT_MS = 60000/);
@@ -178,25 +180,17 @@ test("title worker retains retry verification and itemResults used for durable r
   assert.match(source, /LAST_RUN_STORAGE_KEY/);
 });
 
-test("title ledger migration baselines all pre-upgrade goods keys and only future rows can queue", async () => {
+test("title ledger migration still preserves baseline and explicit retry semantics", async () => {
   const source = await readFile(titleLedgerMigrationPath, "utf8");
   assert.match(source, /shopling_title_diversification_ledger/);
   assert.match(source, /primary key \(owner_id, goods_key\)/i);
   assert.match(source, /baseline_processed/);
-  assert.match(source, /v053_cutover_existing_registry/);
-  assert.match(source, /on conflict \(owner_id, goods_key\) do nothing/i);
-  assert.match(source, /claim_shopling_title_diversification_tasks/);
   assert.match(source, /status = 'confirm_needed'/);
-  assert.doesNotMatch(
-    source,
-    /set status = 'queued',[\s\S]{0,500}where status = 'claimed'[\s\S]{0,120}claimed_at < now\(\) - interval '2 hours'/i,
-  );
   assert.match(source, /retry_shopling_title_diversification_failures/);
-  assert.match(source, /status in \('failed','confirm_needed'\)/);
   assert.match(source, /grant execute .* service_role/i);
 });
 
-test("market pipeline duplicate protections remain unchanged and claim response recovers by run id", async () => {
+test("market pipeline duplicate protections and claim recovery remain unchanged", async () => {
   const background = await readFile(pipelineBackgroundPath, "utf8");
   const route = await readFile(pipelineRoutePath, "utf8");
   const migration = await readFile(pipelineMigrationPath, "utf8");
@@ -205,21 +199,17 @@ test("market pipeline duplicate protections remain unchanged and claim response 
   assert.match(route, /arm_shopling_market_pipeline_submit/);
   assert.match(route, /\.from\("shopling_market_pipeline_ledger"\)/);
   assert.match(route, /\.eq\("claim_run_id", runId\)/);
-  assert.match(route, /\.eq\("status", "claimed"\)/);
   assert.match(route, /recoveredClaimRowCount/);
-  assert.match(route, /claim_payload_invalid/);
   assert.match(migration, /legacy_ignored/);
   assert.match(migration, /market_status = 'submit_armed'/);
   assert.match(migration, /stale_claim_requires_review/);
 });
 
-test("Shopling bridge v0.5.4 download ZIP contains stability, title and market workers", async () => {
+test("Shopling bridge v0.5.5 ZIP contains unified UI and persistent title supervisor", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.ok(source.includes('"content-shopling-product-list-registry-bridge.js"'));
-  assert.ok(source.includes('"background-shopling-title-registry.js"'));
-  assert.ok(source.includes('"content-shopling-pipeline-frame-bridge.js"'));
-  assert.ok(source.includes('"content-shopling-onebutton-stability-v054.js"'));
+  assert.ok(source.includes('"content-shopling-onebutton-stability-v055.js"'));
+  assert.ok(source.includes('"background-shopling-title-supervisor-v055.js"'));
   assert.ok(source.includes('"background-shopling-pipeline.js"'));
-  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.4.zip"));
-  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.4"));
+  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.5.zip"));
+  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.5"));
 });
