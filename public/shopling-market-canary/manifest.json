@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Commerce OS Shopling Market Canary",
+  "short_name": "Shopling Canary",
+  "version": "0.1.0",
+  "description": "DM1→도매1 한 건만 실제 송신해 Chrome 확장프로그램 기반 Shopling 마켓 전송 가능 여부를 검증합니다.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://a.shopling.co.kr/*",
+    "https://commerce-os-ops-center.vercel.app/*"
+  ],
+  "background": {
+    "service_worker": "background-root.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://a.shopling.co.kr/*"
+      ],
+      "js": [
+        "content-shopling-pipeline.js",
+        "content-market-canary.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle"
+    }
+  ]
+}
