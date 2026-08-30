@@ -32,6 +32,12 @@
       "@/lib/keywordEngineElonKeywordPortfolioV8": [
         "./src/lib/keywordEngineElonKeywordPortfolioV8SparseGuardV10.ts"
       ],
+      "@/lib/keywordEngineElonFreshMallTitleComposer": [
+        "./src/lib/keywordEngineElonFreshMallTitleComposerV11.ts"
+      ],
+      "@/lib/keywordEngineElonBulkFinal": [
+        "./src/lib/keywordEngineElonBulkFinalV11.ts"
+      ],
       "@/*": [
         "./src/*"
       ]
