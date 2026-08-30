@@ -8,6 +8,7 @@ const listContentPath = new URL("../public/shopling-account-title-bridge/content
 const registryListBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js", import.meta.url);
 const pipelineContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
 const frameBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js", import.meta.url);
+const stabilityBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-onebutton-stability-v054.js", import.meta.url);
 const titleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-batch.js", import.meta.url);
 const titleRegistryBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-registry.js", import.meta.url);
 const pipelineBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-pipeline.js", import.meta.url);
@@ -21,10 +22,10 @@ const keywordPoolLibPath = new URL("../src/lib/shoplingTitleKeywordPool.ts", imp
 const pipelineMigrationPath = new URL("../supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql", import.meta.url);
 const titleLedgerMigrationPath = new URL("../supabase/migrations/202608300002_shopling_title_diversification_ledger_v053.sql", import.meta.url);
 
-test("Shopling bridge v0.5.3 keeps market idempotency and adds durable title idempotency", async () => {
+test("Shopling bridge v0.5.4 keeps durable idempotency and adds handoff recovery", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.5.3");
+  assert.equal(manifest.version, "0.5.4");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
@@ -38,6 +39,7 @@ test("Shopling bridge v0.5.3 keeps market idempotency and adds durable title ide
   assert.deepEqual(manifest.content_scripts[2].js, [
     "content-shopling-pipeline.js",
     "content-shopling-pipeline-frame-bridge.js",
+    "content-shopling-onebutton-stability-v054.js",
   ]);
 });
 
@@ -151,6 +153,21 @@ test("orange frame UI ignores purple title progress unless its own pipeline titl
   assert.match(source, /신규상품 전체 자동처리 · 동시 2창/);
 });
 
+test("v0.5.4 stability bridge recovers completed title work into market start without focus dependency", async () => {
+  const source = await readFile(stabilityBridgePath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /TITLE_LAST_RUN_KEY/);
+  assert.match(source, /MARKET_LAST_RUN_KEY/);
+  assert.match(source, /PIPE_MARKET_START_MESSAGE/);
+  assert.match(source, /titleRunCoversUiRun/);
+  assert.match(source, /marketEnsured/);
+  assert.match(source, /setInterval\(\(\) => void ensureTitleToMarketHandoff/);
+  assert.match(source, /window\.addEventListener\("focus"/);
+  assert.match(source, /document\.addEventListener\("visibilitychange"/);
+  assert.match(source, /outcome: "title_failed"/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
 test("title worker retains retry verification and itemResults used for durable reporting", async () => {
   const source = await readFile(titleBackgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
@@ -196,12 +213,13 @@ test("market pipeline duplicate protections remain unchanged and claim response 
   assert.match(migration, /stale_claim_requires_review/);
 });
 
-test("Shopling bridge v0.5.3 download ZIP contains durable title and market workers", async () => {
+test("Shopling bridge v0.5.4 download ZIP contains stability, title and market workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.ok(source.includes('"content-shopling-product-list-registry-bridge.js"'));
   assert.ok(source.includes('"background-shopling-title-registry.js"'));
   assert.ok(source.includes('"content-shopling-pipeline-frame-bridge.js"'));
+  assert.ok(source.includes('"content-shopling-onebutton-stability-v054.js"'));
   assert.ok(source.includes('"background-shopling-pipeline.js"'));
-  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.3.zip"));
-  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.3"));
+  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.4.zip"));
+  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.4"));
 });
