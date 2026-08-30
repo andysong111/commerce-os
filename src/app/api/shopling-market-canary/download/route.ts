@@ -7,11 +7,9 @@ export const dynamic = "force-dynamic";
 
 const MANIFEST_PATH = "public/shopling-market-canary/manifest.json";
 const BACKGROUND_ROOT_PATH = "public/shopling-market-canary/background-root.js";
-const FILES = [
-  ["background-market-canary.mjs", "public/shopling-market-canary/background-market-canary.js"],
-  ["content-market-canary.mjs", "public/shopling-market-canary/content-market-canary.js"],
-  ["README.txt", "public/shopling-market-canary/README.txt"],
-] as const;
+const BACKGROUND_PATH = "public/shopling-market-canary/background-market-canary.js";
+const CONTENT_PATH = "public/shopling-market-canary/content-market-canary.js";
+const README_PATH = "public/shopling-market-canary/README.txt";
 
 export async function GET() {
   const root = process.cwd();
@@ -24,10 +22,16 @@ export async function GET() {
     .replace(/background-market-canary\.js/g, "background-market-canary.mjs");
   entries["background-root.mjs"] = strToU8(backgroundRoot);
 
-  for (const [archiveName, sourcePath] of FILES) {
-    const bytes = await readFile(path.join(root, sourcePath));
-    entries[archiveName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  }
+  const background = await readFile(path.join(root, BACKGROUND_PATH));
+  entries["background-market-canary.mjs"] = new Uint8Array(background.buffer, background.byteOffset, background.byteLength);
+
+  const content = (await readFile(path.join(root, CONTENT_PATH), "utf8"))
+    .replace('const VERSION = "0.1.2";', 'const VERSION = "0.1.3";');
+  entries["content-market-canary.mjs"] = strToU8(content);
+
+  const readme = (await readFile(path.join(root, README_PATH), "utf8"))
+    .replace(/v0\.1\.2/g, "v0.1.3");
+  entries["README.txt"] = strToU8(readme);
 
   entries["VERSION.txt"] = strToU8("Commerce OS Shopling Market Canary v0.1.3\n");
 
