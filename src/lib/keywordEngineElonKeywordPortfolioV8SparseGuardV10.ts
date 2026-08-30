@@ -128,6 +128,7 @@ export function buildKeywordElonTitleKeywordReservoirV8(input: {
     `SEO_KEYWORD_V8_EXCELLENT_TITLE_POOL:${eligible.length}`,
     `SEO_KEYWORD_V8_TITLE_PRIMARY_COUNT:${fallback.titleKeywords.length}`,
     `SEO_KEYWORD_V8_TITLE_FALLBACK_COUNT:${base.fallbackTitleKeywordCount + fallback.added}`,
+    `SEO_KEYWORD_V10_SPARSE_DIRECT_RESCUE:${rescuedDirectCount}`,
     `SEO_KEYWORD_V11_DIRECT_RESERVOIR_PRESERVED:${rescuedDirectCount}`,
     `SEO_KEYWORD_V11_TITLE_RESERVOIR:${fallback.titleKeywords.length}/${TITLE_RESERVOIR_CAPACITY_V11}`,
     `SEO_KEYWORD_V11_GROUNDED_SPARSE_SUPPORT:${fallback.added}`,
