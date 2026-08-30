@@ -27,18 +27,6 @@
     },
     {
       "matches": [
-        "https://a.shopling.co.kr/prod/*"
-      ],
-      "js": [
-        "content-shopling-product-list-batch.js",
-        "content-shopling-product-list-registry-bridge.js"
-      ],
-      "all_frames": true,
-      "match_about_blank": true,
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
         "https://a.shopling.co.kr/*"
       ],
       "js": [
