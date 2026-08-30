@@ -6,6 +6,7 @@
   const ACTION_BUTTON_ID = `${BRIDGE_ID}-action`;
   const MAX_TITLE_BYTES = 100;
   const BATCH_PAGE_MESSAGE = "commerce-os-shopling-title-batch-page";
+  const SEO_KEYWORD_POOL_MESSAGE = "commerce-os-shopling-seo-keyword-pool";
   const MARKET_NAMES = [
     "카카오톡 스토어",
     "스마트스토어",
@@ -51,8 +52,7 @@
   }
 
   function isUsefulToken(value) {
-    const normalized = text(value);
-    const key = tokenKey(normalized);
+    const key = tokenKey(value);
     return key.length >= 2 && /[0-9a-z가-힣]/i.test(key);
   }
 
@@ -84,6 +84,19 @@
     return [...values.slice(normalized), ...values.slice(0, normalized)];
   }
 
+  function sendRuntimeMessage(payload) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(payload, (response) => {
+          void chrome.runtime.lastError;
+          resolve(response || null);
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
   function buildVerifiedTokenPool(rows) {
     const tokens = [];
     for (const row of rows) {
@@ -94,7 +107,26 @@
     return unique(tokens, tokenKey).slice(0, 48);
   }
 
-  function titleVariants(baseTitle, identity, verifiedPool, limit = 64) {
+  async function loadSeoMasterTokenPool(goodsKey) {
+    const response = await sendRuntimeMessage({
+      type: SEO_KEYWORD_POOL_MESSAGE,
+      goodsKey,
+    });
+    const keywords = response?.ok && Array.isArray(response.keywords) ? response.keywords : [];
+    const tokens = [];
+    for (const keyword of keywords) {
+      for (const token of tokenize(keyword)) {
+        if (isUsefulToken(token)) tokens.push(token);
+      }
+    }
+    return {
+      tokens: unique(tokens, tokenKey).slice(0, 64),
+      candidateCount: Number(response?.candidateCount || keywords.length || 0),
+      source: text(response?.source || "none"),
+    };
+  }
+
+  function titleVariants(baseTitle, identity, fallbackPool, fallbackMode, limit = 96) {
     const baseTokens = tokenize(baseTitle);
     if (!baseTokens.length) return [];
 
@@ -127,25 +159,28 @@
     }
 
     const baseKeys = new Set(baseTokens.map(tokenKey));
-    const extras = verifiedPool.filter((token) => {
+    const extras = fallbackPool.filter((token) => {
       const key = tokenKey(token);
       return key && !baseKeys.has(key);
     });
-    const orderedExtras = rotate(extras, extras.length ? stableHash(identity) % extras.length : 0);
+    const orderedExtras = rotate(
+      extras,
+      extras.length ? stableHash(identity) % extras.length : 0,
+    );
 
-    for (const extra of orderedExtras.slice(0, 16)) {
-      add([...baseTokens, extra], "verified_pool");
-      add([extra, ...baseTokens], "verified_pool");
+    for (const extra of orderedExtras.slice(0, 24)) {
+      add([...baseTokens, extra], fallbackMode);
+      add([extra, ...baseTokens], fallbackMode);
       if (baseTokens.length >= 2) {
-        add([baseTokens[0], extra, ...baseTokens.slice(1)], "verified_pool");
-        add([...baseTokens.slice(0, -1), extra, baseTokens.at(-1)], "verified_pool");
+        add([baseTokens[0], extra, ...baseTokens.slice(1)], fallbackMode);
+        add([...baseTokens.slice(0, -1), extra, baseTokens.at(-1)], fallbackMode);
       }
     }
 
-    for (let left = 0; left < Math.min(orderedExtras.length, 8); left += 1) {
-      for (let right = left + 1; right < Math.min(orderedExtras.length, 8); right += 1) {
-        add([...baseTokens, orderedExtras[left], orderedExtras[right]], "verified_pool");
-        add([orderedExtras[right], ...baseTokens, orderedExtras[left]], "verified_pool");
+    for (let left = 0; left < Math.min(orderedExtras.length, 10); left += 1) {
+      for (let right = left + 1; right < Math.min(orderedExtras.length, 10); right += 1) {
+        add([...baseTokens, orderedExtras[left], orderedExtras[right]], fallbackMode);
+        add([orderedExtras[right], ...baseTokens, orderedExtras[left]], fallbackMode);
       }
     }
 
@@ -234,7 +269,14 @@
     return { duplicateGroupCount, duplicateRowCount, duplicateMarkets };
   }
 
-  function buildGroupAssignments(marketName, marketRows, goodsKey, verifiedPool, retryAttempt) {
+  function buildGroupAssignments(
+    marketName,
+    marketRows,
+    goodsKey,
+    fallbackPool,
+    fallbackMode,
+    retryAttempt,
+  ) {
     if (marketRows.length < 2) return [];
     const byTitle = new Map();
     for (const row of marketRows) {
@@ -255,13 +297,13 @@
       const baseTitle = duplicateRows[0].currentTitle;
       const variants = titleVariants(
         baseTitle,
-        `${goodsKey}:${marketName}:${baseTitle}:attempt-${retryAttempt}`,
-        verifiedPool,
-        Math.max(64, duplicateRows.length * 12),
+        `${goodsKey}:${marketName}:${baseTitle}:${fallbackMode}:attempt-${retryAttempt}`,
+        fallbackPool,
+        fallbackMode,
+        Math.max(96, duplicateRows.length * 16),
       );
 
-      for (let index = 0; index < duplicateRows.length; index += 1) {
-        const row = duplicateRows[index];
+      for (const row of duplicateRows) {
         let selected = null;
         for (const candidate of variants) {
           const key = canonical(candidate.title);
@@ -282,14 +324,11 @@
     input.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function applyDiversification(retryAttempt = 0) {
-    const goodsKey = new URLSearchParams(location.search).get("prod_id") || "";
+  function applyPass(goodsKey, fallbackPool, fallbackMode, retryAttempt) {
     const rows = collectEditableRows();
     const groups = groupRows(rows);
-    const verifiedPool = buildVerifiedTokenPool(rows);
     let changed = 0;
     let fallbackUsed = 0;
-    let diversifiedMarkets = 0;
     const changedMarkets = [];
 
     for (const [marketName, marketRows] of groups.entries()) {
@@ -297,7 +336,8 @@
         marketName,
         marketRows,
         goodsKey,
-        verifiedPool,
+        fallbackPool,
+        fallbackMode,
         retryAttempt,
       );
       if (!assignments.length) continue;
@@ -315,23 +355,55 @@
         dispatchValueEvents(input);
         changed += 1;
         marketChanged += 1;
-        if (assignment.mode === "verified_pool") fallbackUsed += 1;
+        if (assignment.mode === fallbackMode) fallbackUsed += 1;
       }
-      if (marketChanged > 0) {
-        diversifiedMarkets += 1;
-        changedMarkets.push(`${marketName} ${marketChanged}개`);
+      if (marketChanged) changedMarkets.push(`${marketName} ${marketChanged}개`);
+    }
+
+    return { changed, fallbackUsed, changedMarkets };
+  }
+
+  async function applyDiversification(retryAttempt = 0) {
+    const goodsKey = new URLSearchParams(location.search).get("prod_id") || "";
+    const initialRows = collectEditableRows();
+    const localPool = buildVerifiedTokenPool(initialRows);
+    const localPass = applyPass(
+      goodsKey,
+      localPool,
+      "verified_pool",
+      retryAttempt,
+    );
+
+    let seoPool = { tokens: [], candidateCount: 0, source: "none" };
+    let seoPass = { changed: 0, fallbackUsed: 0, changedMarkets: [] };
+    let after = analyzeDuplicates(collectEditableRows());
+
+    if (after.duplicateGroupCount > 0) {
+      seoPool = await loadSeoMasterTokenPool(goodsKey);
+      if (seoPool.tokens.length) {
+        seoPass = applyPass(
+          goodsKey,
+          seoPool.tokens,
+          "seo_master_pool",
+          retryAttempt,
+        );
+        after = analyzeDuplicates(collectEditableRows());
       }
     }
 
-    const after = analyzeDuplicates(collectEditableRows());
     return {
       goodsKey,
-      totalEditableRows: rows.length,
-      verifiedPoolSize: verifiedPool.length,
-      changed,
-      fallbackUsed,
-      diversifiedMarkets,
-      changedMarkets,
+      totalEditableRows: initialRows.length,
+      verifiedPoolSize: localPool.length,
+      seoPoolSize: seoPool.tokens.length,
+      seoCandidateCount: seoPool.candidateCount,
+      changed: localPass.changed + seoPass.changed,
+      fallbackUsed: localPass.fallbackUsed,
+      seoFallbackUsed: seoPass.fallbackUsed,
+      changedMarkets: unique([
+        ...localPass.changedMarkets,
+        ...seoPass.changedMarkets,
+      ]),
       remainingDuplicates: after.duplicateGroupCount,
       remainingMarkets: after.duplicateMarkets,
     };
@@ -369,41 +441,33 @@
     if (label) button.textContent = label;
   }
 
-  function sendRuntimeMessage(payload) {
-    return new Promise((resolve) => {
-      try {
-        chrome.runtime.sendMessage(payload, (response) => {
-          void chrome.runtime.lastError;
-          resolve(response || null);
-        });
-      } catch {
-        resolve(null);
-      }
-    });
-  }
-
   async function runManualSingle() {
     const before = analyzeDuplicates();
     if (!before.duplicateGroupCount) {
       setStatus("이 goods key는 같은 쇼핑몰 내 중복 상품명이 없습니다.", "success");
       return;
     }
-    const result = applyDiversification(0);
+    setActionBusy(true, "SEO 원장 확인 중...");
+    const result = await applyDiversification(0);
     if (!result.changed || result.remainingDuplicates > 0) {
+      setActionBusy(false, "분산·저장");
       setStatus(
-        `검증된 같은 상품 키워드까지 사용했지만 ${result.remainingDuplicates || before.duplicateGroupCount}개 중복 그룹이 남았습니다.`,
+        `Shopling 기존 제목 + SEO 원장 검증키워드까지 사용했지만 ${result.remainingDuplicates || before.duplicateGroupCount}개 중복 그룹이 남았습니다.`,
         "error",
       );
       return;
     }
     const saveButton = findNativeSaveButton();
     if (!saveButton) {
+      setActionBusy(false, "분산·저장");
       setStatus("분산은 완료했지만 Shopling 저장 버튼을 찾지 못했습니다.", "error");
       return;
     }
     setActionBusy(true, "저장 중...");
-    const fallbackText = result.fallbackUsed ? ` · 검증키워드 보강 ${result.fallbackUsed}개` : "";
-    setStatus(`상품명 ${result.changed}개 분산${fallbackText} 후 Shopling에 저장합니다.`, "success");
+    const seoText = result.seoFallbackUsed
+      ? ` · SEO원장 보강 ${result.seoFallbackUsed}개`
+      : "";
+    setStatus(`상품명 ${result.changed}개 분산${seoText} 후 Shopling에 저장합니다.`, "success");
     setTimeout(() => saveButton.click(), 250);
   }
 
@@ -431,7 +495,7 @@
 
     const status = document.createElement("div");
     status.id = STATUS_ID;
-    status.textContent = "같은 쇼핑몰 로그인 ID에 같은 제목이 있으면 검증된 키워드만 이용해 분산 후 저장합니다.";
+    status.textContent = "같은 쇼핑몰 로그인 ID 중복은 Shopling 제목을 먼저 쓰고, 부족할 때 Commerce OS SEO 원장의 검증키워드만 보강합니다.";
     status.style.cssText = "margin-bottom:8px;color:#475569";
 
     const button = document.createElement("button");
@@ -488,7 +552,7 @@
       return;
     }
 
-    const result = applyDiversification(retryAttempt);
+    const result = await applyDiversification(retryAttempt);
     if (!result.changed || result.remainingDuplicates > 0) {
       await sendRuntimeMessage({
         type: BATCH_PAGE_MESSAGE,
@@ -496,12 +560,15 @@
         runId,
         goodsKey,
         retryAttempt,
-        reasonCode: "keyword_pool_insufficient",
+        reasonCode: "seo_keyword_pool_insufficient",
         duplicateGroupCount: result.remainingDuplicates || before.duplicateGroupCount,
         duplicateMarkets: result.remainingMarkets.length ? result.remainingMarkets : before.duplicateMarkets,
         verifiedPoolSize: result.verifiedPoolSize,
+        seoPoolSize: result.seoPoolSize,
+        seoCandidateCount: result.seoCandidateCount,
         fallbackUsed: result.fallbackUsed,
-        message: `검증된 같은 상품 키워드 pool까지 사용했지만 중복 ${result.remainingDuplicates || before.duplicateGroupCount}그룹이 남았습니다.`,
+        seoFallbackUsed: result.seoFallbackUsed,
+        message: `Shopling 제목 + SEO 원장 pool까지 사용했지만 중복 ${result.remainingDuplicates || before.duplicateGroupCount}그룹이 남았습니다.`,
       });
       return;
     }
@@ -528,7 +595,9 @@
       retryAttempt,
       changed: result.changed,
       fallbackUsed: result.fallbackUsed,
+      seoFallbackUsed: result.seoFallbackUsed,
       verifiedPoolSize: result.verifiedPoolSize,
+      seoPoolSize: result.seoPoolSize,
     });
     setTimeout(() => saveButton.click(), 250);
   }
