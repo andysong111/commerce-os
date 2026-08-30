@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.5.2",
-  "description": "OPS CENTER 등록 goods key 기준으로 상품명 분산을 조회조건과 무관하게 처리하고, 신규상품은 미등록 마켓 송신까지 영구 잠금으로 중복등록을 차단합니다.",
+  "version": "0.5.3",
+  "description": "상품명 분산도 영구 원장으로 신규 goods key만 처리하고, 신규상품 마켓 송신은 기존 영구 잠금으로 중복등록을 차단합니다.",
   "permissions": [
     "storage"
   ],
