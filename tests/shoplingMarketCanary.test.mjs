@@ -9,12 +9,13 @@ const contentPath = new URL("../public/shopling-market-canary/content-market-can
 const routePath = new URL("../src/app/api/shopling-account-title-bridge/pipeline/route.ts", import.meta.url);
 const downloadPath = new URL("../src/app/api/shopling-market-canary/download/route.ts", import.meta.url);
 
-test("market canary v0.1.2 is standalone and does not load the batch market engine", async () => {
+test("market canary v0.1.3 stays standalone and declares Windows-safe script names", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, "0.1.2");
+  assert.equal(manifest.version, "0.1.3");
   assert.equal(manifest.name, "Commerce OS Shopling Market Canary");
   assert.deepEqual(manifest.permissions, ["storage"]);
-  assert.deepEqual(manifest.content_scripts[0].js, ["content-market-canary.js"]);
+  assert.equal(manifest.background.service_worker, "background-root.mjs");
+  assert.deepEqual(manifest.content_scripts[0].js, ["content-market-canary.mjs"]);
 
   const root = await readFile(rootPath, "utf8");
   assert.doesNotThrow(() => new Function(root));
@@ -70,13 +71,16 @@ test("server canary still claims one wholesale1 row and releases only pre-submit
   assert.match(source, /canary_release_rejected/);
 });
 
-test("download ZIP contains only the standalone v0.1.2 canary files", async () => {
+test("download ZIP is Windows Explorer friendly and contains no legacy .js payload names", async () => {
   const source = await readFile(downloadPath, "utf8");
-  assert.match(source, /shopling-market-canary\/manifest\.json/);
-  assert.match(source, /content-market-canary\.js/);
-  assert.match(source, /background-market-canary\.js/);
-  assert.doesNotMatch(source, /content-canary-frame-router|content-shopling-pipeline|background-shopling-pipeline/);
-  assert.doesNotMatch(source, /title-batch|title-registry|seo-keywords/);
-  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.2\.zip/);
-  assert.match(source, /Shopling Market Canary v0\.1\.2/);
+  assert.match(source, /background-root\.mjs/);
+  assert.match(source, /background-market-canary\.mjs/);
+  assert.match(source, /content-market-canary\.mjs/);
+  assert.match(source, /replace\(\/background-market-canary\\\.js\/g, "background-market-canary\.mjs"\)/);
+  assert.match(source, /zipSync\(entries, \{ level: 0 \}\)/);
+  assert.doesNotMatch(source, /\["background-root\.js",/);
+  assert.doesNotMatch(source, /\["background-market-canary\.js",/);
+  assert.doesNotMatch(source, /\["content-market-canary\.js",/);
+  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.3\.zip/);
+  assert.match(source, /Shopling Market Canary v0\.1\.3/);
 });
