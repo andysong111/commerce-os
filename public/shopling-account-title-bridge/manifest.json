@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.5.1",
-  "description": "OPS CENTER 신규등록 원장만 상품명 분산부터 Shopling 미등록 마켓 송신까지 원버튼 처리하고 영구 송신잠금으로 중복등록을 차단합니다.",
+  "version": "0.5.2",
+  "description": "OPS CENTER 등록 goods key 기준으로 상품명 분산을 조회조건과 무관하게 처리하고, 신규상품은 미등록 마켓 송신까지 영구 잠금으로 중복등록을 차단합니다.",
   "permissions": [
     "storage"
   ],
@@ -29,7 +29,8 @@
         "https://a.shopling.co.kr/prod/*"
       ],
       "js": [
-        "content-shopling-product-list-batch.js"
+        "content-shopling-product-list-batch.js",
+        "content-shopling-product-list-registry-bridge.js"
       ],
       "all_frames": true,
       "match_about_blank": true,
