@@ -5,28 +5,35 @@ import test from "node:test";
 const manifestPath = new URL("../public/shopling-account-title-bridge/manifest.json", import.meta.url);
 const titleContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-account-titles.js", import.meta.url);
 const listContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-batch.js", import.meta.url);
+const registryListBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js", import.meta.url);
 const pipelineContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
 const frameBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js", import.meta.url);
 const titleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-batch.js", import.meta.url);
+const titleRegistryBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-registry.js", import.meta.url);
 const pipelineBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-pipeline.js", import.meta.url);
 const backgroundRootPath = new URL("../public/shopling-account-title-bridge/background-shopling-root.js", import.meta.url);
 const backgroundSeoPath = new URL("../public/shopling-account-title-bridge/background-shopling-seo-keywords.js", import.meta.url);
 const downloadRoutePath = new URL("../src/app/api/shopling-account-title-bridge/download/route.ts", import.meta.url);
 const keywordPoolRoutePath = new URL("../src/app/api/shopling-account-title-bridge/keyword-pool/route.ts", import.meta.url);
+const titleRegistryRoutePath = new URL("../src/app/api/shopling-account-title-bridge/title-registry/route.ts", import.meta.url);
 const pipelineRoutePath = new URL("../src/app/api/shopling-account-title-bridge/pipeline/route.ts", import.meta.url);
 const keywordPoolLibPath = new URL("../src/lib/shoplingTitleKeywordPool.ts", import.meta.url);
 const pipelineMigrationPath = new URL("../supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql", import.meta.url);
 
-test("Shopling bridge v0.5.1 keeps title bridge and adds framed product-list panel fallback", async () => {
+test("Shopling bridge v0.5.2 keeps one-button flow and adds OPS registry-backed title batch", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.5.1");
+  assert.equal(manifest.version, "0.5.2");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*",
   ]);
   assert.equal(manifest.background.service_worker, "background-shopling-root.js");
+  assert.deepEqual(manifest.content_scripts[1].js, [
+    "content-shopling-product-list-batch.js",
+    "content-shopling-product-list-registry-bridge.js",
+  ]);
   assert.deepEqual(manifest.content_scripts[2].matches, ["https://a.shopling.co.kr/*"]);
   assert.deepEqual(manifest.content_scripts[2].js, [
     "content-shopling-pipeline.js",
@@ -46,9 +53,10 @@ test("mall-title bridge still uses verified Shopling and SEO tokens only", async
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("background root switches off v0.4 market coordinator and loads v0.5 pipeline coordinator", async () => {
+test("background root loads title batch, registry reader, SEO pool and market pipeline", async () => {
   const root = await readFile(backgroundRootPath, "utf8");
   assert.match(root, /background-shopling-title-batch\.js/);
+  assert.match(root, /background-shopling-title-registry\.js/);
   assert.match(root, /background-shopling-seo-keywords\.js/);
   assert.match(root, /background-shopling-pipeline\.js/);
   assert.doesNotMatch(root, /background-shopling-market-send\.js/);
@@ -74,13 +82,47 @@ test("keyword-pool API keeps safety filtering", async () => {
   assert.match(helper, /prohibited === true/);
 });
 
-test("legacy list title bridge preserves full-result safety for manual diagnostics", async () => {
+test("legacy list title bridge still preserves old page-collection diagnostics", async () => {
   const source = await readFile(listContentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /미분산 상품 일괄 처리/);
   assert.match(source, /collected\.expected > collected\.goodsKeys\.length/);
   assert.match(source, /credentials: "include"/);
   assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("registry title bridge intercepts purple button and ignores Shopling page size/current results", async () => {
+  const source = await readFile(registryListBridgePath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /TITLE_REGISTRY_MESSAGE/);
+  assert.match(source, /Shopling 현재 검색결과를 사용하지 않고 OPS CENTER 등록 원장에서 goods key를 불러옵니다/);
+  assert.match(source, /event\.stopImmediatePropagation\(\)/);
+  assert.match(source, /CHUNK_SIZE = 500/);
+  assert.match(source, /goodsKeys\.slice\(run\.nextIndex, run\.nextIndex \+ CHUNK_SIZE\)/);
+  assert.match(source, /현재 조회조건\/화면출력 수와 무관/);
+  assert.match(source, /looksLikeProductListUi/);
+  assert.doesNotMatch(source, /credentials:\s*["']include["']/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("title registry background reads only Commerce OS registry endpoint without Shopling credentials", async () => {
+  const source = await readFile(titleRegistryBackgroundPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /title-registry/);
+  assert.match(source, /TITLE_REGISTRY_BRIDGE = "v0\.5\.2"/);
+  assert.match(source, /credentials: "omit"/);
+  assert.doesNotMatch(source, /a\.shopling\.co\.kr/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("title registry API returns sanitized successful Shopling goods keys only", async () => {
+  const source = await readFile(titleRegistryRoutePath, "utf8");
+  assert.match(source, /const BRIDGE_VERSION = "v0\.5\.2"/);
+  assert.match(source, /shopling_product_group_registry/);
+  assert.match(source, /\.eq\("shopling_status", "success"\)/);
+  assert.match(source, /select\("goods_key,registered_at"\)/);
+  assert.match(source, /\/\^\\d\{5,9\}\$\//);
+  assert.doesNotMatch(source, /ptn_goods_cd|title|keyword|price|image|password|cookie/i);
 });
 
 test("one-button content starts from empty prodList and uses exact ptn_goods_cd rather than DM prefix", async () => {
@@ -180,8 +222,10 @@ test("pipeline migration permanently baselines legacy rows and never auto-requeu
   assert.match(source, /grant execute .* service_role/i);
 });
 
-test("Shopling bridge v0.5.1 download ZIP contains framed panel fallback and active pipeline workers", async () => {
+test("Shopling bridge v0.5.2 download ZIP contains registry title bridge and active pipeline workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
+  assert.ok(source.includes('"content-shopling-product-list-registry-bridge.js"'));
+  assert.ok(source.includes('"background-shopling-title-registry.js"'));
   assert.ok(source.includes('"content-shopling-pipeline.js"'));
   assert.ok(source.includes('"content-shopling-pipeline-frame-bridge.js"'));
   assert.ok(source.includes('"background-shopling-pipeline.js"'));
@@ -189,6 +233,6 @@ test("Shopling bridge v0.5.1 download ZIP contains framed panel fallback and act
   assert.ok(source.includes('"background-shopling-seo-keywords.js"'));
   assert.ok(!source.includes('"content-shopling-market-send.js"'));
   assert.ok(!source.includes('"background-shopling-market-send.js"'));
-  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.1.zip"));
-  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.1"));
+  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.2.zip"));
+  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.2"));
 });
