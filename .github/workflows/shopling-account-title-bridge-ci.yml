@@ -28,9 +28,11 @@ jobs:
         run: >-
           node --check public/shopling-account-title-bridge/content-shopling-account-titles.js &&
           node --check public/shopling-account-title-bridge/content-shopling-product-list-batch.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-market-send.js &&
           node --check public/shopling-account-title-bridge/background-shopling-root.js &&
           node --check public/shopling-account-title-bridge/background-shopling-title-batch.js &&
-          node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js
+          node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js &&
+          node --check public/shopling-account-title-bridge/background-shopling-market-send.js
       - name: Test extension safety contract
         run: node --test tests/shoplingAccountTitleBridge.test.mjs
       - name: Build
