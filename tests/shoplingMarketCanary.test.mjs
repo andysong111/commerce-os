@@ -9,9 +9,9 @@ const contentPath = new URL("../public/shopling-market-canary/content-market-can
 const routePath = new URL("../src/app/api/shopling-account-title-bridge/pipeline/route.ts", import.meta.url);
 const downloadPath = new URL("../src/app/api/shopling-market-canary/download/route.ts", import.meta.url);
 
-test("market canary v0.1.4 stays standalone and declares Windows-safe script names", async () => {
+test("market canary v0.1.5 stays standalone and declares Windows-safe script names", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, "0.1.4");
+  assert.equal(manifest.version, "0.1.5");
   assert.equal(manifest.name, "Commerce OS Shopling Market Canary");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.equal(manifest.background.service_worker, "background-root.mjs");
@@ -66,7 +66,7 @@ test("server canary still claims one wholesale1 row and releases only pre-submit
   assert.match(source, /canary_release_rejected/);
 });
 
-test("download ZIP is Windows Explorer friendly and rewrites only popup exclusions for the A18 frame", async () => {
+test("download ZIP keeps A18 frame support and broadens the category fallback wording safely", async () => {
   const source = await readFile(downloadPath, "utf8");
   assert.match(source, /background-root\.mjs/);
   assert.match(source, /background-market-canary\.mjs/);
@@ -75,7 +75,10 @@ test("download ZIP is Windows Explorer friendly and rewrites only popup exclusio
   assert.match(source, /LEGACY_FRAME_GUARD/);
   assert.match(source, /A18_FRAME_GUARD/);
   assert.match(source, /isIdChoicePage\(\) \|\| isPreProdChoicePage\(\)/);
-  assert.match(source, /shopling_canary_a18_frame_guard_rewrite_failed/);
-  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.4\.zip/);
-  assert.match(source, /Shopling Market Canary v0\.1\.4/);
+  assert.match(source, /LEGACY_MAPPING_FALLBACK/);
+  assert.match(source, /ROBUST_MAPPING_FALLBACK/);
+  assert.match(source, /매핑된\\\\s\*카테고리가\.\*없\.\*무시하고/);
+  assert.match(source, /shopling_canary_mapping_fallback_rewrite_failed/);
+  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.5\.zip/);
+  assert.match(source, /Shopling Market Canary v0\.1\.5/);
 });
