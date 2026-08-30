@@ -227,6 +227,16 @@
     }
   });
 
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === "local" && (changes[TITLE_LAST_RUN_KEY] || changes[MARKET_LAST_RUN_KEY])) {
+      setTimeout(() => void ensureTitleToMarketHandoff("durable-storage-change"), 50);
+      return;
+    }
+    if (areaName === "session" && changes[PIPE_UI_RUN_KEY]) {
+      setTimeout(() => void ensureTitleToMarketHandoff("ui-run-change"), 50);
+    }
+  });
+
   window.addEventListener("focus", () => void ensureTitleToMarketHandoff("focus"));
   window.addEventListener("pageshow", () => void ensureTitleToMarketHandoff("pageshow"));
   document.addEventListener("visibilitychange", () => {
