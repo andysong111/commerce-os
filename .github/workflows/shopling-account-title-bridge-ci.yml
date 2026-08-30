@@ -6,6 +6,7 @@ on:
       - "public/shopling-account-title-bridge/**"
       - "src/app/api/shopling-account-title-bridge/**"
       - "src/lib/shoplingTitleKeywordPool.ts"
+      - "supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql"
       - "tests/shoplingAccountTitleBridge.test.mjs"
       - ".github/workflows/shopling-account-title-bridge-ci.yml"
   workflow_dispatch:
@@ -28,11 +29,11 @@ jobs:
         run: >-
           node --check public/shopling-account-title-bridge/content-shopling-account-titles.js &&
           node --check public/shopling-account-title-bridge/content-shopling-product-list-batch.js &&
-          node --check public/shopling-account-title-bridge/content-shopling-market-send.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-pipeline.js &&
           node --check public/shopling-account-title-bridge/background-shopling-root.js &&
           node --check public/shopling-account-title-bridge/background-shopling-title-batch.js &&
           node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js &&
-          node --check public/shopling-account-title-bridge/background-shopling-market-send.js
+          node --check public/shopling-account-title-bridge/background-shopling-pipeline.js
       - name: Test extension safety contract
         run: node --test tests/shoplingAccountTitleBridge.test.mjs
       - name: Build
