@@ -30,6 +30,18 @@ function validRunId(value: string) {
   return /^[A-Za-z0-9._:-]{12,160}$/.test(value);
 }
 
+function mergeClaimRows(...sources: unknown[][]) {
+  const byGoodsKey = new Map<string, Record<string, unknown>>();
+  for (const source of sources) {
+    for (const raw of source) {
+      const row = record(raw);
+      const goodsKey = text(row.goods_key);
+      if (/^\d{5,9}$/.test(goodsKey)) byGoodsKey.set(goodsKey, row);
+    }
+  }
+  return [...byGoodsKey.values()];
+}
+
 export async function POST(request: Request) {
   const payload = record(await request.json().catch(() => null));
   if (text(payload.bridge) !== BRIDGE_VERSION) {
@@ -52,13 +64,38 @@ export async function POST(request: Request) {
     if (result.error) {
       return json({ ok: false, error: "title_claim_failed", message: result.error.message }, 503);
     }
-    const tasks = (Array.isArray(result.data) ? result.data : [])
-      .map(record)
+
+    const rpcRows = Array.isArray(result.data) ? result.data : [];
+    const recovery = await supabase
+      .from("shopling_title_diversification_ledger")
+      .select("goods_key,registry_registered_at")
+      .eq("claim_run_id", runId)
+      .eq("status", "claimed")
+      .order("registry_registered_at", { ascending: true })
+      .limit(limit);
+    if (recovery.error && rpcRows.length === 0) {
+      return json({ ok: false, error: "title_claim_recovery_failed", message: recovery.error.message }, 503);
+    }
+
+    const recoveryRows = Array.isArray(recovery.data) ? recovery.data : [];
+    const rawRows = mergeClaimRows(rpcRows, recoveryRows);
+    const tasks = rawRows
       .map((row) => ({
         goodsKey: text(row.goods_key),
         registeredAt: text(row.registry_registered_at),
       }))
       .filter((row) => /^\d{5,9}$/.test(row.goodsKey));
+
+    if (rawRows.length > 0 && tasks.length !== rawRows.length) {
+      return json({
+        ok: false,
+        error: "title_claim_payload_invalid",
+        message: "Claim된 Shopling 상품명 작업의 goods key를 검증하지 못해 자동 처리를 중단했습니다.",
+        claimedRowCount: rawRows.length,
+        validTaskCount: tasks.length,
+      }, 503);
+    }
+
     return json({
       ok: true,
       bridge: BRIDGE_VERSION,
@@ -66,6 +103,8 @@ export async function POST(request: Request) {
       tasks,
       goodsKeys: tasks.map((task) => task.goodsKey),
       count: tasks.length,
+      rpcClaimRowCount: rpcRows.length,
+      recoveredClaimRowCount: recoveryRows.length,
       source: "shopling_title_diversification_ledger",
     });
   }
