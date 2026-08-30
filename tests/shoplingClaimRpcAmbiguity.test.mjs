@@ -9,19 +9,23 @@ const migrationPath = new URL(
 
 test("Shopling claim RPCs disambiguate owner_id/goods_key conflict targets", async () => {
   const source = await readFile(migrationPath, "utf8");
+  const executable = source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n");
 
-  assert.match(source, /claim_shopling_market_pipeline_tasks/);
-  assert.match(source, /claim_shopling_title_diversification_tasks/);
+  assert.match(executable, /claim_shopling_market_pipeline_tasks/);
+  assert.match(executable, /claim_shopling_title_diversification_tasks/);
   assert.match(
-    source,
+    executable,
     /on conflict on constraint shopling_market_pipeline_ledger_pkey do nothing/i,
   );
   assert.match(
-    source,
+    executable,
     /on conflict on constraint shopling_title_diversification_ledger_pkey do nothing/i,
   );
-  assert.doesNotMatch(source, /on conflict\s*\(\s*owner_id\s*,\s*goods_key\s*\)/i);
-  assert.match(source, /revoke all on function public\.claim_shopling_market_pipeline_tasks/i);
-  assert.match(source, /revoke all on function public\.claim_shopling_title_diversification_tasks/i);
-  assert.match(source, /grant execute .* service_role/i);
+  assert.doesNotMatch(executable, /on conflict\s*\(\s*owner_id\s*,\s*goods_key\s*\)/i);
+  assert.match(executable, /revoke all on function public\.claim_shopling_market_pipeline_tasks/i);
+  assert.match(executable, /revoke all on function public\.claim_shopling_title_diversification_tasks/i);
+  assert.match(executable, /grant execute .* service_role/i);
 });
