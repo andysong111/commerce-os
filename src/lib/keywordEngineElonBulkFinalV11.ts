@@ -31,6 +31,52 @@ function uniqueSupplements(values: unknown[], limit = 120) {
   return out;
 }
 
+function trustedIdentityKeys(input: KeywordElonBulkComposeInput) {
+  return new Set(
+    uniqueSupplements(
+      [
+        input.productName,
+        input.identity.coreProduct,
+        input.identity.identityAnchor,
+        ...(input.identity.primarySeeds ?? []),
+        input.identity.koreanProductIdentity,
+      ],
+      60,
+    ),
+  );
+}
+
+function coreProductNoun(input: KeywordElonBulkComposeInput) {
+  const words = String(input.identity.coreProduct ?? "")
+    .normalize("NFKC")
+    .trim()
+    .split(/\s+/)
+    .map(compactKeywordElonKey)
+    .filter(Boolean);
+  return words.at(-1) ?? compactKeywordElonKey(input.identity.coreProduct);
+}
+
+export function keywordElonRecoveryKeepsProductIdentity(
+  input: KeywordElonBulkComposeInput,
+  value: unknown,
+) {
+  const keyword = compactKeywordElonKey(value);
+  if (keyword.length < 2) return false;
+  if (trustedIdentityKeys(input).has(keyword)) return true;
+  const noun = coreProductNoun(input);
+  return Boolean(noun && keyword.includes(noun));
+}
+
+function groundedSupplements(
+  input: KeywordElonBulkComposeInput,
+  values: unknown[],
+  limit = 120,
+) {
+  return uniqueSupplements(values, limit).filter((keyword) =>
+    keywordElonRecoveryKeepsProductIdentity(input, keyword),
+  );
+}
+
 function verifiedDirectPool(input: KeywordElonBulkComposeInput) {
   const allowed = new Set(input.allowedKeys.map(compactKeywordElonKey).filter(Boolean));
   return uniqueSupplements(
@@ -47,7 +93,11 @@ function finalizeKeywordPools(
   input: KeywordElonBulkComposeInput,
 ) {
   const directPool = verifiedDirectPool(input);
-  const recoveryPool = uniqueSupplements(input.supplementalSearchKeywords ?? [], 120);
+  const recoveryPool = groundedSupplements(
+    input,
+    input.supplementalSearchKeywords ?? [],
+    120,
+  );
   const rawMeta = result.seoFinal.groupProductNames[SEO_TITLE_EXPANSION_META_GROUP_KEY];
   let parsedMeta: Record<string, unknown> = {};
   try {
@@ -90,6 +140,7 @@ function finalizeKeywordPools(
       `SEO_KEYWORD_V12_VERIFIED_RECOVERY_POOL:${recoveryPool.length}`,
       `SEO_KEYWORD_V12_VERIFIED_POOL:${verifiedKeywordPool.length}`,
       "SEO_KEYWORD_V12_SHOPLING_OUTPUT_LIMIT:10",
+      `SEO_KEYWORD_V14_CORE_NOUN_GUARD:${coreProductNoun(input) || "none"}`,
     ],
   } as KeywordElonBulkFinalResult;
 }
@@ -114,17 +165,18 @@ export async function composeKeywordElonBulkFinal(
   } catch (error) {
     if (!recoverableSparseComposeError(error)) throw error;
 
-    // V12 never lowers the normal search/relevance threshold just to fill a sparse
-    // portfolio. Recovery material is generated from verified product facts, screened
-    // for natural marketplace-search form, then passed through the SAME guarded STEP4
-    // path (built-in risk terms, custom blocks and V10 semantic consistency).
+    // V14 never lowers the normal search/relevance threshold just to fill a sparse
+    // portfolio. Recovery material must pass the existing guarded STEP4/V10 path and,
+    // as a final semantic boundary, either be an exact trusted identity phrase or keep
+    // the core product noun. This prevents `실리콘골프공` from representing a
+    // `골프공 커버` merely to fill an external search slot.
     const safeSupplements = await generateSafeBulkKeywordSupplements({
       identity: input.identity,
       source: input.source,
       productName: input.productName,
       customBlockedTerms: input.customBlockedTerms ?? [],
     });
-    const supplementalSearchKeywords = uniqueSupplements([
+    const supplementalSearchKeywords = groundedSupplements(input, [
       ...(input.supplementalSearchKeywords ?? []),
       ...safeSupplements,
     ]);
