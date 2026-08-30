@@ -37,9 +37,10 @@ jobs:
           node --check public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js &&
           node --check public/shopling-account-title-bridge/content-shopling-pipeline.js &&
           node --check public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js &&
-          node --check public/shopling-account-title-bridge/content-shopling-onebutton-stability-v054.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-onebutton-stability-v055.js &&
           node --check public/shopling-account-title-bridge/background-shopling-root.js &&
           node --check public/shopling-account-title-bridge/background-shopling-title-batch.js &&
+          node --check public/shopling-account-title-bridge/background-shopling-title-supervisor-v055.js &&
           node --check public/shopling-account-title-bridge/background-shopling-title-registry.js &&
           node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js &&
           node --check public/shopling-account-title-bridge/background-shopling-pipeline.js
