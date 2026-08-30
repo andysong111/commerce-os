@@ -2,16 +2,17 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.3.0",
-  "description": "Shopling 상품조회 결과 전체를 원버튼으로 분산하고 검증 키워드 fallback·자동 재시도·실패 상세기록까지 처리합니다.",
+  "version": "0.3.1",
+  "description": "Shopling 상품조회 결과 전체를 원버튼으로 분산하고 Commerce OS SEO 원장 fallback·자동 재시도·실패 상세기록까지 처리합니다.",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
-    "https://a.shopling.co.kr/*"
+    "https://a.shopling.co.kr/*",
+    "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-shopling-title-batch.js"
+    "service_worker": "background-shopling-root.js"
   },
   "content_scripts": [
     {
