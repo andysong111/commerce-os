@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.2.0",
-  "description": "Shopling 로그인 상태에서 상품목록의 미분산 goods key를 찾아 계정별 상품명을 자동 분산·저장·검증합니다.",
+  "version": "0.2.1",
+  "description": "Shopling 상품조회 메인 화면에서 현재 조회된 상품 전체의 미분산 goods key를 원버튼으로 자동 분산·저장·검증합니다.",
   "permissions": [
     "storage"
   ],
@@ -16,11 +16,22 @@
   "content_scripts": [
     {
       "matches": [
-        "https://a.shopling.co.kr/prod/*"
+        "https://a.shopling.co.kr/prod/prodShopInfo.phtml*"
       ],
       "js": [
         "content-shopling-account-titles.js"
       ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://a.shopling.co.kr/prod/*"
+      ],
+      "js": [
+        "content-shopling-product-list-batch.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
       "run_at": "document_idle"
     }
   ]
