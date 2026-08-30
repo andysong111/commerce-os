@@ -43,6 +43,17 @@ function sameMallTitlesAreUnique(rows) {
   return true;
 }
 
+function portfolioCovers(rows, keywords) {
+  const used = new Set(
+    rows.flatMap((row) => row.keywordMaterials ?? []).map((value) =>
+      String(value).replace(/\s+/g, "").toLowerCase(),
+    ),
+  );
+  return keywords.every((keyword) =>
+    used.has(String(keyword).replace(/\s+/g, "").toLowerCase()),
+  );
+}
+
 test("V11은 검증된 직접키워드가 10개를 넘으면 제목 reservoir에서 임의로 10/12개에 자르지 않는다", () => {
   const candidates = Array.from({ length: 15 }, (_, index) =>
     candidate(`검증키워드${index + 1}`, index),
@@ -83,10 +94,11 @@ test("V11 희소 보충어는 기준 하향이 아니라 기존 STEP4+V10 안전
   assert.match(recovery, /bulk_keyword_recovery/);
 });
 
-test("V11은 AAA442형 희소 키워드에서도 29개를 만들고 같은 쇼핑몰 계정끼리 제목을 중복시키지 않는다", () => {
+test("V11은 AAA442형 희소 키워드에서도 29개를 만들고 커버리지는 전체 포트폴리오에서 보장한다", () => {
+  const finalKeywords = ["받침대", "받침대4개"];
   const result = composeFreshKeywordElonMallTitles({
     markets: PRODUCT_GROUP_MARKET_REGISTRY,
-    finalKeywords: ["받침대", "받침대4개"],
+    finalKeywords,
     titleExpansionPool: [],
     modelName: "세탁기용 원형 받침대 4개 세트",
     context: {
@@ -100,6 +112,34 @@ test("V11은 AAA442형 희소 키워드에서도 29개를 만들고 같은 쇼�
 
   assert.equal(result.rows.length, 29);
   assert.equal(sameMallTitlesAreUnique(result.rows), true);
+  assert.equal(portfolioCovers(result.rows, finalKeywords), true);
+  assert.equal(result.keywordCoverageCount, finalKeywords.length);
+  assert.equal(result.keywordCoverageTotal, finalKeywords.length);
+});
+
+test("V11은 AAA481형 복수 최종키워드를 각 1행 몰에 모두 강요하지 않고 29행 전체에서 빠짐없이 쓴다", () => {
+  const finalKeywords = [
+    "스트라이프버킷햇",
+    "벙거지버킷햇",
+    "버킷햇벙거지",
+  ];
+  const result = composeFreshKeywordElonMallTitles({
+    markets: PRODUCT_GROUP_MARKET_REGISTRY,
+    finalKeywords,
+    titleExpansionPool: [],
+    modelName: "스트라이프 버킷햇",
+    context: {
+      modelNumber: "AAA481",
+      productName: "스트라이프 버킷햇",
+      category: "잡화>패션잡화>모자>등산모자",
+    },
+    blockedTerms: [],
+    variationSeed: "aaa481-v11-portfolio-coverage",
+  });
+
+  assert.equal(result.rows.length, 29);
+  assert.equal(sameMallTitlesAreUnique(result.rows), true);
+  assert.equal(portfolioCovers(result.rows, finalKeywords), true);
 });
 
 test("V11은 AAA488형 단일 핵심어도 검증된 modelName 조각으로 같은 쇼핑몰 4계정을 안전하게 분리한다", () => {
@@ -119,6 +159,7 @@ test("V11은 AAA488형 단일 핵심어도 검증된 modelName 조각으로 같�
 
   assert.equal(result.rows.length, 29);
   assert.equal(sameMallTitlesAreUnique(result.rows), true);
+  assert.equal(portfolioCovers(result.rows, ["커버"]), true);
 });
 
 test("production alias는 V11 guarded bulk/fresh composer를 사용한다", async () => {
