@@ -26,6 +26,7 @@ jobs:
       - name: Check extension JavaScript syntax
         run: >-
           node --check public/shopling-account-title-bridge/content-shopling-account-titles.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-product-list-batch.js &&
           node --check public/shopling-account-title-bridge/background-shopling-title-batch.js
       - name: Test extension safety contract
         run: node --test tests/shoplingAccountTitleBridge.test.mjs
