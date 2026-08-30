@@ -151,7 +151,14 @@ test("pipeline migration permanently baselines legacy rows and never auto-requeu
   assert.match(source, /2026-08-30 11:17:06\+00/);
   assert.match(source, /status = 'claimed'/);
   assert.match(source, /stale_claim_requires_review/);
-  assert.doesNotMatch(source, /status\s*=\s*'queued'.*claimed_at/s);
+  assert.match(
+    source,
+    /set status = 'confirm_needed',[\s\S]{0,700}where status = 'claimed'[\s\S]{0,120}claimed_at < now\(\) - interval '2 hours'/i,
+  );
+  assert.doesNotMatch(
+    source,
+    /set status = 'queued',[\s\S]{0,700}where status = 'claimed'[\s\S]{0,120}claimed_at < now\(\) - interval '2 hours'/i,
+  );
   assert.match(source, /market_status = 'submit_armed'/);
   assert.match(source, /grant execute .* service_role/i);
 });
