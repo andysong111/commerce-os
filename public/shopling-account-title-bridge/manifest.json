@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.4.0",
-  "description": "Shopling 상품명 일괄 분산 후 DM1~SM2 미등록 상품을 저장검색 1:1 매핑으로 최대 2개 창에서 안전하게 마켓 전송합니다.",
+  "version": "0.5.0",
+  "description": "OPS CENTER 신규등록 원장만 상품명 분산부터 Shopling 미등록 마켓 송신까지 원버튼 처리하고 영구 송신잠금으로 중복등록을 차단합니다.",
   "permissions": [
     "storage"
   ],
@@ -40,7 +40,7 @@
         "https://a.shopling.co.kr/*"
       ],
       "js": [
-        "content-shopling-market-send.js"
+        "content-shopling-pipeline.js"
       ],
       "all_frames": true,
       "match_about_blank": true,

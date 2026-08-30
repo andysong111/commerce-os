@@ -3,5 +3,5 @@
 importScripts(
   "background-shopling-title-batch.js",
   "background-shopling-seo-keywords.js",
-  "background-shopling-market-send.js",
+  "background-shopling-pipeline.js",
 );
