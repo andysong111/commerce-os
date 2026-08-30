@@ -243,16 +243,22 @@
     if (!message || typeof message !== "object" || !document.getElementById(PANEL_ID)) return;
 
     if (message.type === TITLE_BATCH_PROGRESS_MESSAGE) {
-      const total = Number(message.total || 0);
-      const done = Number(message.done || 0);
-      const failed = Number(message.failed || 0);
-      if (message.status === "completed") {
-        setPanelBusy(true, "마켓 자동전송 준비 중...");
-        setPanelStatus(`상품명 분산 완료 ${done}/${total} · 실패 ${failed} · 신규상품 마켓 전송 준비`);
-      } else {
-        setPanelBusy(true, `상품명 분산 ${done}/${total}`);
-        setPanelStatus(`신규상품 상품명 분산 진행 ${done}/${total} · 실패 ${failed}`);
-      }
+      void (async () => {
+        const uiRun = await loadUiRun();
+        if (!uiRun || uiRun.status !== "running" || uiRun.stage !== "title") return;
+        const total = Number(message.total || 0);
+        const done = Number(message.done || 0);
+        const failed = Number(message.failed || 0);
+        if (message.status === "completed") {
+          uiRun.stage = "market";
+          await saveUiRun(uiRun);
+          setPanelBusy(true, "마켓 자동전송 준비 중...");
+          setPanelStatus(`상품명 분산 완료 ${done}/${total} · 실패 ${failed} · 신규상품 마켓 전송 준비`);
+        } else {
+          setPanelBusy(true, `상품명 분산 ${done}/${total}`);
+          setPanelStatus(`신규상품 상품명 분산 진행 ${done}/${total} · 실패 ${failed}`);
+        }
+      })();
       return;
     }
 
@@ -271,6 +277,7 @@
           failed || confirm ? "error" : "success",
         );
         renderDetails(message.tasks || []);
+        void saveUiRun(null);
       } else {
         const activeLabel = active.map((task) => `${task.ptnGoodsCd}→${task.profile}`).join(" / ");
         setPanelBusy(true, `마켓 전송 ${done}/${total}`);
