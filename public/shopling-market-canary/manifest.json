@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Market Canary",
   "short_name": "Shopling Canary",
-  "version": "0.1.4",
-  "description": "DM1→도매1 한 건만 대상으로 실제 Shopling 수동 등록 경로를 그대로 따라가며, A18 내부 프레임에서도 테스트 버튼을 안정적으로 표시합니다.",
+  "version": "0.1.5",
+  "description": "DM1→도매1 한 건만 대상으로 실제 Shopling 수동 등록 경로를 그대로 따라가며, Shopling의 카테고리 fallback 문구 차이도 안전하게 인식합니다.",
   "permissions": [
     "storage"
   ],
