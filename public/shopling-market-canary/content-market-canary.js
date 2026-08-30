@@ -2,6 +2,7 @@
   "use strict";
 
   const CANARY_CLAIM_MESSAGE = "commerce-os-shopling-market-canary-claim";
+  const PIPE_REPORT_MESSAGE = "commerce-os-shopling-pipeline-report";
   const PIPE_MARKET_START_MESSAGE = "commerce-os-shopling-pipeline-market-start";
   const PIPE_MARKET_PROGRESS_MESSAGE = "commerce-os-shopling-pipeline-market-progress";
   const PANEL_ID = "commerce-os-shopling-market-canary-panel";
@@ -44,6 +45,19 @@
     return `canary-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  async function releasePreSubmitClaim(runId, task, reasonCode, message) {
+    const goodsKey = text(task?.goodsKey);
+    if (!/^\d{5,9}$/.test(goodsKey)) return null;
+    return sendMessage({
+      type: PIPE_REPORT_MESSAGE,
+      runId,
+      goodsKey,
+      outcome: "failed",
+      reasonCode,
+      message,
+    });
+  }
+
   function hideFullPanel() {
     const panel = document.getElementById(FULL_PANEL_ID);
     if (panel) panel.style.setProperty("display", "none", "important");
@@ -82,8 +96,9 @@
       return;
     }
     if (text(task.searchCode) !== "DM1" || text(task.profile) !== "도매1") {
+      await releasePreSubmitClaim(runId, task, "canary_mapping_guard_failed", "Canary DM1→도매1 매핑 안전검증에 실패했습니다.");
       setBusy(false);
-      setStatus("안전검증 실패: DM1→도매1 이외 작업이 반환되어 송신하지 않았습니다.", "error");
+      setStatus("안전검증 실패: DM1→도매1 이외 작업이 반환되어 송신하지 않았고 대기열로 원복했습니다.", "error");
       return;
     }
 
@@ -94,8 +109,19 @@
       tasks: [task],
     });
     if (!started?.ok) {
+      const released = await releasePreSubmitClaim(
+        runId,
+        task,
+        "canary_worker_start_failed",
+        text(started?.message || started?.error) || "Canary 작업창 시작 실패",
+      );
       setBusy(false);
-      setStatus(`작업창 시작 실패: ${text(started?.message || started?.error)} · 실제 송신은 시작되지 않았습니다.`, "error");
+      setStatus(
+        released?.ok
+          ? `작업창 시작 실패: ${text(started?.message || started?.error)} · 실제 송신 전이므로 대기열로 원복했습니다.`
+          : `작업창 시작 실패: ${text(started?.message || started?.error)} · 원장 원복 여부 확인이 필요합니다.`,
+        "error",
+      );
       return;
     }
     setBusy(true, "실제 마켓 전송 테스트 0/1");
