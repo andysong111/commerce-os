@@ -8,6 +8,7 @@ on:
       - "src/lib/shoplingTitleKeywordPool.ts"
       - "supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql"
       - "supabase/migrations/202608300002_shopling_title_diversification_ledger_v053.sql"
+      - "supabase/migrations/202608300003_shopling_bridge_security_definer_acl_lockdown.sql"
       - "tests/shoplingAccountTitleBridge.test.mjs"
       - ".github/workflows/shopling-account-title-bridge-ci.yml"
   workflow_dispatch:
