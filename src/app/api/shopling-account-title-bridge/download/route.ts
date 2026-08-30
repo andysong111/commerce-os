@@ -27,7 +27,7 @@ export async function GET() {
   }
 
   entries["VERSION.txt"] = strToU8(
-    "Commerce OS Shopling Account Title Bridge v0.2.1\n",
+    "Commerce OS Shopling Account Title Bridge v0.3.0\n",
   );
 
   const archive = zipSync(entries, { level: 6 });
@@ -36,7 +36,7 @@ export async function GET() {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition":
-        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.2.1.zip"',
+        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.3.0.zip"',
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
