@@ -5,20 +5,34 @@ import test from "node:test";
 const manifestPath = new URL("../public/shopling-market-canary/manifest.json", import.meta.url);
 const rootPath = new URL("../public/shopling-market-canary/background-root.js", import.meta.url);
 const claimPath = new URL("../public/shopling-market-canary/background-market-canary.js", import.meta.url);
+const routerPath = new URL("../public/shopling-market-canary/content-canary-frame-router.js", import.meta.url);
 const contentPath = new URL("../public/shopling-market-canary/content-market-canary.js", import.meta.url);
 const pipelinePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
 const routePath = new URL("../src/app/api/shopling-account-title-bridge/pipeline/route.ts", import.meta.url);
 const downloadPath = new URL("../src/app/api/shopling-market-canary/download/route.ts", import.meta.url);
 
-test("market canary package is isolated and DM1-only", async () => {
+test("market canary package is isolated, DM1-only, and routes token before shared worker", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.1.1");
   assert.equal(manifest.name, "Commerce OS Shopling Market Canary");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.content_scripts[0].js, [
+    "content-canary-frame-router.js",
     "content-shopling-pipeline.js",
     "content-market-canary.js",
   ]);
+});
+
+test("canary frame router parks token on Shopling shell and passes it to actual worker frame", async () => {
+  const source = await readFile(routerPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /CANARY_PREFIX = "commerce-os-canary-pipeline:"/);
+  assert.match(source, /PIPE_PREFIX = "commerce-os-pipeline:"/);
+  assert.match(source, /window\.top === window/);
+  assert.match(source, /removeTokenFromVisibleUrl/);
+  assert.match(source, /window\.top\?\.name/);
+  assert.match(source, /goods_mallReg_idChoice/);
+  assert.match(source, /goods_mallReg_preProdChoice/);
 });
 
 test("canary background loads only market pipeline plus canary claim bridge", async () => {
@@ -65,13 +79,14 @@ test("server canary claims one wholesale1 row and only releases pre-submit failu
   assert.match(source, /canary_release_rejected/);
 });
 
-test("download ZIP contains only canary plus shared market worker files", async () => {
+test("download ZIP contains frame router plus canary and shared market worker files", async () => {
   const source = await readFile(downloadPath, "utf8");
   assert.match(source, /shopling-market-canary\/manifest\.json/);
+  assert.match(source, /content-canary-frame-router\.js/);
   assert.match(source, /content-shopling-pipeline\.js/);
   assert.match(source, /background-shopling-pipeline\.js/);
   assert.match(source, /content-market-canary\.js/);
   assert.match(source, /background-market-canary\.js/);
   assert.doesNotMatch(source, /title-batch|title-registry|seo-keywords/);
-  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.0\.zip/);
+  assert.match(source, /commerce-os-shopling-market-canary-v0\.1\.1\.zip/);
 });
