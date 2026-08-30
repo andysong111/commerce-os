@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shopling 쇼핑몰별 상품명 화면에서 같은 쇼핑몰의 여러 로그인 계정 제목을 안전하게 분산합니다.",
   "host_permissions": [
     "https://a.shopling.co.kr/*"

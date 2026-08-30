@@ -14,10 +14,15 @@ const saveGuardPath = new URL(
   "../public/shopling-account-title-bridge/content-shopling-save-guard.js",
   import.meta.url,
 );
+const downloadRoutePath = new URL(
+  "../src/app/api/shopling-account-title-bridge/download/route.ts",
+  import.meta.url,
+);
 
 test("Shopling account title bridge only receives the Shopling product-name page permission", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.version, "0.1.1");
   assert.deepEqual(manifest.host_permissions, ["https://a.shopling.co.kr/*"]);
   assert.deepEqual(manifest.content_scripts[0].matches, [
     "https://a.shopling.co.kr/prod/prodShopInfo.phtml*",
@@ -47,4 +52,15 @@ test("Shopling bridge save guard only clicks the native save control after diver
   assert.match(source, /=== "저장"/);
   assert.match(source, /native\.click\(\)/);
   assert.doesNotMatch(source, /\bfetch\s*\(/);
+});
+
+test("Shopling bridge download ZIP puts manifest.json at the archive root", async () => {
+  const source = await readFile(downloadRoutePath, "utf8");
+  assert.ok(source.includes("entries[fileName] = new Uint8Array"));
+  assert.ok(source.includes('entries["VERSION.txt"]'));
+  assert.ok(source.includes('commerce-os-shopling-account-title-bridge-v0.1.1.zip'));
+  assert.doesNotMatch(
+    source,
+    /entries\[`commerce-os-shopling-account-title-bridge\/\$\{fileName\}`\]/,
+  );
 });
