@@ -43,7 +43,7 @@ test("Shopling bridge keeps blank rows untouched and does not add network or cre
 test("Shopling bridge save guard only clicks the native save control after diversified inputs exist", async () => {
   const source = await readFile(saveGuardPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /input\[data-commerce-os-diversified=\\"1\\"\]/);
+  assert.ok(source.includes('input[data-commerce-os-diversified="1"]'));
   assert.match(source, /=== "저장"/);
   assert.match(source, /native\.click\(\)/);
   assert.doesNotMatch(source, /\bfetch\s*\(/);
