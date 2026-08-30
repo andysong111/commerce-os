@@ -6,6 +6,7 @@ const manifestPath = new URL("../public/shopling-account-title-bridge/manifest.j
 const titleContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-account-titles.js", import.meta.url);
 const listContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-batch.js", import.meta.url);
 const pipelineContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
+const frameBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js", import.meta.url);
 const titleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-batch.js", import.meta.url);
 const pipelineBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-pipeline.js", import.meta.url);
 const backgroundRootPath = new URL("../public/shopling-account-title-bridge/background-shopling-root.js", import.meta.url);
@@ -16,10 +17,10 @@ const pipelineRoutePath = new URL("../src/app/api/shopling-account-title-bridge/
 const keywordPoolLibPath = new URL("../src/lib/shoplingTitleKeywordPool.ts", import.meta.url);
 const pipelineMigrationPath = new URL("../supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql", import.meta.url);
 
-test("Shopling bridge v0.5.0 keeps title bridge and installs one-button pipeline on all Shopling pages", async () => {
+test("Shopling bridge v0.5.1 keeps title bridge and adds framed product-list panel fallback", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.5.0");
+  assert.equal(manifest.version, "0.5.1");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
@@ -27,7 +28,10 @@ test("Shopling bridge v0.5.0 keeps title bridge and installs one-button pipeline
   ]);
   assert.equal(manifest.background.service_worker, "background-shopling-root.js");
   assert.deepEqual(manifest.content_scripts[2].matches, ["https://a.shopling.co.kr/*"]);
-  assert.deepEqual(manifest.content_scripts[2].js, ["content-shopling-pipeline.js"]);
+  assert.deepEqual(manifest.content_scripts[2].js, [
+    "content-shopling-pipeline.js",
+    "content-shopling-pipeline-frame-bridge.js",
+  ]);
   assert.equal(manifest.content_scripts[2].all_frames, true);
 });
 
@@ -91,6 +95,19 @@ test("one-button content starts from empty prodList and uses exact ptn_goods_cd 
   assert.doesNotMatch(source, /setInputValue\(searchInput, context\.searchCode\)/);
   assert.match(source, /TITLE_BATCH_START_MESSAGE/);
   assert.match(source, /startMarketAfterTitles/);
+});
+
+test("frame bridge recognizes Shopling product-list DOM without relying on exact iframe path", async () => {
+  const source = await readFile(frameBridgePath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /function isProductListDocument\(\)/);
+  assert.match(source, /총\\s\*조회수/);
+  assert.match(source, /상품\\s\*조회\\s\*수정|상품조회수정/);
+  assert.match(source, /hasSelfCodeSearchOption/);
+  assert.match(source, /신규상품 전체 자동처리 · 동시 2창/);
+  assert.match(source, /PIPE_CLAIM_MESSAGE/);
+  assert.match(source, /TITLE_BATCH_START_MESSAGE/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
 test("one-button content enforces Shopling unregistered check and durable submit lock before click", async () => {
@@ -163,14 +180,15 @@ test("pipeline migration permanently baselines legacy rows and never auto-requeu
   assert.match(source, /grant execute .* service_role/i);
 });
 
-test("Shopling bridge v0.5.0 download ZIP contains only the active pipeline workers", async () => {
+test("Shopling bridge v0.5.1 download ZIP contains framed panel fallback and active pipeline workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.ok(source.includes('"content-shopling-pipeline.js"'));
+  assert.ok(source.includes('"content-shopling-pipeline-frame-bridge.js"'));
   assert.ok(source.includes('"background-shopling-pipeline.js"'));
   assert.ok(source.includes('"background-shopling-title-batch.js"'));
   assert.ok(source.includes('"background-shopling-seo-keywords.js"'));
   assert.ok(!source.includes('"content-shopling-market-send.js"'));
   assert.ok(!source.includes('"background-shopling-market-send.js"'));
-  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.0.zip"));
-  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.0"));
+  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.1.zip"));
+  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.1"));
 });
