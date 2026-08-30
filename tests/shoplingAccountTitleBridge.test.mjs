@@ -14,8 +14,16 @@ const listContentPath = new URL(
   "../public/shopling-account-title-bridge/content-shopling-product-list-batch.js",
   import.meta.url,
 );
+const marketContentPath = new URL(
+  "../public/shopling-account-title-bridge/content-shopling-market-send.js",
+  import.meta.url,
+);
 const backgroundPath = new URL(
   "../public/shopling-account-title-bridge/background-shopling-title-batch.js",
+  import.meta.url,
+);
+const marketBackgroundPath = new URL(
+  "../public/shopling-account-title-bridge/background-shopling-market-send.js",
   import.meta.url,
 );
 const backgroundRootPath = new URL(
@@ -39,10 +47,10 @@ const keywordPoolLibPath = new URL(
   import.meta.url,
 );
 
-test("Shopling bridge v0.3.1 keeps one-button list architecture and adds Commerce OS read-only host", async () => {
+test("Shopling bridge v0.4.0 keeps title bridge and adds all-Shopling market content worker", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.3.1");
+  assert.equal(manifest.version, "0.4.0");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
@@ -56,6 +64,11 @@ test("Shopling bridge v0.3.1 keeps one-button list architecture and adds Commerc
     "https://a.shopling.co.kr/prod/*",
   ]);
   assert.equal(manifest.content_scripts[1].all_frames, true);
+  assert.deepEqual(manifest.content_scripts[2].matches, [
+    "https://a.shopling.co.kr/*",
+  ]);
+  assert.equal(manifest.content_scripts[2].all_frames, true);
+  assert.deepEqual(manifest.content_scripts[2].js, ["content-shopling-market-send.js"]);
 });
 
 test("mall-title bridge uses Shopling title tokens first and SEO master only as final fallback", async () => {
@@ -80,6 +93,7 @@ test("SEO keyword background worker omits Shopling credentials and uses only Com
   assert.doesNotThrow(() => new Function(source));
   assert.match(root, /background-shopling-title-batch\.js/);
   assert.match(root, /background-shopling-seo-keywords\.js/);
+  assert.match(root, /background-shopling-market-send\.js/);
   assert.match(source, /commerce-os-ops-center\.vercel\.app\/api\/shopling-account-title-bridge\/keyword-pool/);
   assert.match(source, /credentials: "omit"/);
   assert.match(source, /SEO_KEYWORD_POOL_TIMEOUT_MS = 8000/);
@@ -104,7 +118,7 @@ test("keyword-pool API reads registry and latest SEO run but returns sanitized k
   assert.match(helper, /MAX_POOL_SIZE = 64/);
 });
 
-test("product-list bridge preserves full-result safety and failure diagnostics", async () => {
+test("product-list title bridge preserves full-result safety and failure diagnostics", async () => {
   const source = await readFile(listContentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /총\\s\*조회수/);
@@ -118,7 +132,26 @@ test("product-list bridge preserves full-result safety and failure diagnostics",
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("background coordinator keeps retry and persistent failure behavior", async () => {
+test("market autosend content keeps fixed channel-profile mapping and fail-closed registration rules", async () => {
+  const source = await readFile(marketContentPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /\["DM1", "도매1"\]/);
+  assert.match(source, /\["DM2", "도매2"\]/);
+  assert.match(source, /\["DM3", "도매3"\]/);
+  assert.match(source, /\["DM4", "도매4"\]/);
+  assert.match(source, /\["SM1", "소매1"\]/);
+  assert.match(source, /\["SM2", "소매2"\]/);
+  assert.match(source, /goods_mallReg_idChoice/);
+  assert.match(source, /goods_mallReg_preProdChoice/);
+  assert.match(source, /쇼핑몰별\\s\*상품판매가/);
+  assert.match(source, /쇼핑몰별\\s\*상품명/);
+  assert.match(source, /rows\.length > 0 && rows\.length <= 12/);
+  assert.match(source, /submit_result_ambiguous/);
+  assert.match(source, /중복 재전송/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("background title coordinator keeps retry and persistent failure behavior", async () => {
   const source = await readFile(backgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /const PAGE_TIMEOUT_MS = 60000/);
@@ -135,14 +168,32 @@ test("background coordinator keeps retry and persistent failure behavior", async
   assert.doesNotMatch(source, /https:\/\/(?!a\.shopling\.co\.kr)/);
 });
 
-test("Shopling bridge v0.3.1 download ZIP includes both background workers", async () => {
+test("market background coordinator uses exactly two lanes and never auto-retries after submit", async () => {
+  const source = await readFile(marketBackgroundPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /const MARKET_MAX_LANES = 2/);
+  assert.match(source, /const MARKET_MAX_AUTO_RETRIES = 1/);
+  assert.match(source, /searchCode: "DM1", profile: "도매1"/);
+  assert.match(source, /searchCode: "SM2", profile: "소매2"/);
+  assert.match(source, /task\.stage !== "submitted"/);
+  assert.match(source, /shopling_window_closed_after_submit/);
+  assert.match(source, /submit_result_timeout/);
+  assert.match(source, /chrome\.windows\.create/);
+  assert.match(source, /chrome\.storage\.session/);
+  assert.match(source, /chrome\.storage\.local/);
+  assert.doesNotMatch(source, /password|document\.cookie/i);
+});
+
+test("Shopling bridge v0.4.0 download ZIP includes market send workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.ok(source.includes('"background-shopling-root.js"'));
   assert.ok(source.includes('"background-shopling-title-batch.js"'));
   assert.ok(source.includes('"background-shopling-seo-keywords.js"'));
+  assert.ok(source.includes('"background-shopling-market-send.js"'));
   assert.ok(source.includes('"content-shopling-product-list-batch.js"'));
-  assert.ok(source.includes('commerce-os-shopling-account-title-bridge-v0.3.1.zip'));
-  assert.ok(source.includes('Commerce OS Shopling Account Title Bridge v0.3.1'));
+  assert.ok(source.includes('"content-shopling-market-send.js"'));
+  assert.ok(source.includes('commerce-os-shopling-account-title-bridge-v0.4.0.zip'));
+  assert.ok(source.includes('Commerce OS Shopling Account Title Bridge v0.4.0'));
   assert.doesNotMatch(
     source,
     /entries\[`commerce-os-shopling-account-title-bridge\/\$\{fileName\}`\]/,

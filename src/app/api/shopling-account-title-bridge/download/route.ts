@@ -9,9 +9,11 @@ const FILES = [
   "manifest.json",
   "content-shopling-account-titles.js",
   "content-shopling-product-list-batch.js",
+  "content-shopling-market-send.js",
   "background-shopling-root.js",
   "background-shopling-title-batch.js",
   "background-shopling-seo-keywords.js",
+  "background-shopling-market-send.js",
   "README.txt",
 ] as const;
 
@@ -29,7 +31,7 @@ export async function GET() {
   }
 
   entries["VERSION.txt"] = strToU8(
-    "Commerce OS Shopling Account Title Bridge v0.3.1\n",
+    "Commerce OS Shopling Account Title Bridge v0.4.0\n",
   );
 
   const archive = zipSync(entries, { level: 6 });
@@ -38,7 +40,7 @@ export async function GET() {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition":
-        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.3.1.zip"',
+        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.4.0.zip"',
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
