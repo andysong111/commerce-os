@@ -5,7 +5,7 @@ const BATCH_PAGE_MESSAGE = "commerce-os-shopling-title-batch-page";
 const BATCH_PROGRESS_MESSAGE = "commerce-os-shopling-title-batch-progress";
 const RUN_STORAGE_KEY = "commerceOsShoplingTitleBatchRun";
 const PAGE_TIMEOUT_MS = 30000;
-const SAVE_SETTLE_MS = 1800;
+const SAVE_VERIFY_FALLBACK_MS = 2200;
 const MAX_BATCH_GOODS_KEYS = 500;
 
 function uniqueGoodsKeys(values) {
@@ -37,7 +37,7 @@ async function safeRemoveTab(tabId) {
   try {
     await chrome.tabs.remove(tabId);
   } catch {
-    // The Shopling popup may close itself after saving.
+    // Shopling may close its own save popup/tab.
   }
 }
 
@@ -57,7 +57,7 @@ async function notifyOrigin(run, extra = {}) {
   try {
     await chrome.tabs.sendMessage(run.originTabId, payload);
   } catch {
-    // The origin Shopling list tab may have been closed; the batch can still finish.
+    // The origin list tab can be closed without corrupting the batch state.
   }
 }
 
@@ -94,11 +94,15 @@ function armWatchdog(runId, goodsKey, phase) {
     const run = await loadRun();
     if (!run || run.runId !== runId || run.status !== "running") return;
     if (run.currentGoodsKey !== goodsKey || run.phase !== phase) return;
-    await safeRemoveTab(run.currentTabId);
+    const tabId = run.currentTabId;
+    run.phase = "timeout-cleanup";
+    await saveRun(run);
+    await safeRemoveTab(tabId);
     run.failed += 1;
     run.done += 1;
     run.index += 1;
     run.phase = "timeout";
+    run.currentTabId = null;
     run.lastError = `${goodsKey} ${phase} timeout`;
     await saveRun(run);
     await notifyOrigin(run);
@@ -119,12 +123,13 @@ async function openBatchPage(run) {
   armWatchdog(run.runId, goodsKey, "batch");
 }
 
-async function openVerifyPage(run, previousTabId) {
+async function openVerifyPage(runInput, previousTabId) {
   const current = await loadRun();
-  if (!current || current.runId !== run.runId || current.status !== "running") return;
-  if (current.currentGoodsKey !== run.currentGoodsKey || current.phase !== "saving") return;
+  if (!current || current.runId !== runInput.runId || current.status !== "running") return;
+  if (current.currentGoodsKey !== runInput.currentGoodsKey || current.phase !== "saving") return;
 
   current.phase = "verify-opening";
+  current.currentTabId = null;
   await saveRun(current);
   await safeRemoveTab(previousTabId);
 
@@ -137,6 +142,12 @@ async function openVerifyPage(run, previousTabId) {
   await saveRun(current);
   await notifyOrigin(current);
   armWatchdog(current.runId, current.currentGoodsKey, "verify");
+}
+
+function scheduleVerifyFallback(run) {
+  setTimeout(() => {
+    void openVerifyPage(run, run.currentTabId);
+  }, SAVE_VERIFY_FALLBACK_MS);
 }
 
 async function processNext() {
@@ -195,13 +206,16 @@ async function startBatch(goodsKeys, originTabId) {
     lastError: "",
   };
   await saveRun(run);
-  void processNext();
+  await processNext();
   return { ok: true, runId: run.runId, total: normalized.length };
 }
 
 async function completeCurrent({ outcome, tabId, message = "" }) {
   const run = await loadRun();
   if (!run || run.status !== "running") return;
+  run.phase = "item-cleanup";
+  run.currentTabId = null;
+  await saveRun(run);
   await safeRemoveTab(tabId);
 
   if (outcome === "changed") run.changed += 1;
@@ -243,9 +257,7 @@ async function handlePageMessage(message, sender) {
     run.currentTabId = tabId ?? run.currentTabId;
     await saveRun(run);
     await notifyOrigin(run);
-    setTimeout(() => {
-      void openVerifyPage(run, tabId);
-    }, SAVE_SETTLE_MS);
+    scheduleVerifyFallback(run);
     return;
   }
 
@@ -285,4 +297,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   return false;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== "complete") return;
+  void (async () => {
+    const run = await loadRun();
+    if (!run || run.status !== "running") return;
+    if (run.phase !== "saving" || run.currentTabId !== tabId) return;
+    await openVerifyPage(run, tabId);
+  })();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void (async () => {
+    const run = await loadRun();
+    if (!run || run.status !== "running") return;
+    if (run.phase !== "saving" || run.currentTabId !== tabId) return;
+    await openVerifyPage(run, null);
+  })();
 });
