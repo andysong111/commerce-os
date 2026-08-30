@@ -48,6 +48,7 @@ jobs:
           node --check public/shopling-account-title-bridge/background-shopling-pipeline.js &&
           node --check public/shopling-market-canary/background-root.js &&
           node --check public/shopling-market-canary/background-market-canary.js &&
+          node --check public/shopling-market-canary/content-canary-frame-router.js &&
           node --check public/shopling-market-canary/content-market-canary.js
       - name: Test extension safety contract
         run: node --test tests/shoplingAccountTitleBridge.test.mjs tests/shoplingMarketCanary.test.mjs tests/shoplingBridgeRpcAclLockdown.test.mjs tests/shoplingClaimRpcAmbiguity.test.mjs
