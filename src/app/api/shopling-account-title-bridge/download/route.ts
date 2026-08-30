@@ -9,11 +9,11 @@ const FILES = [
   "manifest.json",
   "content-shopling-account-titles.js",
   "content-shopling-product-list-batch.js",
-  "content-shopling-market-send.js",
+  "content-shopling-pipeline.js",
   "background-shopling-root.js",
   "background-shopling-title-batch.js",
   "background-shopling-seo-keywords.js",
-  "background-shopling-market-send.js",
+  "background-shopling-pipeline.js",
   "README.txt",
 ] as const;
 
@@ -23,24 +23,16 @@ export async function GET() {
 
   for (const fileName of FILES) {
     const bytes = await readFile(path.join(root, fileName));
-    entries[fileName] = new Uint8Array(
-      bytes.buffer,
-      bytes.byteOffset,
-      bytes.byteLength,
-    );
+    entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8(
-    "Commerce OS Shopling Account Title Bridge v0.4.0\n",
-  );
-
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.0\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition":
-        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.4.0.zip"',
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.0.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
