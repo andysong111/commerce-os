@@ -26,6 +26,18 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function mergeClaimRows(...sources: unknown[][]) {
+  const byGoodsKey = new Map<string, Record<string, unknown>>();
+  for (const source of sources) {
+    for (const raw of source) {
+      const row = record(raw);
+      const goodsKey = text(row.goods_key);
+      if (/^\d{5,9}$/.test(goodsKey)) byGoodsKey.set(goodsKey, row);
+    }
+  }
+  return [...byGoodsKey.values()];
+}
+
 function profileSearchCode(productGroupKey: string) {
   const values: Record<string, { searchCode: string; profile: string }> = {
     wholesale1: { searchCode: "DM1", profile: "도매1" },
@@ -63,8 +75,22 @@ export async function POST(request: Request) {
     if (result.error) {
       return json({ ok: false, error: "claim_failed", message: result.error.message }, 503);
     }
-    const rows = (Array.isArray(result.data) ? result.data : [])
-      .map(record)
+
+    const rpcRows = Array.isArray(result.data) ? result.data : [];
+    const recovery = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .select("owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at")
+      .eq("claim_run_id", runId)
+      .eq("status", "claimed")
+      .order("registry_registered_at", { ascending: true })
+      .limit(groupLimit * 6);
+    if (recovery.error && rpcRows.length === 0) {
+      return json({ ok: false, error: "claim_recovery_failed", message: recovery.error.message }, 503);
+    }
+
+    const recoveryRows = Array.isArray(recovery.data) ? recovery.data : [];
+    const rawRows = mergeClaimRows(rpcRows, recoveryRows);
+    const rows = rawRows
       .map((row) => {
         const productGroupKey = text(row.product_group_key);
         const mapping = profileSearchCode(productGroupKey);
@@ -84,6 +110,17 @@ export async function POST(request: Request) {
         };
       })
       .filter(Boolean);
+
+    if (rawRows.length > 0 && rows.length !== rawRows.length) {
+      return json({
+        ok: false,
+        error: "claim_payload_invalid",
+        message: "Claim된 Shopling 작업 중 필수 식별자가 누락되어 자동 처리를 중단했습니다.",
+        claimedRowCount: rawRows.length,
+        validTaskCount: rows.length,
+      }, 503);
+    }
+
     const launchItems = new Set(rows.map((row) => (row as { launchItemId: string }).launchItemId));
     return json({
       ok: true,
@@ -92,6 +129,8 @@ export async function POST(request: Request) {
       tasks: rows,
       taskCount: rows.length,
       launchItemCount: launchItems.size,
+      rpcClaimRowCount: rpcRows.length,
+      recoveredClaimRowCount: recoveryRows.length,
     });
   }
 
