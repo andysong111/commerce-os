@@ -142,7 +142,7 @@ test("V9은 안전한 재료가 부족하면 같은 쇼핑몰 안에서 단어 �
   });
 
   assert.notEqual(improved.rows[1].title, sparseRows[1].title);
-  assert.equal(
+  assert.deepEqual(
     new Set(improved.rows[1].title.split(/\s+/)),
     new Set(sparseRows[1].title.split(/\s+/)),
   );
