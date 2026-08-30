@@ -13,6 +13,8 @@ const README_PATH = "public/shopling-market-canary/README.txt";
 
 const LEGACY_FRAME_GUARD = 'if (location.hostname !== "a.shopling.co.kr" || location.pathname.startsWith("/prodlinkage/")) return false;';
 const A18_FRAME_GUARD = 'if (location.hostname !== "a.shopling.co.kr") return false;\n    if (isIdChoicePage() || isPreProdChoicePage()) return false;';
+const LEGACY_MAPPING_FALLBACK = '{ name: "매핑없음 기본카테고리", pattern: /매핑된\\s*카테고리가\\s*없으시?.*무시하고.*쇼핑몰기본정보.*카테고리로\\s*전송/i },';
+const ROBUST_MAPPING_FALLBACK = '{ name: "매핑없음 기본카테고리", pattern: /매핑된\\s*카테고리가.*없.*무시하고.*쇼핑몰기본정보.*카테고리로\\s*전송/i },';
 
 export async function GET() {
   const root = process.cwd();
@@ -29,18 +31,22 @@ export async function GET() {
   entries["background-market-canary.mjs"] = new Uint8Array(background.buffer, background.byteOffset, background.byteLength);
 
   const content = (await readFile(path.join(root, CONTENT_PATH), "utf8"))
-    .replace(/const VERSION = "0\.1\.[23]";/, 'const VERSION = "0.1.4";')
-    .replace(LEGACY_FRAME_GUARD, A18_FRAME_GUARD);
+    .replace(/const VERSION = "0\.1\.[234]";/, 'const VERSION = "0.1.5";')
+    .replace(LEGACY_FRAME_GUARD, A18_FRAME_GUARD)
+    .replace(LEGACY_MAPPING_FALLBACK, ROBUST_MAPPING_FALLBACK);
   if (content.includes(LEGACY_FRAME_GUARD)) {
     throw new Error("shopling_canary_a18_frame_guard_rewrite_failed");
+  }
+  if (content.includes(LEGACY_MAPPING_FALLBACK)) {
+    throw new Error("shopling_canary_mapping_fallback_rewrite_failed");
   }
   entries["content-market-canary.mjs"] = strToU8(content);
 
   const readme = (await readFile(path.join(root, README_PATH), "utf8"))
-    .replace(/v0\.1\.[23]/g, "v0.1.4");
+    .replace(/v0\.1\.[234]/g, "v0.1.5");
   entries["README.txt"] = strToU8(readme);
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Market Canary v0.1.4\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Market Canary v0.1.5\n");
 
   // Store-only ZIP is intentionally used here for maximum compatibility with
   // Windows Explorer's built-in ZIP extractor. Script payloads use .mjs names
@@ -50,7 +56,7 @@ export async function GET() {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-market-canary-v0.1.4.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-market-canary-v0.1.5.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
