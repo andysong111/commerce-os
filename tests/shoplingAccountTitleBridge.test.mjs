@@ -114,13 +114,16 @@ test("title ledger background exposes claim report retry stats with no Shopling 
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("title registry API is ledger-backed and never returns the historical registry wholesale", async () => {
+test("title registry API is ledger-backed, recoverable by run id, and never returns historical registry wholesale", async () => {
   const source = await readFile(titleRegistryRoutePath, "utf8");
   assert.match(source, /const BRIDGE_VERSION = "v0\.5\.3"/);
   assert.match(source, /claim_shopling_title_diversification_tasks/);
   assert.match(source, /report_shopling_title_diversification_task/);
   assert.match(source, /retry_shopling_title_diversification_failures/);
-  assert.match(source, /shopling_title_diversification_ledger/);
+  assert.match(source, /\.from\("shopling_title_diversification_ledger"\)/);
+  assert.match(source, /\.eq\("claim_run_id", runId\)/);
+  assert.match(source, /\.eq\("status", "claimed"\)/);
+  assert.match(source, /recoveredClaimRowCount/);
   assert.doesNotMatch(source, /\.from\("shopling_product_group_registry"\)/);
   assert.doesNotMatch(source, /password|cookie/i);
 });
@@ -176,13 +179,18 @@ test("title ledger migration baselines all pre-upgrade goods keys and only futur
   assert.match(source, /grant execute .* service_role/i);
 });
 
-test("market pipeline durable duplicate protections remain unchanged", async () => {
+test("market pipeline duplicate protections remain unchanged and claim response recovers by run id", async () => {
   const background = await readFile(pipelineBackgroundPath, "utf8");
   const route = await readFile(pipelineRoutePath, "utf8");
   const migration = await readFile(pipelineMigrationPath, "utf8");
   assert.match(background, /PIPE_MAX_LANES = 2/);
   assert.match(background, /!\["submit-armed", "submitted"\]\.includes\(stage\)/);
   assert.match(route, /arm_shopling_market_pipeline_submit/);
+  assert.match(route, /\.from\("shopling_market_pipeline_ledger"\)/);
+  assert.match(route, /\.eq\("claim_run_id", runId\)/);
+  assert.match(route, /\.eq\("status", "claimed"\)/);
+  assert.match(route, /recoveredClaimRowCount/);
+  assert.match(route, /claim_payload_invalid/);
   assert.match(migration, /legacy_ignored/);
   assert.match(migration, /market_status = 'submit_armed'/);
   assert.match(migration, /stale_claim_requires_review/);
