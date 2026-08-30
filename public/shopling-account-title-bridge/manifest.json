@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.2.1",
-  "description": "Shopling 상품조회 메인 화면에서 현재 조회된 상품 전체의 미분산 goods key를 원버튼으로 자동 분산·저장·검증합니다.",
+  "version": "0.3.0",
+  "description": "Shopling 상품조회 결과 전체를 원버튼으로 분산하고 검증 키워드 fallback·자동 재시도·실패 상세기록까지 처리합니다.",
   "permissions": [
     "storage"
   ],
