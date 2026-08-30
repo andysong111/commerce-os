@@ -2,10 +2,11 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Account Title Bridge",
   "short_name": "Shopling Titles",
-  "version": "0.5.4",
-  "description": "신규 goods key만 처리하고 상품명 완료 후 마켓 2창 전환을 자동 복구하며, Shopling 미등록 재확인과 영구 잠금으로 중복등록을 차단합니다.",
+  "version": "0.5.5",
+  "description": "주황색 원버튼 하나로 신규상품 상품명 점검부터 Shopling 미등록 마켓 전송까지 처리하고, 백그라운드 감시와 영구 잠금으로 중단·중복등록을 차단합니다.",
   "permissions": [
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
@@ -43,7 +44,7 @@
       "js": [
         "content-shopling-pipeline.js",
         "content-shopling-pipeline-frame-bridge.js",
-        "content-shopling-onebutton-stability-v054.js"
+        "content-shopling-onebutton-stability-v055.js"
       ],
       "all_frames": true,
       "match_about_blank": true,
