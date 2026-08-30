@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const FILES = [
   "manifest.json",
   "content-shopling-account-titles.js",
-  "content-shopling-save-guard.js",
+  "background-shopling-title-batch.js",
   "README.txt",
 ] as const;
 
@@ -18,9 +18,6 @@ export async function GET() {
 
   for (const fileName of FILES) {
     const bytes = await readFile(path.join(root, fileName));
-    // Chrome's "Load unpacked" expects manifest.json at the selected folder root.
-    // Keep every extension file at the ZIP root so normal Windows extraction produces
-    // one directly loadable folder instead of an extra nested directory.
     entries[fileName] = new Uint8Array(
       bytes.buffer,
       bytes.byteOffset,
@@ -29,7 +26,7 @@ export async function GET() {
   }
 
   entries["VERSION.txt"] = strToU8(
-    "Commerce OS Shopling Account Title Bridge v0.1.1\n",
+    "Commerce OS Shopling Account Title Bridge v0.2.0\n",
   );
 
   const archive = zipSync(entries, { level: 6 });
@@ -38,7 +35,7 @@ export async function GET() {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition":
-        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.1.1.zip"',
+        'attachment; filename="commerce-os-shopling-account-title-bridge-v0.2.0.zip"',
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
