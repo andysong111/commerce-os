@@ -30,6 +30,11 @@ function validRunId(value: string) {
   return /^[A-Za-z0-9._:-]{12,160}$/.test(value);
 }
 
+function dueNow(value: unknown, nowMs: number) {
+  const parsed = Date.parse(text(value));
+  return Number.isFinite(parsed) && parsed <= nowMs;
+}
+
 export async function POST(request: Request) {
   const payload = object(await request.json().catch(() => null));
   if (text(payload.bridge) !== BRIDGE_VERSION) {
@@ -65,16 +70,18 @@ export async function POST(request: Request) {
       .select("id,sku_id,barcode,goods_key,desired_state,lifecycle_state,reason_codes,scheduled_for")
       .eq("status", "pending")
       .eq("shadow_mode", false)
-      .lte("scheduled_for", new Date().toISOString())
       .order("scheduled_for", { ascending: true })
-      .limit(limit * 2);
+      .limit(limit * 4);
     if (candidates.error) {
       return json({ ok: false, error: "claim_candidates_failed", message: candidates.error.message }, 503);
     }
 
     const tasks: unknown[] = [];
     const claimedAt = new Date().toISOString();
-    for (const candidate of Array.isArray(candidates.data) ? candidates.data : []) {
+    const claimable = (Array.isArray(candidates.data) ? candidates.data : []).filter((candidate) =>
+      dueNow(candidate.scheduled_for, Date.parse(claimedAt)),
+    );
+    for (const candidate of claimable) {
       if (tasks.length >= limit) break;
       const id = text(candidate.id);
       if (!id) continue;
