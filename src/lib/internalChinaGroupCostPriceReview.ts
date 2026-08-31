@@ -93,6 +93,8 @@ export type InternalChinaGroupCostPriceApproval = {
   proposalSourceEventId: string;
   approvedAt: string;
   approvedChangedRowCount: number;
+  excludedBlockedRowCount: number;
+  excludedUnresolvedGroupCount: number;
   ruleVersion: string;
   shoplingWritesEnabled: false;
 };
@@ -175,6 +177,17 @@ function parseProposal(row: OperationRow | undefined) {
 
 function listingKey(barcode: unknown, goodsKey: unknown, optionId: unknown) {
   return `${normalizeBarcode(barcode)}|${text(goodsKey)}|${text(optionId)}`;
+}
+
+function approvableChangedRows(proposal: InternalChinaGroupCostPriceProposal) {
+  return proposal.rows.filter(
+    (row) =>
+      row.changeRequired &&
+      !row.blockedReason &&
+      row.productGroupSource !== "UNRESOLVED" &&
+      Boolean(row.goodsKey) &&
+      row.saleStatusActive === true,
+  );
 }
 
 async function loadLiveListingStatuses(v1: InternalChinaCostPriceProposal) {
@@ -278,6 +291,7 @@ export async function buildInternalChinaGroupCostPriceProposal(
     (row) => row.blockedReason === "SHOPLING_LIVE_LISTING_NOT_FOUND",
   ).length;
   const changedRowCount = increaseCount + decreaseCount;
+  const managedListingCount = increaseCount + decreaseCount + holdCount;
   const stable = {
     draftId: v1.draftId,
     cycleMonth: v1.cycleMonth,
@@ -309,10 +323,10 @@ export async function buildInternalChinaGroupCostPriceProposal(
     cycleMonth: v1.cycleMonth,
     v1ProposalFingerprint: v1.fingerprint,
     state:
-      unresolvedGroupCount > 0
-        ? "BLOCKED"
-        : changedRowCount > 0
-          ? "AWAITING_APPROVAL"
+      changedRowCount > 0
+        ? "AWAITING_APPROVAL"
+        : managedListingCount > 0
+          ? "NO_CHANGE"
           : blockedCount > 0
             ? "BLOCKED"
             : "NO_CHANGE",
@@ -361,8 +375,10 @@ async function storeProposal(proposal: InternalChinaGroupCostPriceProposal) {
         },
         result_snapshot: proposal,
         error_message:
-          proposal.unresolvedGroupCount > 0
-            ? `PRODUCT_GROUP_NOT_RESOLVED:${proposal.unresolvedGroupCount}`
+          proposal.state === "BLOCKED"
+            ? proposal.unresolvedGroupCount > 0
+              ? `NO_MANAGED_PRICE_ROWS:PRODUCT_GROUP_NOT_RESOLVED:${proposal.unresolvedGroupCount}`
+              : `PRICE_REVIEW_BLOCKED:${proposal.blockedCount}`
             : null,
         started_at: proposal.generatedAt,
         finished_at: now,
@@ -465,8 +481,12 @@ export async function approveInternalChinaGroupCostPriceProposal(input: {
   ) {
     throw new Error("INTERNAL_CHINA_GROUP_COST_PRICE_PROPOSAL_STALE");
   }
-  if (proposal.unresolvedGroupCount > 0 || proposal.state !== "AWAITING_APPROVAL") {
+  if (proposal.state !== "AWAITING_APPROVAL" || proposal.changedRowCount <= 0) {
     throw new Error("INTERNAL_CHINA_GROUP_COST_PRICE_PROPOSAL_NOT_APPROVABLE");
+  }
+  const approvedRows = approvableChangedRows(proposal);
+  if (approvedRows.length !== proposal.changedRowCount) {
+    throw new Error("INTERNAL_CHINA_GROUP_COST_PRICE_APPROVAL_SCOPE_MISMATCH");
   }
 
   const now = new Date().toISOString();
@@ -474,7 +494,9 @@ export async function approveInternalChinaGroupCostPriceProposal(input: {
     proposalFingerprint: proposal.fingerprint,
     proposalSourceEventId: latest.sourceEventId,
     approvedAt: now,
-    approvedChangedRowCount: proposal.changedRowCount,
+    approvedChangedRowCount: approvedRows.length,
+    excludedBlockedRowCount: proposal.blockedCount,
+    excludedUnresolvedGroupCount: proposal.unresolvedGroupCount,
     ruleVersion: proposal.ruleVersion,
     shoplingWritesEnabled: false,
   };
