@@ -1,3 +1,4 @@
+import { runInternalChinaCostPriceProposalStep } from "@/lib/internalChinaCostPriceReview";
 import { runReceiptLivePriceProposalStep } from "@/lib/receiptLivePriceProposalWorker";
 
 export const runtime = "nodejs";
@@ -18,11 +19,26 @@ export async function GET(request: Request) {
     );
   }
   try {
-    const result = await runReceiptLivePriceProposalStep();
+    const costOnly = await runInternalChinaCostPriceProposalStep();
+    if (costOnly.processed) {
+      return Response.json(
+        {
+          ok: true,
+          flow: "internal_china_cost_price",
+          ...costOnly,
+          productGradeUsed: false,
+          shoplingPriceWritesEnabled: false,
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+
+    const legacy = await runReceiptLivePriceProposalStep();
     return Response.json(
       {
         ok: true,
-        ...result,
+        flow: "legacy_receipt_live_price",
+        ...legacy,
         shoplingPriceWritesEnabled: false,
       },
       { headers: { "cache-control": "no-store" } },
@@ -35,7 +51,7 @@ export async function GET(request: Request) {
         message:
           error instanceof Error
             ? error.message
-            : "입고확정 LIVE 가격제안 Worker 실행에 실패했습니다.",
+            : "입고확정 가격제안 Worker 실행에 실패했습니다.",
         writesEnabled: false,
         shoplingPriceWritesEnabled: false,
       },
