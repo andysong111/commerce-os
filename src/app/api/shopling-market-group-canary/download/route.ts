@@ -46,68 +46,33 @@ function rewriteBackground(source: string) {
 
 function rewriteContent(source: string) {
   let rewritten = source;
-  rewritten = replaceOnce(
-    rewritten,
-    'const VERSION = "0.3.4";',
-    'const VERSION = "0.3.6";',
-    "shopling_parallel_worker_v036_content_version_anchor_missing",
-  );
-  rewritten = replaceOnce(
-    rewritten,
-    'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV034";',
-    'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV036";',
-    "shopling_parallel_worker_v036_run_state_anchor_missing",
-  );
-  rewritten = replaceOnce(
-    rewritten,
-    'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV034";',
-    'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV036";',
-    "shopling_parallel_worker_v036_worker_state_anchor_missing",
-  );
+  rewritten = replaceOnce(rewritten, 'const VERSION = "0.3.4";', 'const VERSION = "0.3.6";', "shopling_parallel_worker_v036_content_version_anchor_missing");
+  rewritten = replaceOnce(rewritten, 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV034";', 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV036";', "shopling_parallel_worker_v036_run_state_anchor_missing");
+  rewritten = replaceOnce(rewritten, 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV034";', 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV036";', "shopling_parallel_worker_v036_worker_state_anchor_missing");
   rewritten = replaceOnce(
     rewritten,
     '  const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";',
     `  const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";\n  const CONTROL_START_MESSAGE = "${CONTROL_START_MESSAGE}";\n  const CONTROL_UI_MODE = "extension-action-only-no-shopling-dom";`,
     "shopling_parallel_worker_v036_control_message_anchor_missing",
   );
-  rewritten = replaceOnce(
-    rewritten,
-    "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;",
-    "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;\n  const A18_NAVIGATION_TIMEOUT_MS = 20000;",
-    "shopling_parallel_worker_v036_a18_timeout_anchor_missing",
-  );
-  rewritten = replaceOnce(
-    rewritten,
-    '    if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) return;',
-    '    if (!["worker_opening", "await_a18"].includes(state.stage)) return;',
-    "shopling_parallel_worker_v036_repeat_a18_gate_anchor_missing",
-  );
+  rewritten = replaceOnce(rewritten, "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;", "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;\n  const A18_NAVIGATION_TIMEOUT_MS = 20000;", "shopling_parallel_worker_v036_a18_timeout_anchor_missing");
+  rewritten = replaceOnce(rewritten, '    if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) return;', '    if (!["worker_opening", "await_a18"].includes(state.stage)) return;', "shopling_parallel_worker_v036_repeat_a18_gate_anchor_missing");
 
   const driveAnchor = `      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
-  const driveReplacement = `      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (state.stage === "a18_clicked") {\n        const age = Date.now() - Number(state.stepAt || 0);\n        if (age >= A18_NAVIGATION_TIMEOUT_MS) {\n          await failTask(\n            state,\n            "a18_navigation_timeout",\n            "A18 진입 클릭 후 상품등록 화면을 확인하지 못했습니다. 메뉴를 반복 클릭하지 않고 이 채널만 안전중단했습니다.",\n          );\n        }\n        return;\n      }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
-  rewritten = replaceOnce(
-    rewritten,
-    driveAnchor,
-    driveReplacement,
-    "shopling_parallel_worker_v036_drive_wait_anchor_missing",
-  );
+  const driveReplacement = `      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (state.stage === "a18_clicked") {\n        const age = Date.now() - Number(state.stepAt || 0);\n        if (age >= A18_NAVIGATION_TIMEOUT_MS) {\n          await failTask(state, "a18_navigation_timeout", "A18 진입 클릭 후 상품등록 화면을 확인하지 못했습니다. 메뉴를 반복 클릭하지 않고 이 채널만 안전중단했습니다.");\n        }\n        return;\n      }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
+  rewritten = replaceOnce(rewritten, driveAnchor, driveReplacement, "shopling_parallel_worker_v036_drive_wait_anchor_missing");
 
   rewritten = replaceBetween(
     rewritten,
     "  function mount() {",
     "\n  chrome.storage.onChanged.addListener",
-    `  function mount() {\n    // v0.3.6 deliberately renders no UI inside Shopling.\n    // Control lives in the Chrome extension popup so A18 DOM cannot be covered.\n    return CONTROL_UI_MODE;\n  }\n`,
+    `  function mount() {\n    return CONTROL_UI_MODE;\n  }\n`,
     "shopling_parallel_worker_v036_mount_block",
   );
 
   const startupAnchor = `  mount();\n  const observer = new MutationObserver(() => mount());\n  observer.observe(document.documentElement, { childList: true, subtree: true });\n  timer = setInterval(() => void drive(), 800);\n  panelTimer = setInterval(() => void refreshPanel(), 1200);\n  void drive();`;
-  const startupReplacement = `  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {\n    if (!message || message.type !== CONTROL_START_MESSAGE || !isProductListUi()) return false;\n    startParallelCanary()\n      .then(() => sendResponse({ ok: true, version: VERSION }))\n      .catch((error) => sendResponse({\n        ok: false,\n        error: "parallel_control_start_failed",\n        message: error instanceof Error ? error.message : String(error || "start failed"),\n      }));\n    return true;\n  });\n\n  timer = setInterval(() => void drive(), 800);\n  panelTimer = null;\n  void drive();`;
-  rewritten = replaceOnce(
-    rewritten,
-    startupAnchor,
-    startupReplacement,
-    "shopling_parallel_worker_v036_popup_startup_anchor_missing",
-  );
+  const startupReplacement = `  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {\n    if (!message || message.type !== CONTROL_START_MESSAGE || !isProductListUi()) return false;\n    startParallelCanary()\n      .then(() => sendResponse({ ok: true, version: VERSION }))\n      .catch((error) => sendResponse({ ok: false, error: "parallel_control_start_failed", message: error instanceof Error ? error.message : String(error || "start failed") }));\n    return true;\n  });\n\n  timer = setInterval(() => void drive(), 800);\n  panelTimer = null;\n  void drive();`;
+  rewritten = replaceOnce(rewritten, startupAnchor, startupReplacement, "shopling_parallel_worker_v036_popup_startup_anchor_missing");
 
   assertScript("content-group-canary-v036", rewritten);
   return rewritten;
@@ -120,13 +85,8 @@ const POPUP_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Shopling Parallel Worker</title>
 <style>
-  body{width:360px;margin:0;padding:14px;font:13px/1.45 Arial,sans-serif;color:#0f172a;background:#fff;box-sizing:border-box}
-  h1{font-size:14px;margin:0 0 6px;color:#0f766e}
-  p{margin:0 0 10px;color:#64748b}
-  #status{padding:9px;border:1px solid #dbeafe;border-radius:8px;background:#f8fafc;margin-bottom:10px;white-space:pre-line}
-  button{width:100%;padding:10px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:700;cursor:pointer}
-  button:disabled{opacity:.55;cursor:default}
-  .guard{font-size:11px;color:#64748b;margin-top:9px}
+body{width:360px;margin:0;padding:14px;font:13px/1.45 Arial,sans-serif;color:#0f172a;background:#fff;box-sizing:border-box}
+h1{font-size:14px;margin:0 0 6px;color:#0f766e}p{margin:0 0 10px;color:#64748b}#status{padding:9px;border:1px solid #dbeafe;border-radius:8px;background:#f8fafc;margin-bottom:10px}button{width:100%;padding:10px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:default}.guard{font-size:11px;color:#64748b;margin-top:9px}
 </style>
 </head>
 <body>
@@ -148,9 +108,7 @@ const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV036:";
 const statusNode = document.getElementById("status");
 const startButton = document.getElementById("start");
 
-function text(value) {
-  return String(value == null ? "" : value).replace(/\\s+/g, " ").trim();
-}
+function text(value) { return String(value == null ? "" : value).replace(/\\s+/g, " ").trim(); }
 
 async function activeShoplingTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -167,16 +125,13 @@ async function refresh() {
     startButton.disabled = false;
     return;
   }
-  const states = Object.keys(all)
-    .filter(function (key) { return key.indexOf(WORKER_STATE_PREFIX + run.runId + ":") === 0; })
-    .map(function (key) { return all[key]; })
-    .filter(Boolean);
+  const states = Object.keys(all).filter(function (key) { return key.indexOf(WORKER_STATE_PREFIX + run.runId + ":") === 0; }).map(function (key) { return all[key]; }).filter(Boolean);
   const running = states.filter(function (row) { return row.status === "running"; }).length;
   const sent = states.filter(function (row) { return row.status === "completed" && row.outcome === "sent"; }).length;
   const skipped = states.filter(function (row) { return row.status === "completed" && row.outcome === "already_registered"; }).length;
   const failed = states.filter(function (row) { return row.status === "failed"; }).length;
   const confirm = states.filter(function (row) { return row.status === "confirm_needed"; }).length;
-  statusNode.textContent = "v" + VERSION + " · " + text(run.status) + "\n실행 " + running + " · 성공 " + sent + " · 이미등록 " + skipped + " · 실패 " + failed + " · 확인필요 " + confirm;
+  statusNode.textContent = "v" + VERSION + " · " + text(run.status) + " · 실행 " + running + " · 성공 " + sent + " · 이미등록 " + skipped + " · 실패 " + failed + " · 확인필요 " + confirm;
   startButton.disabled = run.status === "opening" || run.status === "running" || run.status === "confirm_needed";
 }
 
@@ -208,29 +163,16 @@ refresh();
 export async function GET() {
   const root = path.join(process.cwd(), "public", "shopling-market-group-canary");
   const entries: Record<string, Uint8Array> = {};
-
   const manifestSource = await readFile(path.join(root, "manifest.json"), "utf8");
-  const manifest = JSON.parse(manifestSource) as {
-    version?: string;
-    description?: string;
-    permissions?: string[];
-    content_scripts?: Array<{ js?: string[] }>;
-    action?: Record<string, string>;
-  };
+  const manifest = JSON.parse(manifestSource) as { version?: string; description?: string; permissions?: string[]; content_scripts?: Array<{ js?: string[] }>; action?: Record<string, string> };
   if (manifest.version !== BASE_VERSION) throw new Error("shopling_parallel_worker_base_manifest_version_mismatch");
   if (manifest.permissions?.includes("contentSettings")) throw new Error("shopling_parallel_worker_obsolete_popup_permission_present");
   if (manifest.permissions?.includes("scripting")) throw new Error("shopling_parallel_worker_obsolete_launcher_script_permission_present");
 
   manifest.version = VERSION;
   manifest.description = "Shopling A18 DOM에 제어 패널을 전혀 삽입하지 않고 Chrome 확장 팝업에서만 병렬 등록을 시작하는 클릭충돌 제거 버전입니다.";
-  manifest.action = {
-    default_title: "Commerce OS Shopling Parallel Worker",
-    default_popup: "popup.html",
-  };
-  manifest.content_scripts = (manifest.content_scripts || []).map((entry) => ({
-    ...entry,
-    js: ["content-group-canary.mjs"],
-  }));
+  manifest.action = { default_title: "Commerce OS Shopling Parallel Worker", default_popup: "popup.html" };
+  manifest.content_scripts = (manifest.content_scripts || []).map((entry) => ({ ...entry, js: ["content-group-canary.mjs"] }));
   entries["manifest.json"] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
 
   const backgroundSource = await readFile(path.join(root, "background-root.mjs"), "utf8");
@@ -263,9 +205,7 @@ export async function GET() {
   assertScript("popup-v036", popup);
 
   const readme = await readFile(path.join(root, "README.txt"), "utf8");
-  entries["README.txt"] = strToU8(
-    `v${VERSION} CLICK-SAFE HOTFIX\n- Shopling A18 페이지 안에는 제어 패널/버튼/오버레이를 0개 삽입합니다.\n- 확장프로그램 아이콘을 눌러 열린 popup에서만 병렬 작업을 시작합니다.\n- A18 페이지는 조회/검색/체크박스/버튼 클릭을 Shopling 원본 그대로 유지합니다.\n- 복제 Worker의 A18 메뉴 hover/click은 최초 1회만 수행합니다.\n- 20초 안에 A18 화면 전환이 확인되지 않으면 반복 클릭 대신 해당 채널만 안전중단합니다.\n\n${readme}`,
-  );
+  entries["README.txt"] = strToU8(`v${VERSION} CLICK-SAFE HOTFIX\n- Shopling A18 페이지 안에는 제어 패널/버튼/오버레이를 0개 삽입합니다.\n- 확장프로그램 아이콘을 눌러 열린 popup에서만 병렬 작업을 시작합니다.\n- A18 페이지는 조회/검색/체크박스/버튼 클릭을 Shopling 원본 그대로 유지합니다.\n- 복제 Worker의 A18 메뉴 hover/click은 최초 1회만 수행합니다.\n- 20초 안에 A18 화면 전환이 확인되지 않으면 반복 클릭 대신 해당 채널만 안전중단합니다.\n\n${readme}`);
   entries["VERSION.txt"] = strToU8(`Commerce OS Shopling Market Parallel Fresh Worker Canary v${VERSION}\n`);
 
   const archive = zipSync(entries, { level: 0 });
