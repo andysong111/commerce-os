@@ -1,22 +1,23 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.3.0";
-  const STATE_KEY = "commerceOsShoplingMarketFreshWorkerCanaryV030";
+  const VERSION = "0.3.4";
+  const RUN_STATE_KEY = "commerceOsShoplingParallelRunV034";
+  const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV034";
   const CLAIM_MESSAGE = "commerce-os-shopling-group-canary-claim";
   const ARM_MESSAGE = "commerce-os-shopling-group-canary-arm";
   const REPORT_MESSAGE = "commerce-os-shopling-group-canary-report";
-  const OPEN_WORKER_MESSAGE = "commerce-os-shopling-fresh-worker-open";
-  const CLOSE_WORKERS_MESSAGE = "commerce-os-shopling-fresh-worker-close";
-  const CONTEXT_MESSAGE = "commerce-os-shopling-fresh-worker-context";
-  const ADMIN_READY_MESSAGE = "commerce-os-shopling-fresh-worker-admin-ready";
-  const PANEL_ID = "commerce-os-shopling-market-fresh-worker-panel";
+  const OPEN_WORKERS_MESSAGE = "commerce-os-shopling-parallel-workers-open";
+  const CLOSE_WORKER_MESSAGE = "commerce-os-shopling-parallel-worker-close";
+  const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";
+  const PANEL_ID = "commerce-os-shopling-market-parallel-worker-panel";
   const STATUS_ID = `${PANEL_ID}-status`;
   const BUTTON_ID = `${PANEL_ID}-button`;
   const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;
 
   let driving = false;
   let timer = null;
+  let panelTimer = null;
 
   function text(value) {
     return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -42,6 +43,10 @@
     return text(document.body?.innerText || document.body?.textContent || "");
   }
 
+  function rawBodyText() {
+    return String(document.body?.innerText || document.body?.textContent || "");
+  }
+
   function isIdChoicePage() {
     return location.hostname === "a.shopling.co.kr" && /\/prodlinkage\/goods_mallReg_idChoice\.phtml$/i.test(location.pathname);
   }
@@ -64,11 +69,6 @@
       && /총\s*조회수\s*[:：]?\s*[\d,]+\s*건/i.test(body);
   }
 
-  function isPublicShoplingHome() {
-    return /^(?:www\.)?shopling\.co\.kr$/i.test(location.hostname)
-      && !/a\.shopling\.co\.kr$/i.test(location.hostname);
-  }
-
   function isAdminShell() {
     if (location.hostname !== "a.shopling.co.kr" || window.top !== window) return false;
     if (isProductListUi() || isIdChoicePage() || isPreProdChoicePage() || isSubmitResultPage()) return false;
@@ -89,40 +89,87 @@
     });
   }
 
-  function getState() {
+  function storageGet(keys) {
     return new Promise((resolve) => {
-      chrome.storage.local.get(STATE_KEY, (stored) => {
+      chrome.storage.local.get(keys, (stored) => {
         void chrome.runtime.lastError;
-        resolve(stored?.[STATE_KEY] || null);
+        resolve(stored || {});
       });
     });
   }
 
-  function saveState(state) {
+  function storageSet(values) {
     return new Promise((resolve) => {
-      chrome.storage.local.set({ [STATE_KEY]: state }, () => {
+      chrome.storage.local.set(values, () => {
         void chrome.runtime.lastError;
-        resolve(state);
+        resolve(values);
       });
     });
   }
 
-  async function patchState(patch) {
-    const current = await getState();
-    if (!current) return null;
-    const next = { ...current, ...patch, updatedAt: Date.now() };
-    await saveState(next);
+  function workerStateKey(runId, goodsKey) {
+    return `${WORKER_STATE_PREFIX}:${runId}:${goodsKey}`;
+  }
+
+  async function getRunState() {
+    const stored = await storageGet(RUN_STATE_KEY);
+    return stored?.[RUN_STATE_KEY] || null;
+  }
+
+  async function saveRunState(state) {
+    await storageSet({ [RUN_STATE_KEY]: state });
+    return state;
+  }
+
+  async function getWorkerState(runId, goodsKey) {
+    const key = workerStateKey(runId, goodsKey);
+    const stored = await storageGet(key);
+    return stored?.[key] || null;
+  }
+
+  async function saveWorkerState(state) {
+    const key = workerStateKey(state.runId, state.task.goodsKey);
+    await storageSet({ [key]: state });
+    return state;
+  }
+
+  async function patchWorkerState(state, patch) {
+    const latest = await getWorkerState(state.runId, state.task.goodsKey);
+    if (!latest || latest.runId !== state.runId) return null;
+    const next = { ...latest, ...patch, updatedAt: Date.now() };
+    await saveWorkerState(next);
     return next;
   }
 
-  function currentTask(state) {
-    const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
-    const index = Number(state?.index || 0);
-    return tasks[index] || null;
+  async function initializeWorkerStates(runId, tasks) {
+    const now = Date.now();
+    const values = {};
+    for (const task of tasks) {
+      values[workerStateKey(runId, task.goodsKey)] = {
+        version: VERSION,
+        runId,
+        task,
+        status: "running",
+        stage: "worker_opening",
+        startedAt: now,
+        stepAt: now,
+        submitArmedAt: 0,
+        submitClickedAt: 0,
+        message: `${task.ptnGoodsCd} → ${task.profile} · 병렬 A18 복제창 준비 중`,
+        updatedAt: now,
+      };
+    }
+    await storageSet(values);
   }
 
   function newRunId() {
+    // Server claim/release APIs currently accept the v030-compatible prefix.
     return `canary-group-v030-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  async function workerContext() {
+    const response = await sendMessage({ type: CONTEXT_MESSAGE });
+    return response || { worker: false, control: false };
   }
 
   function optionText(select) {
@@ -320,112 +367,118 @@
     return { ok: missing.length === 0, missing };
   }
 
+  function countFrom(source, pattern) {
+    const match = source.match(pattern);
+    return match ? Number(String(match[1]).replace(/,/g, "")) || 0 : 0;
+  }
+
   function submitEvidence() {
-    const body = bodyText();
+    const raw = rawBodyText();
+    const body = text(raw);
+    const processing = /처리중입니다|잠시만\s*기다려주시기\s*바랍니다/i.test(body);
+    const resultLike = /쇼핑몰\s*상품\s*등록\s*전송\s*결과|상품\s*등록.{0,30}(결과|완료|성공)|상품전송이\s*완료되었습니다/i.test(body);
+    const sections = raw.split(/쇼핑몰명\s*\(ID\)\s*:\s*/i).slice(1);
+    if (sections.length) {
+      const parsed = sections.map((section) => {
+        const head = section.split(/\r?\n/).slice(0, 4).join(" ");
+        const isSelpa = /셀파/i.test(head);
+        const successCount = countFrom(section, /성공건수\s*[:：]?\s*([\d,]+)/i);
+        const failureCount = countFrom(section, /실패건수\s*[:：]?\s*([\d,]+)/i);
+        const success = successCount > 0 || /성공여부\s*성공/i.test(section);
+        const failure = failureCount > 0 || /성공여부\s*실패/i.test(section);
+        return { isSelpa, success, failure, successCount, failureCount };
+      });
+      const hasSuccess = parsed.some((row) => row.success);
+      const ignoredSelpaFailures = parsed.filter((row) => row.isSelpa && row.failure).length;
+      const nonIgnoredFailure = parsed.some((row) => !row.isSelpa && row.failure);
+      return {
+        success: resultLike && !processing && hasSuccess && !nonIgnoredFailure,
+        failure: resultLike && !processing && nonIgnoredFailure,
+        processing,
+        ignoredSelpaFailures,
+      };
+    }
+
     const successCounts = [...body.matchAll(/성공건수\s*[:：]?\s*([\d,]+)/g)]
       .map((match) => Number(match[1].replace(/,/g, "")) || 0);
     const failureCounts = [...body.matchAll(/실패건수\s*[:：]?\s*([\d,]+)/g)]
       .map((match) => Number(match[1].replace(/,/g, "")) || 0);
-    const processing = /처리중입니다|잠시만\s*기다려주시기\s*바랍니다/i.test(body);
-    const resultLike = /쇼핑몰\s*상품\s*등록\s*전송\s*결과|상품\s*등록.{0,30}(결과|완료|성공)/i.test(body);
     const hasSuccess = successCounts.some((value) => value > 0) || /성공여부\s*성공/i.test(body);
     const hasFailure = failureCounts.some((value) => value > 0) || /성공여부\s*실패/i.test(body);
-    return { success: resultLike && !processing && hasSuccess && !hasFailure, failure: resultLike && !processing && hasFailure, processing };
+    return {
+      success: resultLike && !processing && hasSuccess && !hasFailure,
+      failure: resultLike && !processing && hasFailure,
+      processing,
+      ignoredSelpaFailures: 0,
+    };
   }
 
-  async function workerContext(runId) {
-    const response = await sendMessage({ type: CONTEXT_MESSAGE, runId });
-    return response || { worker: false, control: false };
+  async function closeCurrentWorker(state, preserveSenderWindow = false) {
+    return sendMessage({
+      type: CLOSE_WORKER_MESSAGE,
+      runId: state.runId,
+      goodsKey: state.task.goodsKey,
+      preserveSenderWindow,
+    });
   }
 
-  async function closeWorkers(state, preserveSenderWindow = false) {
-    return sendMessage({ type: CLOSE_WORKERS_MESSAGE, runId: state.runId, preserveSenderWindow });
+  async function reportTask(state, outcome, reasonCode, message) {
+    return sendMessage({
+      type: REPORT_MESSAGE,
+      runId: state.runId,
+      goodsKey: state.task.goodsKey,
+      outcome,
+      reasonCode,
+      message,
+    });
   }
 
-  async function openNextFreshWorker(state) {
-    const response = await sendMessage({ type: OPEN_WORKER_MESSAGE, runId: state.runId });
+  async function completeTask(state, outcome, reasonCode, message) {
+    const response = await reportTask(state, outcome, reasonCode, message);
     if (!response?.ok) {
-      await saveState({ ...state, status: "failed", stage: "worker_open_failed", message: `새 관리자 작업창 생성 실패: ${text(response?.message || response?.error)}`, updatedAt: Date.now() });
-      return false;
-    }
-    return true;
-  }
-
-  async function releaseTasks(state, fromIndex, reasonCode, message) {
-    const tasks = Array.isArray(state?.tasks) ? state.tasks : [];
-    let allOk = true;
-    for (let index = fromIndex; index < tasks.length; index += 1) {
-      const task = tasks[index];
-      const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "failed", reasonCode, message });
-      if (!response?.ok) allOk = false;
-    }
-    return allOk;
-  }
-
-  async function reportAndAdvance(state, outcome, reasonCode, message) {
-    const task = currentTask(state);
-    if (!task) return;
-    const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome, reasonCode, message });
-    if (!response?.ok) {
-      await saveState({ ...state, status: "confirm_needed", stage: "report_failed", message: `Commerce OS 원장 기록 실패: ${text(response?.message || response?.error)}`, updatedAt: Date.now() });
-      await closeWorkers(state, true);
+      await patchWorkerState(state, {
+        status: "confirm_needed",
+        stage: "report_failed",
+        message: `Commerce OS 원장 기록 실패: ${text(response?.message || response?.error)}`,
+      });
+      await closeCurrentWorker(state, true);
       return;
     }
-    const results = Array.isArray(state.results) ? [...state.results] : [];
-    results.push({ goodsKey: task.goodsKey, ptnGoodsCd: task.ptnGoodsCd, profile: task.profile, outcome, reasonCode });
-    const nextIndex = Number(state.index || 0) + 1;
-    if (nextIndex >= state.tasks.length) {
-      const finished = { ...state, results, index: nextIndex, status: "completed", stage: "finished", message: `1상품 Fresh Worker 검증 완료 · ${results.length}개 채널 종료`, finishedAt: Date.now(), updatedAt: Date.now() };
-      await saveState(finished);
-      await closeWorkers(finished, false);
-      return;
-    }
-    const nextTask = state.tasks[nextIndex];
-    const next = { ...state, results, index: nextIndex, status: "running", stage: "worker_opening", submitClickedAt: 0, stepAt: Date.now(), message: `${nextTask.ptnGoodsCd} → ${nextTask.profile} · 새 관리자 작업창으로 다음 채널 시작`, updatedAt: Date.now() };
-    await saveState(next);
-    await openNextFreshWorker(next);
+    await patchWorkerState(state, {
+      status: "completed",
+      stage: "finished",
+      outcome,
+      reasonCode,
+      message,
+      finishedAt: Date.now(),
+    });
+    await closeCurrentWorker(state, false);
   }
 
-  async function failAndStop(state, reasonCode, message) {
-    const task = currentTask(state);
-    if (!task) return;
-    if (["submit_armed", "submit_clicked"].includes(state.stage)) {
-      const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "confirm_needed", reasonCode, message });
-      const stopped = { ...state, status: "confirm_needed", stage: "stopped_after_submit_boundary", message: response?.ok ? message : `송신경계 이후 원장기록도 확인필요: ${text(response?.message || response?.error)}`, updatedAt: Date.now() };
-      await saveState(stopped);
-      await closeWorkers(stopped, true);
+  async function failTask(state, reasonCode, message) {
+    const crossedSubmitBoundary = ["submit_armed", "submit_clicked"].includes(state.stage);
+    if (crossedSubmitBoundary) {
+      const response = await reportTask(state, "confirm_needed", reasonCode, message);
+      await patchWorkerState(state, {
+        status: "confirm_needed",
+        stage: "stopped_after_submit_boundary",
+        message: response?.ok
+          ? message
+          : `송신경계 이후 원장기록도 확인필요: ${text(response?.message || response?.error)}`,
+      });
+      await closeCurrentWorker(state, true);
       return;
     }
-    const currentRelease = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "failed", reasonCode, message });
-    const remainingReleased = await releaseTasks(state, Number(state.index || 0) + 1, "fresh_worker_aborted_unstarted", "앞선 채널 검증이 송신 전에 중단되어 아직 시작하지 않은 채널을 원복했습니다.");
-    const stopped = { ...state, status: currentRelease?.ok && remainingReleased ? "failed" : "confirm_needed", stage: "stopped", message: currentRelease?.ok && remainingReleased ? `${message} · 현재/미시작 채널은 대기열로 원복했습니다.` : `${message} · 일부 원복 결과를 확인해야 합니다. 다시 실행하지 마세요.`, updatedAt: Date.now() };
-    await saveState(stopped);
-    await closeWorkers(stopped, false);
-  }
 
-  async function startFreshWorkerCanary() {
-    const existing = await getState();
-    if (existing?.status === "running") return;
-    const runId = newRunId();
-    setPanelStatus("Commerce OS 원장에서 이어서 검증할 상품 1개를 확보 중입니다.", "info", true);
-    const claim = await sendMessage({ type: CLAIM_MESSAGE, runId });
-    if (!claim?.ok) {
-      setPanelStatus(`대상 확보 실패: ${text(claim?.message || claim?.error)}`, "error", false);
-      return;
-    }
-    const tasks = Array.isArray(claim.tasks) ? claim.tasks : [];
-    if (!tasks.length) {
-      setPanelStatus("검증 가능한 마켓 대기 채널이 없습니다.", "success", false);
-      return;
-    }
-    const first = tasks[0];
-    const state = { version: VERSION, runId, tasks, index: 0, results: [], status: "running", stage: "worker_opening", startedAt: Date.now(), stepAt: Date.now(), updatedAt: Date.now(), message: `1상품 ${tasks.length}개 남은 채널 확보 · ${first.ptnGoodsCd} → ${first.profile} · 새 관리자 작업창 시작` };
-    await saveState(state);
-    await openNextFreshWorker(state);
-  }
-
-  function findManagerAccessButton() {
-    return buttons(/^관리자\s*접속$/i, true)[0] || buttons(/관리자\s*접속/i, true)[0] || null;
+    const response = await reportTask(state, "failed", reasonCode, message);
+    await patchWorkerState(state, {
+      status: response?.ok ? "failed" : "confirm_needed",
+      stage: response?.ok ? "stopped" : "release_failed",
+      message: response?.ok
+        ? `${message} · 이 채널만 대기열로 원복했습니다. 다른 병렬 채널은 계속 진행합니다.`
+        : `${message} · claim 원복 결과 확인이 필요합니다. 이 채널은 다시 누르지 마세요.`,
+    });
+    await closeCurrentWorker(state, !response?.ok);
   }
 
   function findA18Link() {
@@ -436,103 +489,119 @@
 
   function dispatchHover(element) {
     if (!(element instanceof Element)) return;
-    for (const type of ["mouseenter", "mouseover", "mousemove"]) element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    for (const type of ["mouseenter", "mouseover", "mousemove"]) {
+      element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
   }
 
   async function navigateWorkerShell(state) {
-    if (window.top !== window) return;
-    const context = await workerContext(state.runId);
-    if (!context.worker) return;
-    if (isPublicShoplingHome()) {
-      if (state.stage !== "worker_opening") return;
-      const managerButton = findManagerAccessButton();
-      if (!managerButton) {
-        await failAndStop(state, "manager_access_button_missing", "Shopling 메인에서 '관리자접속' 버튼을 찾지 못했습니다.");
-        return;
-      }
-      await patchState({ stage: "manager_access_clicked", stepAt: Date.now(), message: "새 Shopling 창 · 관리자접속 자동 클릭" });
-      click(managerButton);
+    if (window.top !== window || !isAdminShell()) return;
+    if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) return;
+    const aMenu = buttons(/^\[?A\]?\s*상품$/i, true)[0] || buttons(/\[A\].*상품/i, true)[0];
+    if (aMenu) dispatchHover(aMenu);
+    await sleep(250);
+    const a18 = findA18Link();
+    if (!a18) {
+      await failTask(state, "a18_menu_missing", "복제 관리자 창에서 [18] 쇼핑몰상품등록 메뉴를 찾지 못했습니다.");
       return;
     }
-    if (isAdminShell() && ["worker_opening", "manager_access_clicked", "await_a18"].includes(state.stage)) {
-      await sendMessage({ type: ADMIN_READY_MESSAGE, runId: state.runId });
-      const aMenu = buttons(/^\[?A\]?\s*상품$/i, true)[0] || buttons(/\[A\].*상품/i, true)[0];
-      if (aMenu) dispatchHover(aMenu);
-      await sleep(250);
-      const a18 = findA18Link();
-      if (!a18) {
-        await failAndStop(state, "a18_menu_missing", "새 관리자 창에서 [18] 쇼핑몰상품등록 메뉴를 찾지 못했습니다.");
-        return;
-      }
-      await patchState({ stage: "a18_clicked", stepAt: Date.now(), message: "새 관리자 창 · [18] 쇼핑몰상품등록 진입" });
-      click(a18);
-    }
+    await patchWorkerState(state, {
+      stage: "a18_clicked",
+      stepAt: Date.now(),
+      message: `${state.task.profile} 복제창 · [18] 쇼핑몰상품등록 진입`,
+    });
+    click(a18);
   }
 
   async function driveProductList(state) {
-    const task = currentTask(state);
-    if (!task) return;
-    if (["worker_opening", "manager_access_clicked", "await_a18", "a18_clicked"].includes(state.stage)) {
-      await patchState({ stage: "claimed", stepAt: Date.now(), message: `${task.ptnGoodsCd} → ${task.profile} · 새 A18 작업창 준비 완료` });
+    const task = state.task;
+    if (["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) {
+      await patchWorkerState(state, {
+        stage: "claimed",
+        stepAt: Date.now(),
+        message: `${task.ptnGoodsCd} → ${task.profile} · 독립 A18 작업창 준비 완료`,
+      });
       return;
     }
+
     if (state.stage === "claimed") {
       const controls = findUnregisteredControls(task.profile);
       if (!controls.ok) {
-        await failAndStop(state, controls.reason, "'쇼핑몰 미등록 검색' 영역을 찾지 못했습니다.");
+        await failTask(state, controls.reason, "'쇼핑몰 미등록 검색' 영역을 찾지 못했습니다.");
         return;
       }
       const profilePattern = new RegExp(`^${escapeRegex(task.profile)}$`);
       if (!controls.profileSelect || !setSelect(controls.profileSelect, profilePattern)) {
-        await failAndStop(state, "unregistered_profile_apply_failed", `쇼핑몰 미등록 검색의 ${task.profile} 그룹 적용에 실패했습니다.`);
+        await failTask(state, "unregistered_profile_apply_failed", `쇼핑몰 미등록 검색의 ${task.profile} 그룹 적용에 실패했습니다.`);
         return;
       }
-      if (controls.searchType && selectHas(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i)) setSelect(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i);
+      if (controls.searchType && selectHas(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i)) {
+        setSelect(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i);
+      }
       if (!controls.input || !controls.searchButton) {
-        await failAndStop(state, "unregistered_search_controls_missing", "쇼핑몰 미등록 검색의 입력칸/검색 버튼을 찾지 못했습니다.");
+        await failTask(state, "unregistered_search_controls_missing", "쇼핑몰 미등록 검색의 입력칸/검색 버튼을 찾지 못했습니다.");
         return;
       }
       setInput(controls.input, task.ptnGoodsCd);
-      await patchState({ stage: "unregistered_search_submitted", stepAt: Date.now(), message: `${task.ptnGoodsCd} · ${task.profile} 미등록 조회` });
+      await patchWorkerState(state, {
+        stage: "unregistered_search_submitted",
+        stepAt: Date.now(),
+        message: `${task.ptnGoodsCd} · ${task.profile} 미등록 조회`,
+      });
       click(controls.searchButton);
       return;
     }
+
     if (state.stage === "unregistered_search_submitted") {
       await sleep(750);
       const rows = exactProductRows(task);
       if (rows.length === 0) {
-        await reportAndAdvance(state, "already_registered", "no_exact_unregistered_identity", `${task.goodsKey} + ${task.ptnGoodsCd}는 ${task.profile} 미등록 검색에 없어 재송신하지 않습니다.`);
+        await completeTask(
+          state,
+          "already_registered",
+          "no_exact_unregistered_identity",
+          `${task.goodsKey} + ${task.ptnGoodsCd}는 ${task.profile} 미등록 검색에 없어 재송신하지 않습니다.`,
+        );
         return;
       }
       if (rows.length !== 1) {
-        await failAndStop(state, "exact_product_identity_ambiguous", `${task.goodsKey} + ${task.ptnGoodsCd} 동시 정확일치 행이 ${rows.length}개라 중단했습니다.`);
+        await failTask(state, "exact_product_identity_ambiguous", `${task.goodsKey} + ${task.ptnGoodsCd} 동시 정확일치 행이 ${rows.length}개라 이 채널만 중단했습니다.`);
         return;
       }
       if (!checkOnly(rows[0])) {
-        await failAndStop(state, "exact_product_select_failed", "상품번호+자사상품코드 정확일치 행 선택에 실패했습니다.");
+        await failTask(state, "exact_product_select_failed", "상품번호+자사상품코드 정확일치 행 선택에 실패했습니다.");
         return;
       }
-      const registerButton = buttons(/^(쇼핑몰\s*상품등록(?:하기)?|쇼핑몰\s*상품\s*등록(?:하기)?)$/i)[0] || buttons(/쇼핑몰\s*상품등록(?:하기)?/i)[0];
+      const registerButton = buttons(/^(쇼핑몰\s*상품등록(?:하기)?|쇼핑몰\s*상품\s*등록(?:하기)?)$/i)[0]
+        || buttons(/쇼핑몰\s*상품등록(?:하기)?/i)[0];
       if (!registerButton) {
-        await failAndStop(state, "mall_register_button_missing", "'쇼핑몰 상품등록하기' 버튼을 찾지 못했습니다.");
+        await failTask(state, "mall_register_button_missing", "'쇼핑몰 상품등록하기' 버튼을 찾지 못했습니다.");
         return;
       }
-      await patchState({ stage: "register_clicked", stepAt: Date.now(), message: `${task.goodsKey} + ${task.ptnGoodsCd} 정확일치 · 등록 팝업 호출` });
+      await patchWorkerState(state, {
+        stage: "register_clicked",
+        stepAt: Date.now(),
+        message: `${task.goodsKey} + ${task.ptnGoodsCd} 정확일치 · 등록 팝업 호출`,
+      });
       click(registerButton);
     }
   }
 
   async function driveIdChoice(state) {
-    const task = currentTask(state);
-    if (!task || !["register_clicked", "id_profile_selected", "id_choice_ready"].includes(state.stage)) return;
+    const task = state.task;
+    if (!["register_clicked", "id_profile_selected", "id_choice_ready"].includes(state.stage)) return;
     const profilePattern = new RegExp(`^${escapeRegex(task.profile)}$`);
     const select = savedProfileSelect(task.profile);
     if (!select) {
-      await failAndStop(state, "saved_profile_select_missing", `쇼핑몰 ID 선택 화면에서 검색관리 '${task.profile}'을 찾지 못했습니다.`);
+      await failTask(state, "saved_profile_select_missing", `쇼핑몰 ID 선택 화면에서 검색관리 '${task.profile}'을 찾지 못했습니다.`);
       return;
     }
     if (optionText(select) !== task.profile) {
-      await patchState({ stage: "id_profile_selected", stepAt: Date.now(), message: `쇼핑몰 ID 선택 · ${task.profile} 저장검색 적용` });
+      await patchWorkerState(state, {
+        stage: "id_profile_selected",
+        stepAt: Date.now(),
+        message: `쇼핑몰 ID 선택 · ${task.profile} 저장검색 적용`,
+      });
       setSelect(select, profilePattern);
       await sleep(850);
       return;
@@ -540,29 +609,37 @@
     await sleep(500);
     const checked = checkedMallIds();
     if (!checked.length) {
-      await failAndStop(state, "saved_profile_no_mall_ids", `${task.profile} 적용 후 선택된 쇼핑몰 ID가 0개입니다.`);
+      await failTask(state, "saved_profile_no_mall_ids", `${task.profile} 적용 후 선택된 쇼핑몰 ID가 0개입니다.`);
       return;
     }
     const selectButton = topSelectButton();
     if (!selectButton) {
-      await failAndStop(state, "mall_id_select_button_missing", "쇼핑몰 ID 선택 화면의 상단 '선택' 버튼을 찾지 못했습니다.");
+      await failTask(state, "mall_id_select_button_missing", "쇼핑몰 ID 선택 화면의 상단 '선택' 버튼을 찾지 못했습니다.");
       return;
     }
-    await patchState({ stage: "id_choice_submitted", stepAt: Date.now(), message: `${task.profile} 저장검색 · 쇼핑몰 ID ${checked.length}개 확인 · 연동정보 화면 이동` });
+    await patchWorkerState(state, {
+      stage: "id_choice_submitted",
+      stepAt: Date.now(),
+      message: `${task.profile} 저장검색 · 쇼핑몰 ID ${checked.length}개 확인 · 연동정보 화면 이동`,
+    });
     click(selectButton);
   }
 
   async function drivePreProd(state) {
-    const task = currentTask(state);
-    if (!task || !["id_choice_submitted", "pre_profile_selected", "pre_mapping_ready", "arming"].includes(state.stage)) return;
+    const task = state.task;
+    if (!["id_choice_submitted", "pre_profile_selected", "pre_mapping_ready", "arming"].includes(state.stage)) return;
     const profilePattern = new RegExp(`^${escapeRegex(task.profile)}$`);
     const select = savedProfileSelect(task.profile);
     if (!select) {
-      await failAndStop(state, "preprod_saved_profile_missing", `쇼핑몰 연동 정보 화면에서 검색관리 '${task.profile}'을 찾지 못했습니다.`);
+      await failTask(state, "preprod_saved_profile_missing", `쇼핑몰 연동 정보 화면에서 검색관리 '${task.profile}'을 찾지 못했습니다.`);
       return;
     }
     if (optionText(select) !== task.profile) {
-      await patchState({ stage: "pre_profile_selected", stepAt: Date.now(), message: `쇼핑몰 연동 정보 · ${task.profile} 저장검색 적용` });
+      await patchWorkerState(state, {
+        stage: "pre_profile_selected",
+        stepAt: Date.now(),
+        message: `쇼핑몰 연동 정보 · ${task.profile} 저장검색 적용`,
+      });
       setSelect(select, profilePattern);
       await sleep(850);
       return;
@@ -570,42 +647,69 @@
     await sleep(500);
     const mapping = applyPreProdMapping();
     if (!mapping.ok) {
-      await failAndStop(state, "mapping_controls_missing", `${task.profile} 연동정보 중 누락: ${mapping.missing.join(", ")}`);
+      await failTask(state, "mapping_controls_missing", `${task.profile} 연동정보 중 누락: ${mapping.missing.join(", ")}`);
       return;
     }
     const sendButton = buttons(/^상품등록송신$/i)[0] || buttons(/상품\s*등록\s*송신/i)[0];
     if (!sendButton) {
-      await failAndStop(state, "submit_button_missing", "'상품등록송신' 버튼을 찾지 못했습니다.");
+      await failTask(state, "submit_button_missing", "'상품등록송신' 버튼을 찾지 못했습니다.");
       return;
     }
-    await patchState({ stage: "arming", stepAt: Date.now(), message: `${task.profile} 연동정보 검증 완료 · 송신 직전 Commerce OS 영구잠금 확인` });
-    const arm = await sendMessage({ type: ARM_MESSAGE, runId: state.runId, goodsKey: task.goodsKey });
+    await patchWorkerState(state, {
+      stage: "arming",
+      stepAt: Date.now(),
+      message: `${task.profile} 연동정보 검증 완료 · 이 채널의 송신 영구잠금 확인`,
+    });
+    const arm = await sendMessage({
+      type: ARM_MESSAGE,
+      runId: state.runId,
+      goodsKey: task.goodsKey,
+    });
     if (!arm?.ok) {
-      await failAndStop(state, "submit_lock_failed", `송신 잠금 실패: ${text(arm?.message || arm?.error)}`);
+      await failTask(state, "submit_lock_failed", `송신 잠금 실패: ${text(arm?.message || arm?.error)}`);
       return;
     }
-    const latest = await getState();
-    if (!latest || latest.runId !== state.runId || latest.status !== "running") return;
-    await patchState({ stage: "submit_clicked", submitArmedAt: Date.now(), submitClickedAt: Date.now(), stepAt: Date.now(), message: `${task.profile} 영구잠금 완료 · Shopling 상품등록송신 클릭` });
+    const latest = await getWorkerState(state.runId, task.goodsKey);
+    if (!latest || latest.status !== "running") return;
+    const armed = await patchWorkerState(latest, {
+      stage: "submit_armed",
+      submitArmedAt: Date.now(),
+      stepAt: Date.now(),
+      message: `${task.profile} 영구잠금 완료 · Shopling 상품등록송신 클릭 직전`,
+    });
+    if (!armed) return;
+    await patchWorkerState(armed, {
+      stage: "submit_clicked",
+      submitClickedAt: Date.now(),
+      stepAt: Date.now(),
+      message: `${task.profile} · Shopling 상품등록송신 클릭`,
+    });
     click(sendButton);
   }
 
   async function checkSubmitOutcome(state) {
     if (state.stage !== "submit_clicked" || !isSubmitResultPage()) return;
-    const task = currentTask(state);
-    if (!task) return;
+    const task = state.task;
     const evidence = submitEvidence();
     if (evidence.success) {
-      await reportAndAdvance(state, "sent", "shopling_submit_success_fresh_worker", `${task.profile} 실제 Shopling 결과 화면에서 처리완료·성공건수>0·실패건수=0을 확인했습니다.`);
+      const ignored = evidence.ignoredSelpaFailures > 0
+        ? ` · 셀파 실패 ${evidence.ignoredSelpaFailures}건은 운영정책상 무시`
+        : "";
+      await completeTask(
+        state,
+        "sent",
+        "shopling_submit_success_parallel_worker",
+        `${task.profile} 실제 Shopling 결과 화면에서 비셀파 성공을 확인했습니다${ignored}.`,
+      );
       return;
     }
     if (evidence.failure) {
-      await failAndStop(state, "shopling_submit_result_has_failure", `${task.profile} 송신 결과에 실패건수가 있어 재송신하지 않고 확인필요로 중단합니다.`);
+      await failTask(state, "shopling_submit_result_has_nonselfa_failure", `${task.profile} 송신 결과에 셀파 외 실패가 있어 이 채널만 확인필요로 보존합니다.`);
       return;
     }
     const age = Date.now() - Number(state.submitClickedAt || 0);
     if (!evidence.processing && age >= SUBMIT_CONFIRM_TIMEOUT_MS) {
-      await failAndStop(state, "submit_result_requires_manual_check", `${task.profile} 실제 결과 페이지에서 ${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 확정 성공결과를 확인하지 못했습니다.`);
+      await failTask(state, "submit_result_requires_manual_check", `${task.profile} 실제 결과 페이지에서 ${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 확정 성공결과를 확인하지 못했습니다.`);
     }
   }
 
@@ -613,26 +717,38 @@
     if (driving) return;
     driving = true;
     try {
-      const state = await getState();
-      updatePanelFromState(state);
+      const context = await workerContext();
+      if (!context.worker || !context.runId || !context.goodsKey || !context.task) return;
+      const state = await getWorkerState(context.runId, context.goodsKey);
       if (!state || state.status !== "running") return;
-      const context = await workerContext(state.runId);
-      if (!context.worker) return;
+      if (state.task.goodsKey !== context.goodsKey || state.task.ptnGoodsCd !== context.task.ptnGoodsCd) {
+        await failTask(state, "parallel_worker_context_identity_mismatch", "복제창과 채널 작업 식별자가 달라 이 채널만 안전중단했습니다.");
+        return;
+      }
       if (state.stage === "submit_clicked") {
-        if (!isSubmitResultPage()) return;
-        await checkSubmitOutcome(state);
+        if (isSubmitResultPage()) await checkSubmitOutcome(state);
         return;
       }
       if (isIdChoicePage()) { await driveIdChoice(state); return; }
       if (isPreProdChoicePage()) { await drivePreProd(state); return; }
       if (isProductListUi()) { await driveProductList(state); return; }
-      if (window.top === window) await navigateWorkerShell(state);
+      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);
     } catch (error) {
-      const state = await getState();
-      if (state?.status === "running") await failAndStop(state, "fresh_worker_unhandled_exception", error instanceof Error ? error.message : String(error || "Fresh Worker Canary 오류"));
+      const context = await workerContext();
+      if (context.worker && context.runId && context.goodsKey) {
+        const state = await getWorkerState(context.runId, context.goodsKey);
+        if (state?.status === "running") {
+          await failTask(state, "parallel_worker_unhandled_exception", error instanceof Error ? error.message : String(error || "Parallel Worker 오류"));
+        }
+      }
     } finally {
       driving = false;
     }
+  }
+
+  async function collectRunWorkerStates(run) {
+    const tasks = Array.isArray(run?.tasks) ? run.tasks : [];
+    return Promise.all(tasks.map((task) => getWorkerState(run.runId, task.goodsKey)));
   }
 
   function setPanelStatus(message, kind = "info", busy = false) {
@@ -645,67 +761,177 @@
     if (button) {
       button.disabled = busy;
       button.style.opacity = busy ? "0.6" : "1";
-      button.textContent = busy ? "Fresh Worker 순차 처리 중..." : "1상품 · 남은 채널 Fresh Worker 검증";
+      button.textContent = busy ? "채널별 병렬 처리 중..." : "1상품 · 남은 채널 병렬 Fresh Worker";
     }
   }
 
-  function updatePanelFromState(state) {
-    if (!document.getElementById(PANEL_ID) || !state) return;
-    const task = currentTask(state);
-    const total = Array.isArray(state.tasks) ? state.tasks.length : 0;
-    const done = Array.isArray(state.results) ? state.results.length : 0;
-    if (state.status === "running") {
-      setPanelStatus(`${done}/${total} 완료 · ${text(task?.ptnGoodsCd)} → ${text(task?.profile)} · ${text(state.stage)} · ${text(state.message)}`, "info", true);
-    } else if (state.status === "completed") {
-      const sent = (state.results || []).filter((row) => row.outcome === "sent").length;
-      const skipped = (state.results || []).filter((row) => row.outcome === "already_registered").length;
-      setPanelStatus(`Fresh Worker 검증 완료 · 송신 ${sent} · 이미등록/미등록없음 ${skipped}`, "success", false);
-    } else if (state.status === "failed") {
-      setPanelStatus(`송신 전 안전중단 · ${text(state.message)}`, "error", false);
-    } else if (state.status === "confirm_needed") {
-      setPanelStatus(`확인필요 · ${text(state.message)} · 다시 누르지 마세요.`, "error", true);
+  async function refreshPanel() {
+    const panel = document.getElementById(PANEL_ID);
+    if (!panel) return;
+    const context = await workerContext();
+    if (context.worker) {
+      panel.style.display = "none";
+      return;
     }
+    panel.style.display = "block";
+    const run = await getRunState();
+    if (!run) {
+      setPanelStatus("남은 채널마다 A18 복제창을 1개씩 만들고 동시에 처리합니다.", "info", false);
+      return;
+    }
+    const states = (await collectRunWorkerStates(run)).filter(Boolean);
+    const running = states.filter((row) => row.status === "running").length;
+    const sent = states.filter((row) => row.status === "completed" && row.outcome === "sent").length;
+    const skipped = states.filter((row) => row.status === "completed" && row.outcome === "already_registered").length;
+    const failed = states.filter((row) => row.status === "failed").length;
+    const confirm = states.filter((row) => row.status === "confirm_needed").length;
+    const total = Array.isArray(run.tasks) ? run.tasks.length : states.length;
+
+    if (running > 0 || run.status === "opening") {
+      setPanelStatus(`병렬 ${total}채널 · 실행 ${running} · 성공 ${sent} · 이미등록 ${skipped} · 실패 ${failed} · 확인필요 ${confirm}`, "info", true);
+      return;
+    }
+    if (confirm > 0) {
+      setPanelStatus(`병렬 작업 종료 · 성공 ${sent} · 이미등록 ${skipped} · 실패 ${failed} · 확인필요 ${confirm} · 확인필요 채널은 재실행하지 마세요.`, "error", true);
+      if (run.status !== "confirm_needed") await saveRunState({ ...run, status: "confirm_needed", updatedAt: Date.now() });
+      return;
+    }
+    if (states.length >= total && total > 0) {
+      setPanelStatus(`병렬 작업 완료 · 성공 ${sent} · 이미등록 ${skipped} · 실패/재대기 ${failed}`, failed ? "error" : "success", false);
+      if (run.status !== "completed") await saveRunState({ ...run, status: "completed", finishedAt: Date.now(), updatedAt: Date.now() });
+      return;
+    }
+    setPanelStatus("병렬 작업 상태를 동기화 중입니다.", "info", true);
+  }
+
+  async function startParallelCanary() {
+    const existing = await getRunState();
+    if (existing?.status === "opening" || existing?.status === "running" || existing?.status === "confirm_needed") {
+      await refreshPanel();
+      return;
+    }
+
+    const runId = newRunId();
+    setPanelStatus("Commerce OS 원장에서 남은 채널을 확보 중입니다.", "info", true);
+    const claim = await sendMessage({ type: CLAIM_MESSAGE, runId });
+    if (!claim?.ok) {
+      setPanelStatus(`대상 확보 실패: ${text(claim?.message || claim?.error)}`, "error", false);
+      return;
+    }
+    const tasks = Array.isArray(claim.tasks) ? claim.tasks : [];
+    if (!tasks.length) {
+      setPanelStatus("검증 가능한 마켓 대기 채널이 없습니다.", "success", false);
+      return;
+    }
+
+    const now = Date.now();
+    const run = {
+      version: VERSION,
+      runId,
+      tasks,
+      status: "opening",
+      startedAt: now,
+      updatedAt: now,
+      message: `남은 ${tasks.length}개 채널을 각각 독립 A18 복제창으로 병렬 시작`,
+    };
+    await saveRunState(run);
+    await initializeWorkerStates(runId, tasks);
+
+    const opened = await sendMessage({ type: OPEN_WORKERS_MESSAGE, runId, tasks });
+    if (!opened?.ok) {
+      const states = await collectRunWorkerStates(run);
+      for (const state of states.filter(Boolean)) {
+        if (state.status === "running") {
+          await patchWorkerState(state, {
+            status: "failed",
+            stage: "worker_open_failed",
+            message: `병렬 A18 작업창 생성 실패: ${text(opened?.message || opened?.error)}`,
+          });
+        }
+      }
+      await saveRunState({ ...run, status: "failed", updatedAt: Date.now() });
+      setPanelStatus(`병렬 작업창 생성 실패: ${text(opened?.message || opened?.error)}`, "error", false);
+      return;
+    }
+
+    for (const failure of Array.isArray(opened.failed) ? opened.failed : []) {
+      const failedState = await getWorkerState(runId, failure.goodsKey);
+      if (failedState) {
+        await patchWorkerState(failedState, {
+          status: failure.released ? "failed" : "confirm_needed",
+          stage: "worker_open_failed",
+          message: `${failure.profile} 복제창 생성 실패: ${text(failure.message || failure.error)}`,
+        });
+      }
+    }
+
+    await saveRunState({
+      ...run,
+      status: "running",
+      openedCount: Number(opened.openedCount || 0),
+      failedOpenCount: Number(opened.failedCount || 0),
+      updatedAt: Date.now(),
+    });
+    await refreshPanel();
   }
 
   function mount() {
     if (!isProductListUi() || document.getElementById(PANEL_ID)) return;
     const box = document.createElement("div");
     box.id = PANEL_ID;
-    box.style.cssText = ["position:fixed", "right:18px", "bottom:40px", "z-index:2147483647", "width:440px", "padding:12px", "border:2px solid #0f766e", "border-radius:10px", "background:#fff", "box-shadow:0 8px 30px rgba(15,23,42,.18)", "font:12px/1.45 Arial,sans-serif", "color:#0f172a"].join(";");
+    box.style.cssText = [
+      "position:fixed",
+      "right:18px",
+      "bottom:40px",
+      "z-index:2147483647",
+      "width:450px",
+      "padding:12px",
+      "border:2px solid #0f766e",
+      "border-radius:10px",
+      "background:#fff",
+      "box-shadow:0 8px 30px rgba(15,23,42,.18)",
+      "font:12px/1.45 Arial,sans-serif",
+      "color:#0f172a",
+    ].join(";");
     const title = document.createElement("div");
-    title.textContent = `Commerce OS · Fresh Worker Canary v${VERSION}`;
+    title.textContent = `Commerce OS · Parallel Fresh Worker Canary v${VERSION}`;
     title.style.cssText = "font-weight:700;margin-bottom:5px;color:#0f766e";
     const guide = document.createElement("div");
-    guide.textContent = "채널 1건 완료 → 기존 작업창 폐기 → 새 관리자 창 → [A18]부터 다음 채널 재시작";
+    guide.textContent = "원본 A18 유지 → 남은 채널 수만큼 A18 복제창 → 각 창은 자기 채널만 독립 처리 → 동시에 진행";
     guide.style.cssText = "font-size:11px;color:#64748b;margin-bottom:7px";
     const status = document.createElement("div");
     status.id = STATUS_ID;
-    status.textContent = "상품번호+자사상품코드 이중일치 후, 채널마다 새 관리자 작업창에서 1건씩 처리합니다.";
+    status.textContent = "채널별 독립 병렬 Worker 준비";
     status.style.cssText = "margin-bottom:8px;color:#475569";
     const button = document.createElement("button");
     button.id = BUTTON_ID;
     button.type = "button";
-    button.textContent = "1상품 · 남은 채널 Fresh Worker 검증";
+    button.textContent = "1상품 · 남은 채널 병렬 Fresh Worker";
     button.style.cssText = "width:100%;padding:10px;border:0;border-radius:7px;background:#0f766e;color:#fff;font-weight:700;cursor:pointer";
-    button.addEventListener("click", () => void startFreshWorkerCanary());
+    button.addEventListener("click", () => void startParallelCanary());
     const guard = document.createElement("div");
-    guard.textContent = "1채널=1새창 · goods_key+자사상품코드 동시일치 · 미등록 재확인 · 송신 전 영구잠금 · 성공 결과 후에만 다음 새창";
+    guard.textContent = "1채널=1복제창 · goods_key+자사상품코드 동시일치 · 채널별 독립 잠금 · 셀파 실패만 무시 · 비셀파 실패는 해당 창만 확인필요";
     guard.style.cssText = "font-size:10px;color:#0f766e;margin-top:7px";
     box.append(title, guide, status, button, guard);
     document.documentElement.appendChild(box);
-    void getState().then(updatePanelFromState);
+    void refreshPanel();
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "local" || !changes[STATE_KEY]) return;
-    updatePanelFromState(changes[STATE_KEY].newValue || null);
-    void drive();
+    if (areaName !== "local") return;
+    if (changes[RUN_STATE_KEY] || Object.keys(changes).some((key) => key.startsWith(`${WORKER_STATE_PREFIX}:`))) {
+      void refreshPanel();
+    }
   });
 
   mount();
   const observer = new MutationObserver(() => mount());
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  timer = setInterval(() => void drive(), 1000);
+  timer = setInterval(() => void drive(), 800);
+  panelTimer = setInterval(() => void refreshPanel(), 1200);
   void drive();
-  window.addEventListener("pagehide", () => { if (timer) clearInterval(timer); }, { once: true });
+  window.addEventListener("pagehide", () => {
+    if (timer) clearInterval(timer);
+    if (panelTimer) clearInterval(panelTimer);
+  }, { once: true });
 })();
