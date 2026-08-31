@@ -262,11 +262,6 @@ async function cloneControlTabIntoWorker(controlTabId) {
     return { ok: false, error: "a18_worker_identity_missing", message: "복제 작업창 식별에 실패했습니다." };
   }
 
-  try {
-    await chrome.tabs.reload(workerTabId);
-  } catch {
-    // The duplicate may already be reloading; the readiness poll below is authoritative.
-  }
   const ready = await waitForTab(
     workerTabId,
     (tab) => tab.status === "complete" && isAdminControlUrl(tab.url),
