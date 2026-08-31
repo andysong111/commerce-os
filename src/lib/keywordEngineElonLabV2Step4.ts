@@ -4,7 +4,7 @@ import {
   uniqueKeywordElonCanonical,
   type KeywordElonCandidate,
   type KeywordElonIdentity,
-} from "@/lib/keywordEngineElonLabV2";
+} from "./keywordEngineElonLabV2.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 35_000;
