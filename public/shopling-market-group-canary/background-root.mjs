@@ -11,9 +11,15 @@ const OPEN_WORKER_MESSAGE = "commerce-os-shopling-fresh-worker-open";
 const CLOSE_WORKERS_MESSAGE = "commerce-os-shopling-fresh-worker-close";
 const CONTEXT_MESSAGE = "commerce-os-shopling-fresh-worker-context";
 const ADMIN_READY_MESSAGE = "commerce-os-shopling-fresh-worker-admin-ready";
-const WORKER_META_KEY = "commerceOsShoplingFreshWorkerMetaV030";
-const ADMIN_HOME_URL = "https://shopling.co.kr/index.php";
-const ALLOWED = new Map([["DM1","도매1"],["DM2","도매2"],["DM3","도매3"],["DM4","도매4"],["SM1","소매1"],["SM2","소매2"]]);
+const WORKER_META_KEY = "commerceOsShoplingFreshWorkerMetaV031";
+const ALLOWED = new Map([
+  ["DM1", "도매1"],
+  ["DM2", "도매2"],
+  ["DM3", "도매3"],
+  ["DM4", "도매4"],
+  ["SM1", "소매1"],
+  ["SM2", "소매2"],
+]);
 
 function text(value) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -35,11 +41,19 @@ async function requestJson(endpoint, payload) {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok || body?.ok !== true) {
-      return { ok: false, error: text(body?.error) || `fresh_worker_http_${response.status}`, message: text(body?.message) };
+      return {
+        ok: false,
+        error: text(body?.error) || `fresh_worker_http_${response.status}`,
+        message: text(body?.message),
+      };
     }
     return body;
   } catch (error) {
-    return { ok: false, error: "fresh_worker_transport_failed", message: error instanceof Error ? error.message : String(error || "request failed") };
+    return {
+      ok: false,
+      error: "fresh_worker_transport_failed",
+      message: error instanceof Error ? error.message : String(error || "request failed"),
+    };
   }
 }
 
@@ -75,7 +89,14 @@ function normalizeTask(raw) {
 async function releaseClaimed(runId, tasks, reasonCode, message) {
   let allOk = true;
   for (const task of tasks) {
-    const result = await api({ action: "report", runId, goodsKey: task.goodsKey, outcome: "failed", reasonCode, message });
+    const result = await api({
+      action: "report",
+      runId,
+      goodsKey: task.goodsKey,
+      outcome: "failed",
+      reasonCode,
+      message,
+    });
     if (!result?.ok) allOk = false;
   }
   return allOk;
@@ -93,12 +114,27 @@ async function claimOneProduct(runId) {
     const releasable = tasks.length
       ? tasks
       : rawTasks.map((row) => ({ goodsKey: text(row?.goodsKey) })).filter((row) => /^\d{5,9}$/.test(row.goodsKey));
-    const released = await releaseClaimed(runId, releasable, "fresh_worker_claim_guard_failed", "1개 상품 범위를 벗어나 송신 전 원복했습니다.");
-    return { ok: false, error: released ? "fresh_worker_claim_guard_failed" : "fresh_worker_claim_guard_release_failed" };
+    const released = await releaseClaimed(
+      runId,
+      releasable,
+      "fresh_worker_claim_guard_failed",
+      "1개 상품 범위를 벗어나 송신 전 원복했습니다.",
+    );
+    return {
+      ok: false,
+      error: released ? "fresh_worker_claim_guard_failed" : "fresh_worker_claim_guard_release_failed",
+    };
   }
   const order = new Map(["DM1", "DM2", "DM3", "DM4", "SM1", "SM2"].map((code, index) => [code, index]));
   tasks.sort((a, b) => (order.get(a.searchCode) ?? 99) - (order.get(b.searchCode) ?? 99));
-  return { ok: true, runId, tasks, taskCount: tasks.length, launchItemId: tasks[0].launchItemId, modelNumber: tasks[0].modelNumber };
+  return {
+    ok: true,
+    runId,
+    tasks,
+    taskCount: tasks.length,
+    launchItemId: tasks[0].launchItemId,
+    modelNumber: tasks[0].modelNumber,
+  };
 }
 
 function getWorkerMeta() {
@@ -119,6 +155,62 @@ function setWorkerMeta(meta) {
   });
 }
 
+function isPersistentLauncherUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return /^(?:www\.)?shopling\.co\.kr$/i.test(parsed.hostname)
+      && /\/index\.php$/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function findPersistentLauncherTab(controlTabId) {
+  const tabs = await chrome.tabs.query({});
+  const candidates = tabs
+    .filter((tab) => Number.isInteger(tab.id) && tab.id !== controlTabId && isPersistentLauncherUrl(tab.url))
+    .sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)) || Number(b.lastAccessed || 0) - Number(a.lastAccessed || 0));
+  return candidates[0] || null;
+}
+
+async function clickManagerAccessOnLauncher(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const normalize = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+        const label = (element) => normalize(
+          element?.value || element?.innerText || element?.textContent || element?.getAttribute?.("aria-label") || "",
+        );
+        const all = [...document.querySelectorAll("a,button,input,[role='button'],[onclick],div,span")];
+        const leaf = all.find((element) => /^관리자\s*접속$/i.test(label(element)))
+          || all.find((element) => /관리자\s*접속/i.test(label(element)));
+        if (!leaf) return { clicked: false, reason: "manager_access_text_missing" };
+        const clickable = leaf.closest?.("a,button,[role='button'],[onclick]") || leaf;
+        try {
+          clickable.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+          clickable.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+        } catch {
+          // Best effort only.
+        }
+        if (typeof clickable.click === "function") clickable.click();
+        else clickable.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return { clicked: true, label: label(clickable) || label(leaf) };
+      },
+    });
+    const success = Array.isArray(results) && results.some((row) => row?.result?.clicked === true);
+    return success
+      ? { ok: true }
+      : { ok: false, error: "persistent_launcher_manager_button_missing", message: "기존 로그인 Shopling 메인 탭에서 관리자접속 버튼을 찾지 못했습니다." };
+  } catch (error) {
+    return {
+      ok: false,
+      error: "persistent_launcher_script_failed",
+      message: error instanceof Error ? error.message : String(error || "launcher script failed"),
+    };
+  }
+}
+
 async function recordWorkerContext(runId, sender, allowOpener = true) {
   const meta = await getWorkerMeta();
   if (!meta || meta.runId !== runId || !sender?.tab) return { worker: false, control: false };
@@ -129,13 +221,20 @@ async function recordWorkerContext(runId, sender, allowOpener = true) {
   const windows = new Set(Array.isArray(meta.windowIds) ? meta.windowIds : []);
   const control = tabId === meta.controlTabId;
   let worker = tabs.has(tabId) || windows.has(windowId);
-  if (!worker && allowOpener && Number.isInteger(openerTabId) && tabs.has(openerTabId)) {
+  const launchedFromPersistentTab = Number.isInteger(openerTabId) && openerTabId === meta.launcherTabId;
+  const launchedFromWorkerTab = Number.isInteger(openerTabId) && tabs.has(openerTabId);
+  if (!worker && allowOpener && (launchedFromPersistentTab || launchedFromWorkerTab)) {
     worker = true;
     tabs.add(tabId);
     windows.add(windowId);
-    await setWorkerMeta({ ...meta, tabIds: [...tabs], windowIds: [...windows], updatedAt: Date.now() });
+    await setWorkerMeta({
+      ...meta,
+      tabIds: [...tabs],
+      windowIds: [...windows],
+      updatedAt: Date.now(),
+    });
   }
-  return { worker, control };
+  return { worker, control, launcher: tabId === meta.launcherTabId };
 }
 
 async function closeWindowIds(ids) {
@@ -152,7 +251,7 @@ async function openFreshWorker(runId, sender) {
   if (!validRunId(runId)) return { ok: false, error: "invalid_fresh_worker_run_id" };
   const previous = await getWorkerMeta();
   const sameRun = previous?.runId === runId;
-  const oldWindowIds = sameRun && Array.isArray(previous.windowIds) ? [...previous.windowIds] : [];
+  const oldWorkerWindowIds = sameRun && Array.isArray(previous.windowIds) ? [...previous.windowIds] : [];
   const controlTabId = sameRun && Number.isInteger(previous?.controlTabId)
     ? previous.controlTabId
     : (sender?.tab?.id ?? null);
@@ -160,43 +259,44 @@ async function openFreshWorker(runId, sender) {
     ? previous.controlWindowId
     : (sender?.tab?.windowId ?? null);
 
-  let created;
-  try {
-    created = await chrome.windows.create({
-      url: ADMIN_HOME_URL,
-      type: "normal",
-      focused: false,
-      width: 1220,
-      height: 900,
-    });
-  } catch (error) {
-    return { ok: false, error: "fresh_worker_window_create_failed", message: error instanceof Error ? error.message : String(error || "window create failed") };
-  }
-
-  const workerWindowId = created?.id;
-  const workerTabId = created?.tabs?.[0]?.id;
-  if (!Number.isInteger(workerWindowId) || !Number.isInteger(workerTabId)) {
-    if (Number.isInteger(workerWindowId)) {
-      try { await chrome.windows.remove(workerWindowId); } catch { /* best effort */ }
-    }
-    return { ok: false, error: "fresh_worker_window_identity_missing" };
+  const launcher = sameRun && Number.isInteger(previous?.launcherTabId)
+    ? await chrome.tabs.get(previous.launcherTabId).catch(() => null)
+    : await findPersistentLauncherTab(controlTabId);
+  if (!launcher || !Number.isInteger(launcher.id) || !Number.isInteger(launcher.windowId)) {
+    return {
+      ok: false,
+      error: "persistent_shopling_launcher_missing",
+      message: "로그인해 둔 Shopling 메인(index.php) 탭을 찾지 못했습니다. 첫 번째 Shopling 메인 탭을 로그인 상태로 열어두세요.",
+    };
   }
 
   await setWorkerMeta({
     runId,
     controlTabId,
     controlWindowId,
-    rootWindowId: workerWindowId,
-    rootTabId: workerTabId,
-    windowIds: [workerWindowId],
-    tabIds: [workerTabId],
+    launcherTabId: launcher.id,
+    launcherWindowId: launcher.windowId,
+    rootWindowId: null,
+    rootTabId: null,
+    windowIds: [],
+    tabIds: [],
     openedAt: Date.now(),
     updatedAt: Date.now(),
   });
 
-  const removable = oldWindowIds.filter((id) => id !== workerWindowId && id !== controlWindowId);
-  if (removable.length) setTimeout(() => void closeWindowIds(removable), 500);
-  return { ok: true, workerWindowId, workerTabId };
+  const clickResult = await clickManagerAccessOnLauncher(launcher.id);
+  if (!clickResult?.ok) {
+    return clickResult;
+  }
+
+  const removable = oldWorkerWindowIds.filter((id) => id !== controlWindowId && id !== launcher.windowId);
+  if (removable.length) setTimeout(() => void closeWindowIds(removable), 900);
+  return {
+    ok: true,
+    launcherTabId: launcher.id,
+    launcherWindowId: launcher.windowId,
+    waitingForAdminPopup: true,
+  };
 }
 
 async function closeFreshWorkers(runId, sender, preserveSender = false) {
@@ -204,12 +304,10 @@ async function closeFreshWorkers(runId, sender, preserveSender = false) {
   if (!meta || meta.runId !== runId) return { ok: true, closed: 0 };
   const senderWindowId = sender?.tab?.windowId;
   const ids = (Array.isArray(meta.windowIds) ? meta.windowIds : [])
-    .filter((id) => id !== meta.controlWindowId)
+    .filter((id) => id !== meta.controlWindowId && id !== meta.launcherWindowId)
     .filter((id) => !preserveSender || id !== senderWindowId);
   await setWorkerMeta({
-    runId,
-    controlTabId: meta.controlTabId,
-    controlWindowId: meta.controlWindowId,
+    ...meta,
     rootWindowId: null,
     rootTabId: null,
     windowIds: preserveSender && Number.isInteger(senderWindowId) ? [senderWindowId] : [],
@@ -227,15 +325,18 @@ async function adminReady(runId, sender) {
   if (!meta || meta.runId !== runId) return { ok: false, error: "fresh_worker_meta_missing" };
   const senderWindowId = sender?.tab?.windowId;
   const senderTabId = sender?.tab?.id;
-  const oldRoot = meta.rootWindowId;
   const windows = new Set(Array.isArray(meta.windowIds) ? meta.windowIds : []);
   const tabs = new Set(Array.isArray(meta.tabIds) ? meta.tabIds : []);
   if (Number.isInteger(senderWindowId)) windows.add(senderWindowId);
   if (Number.isInteger(senderTabId)) tabs.add(senderTabId);
-  await setWorkerMeta({ ...meta, rootWindowId: senderWindowId, rootTabId: senderTabId, windowIds: [...windows], tabIds: [...tabs], updatedAt: Date.now() });
-  if (Number.isInteger(oldRoot) && oldRoot !== senderWindowId && oldRoot !== meta.controlWindowId) {
-    setTimeout(() => void closeWindowIds([oldRoot]), 600);
-  }
+  await setWorkerMeta({
+    ...meta,
+    rootWindowId: senderWindowId,
+    rootTabId: senderTabId,
+    windowIds: [...windows],
+    tabIds: [...tabs],
+    updatedAt: Date.now(),
+  });
   return { ok: true };
 }
 
@@ -244,15 +345,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const runId = text(message.runId);
 
   if (message.type === CLAIM_MESSAGE) {
-    claimOneProduct(runId).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_claim_exception", message: String(error?.message || error) }));
+    claimOneProduct(runId).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_claim_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   if (message.type === OPEN_WORKER_MESSAGE) {
-    openFreshWorker(runId, sender).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_open_exception", message: String(error?.message || error) }));
+    openFreshWorker(runId, sender).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_open_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   if (message.type === CLOSE_WORKERS_MESSAGE) {
-    closeFreshWorkers(runId, sender, Boolean(message.preserveSenderWindow)).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_close_exception", message: String(error?.message || error) }));
+    closeFreshWorkers(runId, sender, Boolean(message.preserveSenderWindow)).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_close_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   if (message.type === CONTEXT_MESSAGE) {
@@ -260,12 +373,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === ADMIN_READY_MESSAGE) {
-    adminReady(runId, sender).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_admin_ready_exception", message: String(error?.message || error) }));
+    adminReady(runId, sender).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_admin_ready_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   if (message.type === ARM_MESSAGE) {
     void recordWorkerContext(runId, sender, true);
-    api({ action: "arm-submit", runId, goodsKey: text(message.goodsKey) }).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_arm_exception", message: String(error?.message || error) }));
+    api({ action: "arm-submit", runId, goodsKey: text(message.goodsKey) }).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_arm_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   if (message.type === REPORT_MESSAGE) {
@@ -277,7 +398,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       outcome: text(message.outcome),
       reasonCode: text(message.reasonCode),
       message: text(message.message),
-    }).then(sendResponse).catch((error) => sendResponse({ ok: false, error: "fresh_worker_report_exception", message: String(error?.message || error) }));
+    }).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "fresh_worker_report_exception",
+      message: String(error?.message || error),
+    }));
     return true;
   }
   return false;
