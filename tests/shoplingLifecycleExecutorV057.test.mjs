@@ -88,13 +88,18 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.5.7 with alarms and main-world executor", async () => {
+test("download package upgrades baseline manifest to v0.5.7 with top-frame-only lifecycle workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.match(source, /manifest\.version = "0\.5\.7"/);
   assert.match(source, /"alarms"/);
-  assert.match(source, /content-shopling-lifecycle-executor\.js/);
-  assert.match(source, /content-shopling-lifecycle-main\.js/);
-  assert.match(source, /world: "MAIN"/);
+  assert.match(
+    source,
+    /js: \["content-shopling-lifecycle-executor\.js"\],[\s\S]{0,120}all_frames: false/,
+  );
+  assert.match(
+    source,
+    /js: \["content-shopling-lifecycle-main\.js"\],[\s\S]{0,120}all_frames: false[\s\S]{0,120}world: "MAIN"/,
+  );
   assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.7\.zip/);
   assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.7/);
 });
