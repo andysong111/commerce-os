@@ -37,7 +37,7 @@ test("group canary prioritizes the most recently proven partial product before a
   assert.match(claimRoute, /const recentSent = await supabase/);
   assert.match(claimRoute, /\.eq\("status", "sent"\)/);
   assert.match(claimRoute, /\.eq\("market_status", "sent"\)/);
-  assert.match(claimRoute, /\.order\("completed_at", \{ ascending: false, nullsFirst: false \}\)/);
+  assert.match(claimRoute, /\.order\("completed_at", \{ ascending: false \}\)/);
   assert.match(claimRoute, /const recentPartial =/);
   assert.match(claimRoute, /queuedIdentities\.has/);
   assert.match(claimRoute, /resumedPartialProduct: Boolean\(recentPartial\)/);
