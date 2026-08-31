@@ -133,7 +133,7 @@ export async function POST(request: Request) {
     .select("owner_id,launch_item_id,completed_at,updated_at")
     .eq("status", "sent")
     .eq("market_status", "sent")
-    .order("completed_at", { ascending: false, nullsFirst: false })
+    .order("completed_at", { ascending: false })
     .order("updated_at", { ascending: false })
     .limit(50);
   if (recentSent.error) {
