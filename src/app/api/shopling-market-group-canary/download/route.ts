@@ -5,12 +5,12 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.2";
+const VERSION = "0.3.3";
 const FILES = [
   "manifest.json",
   "background-root.mjs",
   "content-group-canary.mjs",
-  "content-version-v032.mjs",
+  "content-version-v033.mjs",
   "README.txt",
 ] as const;
 
@@ -28,9 +28,11 @@ export async function GET() {
   const entries: Record<string, Uint8Array> = {};
 
   const manifestSource = await readFile(path.join(root, "manifest.json"), "utf8");
-  const manifest = JSON.parse(manifestSource) as { version?: string; permissions?: string[] };
+  const manifest = JSON.parse(manifestSource) as { version?: string; permissions?: string[]; content_scripts?: Array<{ js?: string[] }> };
   if (manifest.version !== VERSION) throw new Error("shopling_fresh_worker_manifest_version_mismatch");
-  if (!manifest.permissions?.includes("contentSettings")) throw new Error("shopling_fresh_worker_popup_permission_missing");
+  if (manifest.permissions?.includes("contentSettings")) throw new Error("shopling_fresh_worker_obsolete_popup_permission_present");
+  if (manifest.permissions?.includes("scripting")) throw new Error("shopling_fresh_worker_obsolete_launcher_script_permission_present");
+  if (!manifest.content_scripts?.[0]?.js?.includes("content-version-v033.mjs")) throw new Error("shopling_fresh_worker_v033_overlay_missing");
   entries["manifest.json"] = strToU8(manifestSource);
 
   for (const fileName of FILES.filter((file) => file.endsWith(".mjs"))) {
@@ -41,12 +43,12 @@ export async function GET() {
 
   const background = new TextDecoder().decode(entries["background-root.mjs"]);
   const content = new TextDecoder().decode(entries["content-group-canary.mjs"]);
-  if (background.includes("chrome.windows.create")) throw new Error("shopling_fresh_worker_must_not_create_public_launcher_window");
-  if (!background.includes("findPersistentLauncherTab")) throw new Error("shopling_fresh_worker_persistent_launcher_lookup_missing");
-  if (!background.includes("chrome.scripting.executeScript")) throw new Error("shopling_fresh_worker_launcher_click_missing");
-  if (!background.includes("chrome.contentSettings.popups.set")) throw new Error("shopling_fresh_worker_popup_allow_missing");
-  if (!background.includes("waitForAdminPopup")) throw new Error("shopling_fresh_worker_popup_verification_missing");
-  if (!background.includes("restoreLauncherTab")) throw new Error("shopling_fresh_worker_launcher_recovery_missing");
+  if (!background.includes("chrome.tabs.duplicate")) throw new Error("shopling_fresh_worker_a18_duplicate_missing");
+  if (!background.includes("tabId: duplicate.id")) throw new Error("shopling_fresh_worker_duplicate_window_adoption_missing");
+  if (!background.includes("controlTabId")) throw new Error("shopling_fresh_worker_control_template_missing");
+  if (!background.includes("a18CloneVerified")) throw new Error("shopling_fresh_worker_clone_verification_missing");
+  if (background.includes("clickManagerAccessOnLauncher")) throw new Error("shopling_fresh_worker_obsolete_manager_launcher_present");
+  if (background.includes("chrome.contentSettings")) throw new Error("shopling_fresh_worker_obsolete_popup_logic_present");
   if (!background.includes("group-canary-release-v0.3.2")) throw new Error("shopling_fresh_worker_claim_release_missing");
   if (!content.includes("1채널=1새창")) throw new Error("shopling_fresh_worker_contract_missing");
   if (!content.includes("isSubmitResultPage")) throw new Error("shopling_fresh_worker_result_guard_missing");
