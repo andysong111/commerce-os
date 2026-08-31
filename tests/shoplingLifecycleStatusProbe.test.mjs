@@ -27,3 +27,12 @@ test("lifecycle status probe validates numeric goods keys and keeps response no-
   assert.match(source, /cache-control.*no-store/s);
   assert.match(source, /x-content-type-options/);
 });
+
+test("GET diagnostics are preview-only while production automation remains POST", async () => {
+  const source = await readFile(routePath, "utf8");
+  assert.match(source, /export async function POST/);
+  assert.match(source, /export async function GET/);
+  assert.match(source, /process\.env\.VERCEL_ENV !== "preview"/);
+  assert.match(source, /preview_probe_only/);
+  assert.match(source, /status:\s*405/);
+});
