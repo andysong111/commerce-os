@@ -10,6 +10,10 @@ const mainPath = new URL(
   "../public/shopling-account-title-bridge/content-shopling-lifecycle-main.js",
   import.meta.url,
 );
+const relayPath = new URL(
+  "../public/shopling-account-title-bridge/content-shopling-lifecycle-cross-world-relay.js",
+  import.meta.url,
+);
 const backgroundPath = new URL(
   "../public/shopling-account-title-bridge/background-shopling-lifecycle.js",
   import.meta.url,
@@ -62,6 +66,18 @@ test("MAIN-world bridge accepts persisted lifecycle context after Shopling GET s
   assert.match(main, /data-commerce-os-shopling-lifecycle-main/);
 });
 
+test("v0.5.9 relays cross-world lifecycle events into world-local CustomEvents before legacy instanceof checks", async () => {
+  const relay = await readFile(relayPath, "utf8");
+  assert.doesNotThrow(() => new Function(relay));
+  assert.match(relay, /const RELAY_VERSION = "v0\.5\.9"/);
+  assert.match(relay, /chrome\?\.runtime\?\.id/);
+  assert.match(relay, /event\.detail/);
+  assert.match(relay, /stopImmediatePropagation/);
+  assert.match(relay, /window\.dispatchEvent\(new CustomEvent/);
+  assert.match(relay, /__commerceOsShoplingLifecycleRelayed/);
+  assert.doesNotMatch(relay, /event instanceof CustomEvent/);
+});
+
 test("delete remains double-gated in isolated and main worlds", async () => {
   const executor = await readFile(executorPath, "utf8");
   const main = await readFile(mainPath, "utf8");
@@ -102,18 +118,19 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.5.8 with top-frame-only lifecycle workers", async () => {
+test("download package upgrades baseline manifest to v0.5.9 with relay before both lifecycle worlds", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.5\.8"/);
+  assert.match(source, /manifest\.version = "0\.5\.9"/);
   assert.match(source, /"alarms"/);
+  assert.match(source, /content-shopling-lifecycle-cross-world-relay\.js/);
   assert.match(
     source,
-    /js: \["content-shopling-lifecycle-executor\.js"\],[\s\S]{0,120}all_frames: false/,
+    /js: \["content-shopling-lifecycle-cross-world-relay\.js"\],[\s\S]{0,180}js: \["content-shopling-lifecycle-executor\.js"\]/,
   );
   assert.match(
     source,
-    /js: \["content-shopling-lifecycle-main\.js"\],[\s\S]{0,120}all_frames: false[\s\S]{0,120}world: "MAIN"/,
+    /js: \["content-shopling-lifecycle-cross-world-relay\.js"\],[\s\S]{0,180}world: "MAIN"[\s\S]{0,220}js: \["content-shopling-lifecycle-main\.js"\]/,
   );
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.8\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.8/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.9\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.9/);
 });
