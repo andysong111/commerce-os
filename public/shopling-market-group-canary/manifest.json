@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Market Group Canary",
   "short_name": "Shopling Group Canary",
-  "version": "0.2.0",
-  "description": "신규상품 1개만 원장에서 확보하여 이미 완료된 채널은 제외하고 남은 DM/SM 채널을 Shopling 실제 수동 경로로 순차 검증합니다.",
+  "version": "0.2.1",
+  "description": "신규상품 1개의 남은 DM/SM 채널만 이어서 처리하며 실제 Shopling 송신 결과 페이지에서만 성공/실패를 판정합니다.",
   "permissions": ["storage"],
   "host_permissions": [
     "*://*.shopling.co.kr/*",
