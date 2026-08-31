@@ -2,6 +2,8 @@
 
 const API_ENDPOINT = "https://commerce-os-ops-center.vercel.app/api/shopling-account-title-bridge/pipeline";
 const API_BRIDGE = "v0.5.0";
+const CLAIM_API_ENDPOINT = "https://commerce-os-ops-center.vercel.app/api/shopling-market-group-canary/claim";
+const CLAIM_API_BRIDGE = "group-canary-v0.2.1";
 const CLAIM_MESSAGE = "commerce-os-shopling-group-canary-claim";
 const ARM_MESSAGE = "commerce-os-shopling-group-canary-arm";
 const REPORT_MESSAGE = "commerce-os-shopling-group-canary-report";
@@ -18,25 +20,25 @@ function text(value) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
 }
 
-async function api(body) {
+async function requestJson(endpoint, payload) {
   try {
-    const response = await fetch(API_ENDPOINT, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bridge: API_BRIDGE, ...body }),
+      body: JSON.stringify(payload),
       credentials: "omit",
       cache: "no-store",
       signal: AbortSignal.timeout(15000),
     });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok || payload?.ok !== true) {
+    const body = await response.json().catch(() => null);
+    if (!response.ok || body?.ok !== true) {
       return {
         ok: false,
-        error: text(payload?.error) || `group_canary_http_${response.status}`,
-        message: text(payload?.message),
+        error: text(body?.error) || `group_canary_http_${response.status}`,
+        message: text(body?.message),
       };
     }
-    return payload;
+    return body;
   } catch (error) {
     return {
       ok: false,
@@ -44,6 +46,14 @@ async function api(body) {
       message: error instanceof Error ? error.message : String(error || "group canary request failed"),
     };
   }
+}
+
+function api(body) {
+  return requestJson(API_ENDPOINT, { bridge: API_BRIDGE, ...body });
+}
+
+function claimApi(runId) {
+  return requestJson(CLAIM_API_ENDPOINT, { bridge: CLAIM_API_BRIDGE, runId });
 }
 
 function normalizeTask(raw) {
@@ -83,10 +93,10 @@ async function releaseClaimed(runId, tasks, reasonCode, message) {
 }
 
 async function claimOneProduct(runId) {
-  if (!/^canary-group-v020-[A-Za-z0-9._:-]{12,150}$/.test(runId)) {
+  if (!/^canary-group-v021-[A-Za-z0-9._:-]{12,150}$/.test(runId)) {
     return { ok: false, error: "invalid_group_canary_run_id" };
   }
-  const response = await api({ action: "claim", runId, groupLimit: 1 });
+  const response = await claimApi(runId);
   if (!response?.ok) return response;
   const rawTasks = Array.isArray(response.tasks) ? response.tasks : [];
   if (!rawTasks.length) return { ok: true, tasks: [], empty: true };
