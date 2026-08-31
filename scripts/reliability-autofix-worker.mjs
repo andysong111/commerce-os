@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
+import { looksLikeExecutableTypeScriptHarness } from "./reliability-autofix-harness.mjs";
 
 const ROOT = process.cwd();
 const ENDPOINT = process.env.RELIABILITY_AUTOFIX_ENDPOINT ||
@@ -223,7 +224,11 @@ function contentReferencesHarnessTarget(content, targetPath) {
 function enrichContextWithExistingHarness(context, targetPath) {
   const harnesses = new Map();
   const consider = (path, content) => {
-    if (!isExecutedTestPath(path) || !contentReferencesHarnessTarget(content, targetPath)) return;
+    if (
+      !isExecutedTestPath(path) ||
+      !contentReferencesHarnessTarget(content, targetPath) ||
+      !looksLikeExecutableTypeScriptHarness(content)
+    ) return;
     try {
       assertExecutedTestHarnessCompatible(path, content);
     } catch {
