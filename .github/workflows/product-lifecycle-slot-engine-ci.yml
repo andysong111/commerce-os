@@ -8,11 +8,14 @@ on:
       - "src/lib/productLifecyclePurchaseOverlay.ts"
       - "src/lib/integrations/productDecisionAgent.ts"
       - "src/lib/extendedModuleRegistry.ts"
+      - "src/lib/opsAdaptiveDispatcher.ts"
       - "src/lib/supabase/admin.ts"
       - "src/app/product-lifecycle/**"
       - "src/app/api/cron/product-lifecycle-refresh/**"
       - "src/app/api/shopling-lifecycle-bridge/**"
       - "tests/productLifecyclePolicy.test.mjs"
+      - "tests/productLifecycleDispatcherRegistration.test.mjs"
+      - "tests/priceAdjustmentEngineIntegration.test.mjs"
       - "supabase/migrations/202608310001_product_lifecycle_slot_engine_v1.sql"
       - ".github/workflows/product-lifecycle-slot-engine-ci.yml"
   workflow_dispatch:
@@ -43,15 +46,20 @@ jobs:
           src/lib/productLifecyclePurchaseOverlay.ts
           src/lib/integrations/productDecisionAgent.ts
           src/lib/extendedModuleRegistry.ts
+          src/lib/opsAdaptiveDispatcher.ts
           src/lib/supabase/admin.ts
           src/app/product-lifecycle/page.tsx
           src/app/api/cron/product-lifecycle-refresh/route.ts
           src/app/api/shopling-lifecycle-bridge/route.ts
           tests/productLifecyclePolicy.test.mjs
+          tests/productLifecycleDispatcherRegistration.test.mjs
+          tests/priceAdjustmentEngineIntegration.test.mjs
       - name: Run lifecycle regressions
         run: >-
           node --experimental-strip-types --test
           tests/productLifecyclePolicy.test.mjs
+          tests/productLifecycleDispatcherRegistration.test.mjs
+          tests/priceAdjustmentEngineIntegration.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
