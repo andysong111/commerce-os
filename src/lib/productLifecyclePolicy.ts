@@ -1,6 +1,6 @@
 const DAY_MS = 86_400_000;
 
-export const PRODUCT_LIFECYCLE_RULE_VERSION = "commerce-os-product-lifecycle-v1.0.0";
+export const PRODUCT_LIFECYCLE_RULE_VERSION = "commerce-os-product-lifecycle-v1.0.1";
 export const DORMANT_AFTER_DAYS = 180;
 export const DISCONTINUE_AFTER_DAYS = 365;
 export const DORMANT_RETEST_AFTER_DAYS = 90;
@@ -116,19 +116,16 @@ function finalDecision(input: {
   momentumRatio: number | null;
   nextEvaluationAt?: string | null;
   reasonCodes: string[];
-  dataStatus?: string | null;
 }): ProductLifecyclePolicyDecision {
   const desiredShoplingState = shoplingStateFor(input);
   const destructiveActionEligible = desiredShoplingState === "DELETE";
-  const inventoryReview =
-    input.inventoryRequiresReview ||
-    (input.lifecycleState === "DISCONTINUE" && !input.inventoryConfirmed);
-  const dataReview = String(input.dataStatus ?? "").toUpperCase() === "REVIEW";
-  const requiresReview = inventoryReview || dataReview;
-  const reviewReason = inventoryReview
-    ? "INVENTORY_NOT_SAFE_FOR_DESTRUCTIVE_ACTION"
-    : dataReview
-      ? "PRODUCT_MASTER_DATA_REVIEW_REQUIRED"
+  const destructiveInventoryUnverified =
+    input.lifecycleState === "DISCONTINUE" && !input.inventoryConfirmed;
+  const requiresReview = input.inventoryRequiresReview || destructiveInventoryUnverified;
+  const reviewReason = input.inventoryRequiresReview
+    ? "INVENTORY_DATA_REVIEW_REQUIRED"
+    : destructiveInventoryUnverified
+      ? "INVENTORY_NOT_SAFE_FOR_DESTRUCTIVE_ACTION"
       : null;
 
   return {
@@ -188,7 +185,6 @@ export function evaluateProductLifecycle(
     momentumRatio: momentum,
     nextEvaluationAt,
     reasonCodes,
-    dataStatus: input.dataStatus,
   });
 
   if (productStatus === "DISCONTINUED" || input.skuActive === false) {
