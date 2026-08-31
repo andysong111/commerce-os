@@ -1,25 +1,25 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.2.0";
-  const STATE_KEY = "commerceOsShoplingMarketGroupCanaryV020";
+  const VERSION = "0.3.0";
+  const STATE_KEY = "commerceOsShoplingMarketFreshWorkerCanaryV030";
   const CLAIM_MESSAGE = "commerce-os-shopling-group-canary-claim";
   const ARM_MESSAGE = "commerce-os-shopling-group-canary-arm";
   const REPORT_MESSAGE = "commerce-os-shopling-group-canary-report";
-  const PANEL_ID = "commerce-os-shopling-market-group-canary-panel";
+  const OPEN_WORKER_MESSAGE = "commerce-os-shopling-fresh-worker-open";
+  const CLOSE_WORKERS_MESSAGE = "commerce-os-shopling-fresh-worker-close";
+  const CONTEXT_MESSAGE = "commerce-os-shopling-fresh-worker-context";
+  const ADMIN_READY_MESSAGE = "commerce-os-shopling-fresh-worker-admin-ready";
+  const PANEL_ID = "commerce-os-shopling-market-fresh-worker-panel";
   const STATUS_ID = `${PANEL_ID}-status`;
   const BUTTON_ID = `${PANEL_ID}-button`;
-  const SUBMIT_CONFIRM_TIMEOUT_MS = 20000;
+  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;
 
   let driving = false;
   let timer = null;
 
   function text(value) {
     return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
-  }
-
-  function canonical(value) {
-    return text(value).replace(/\s+/g, "").toUpperCase();
   }
 
   function escapeRegex(value) {
@@ -50,13 +50,30 @@
     return location.hostname === "a.shopling.co.kr" && /\/prodlinkage\/goods_mallReg_preProdChoice\.phtml$/i.test(location.pathname);
   }
 
+  function isSubmitResultPage() {
+    return /\/prod_a\/prod_rgst_rspt\.phtml$/i.test(location.pathname)
+      && /shopling\.co\.kr$/i.test(location.hostname);
+  }
+
   function isProductListUi() {
     if (location.hostname !== "a.shopling.co.kr") return false;
-    if (isIdChoicePage() || isPreProdChoicePage()) return false;
+    if (isIdChoicePage() || isPreProdChoicePage() || isSubmitResultPage()) return false;
     const body = bodyText();
     return /쇼핑몰\s*상품등록(?:하기)?/i.test(body)
       && /쇼핑몰\s*미등록\s*검색/i.test(body)
       && /총\s*조회수\s*[:：]?\s*[\d,]+\s*건/i.test(body);
+  }
+
+  function isPublicShoplingHome() {
+    return /^(?:www\.)?shopling\.co\.kr$/i.test(location.hostname)
+      && !/a\.shopling\.co\.kr$/i.test(location.hostname);
+  }
+
+  function isAdminShell() {
+    if (location.hostname !== "a.shopling.co.kr" || window.top !== window) return false;
+    if (isProductListUi() || isIdChoicePage() || isPreProdChoicePage() || isSubmitResultPage()) return false;
+    const body = bodyText();
+    return /쇼핑몰상품등록|상품조회수정|상품등록|상품공급관리/i.test(body);
   }
 
   function sendMessage(payload) {
@@ -105,7 +122,7 @@
   }
 
   function newRunId() {
-    return `canary-group-v020-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    return `canary-group-v030-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   function optionText(select) {
@@ -141,7 +158,7 @@
 
   function click(element) {
     if (!(element instanceof HTMLElement)) return false;
-    element.scrollIntoView({ block: "center", inline: "center" });
+    try { element.scrollIntoView({ block: "center", inline: "center" }); } catch { /* hidden menu is okay */ }
     element.click();
     return true;
   }
@@ -150,9 +167,10 @@
     return text(element?.value || element?.innerText || element?.textContent || "");
   }
 
-  function buttons(pattern) {
+  function buttons(pattern, includeHidden = false) {
     return [...document.querySelectorAll('button, input[type="button"], input[type="submit"], a')]
-      .filter((element) => visible(element) && !element.disabled)
+      .filter((element) => includeHidden || visible(element))
+      .filter((element) => !element.disabled)
       .filter((element) => pattern.test(buttonText(element)));
   }
 
@@ -231,7 +249,7 @@
     const searchButton = nearbyButtons
       .filter((element) => /^(검색|조회)$/i.test(buttonText(element)))
       .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0] || null;
-    return { ok: true, heading, profileSelect, searchType, input, searchButton };
+    return { ok: true, profileSelect, searchType, input, searchButton };
   }
 
   function rowMatchesExactIdentity(row, task) {
@@ -247,10 +265,7 @@
   function exactProductRows(task) {
     return [...document.querySelectorAll("tr")]
       .filter((row) => row.querySelectorAll(":scope > td").length >= 3)
-      .map((row) => ({
-        row,
-        checkbox: row.querySelector('input[type="checkbox"]:not([disabled])'),
-      }))
+      .map((row) => ({ row, checkbox: row.querySelector('input[type="checkbox"]:not([disabled])') }))
       .filter((entry) => entry.checkbox && visible(entry.checkbox) && rowMatchesExactIdentity(entry.row, task));
   }
 
@@ -311,10 +326,29 @@
       .map((match) => Number(match[1].replace(/,/g, "")) || 0);
     const failureCounts = [...body.matchAll(/실패건수\s*[:：]?\s*([\d,]+)/g)]
       .map((match) => Number(match[1].replace(/,/g, "")) || 0);
-    const resultLike = /상품\s*등록.{0,20}(결과|완료|성공)|등록\s*중\s*전송\s*결과/i.test(body);
-    const success = resultLike && (successCounts.some((value) => value > 0) || /성공여부\s*성공/i.test(body));
-    const failure = resultLike && (failureCounts.some((value) => value > 0) || /성공여부\s*실패/i.test(body));
-    return { success: success && !failure, failure };
+    const processing = /처리중입니다|잠시만\s*기다려주시기\s*바랍니다/i.test(body);
+    const resultLike = /쇼핑몰\s*상품\s*등록\s*전송\s*결과|상품\s*등록.{0,30}(결과|완료|성공)/i.test(body);
+    const hasSuccess = successCounts.some((value) => value > 0) || /성공여부\s*성공/i.test(body);
+    const hasFailure = failureCounts.some((value) => value > 0) || /성공여부\s*실패/i.test(body);
+    return { success: resultLike && !processing && hasSuccess && !hasFailure, failure: resultLike && !processing && hasFailure, processing };
+  }
+
+  async function workerContext(runId) {
+    const response = await sendMessage({ type: CONTEXT_MESSAGE, runId });
+    return response || { worker: false, control: false };
+  }
+
+  async function closeWorkers(state, preserveSenderWindow = false) {
+    return sendMessage({ type: CLOSE_WORKERS_MESSAGE, runId: state.runId, preserveSenderWindow });
+  }
+
+  async function openNextFreshWorker(state) {
+    const response = await sendMessage({ type: OPEN_WORKER_MESSAGE, runId: state.runId });
+    if (!response?.ok) {
+      await saveState({ ...state, status: "failed", stage: "worker_open_failed", message: `새 관리자 작업창 생성 실패: ${text(response?.message || response?.error)}`, updatedAt: Date.now() });
+      return false;
+    }
+    return true;
   }
 
   async function releaseTasks(state, fromIndex, reasonCode, message) {
@@ -322,14 +356,7 @@
     let allOk = true;
     for (let index = fromIndex; index < tasks.length; index += 1) {
       const task = tasks[index];
-      const response = await sendMessage({
-        type: REPORT_MESSAGE,
-        runId: state.runId,
-        goodsKey: task.goodsKey,
-        outcome: "failed",
-        reasonCode,
-        message,
-      });
+      const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "failed", reasonCode, message });
       if (!response?.ok) allOk = false;
     }
     return allOk;
@@ -338,115 +365,49 @@
   async function reportAndAdvance(state, outcome, reasonCode, message) {
     const task = currentTask(state);
     if (!task) return;
-    const response = await sendMessage({
-      type: REPORT_MESSAGE,
-      runId: state.runId,
-      goodsKey: task.goodsKey,
-      outcome,
-      reasonCode,
-      message,
-    });
+    const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome, reasonCode, message });
     if (!response?.ok) {
-      await saveState({
-        ...state,
-        status: "confirm_needed",
-        stage: "report_failed",
-        message: `Commerce OS 원장 기록 실패: ${text(response?.message || response?.error)}`,
-        updatedAt: Date.now(),
-      });
+      await saveState({ ...state, status: "confirm_needed", stage: "report_failed", message: `Commerce OS 원장 기록 실패: ${text(response?.message || response?.error)}`, updatedAt: Date.now() });
+      await closeWorkers(state, true);
       return;
     }
     const results = Array.isArray(state.results) ? [...state.results] : [];
-    results.push({
-      goodsKey: task.goodsKey,
-      ptnGoodsCd: task.ptnGoodsCd,
-      profile: task.profile,
-      outcome,
-      reasonCode,
-    });
+    results.push({ goodsKey: task.goodsKey, ptnGoodsCd: task.ptnGoodsCd, profile: task.profile, outcome, reasonCode });
     const nextIndex = Number(state.index || 0) + 1;
     if (nextIndex >= state.tasks.length) {
-      await saveState({
-        ...state,
-        results,
-        index: nextIndex,
-        status: "completed",
-        stage: "finished",
-        message: `1상품 검증 완료 · ${results.length}개 채널 종료`,
-        finishedAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-    } else {
-      const nextTask = state.tasks[nextIndex];
-      await saveState({
-        ...state,
-        results,
-        index: nextIndex,
-        status: "running",
-        stage: "claimed",
-        submitClickedAt: 0,
-        message: `${nextTask.ptnGoodsCd} → ${nextTask.profile} 다음 채널 시작`,
-        updatedAt: Date.now(),
-      });
+      const finished = { ...state, results, index: nextIndex, status: "completed", stage: "finished", message: `1상품 Fresh Worker 검증 완료 · ${results.length}개 채널 종료`, finishedAt: Date.now(), updatedAt: Date.now() };
+      await saveState(finished);
+      await closeWorkers(finished, false);
+      return;
     }
-    if (!isProductListUi() && window.top === window) {
-      setTimeout(() => {
-        try { window.close(); } catch { /* best effort */ }
-      }, 350);
-    }
+    const nextTask = state.tasks[nextIndex];
+    const next = { ...state, results, index: nextIndex, status: "running", stage: "worker_opening", submitClickedAt: 0, stepAt: Date.now(), message: `${nextTask.ptnGoodsCd} → ${nextTask.profile} · 새 관리자 작업창으로 다음 채널 시작`, updatedAt: Date.now() };
+    await saveState(next);
+    await openNextFreshWorker(next);
   }
 
   async function failAndStop(state, reasonCode, message) {
     const task = currentTask(state);
     if (!task) return;
     if (["submit_armed", "submit_clicked"].includes(state.stage)) {
-      const response = await sendMessage({
-        type: REPORT_MESSAGE,
-        runId: state.runId,
-        goodsKey: task.goodsKey,
-        outcome: "confirm_needed",
-        reasonCode,
-        message,
-      });
-      await saveState({
-        ...state,
-        status: "confirm_needed",
-        stage: "stopped_after_submit_boundary",
-        message: response?.ok ? message : `송신경계 이후 원장기록도 확인필요: ${text(response?.message || response?.error)}`,
-        updatedAt: Date.now(),
-      });
+      const response = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "confirm_needed", reasonCode, message });
+      const stopped = { ...state, status: "confirm_needed", stage: "stopped_after_submit_boundary", message: response?.ok ? message : `송신경계 이후 원장기록도 확인필요: ${text(response?.message || response?.error)}`, updatedAt: Date.now() };
+      await saveState(stopped);
+      await closeWorkers(stopped, true);
       return;
     }
-    const currentRelease = await sendMessage({
-      type: REPORT_MESSAGE,
-      runId: state.runId,
-      goodsKey: task.goodsKey,
-      outcome: "failed",
-      reasonCode,
-      message,
-    });
-    const remainingReleased = await releaseTasks(
-      state,
-      Number(state.index || 0) + 1,
-      "group_canary_aborted_unstarted",
-      "앞선 채널 검증이 송신 전에 중단되어 아직 시작하지 않은 채널을 원복했습니다.",
-    );
-    await saveState({
-      ...state,
-      status: currentRelease?.ok && remainingReleased ? "failed" : "confirm_needed",
-      stage: "stopped",
-      message: currentRelease?.ok && remainingReleased
-        ? `${message} · 현재/미시작 채널은 대기열로 원복했습니다.`
-        : `${message} · 일부 원복 결과를 확인해야 합니다. 다시 실행하지 마세요.`,
-      updatedAt: Date.now(),
-    });
+    const currentRelease = await sendMessage({ type: REPORT_MESSAGE, runId: state.runId, goodsKey: task.goodsKey, outcome: "failed", reasonCode, message });
+    const remainingReleased = await releaseTasks(state, Number(state.index || 0) + 1, "fresh_worker_aborted_unstarted", "앞선 채널 검증이 송신 전에 중단되어 아직 시작하지 않은 채널을 원복했습니다.");
+    const stopped = { ...state, status: currentRelease?.ok && remainingReleased ? "failed" : "confirm_needed", stage: "stopped", message: currentRelease?.ok && remainingReleased ? `${message} · 현재/미시작 채널은 대기열로 원복했습니다.` : `${message} · 일부 원복 결과를 확인해야 합니다. 다시 실행하지 마세요.`, updatedAt: Date.now() };
+    await saveState(stopped);
+    await closeWorkers(stopped, false);
   }
 
-  async function startGroupCanary() {
+  async function startFreshWorkerCanary() {
     const existing = await getState();
     if (existing?.status === "running") return;
     const runId = newRunId();
-    setPanelStatus("Commerce OS 원장에서 신규상품 1개를 확보 중입니다.", "info", true);
+    setPanelStatus("Commerce OS 원장에서 이어서 검증할 상품 1개를 확보 중입니다.", "info", true);
     const claim = await sendMessage({ type: CLAIM_MESSAGE, runId });
     if (!claim?.ok) {
       setPanelStatus(`대상 확보 실패: ${text(claim?.message || claim?.error)}`, "error", false);
@@ -454,28 +415,67 @@
     }
     const tasks = Array.isArray(claim.tasks) ? claim.tasks : [];
     if (!tasks.length) {
-      setPanelStatus("검증 가능한 신규상품 채널 대기건이 없습니다.", "success", false);
+      setPanelStatus("검증 가능한 마켓 대기 채널이 없습니다.", "success", false);
       return;
     }
     const first = tasks[0];
-    await saveState({
-      version: VERSION,
-      runId,
-      tasks,
-      index: 0,
-      results: [],
-      status: "running",
-      stage: "claimed",
-      startedAt: Date.now(),
-      updatedAt: Date.now(),
-      message: `1상품 ${tasks.length}개 남은 채널 확보 · ${first.ptnGoodsCd} → ${first.profile} 시작`,
-    });
-    void drive();
+    const state = { version: VERSION, runId, tasks, index: 0, results: [], status: "running", stage: "worker_opening", startedAt: Date.now(), stepAt: Date.now(), updatedAt: Date.now(), message: `1상품 ${tasks.length}개 남은 채널 확보 · ${first.ptnGoodsCd} → ${first.profile} · 새 관리자 작업창 시작` };
+    await saveState(state);
+    await openNextFreshWorker(state);
+  }
+
+  function findManagerAccessButton() {
+    return buttons(/^관리자\s*접속$/i, true)[0] || buttons(/관리자\s*접속/i, true)[0] || null;
+  }
+
+  function findA18Link() {
+    const exact = buttons(/^\[?18\]?\s*쇼핑몰\s*상품등록$/i, true)[0];
+    if (exact) return exact;
+    return buttons(/쇼핑몰\s*상품등록/i, true).find((element) => !/상품등록하기/i.test(buttonText(element))) || null;
+  }
+
+  function dispatchHover(element) {
+    if (!(element instanceof Element)) return;
+    for (const type of ["mouseenter", "mouseover", "mousemove"]) element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  }
+
+  async function navigateWorkerShell(state) {
+    if (window.top !== window) return;
+    const context = await workerContext(state.runId);
+    if (!context.worker) return;
+    if (isPublicShoplingHome()) {
+      if (state.stage !== "worker_opening") return;
+      const managerButton = findManagerAccessButton();
+      if (!managerButton) {
+        await failAndStop(state, "manager_access_button_missing", "Shopling 메인에서 '관리자접속' 버튼을 찾지 못했습니다.");
+        return;
+      }
+      await patchState({ stage: "manager_access_clicked", stepAt: Date.now(), message: "새 Shopling 창 · 관리자접속 자동 클릭" });
+      click(managerButton);
+      return;
+    }
+    if (isAdminShell() && ["worker_opening", "manager_access_clicked", "await_a18"].includes(state.stage)) {
+      await sendMessage({ type: ADMIN_READY_MESSAGE, runId: state.runId });
+      const aMenu = buttons(/^\[?A\]?\s*상품$/i, true)[0] || buttons(/\[A\].*상품/i, true)[0];
+      if (aMenu) dispatchHover(aMenu);
+      await sleep(250);
+      const a18 = findA18Link();
+      if (!a18) {
+        await failAndStop(state, "a18_menu_missing", "새 관리자 창에서 [18] 쇼핑몰상품등록 메뉴를 찾지 못했습니다.");
+        return;
+      }
+      await patchState({ stage: "a18_clicked", stepAt: Date.now(), message: "새 관리자 창 · [18] 쇼핑몰상품등록 진입" });
+      click(a18);
+    }
   }
 
   async function driveProductList(state) {
     const task = currentTask(state);
     if (!task) return;
+    if (["worker_opening", "manager_access_clicked", "await_a18", "a18_clicked"].includes(state.stage)) {
+      await patchState({ stage: "claimed", stepAt: Date.now(), message: `${task.ptnGoodsCd} → ${task.profile} · 새 A18 작업창 준비 완료` });
+      return;
+    }
     if (state.stage === "claimed") {
       const controls = findUnregisteredControls(task.profile);
       if (!controls.ok) {
@@ -487,50 +487,37 @@
         await failAndStop(state, "unregistered_profile_apply_failed", `쇼핑몰 미등록 검색의 ${task.profile} 그룹 적용에 실패했습니다.`);
         return;
       }
-      if (controls.searchType && selectHas(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i)) {
-        setSelect(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i);
-      }
+      if (controls.searchType && selectHas(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i)) setSelect(controls.searchType, /자사\s*상품\s*코드|자체\s*상품\s*코드|자사\s*코드/i);
       if (!controls.input || !controls.searchButton) {
         await failAndStop(state, "unregistered_search_controls_missing", "쇼핑몰 미등록 검색의 입력칸/검색 버튼을 찾지 못했습니다.");
         return;
       }
       setInput(controls.input, task.ptnGoodsCd);
-      await patchState({ stage: "unregistered_search_submitted", message: `${task.ptnGoodsCd} · ${task.profile} 미등록 조회` });
+      await patchState({ stage: "unregistered_search_submitted", stepAt: Date.now(), message: `${task.ptnGoodsCd} · ${task.profile} 미등록 조회` });
       click(controls.searchButton);
       return;
     }
-
     if (state.stage === "unregistered_search_submitted") {
-      await sleep(700);
+      await sleep(750);
       const rows = exactProductRows(task);
       if (rows.length === 0) {
-        await reportAndAdvance(
-          state,
-          "already_registered",
-          "no_exact_unregistered_identity",
-          `${task.goodsKey} + ${task.ptnGoodsCd}는 ${task.profile} 미등록 검색에 없어 재송신하지 않습니다.`,
-        );
+        await reportAndAdvance(state, "already_registered", "no_exact_unregistered_identity", `${task.goodsKey} + ${task.ptnGoodsCd}는 ${task.profile} 미등록 검색에 없어 재송신하지 않습니다.`);
         return;
       }
       if (rows.length !== 1) {
-        await failAndStop(
-          state,
-          "exact_product_identity_ambiguous",
-          `${task.goodsKey} + ${task.ptnGoodsCd} 동시 정확일치 행이 ${rows.length}개라 중단했습니다.`,
-        );
+        await failAndStop(state, "exact_product_identity_ambiguous", `${task.goodsKey} + ${task.ptnGoodsCd} 동시 정확일치 행이 ${rows.length}개라 중단했습니다.`);
         return;
       }
       if (!checkOnly(rows[0])) {
         await failAndStop(state, "exact_product_select_failed", "상품번호+자사상품코드 정확일치 행 선택에 실패했습니다.");
         return;
       }
-      const registerButton = buttons(/^(쇼핑몰\s*상품등록(?:하기)?|쇼핑몰\s*상품\s*등록(?:하기)?)$/i)[0]
-        || buttons(/쇼핑몰\s*상품등록(?:하기)?/i)[0];
+      const registerButton = buttons(/^(쇼핑몰\s*상품등록(?:하기)?|쇼핑몰\s*상품\s*등록(?:하기)?)$/i)[0] || buttons(/쇼핑몰\s*상품등록(?:하기)?/i)[0];
       if (!registerButton) {
         await failAndStop(state, "mall_register_button_missing", "'쇼핑몰 상품등록하기' 버튼을 찾지 못했습니다.");
         return;
       }
-      await patchState({ stage: "register_clicked", message: `${task.goodsKey} + ${task.ptnGoodsCd} 정확일치 · 등록 팝업 호출` });
+      await patchState({ stage: "register_clicked", stepAt: Date.now(), message: `${task.goodsKey} + ${task.ptnGoodsCd} 정확일치 · 등록 팝업 호출` });
       click(registerButton);
     }
   }
@@ -545,9 +532,9 @@
       return;
     }
     if (optionText(select) !== task.profile) {
-      await patchState({ stage: "id_profile_selected", message: `쇼핑몰 ID 선택 · ${task.profile} 저장검색 적용` });
+      await patchState({ stage: "id_profile_selected", stepAt: Date.now(), message: `쇼핑몰 ID 선택 · ${task.profile} 저장검색 적용` });
       setSelect(select, profilePattern);
-      await sleep(800);
+      await sleep(850);
       return;
     }
     await sleep(500);
@@ -561,8 +548,7 @@
       await failAndStop(state, "mall_id_select_button_missing", "쇼핑몰 ID 선택 화면의 상단 '선택' 버튼을 찾지 못했습니다.");
       return;
     }
-    await patchState({ stage: "id_choice_ready", message: `${task.profile} 저장검색 · 쇼핑몰 ID ${checked.length}개 확인` });
-    await patchState({ stage: "id_choice_submitted", message: "쇼핑몰 ID 선택 완료 · 연동정보 화면 이동" });
+    await patchState({ stage: "id_choice_submitted", stepAt: Date.now(), message: `${task.profile} 저장검색 · 쇼핑몰 ID ${checked.length}개 확인 · 연동정보 화면 이동` });
     click(selectButton);
   }
 
@@ -576,9 +562,9 @@
       return;
     }
     if (optionText(select) !== task.profile) {
-      await patchState({ stage: "pre_profile_selected", message: `쇼핑몰 연동 정보 · ${task.profile} 저장검색 적용` });
+      await patchState({ stage: "pre_profile_selected", stepAt: Date.now(), message: `쇼핑몰 연동 정보 · ${task.profile} 저장검색 적용` });
       setSelect(select, profilePattern);
-      await sleep(800);
+      await sleep(850);
       return;
     }
     await sleep(500);
@@ -592,8 +578,7 @@
       await failAndStop(state, "submit_button_missing", "'상품등록송신' 버튼을 찾지 못했습니다.");
       return;
     }
-    await patchState({ stage: "pre_mapping_ready", message: `${task.profile} 연동정보 7개 항목 검증 완료` });
-    await patchState({ stage: "arming", message: "송신 직전 Commerce OS 영구잠금 확인" });
+    await patchState({ stage: "arming", stepAt: Date.now(), message: `${task.profile} 연동정보 검증 완료 · 송신 직전 Commerce OS 영구잠금 확인` });
     const arm = await sendMessage({ type: ARM_MESSAGE, runId: state.runId, goodsKey: task.goodsKey });
     if (!arm?.ok) {
       await failAndStop(state, "submit_lock_failed", `송신 잠금 실패: ${text(arm?.message || arm?.error)}`);
@@ -601,44 +586,26 @@
     }
     const latest = await getState();
     if (!latest || latest.runId !== state.runId || latest.status !== "running") return;
-    await patchState({
-      stage: "submit_clicked",
-      submitArmedAt: Date.now(),
-      submitClickedAt: Date.now(),
-      message: `${task.profile} 영구잠금 완료 · Shopling 상품등록송신 클릭`,
-    });
+    await patchState({ stage: "submit_clicked", submitArmedAt: Date.now(), submitClickedAt: Date.now(), stepAt: Date.now(), message: `${task.profile} 영구잠금 완료 · Shopling 상품등록송신 클릭` });
     click(sendButton);
   }
 
   async function checkSubmitOutcome(state) {
-    if (state.stage !== "submit_clicked") return;
+    if (state.stage !== "submit_clicked" || !isSubmitResultPage()) return;
     const task = currentTask(state);
     if (!task) return;
     const evidence = submitEvidence();
     if (evidence.success) {
-      await reportAndAdvance(
-        state,
-        "sent",
-        "shopling_submit_success",
-        `${task.profile} Shopling 결과 화면에서 성공건수>0, 실패건수=0을 확인했습니다.`,
-      );
+      await reportAndAdvance(state, "sent", "shopling_submit_success_fresh_worker", `${task.profile} 실제 Shopling 결과 화면에서 처리완료·성공건수>0·실패건수=0을 확인했습니다.`);
       return;
     }
     if (evidence.failure) {
-      await failAndStop(
-        state,
-        "shopling_submit_result_has_failure",
-        `${task.profile} 송신 결과에 실패건수가 있어 재송신하지 않고 확인필요로 중단합니다.`,
-      );
+      await failAndStop(state, "shopling_submit_result_has_failure", `${task.profile} 송신 결과에 실패건수가 있어 재송신하지 않고 확인필요로 중단합니다.`);
       return;
     }
     const age = Date.now() - Number(state.submitClickedAt || 0);
-    if (age >= SUBMIT_CONFIRM_TIMEOUT_MS) {
-      await failAndStop(
-        state,
-        "submit_result_requires_manual_check",
-        `${task.profile} 상품등록송신 클릭 후 ${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 성공결과를 확인하지 못했습니다.`,
-      );
+    if (!evidence.processing && age >= SUBMIT_CONFIRM_TIMEOUT_MS) {
+      await failAndStop(state, "submit_result_requires_manual_check", `${task.profile} 실제 결과 페이지에서 ${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 확정 성공결과를 확인하지 못했습니다.`);
     }
   }
 
@@ -649,25 +616,20 @@
       const state = await getState();
       updatePanelFromState(state);
       if (!state || state.status !== "running") return;
+      const context = await workerContext(state.runId);
+      if (!context.worker) return;
       if (state.stage === "submit_clicked") {
-        if (isProductListUi() || isIdChoicePage() || isPreProdChoicePage()) return;
+        if (!isSubmitResultPage()) return;
         await checkSubmitOutcome(state);
         return;
       }
-      if (isIdChoicePage()) {
-        await driveIdChoice(state);
-        return;
-      }
-      if (isPreProdChoicePage()) {
-        await drivePreProd(state);
-        return;
-      }
-      if (isProductListUi()) await driveProductList(state);
+      if (isIdChoicePage()) { await driveIdChoice(state); return; }
+      if (isPreProdChoicePage()) { await drivePreProd(state); return; }
+      if (isProductListUi()) { await driveProductList(state); return; }
+      if (window.top === window) await navigateWorkerShell(state);
     } catch (error) {
       const state = await getState();
-      if (state?.status === "running") {
-        await failAndStop(state, "group_canary_unhandled_exception", error instanceof Error ? error.message : String(error || "Group Canary 오류"));
-      }
+      if (state?.status === "running") await failAndStop(state, "fresh_worker_unhandled_exception", error instanceof Error ? error.message : String(error || "Fresh Worker Canary 오류"));
     } finally {
       driving = false;
     }
@@ -683,7 +645,7 @@
     if (button) {
       button.disabled = busy;
       button.style.opacity = busy ? "0.6" : "1";
-      button.textContent = busy ? "1상품 채널 검증 진행 중..." : "신규상품 1개 · 남은 채널 실전검증";
+      button.textContent = busy ? "Fresh Worker 순차 처리 중..." : "1상품 · 남은 채널 Fresh Worker 검증";
     }
   }
 
@@ -693,15 +655,11 @@
     const total = Array.isArray(state.tasks) ? state.tasks.length : 0;
     const done = Array.isArray(state.results) ? state.results.length : 0;
     if (state.status === "running") {
-      setPanelStatus(
-        `${done}/${total} 완료 · ${text(task?.ptnGoodsCd)} → ${text(task?.profile)} · ${text(state.stage)} · ${text(state.message)}`,
-        "info",
-        true,
-      );
+      setPanelStatus(`${done}/${total} 완료 · ${text(task?.ptnGoodsCd)} → ${text(task?.profile)} · ${text(state.stage)} · ${text(state.message)}`, "info", true);
     } else if (state.status === "completed") {
       const sent = (state.results || []).filter((row) => row.outcome === "sent").length;
       const skipped = (state.results || []).filter((row) => row.outcome === "already_registered").length;
-      setPanelStatus(`1상품 검증 완료 · 송신 ${sent} · 이미등록/미등록없음 ${skipped}`, "success", false);
+      setPanelStatus(`Fresh Worker 검증 완료 · 송신 ${sent} · 이미등록/미등록없음 ${skipped}`, "success", false);
     } else if (state.status === "failed") {
       setPanelStatus(`송신 전 안전중단 · ${text(state.message)}`, "error", false);
     } else if (state.status === "confirm_needed") {
@@ -713,30 +671,26 @@
     if (!isProductListUi() || document.getElementById(PANEL_ID)) return;
     const box = document.createElement("div");
     box.id = PANEL_ID;
-    box.style.cssText = [
-      "position:fixed", "right:18px", "bottom:40px", "z-index:2147483647", "width:430px",
-      "padding:12px", "border:2px solid #b45309", "border-radius:10px", "background:#fff",
-      "box-shadow:0 8px 30px rgba(15,23,42,.18)", "font:12px/1.45 Arial,sans-serif", "color:#0f172a",
-    ].join(";");
+    box.style.cssText = ["position:fixed", "right:18px", "bottom:40px", "z-index:2147483647", "width:440px", "padding:12px", "border:2px solid #0f766e", "border-radius:10px", "background:#fff", "box-shadow:0 8px 30px rgba(15,23,42,.18)", "font:12px/1.45 Arial,sans-serif", "color:#0f172a"].join(";");
     const title = document.createElement("div");
-    title.textContent = `Commerce OS · 1상품 채널 검증 Canary v${VERSION}`;
-    title.style.cssText = "font-weight:700;margin-bottom:5px;color:#92400e";
+    title.textContent = `Commerce OS · Fresh Worker Canary v${VERSION}`;
+    title.style.cssText = "font-weight:700;margin-bottom:5px;color:#0f766e";
     const guide = document.createElement("div");
-    guide.textContent = "신규상품 1개만 확보 → 완료채널 제외 → 남은 DM/SM 채널을 1건씩 순차 송신";
+    guide.textContent = "채널 1건 완료 → 기존 작업창 폐기 → 새 관리자 창 → [A18]부터 다음 채널 재시작";
     guide.style.cssText = "font-size:11px;color:#64748b;margin-bottom:7px";
     const status = document.createElement("div");
     status.id = STATUS_ID;
-    status.textContent = "버튼을 누르면 원장에서 1상품만 잡습니다. 상품번호+자사상품코드가 모두 맞아야 송신합니다.";
+    status.textContent = "상품번호+자사상품코드 이중일치 후, 채널마다 새 관리자 작업창에서 1건씩 처리합니다.";
     status.style.cssText = "margin-bottom:8px;color:#475569";
     const button = document.createElement("button");
     button.id = BUTTON_ID;
     button.type = "button";
-    button.textContent = "신규상품 1개 · 남은 채널 실전검증";
-    button.style.cssText = "width:100%;padding:10px;border:0;border-radius:7px;background:#d97706;color:#fff;font-weight:700;cursor:pointer";
-    button.addEventListener("click", () => void startGroupCanary());
+    button.textContent = "1상품 · 남은 채널 Fresh Worker 검증";
+    button.style.cssText = "width:100%;padding:10px;border:0;border-radius:7px;background:#0f766e;color:#fff;font-weight:700;cursor:pointer";
+    button.addEventListener("click", () => void startFreshWorkerCanary());
     const guard = document.createElement("div");
-    guard.textContent = "순차 1건씩 · goods_key+자사상품코드 이중일치 · 미등록 재확인 · 송신 전 영구잠금 · 송신 전 실패는 원복";
-    guard.style.cssText = "font-size:10px;color:#92400e;margin-top:7px";
+    guard.textContent = "1채널=1새창 · goods_key+자사상품코드 동시일치 · 미등록 재확인 · 송신 전 영구잠금 · 성공 결과 후에만 다음 새창";
+    guard.style.cssText = "font-size:10px;color:#0f766e;margin-top:7px";
     box.append(title, guide, status, button, guard);
     document.documentElement.appendChild(box);
     void getState().then(updatePanelFromState);
@@ -753,8 +707,5 @@
   observer.observe(document.documentElement, { childList: true, subtree: true });
   timer = setInterval(() => void drive(), 1000);
   void drive();
-
-  window.addEventListener("pagehide", () => {
-    if (timer) clearInterval(timer);
-  }, { once: true });
+  window.addEventListener("pagehide", () => { if (timer) clearInterval(timer); }, { once: true });
 })();

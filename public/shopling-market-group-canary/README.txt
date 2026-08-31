@@ -1,21 +1,28 @@
-Commerce OS Shopling Market Group Canary v0.2.0
+Commerce OS Shopling Market Fresh Worker Canary v0.3.0
 
 목적
-- Shopling 마켓 자동전송을 대량화하기 전에 신규상품 1개만 대상으로 남은 DM1~DM4 / SM1~SM2 채널을 실전 검증합니다.
+- Shopling 마켓 자동전송을 대량화하기 전에 신규상품 1개의 남은 DM1~DM4 / SM1~SM2 채널을 실전 검증합니다.
+- 채널 1건마다 이전 관리자/팝업 창을 재사용하지 않고 새 관리자 작업창에서 [A18]부터 다시 시작합니다.
 - 이미 sent 처리된 채널은 서버 원장에서 다시 claim되지 않습니다.
 
 시작 위치
-- Shopling [A18] 쇼핑몰상품등록 화면.
+- 사용자가 보고 있는 Shopling [A18] 쇼핑몰상품등록 화면은 컨트롤 탭으로만 유지합니다.
 - 별도 상품검색을 미리 할 필요가 없습니다.
+- 버튼을 누르면 확장프로그램이 백그라운드에서 새 a.shopling.co.kr 관리자 창을 엽니다.
+- 새 관리자 창에서 [18] 쇼핑몰상품등록 메뉴를 자동으로 열고 현재 채널 1건만 처리합니다.
 
-안전 규칙
-1. 서버 원장에서 groupLimit=1로 상품 1개만 claim합니다.
-2. 각 채널은 자사상품코드로 미등록 검색합니다.
-3. 같은 결과행 안에서 Shopling goods_key(상품번호) + 자사상품코드가 모두 정확히 일치해야 체크합니다.
-4. 쇼핑몰 ID와 연동정보는 해당 도매/소매 저장검색을 적용합니다.
-5. 상품등록송신 직전에 Commerce OS durable submit lock을 획득합니다.
-6. 송신 전 실패는 현재/미시작 채널을 queued로 원복합니다.
-7. 송신 경계 이후 결과가 불명확하면 confirm_needed로 멈추며 자동 재송신하지 않습니다.
-8. Shopling api*.shopling.co.kr 결과 화면에서 성공건수>0, 실패건수=0을 확인한 뒤 sent로 기록합니다.
+채널 순환
+1. 현재 채널의 자사상품코드로 미등록 검색.
+2. 같은 행의 Shopling goods_key(상품번호) + 자사상품코드가 모두 정확히 일치해야 선택.
+3. 해당 도매/소매 저장검색을 ID 선택 화면과 연동정보 화면에 각각 적용.
+4. 상품등록송신 직전에 Commerce OS durable submit lock 획득.
+5. 실제 /prod_a/prod_rgst_rspt.phtml 결과 페이지가 처리완료되고 성공건수>0, 실패건수=0일 때만 sent 기록.
+6. 성공하면 기존 작업창 묶음을 닫고 새 관리자 창을 열어 다음 채널을 [A18]부터 시작.
+7. 송신 전 실패는 현재/미시작 채널을 queued로 원복.
+8. 송신 경계 이후 결과가 불명확하면 confirm_needed로 멈추며 자동 재송신하지 않음.
 
-검증 중에는 기존 운영용 Shopling Bridge를 OFF로 두는 것을 권장합니다.
+운영 주의
+- 검증 중에는 기존 운영용 Commerce OS Shopling Bridge를 OFF로 둡니다.
+- 원래 A18 컨트롤 탭과 Chrome은 닫지 않습니다.
+- Windows 가상 데스크톱을 이동하거나 다른 작업을 하는 것은 괜찮습니다.
+- 확인필요가 뜨면 다시 버튼을 누르지 않습니다.
