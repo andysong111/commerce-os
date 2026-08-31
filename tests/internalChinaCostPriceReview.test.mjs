@@ -99,10 +99,11 @@ test("v1 remains a cost snapshot and never imports the product-grade engine", ()
   assert.ok(reviewPage.includes("사용하지 않습니다"));
 });
 
-test("legacy v1 approval route remains intent-only and is not the v2 page approval path", () => {
-  assert.ok(approvalRoute.includes("approveInternalChinaCostPriceProposal"));
-  assert.ok(approvalRoute.includes("실제 Shopling 판매가격은 아직 변경하지 않습니다"));
-  assert.equal(approvalRoute.includes("shoplingApply"), false);
+test("legacy v1 approval API is hard-retired and cannot be used after v2", () => {
+  assert.ok(approvalRoute.includes("INTERNAL_CHINA_COST_PRICE_V1_RETIRED"));
+  assert.ok(approvalRoute.includes("status: 410"));
+  assert.ok(approvalRoute.includes("shoplingPriceWritesEnabled: false"));
+  assert.equal(approvalRoute.includes("approveInternalChinaCostPriceProposal"), false);
   assert.equal(reviewPage.includes("InternalChinaCostPriceApprovalButton"), false);
 });
 
