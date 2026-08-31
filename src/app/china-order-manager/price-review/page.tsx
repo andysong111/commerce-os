@@ -30,6 +30,12 @@ function directionClass(direction: string) {
   return "bg-amber-50 text-amber-800";
 }
 
+function saleStatusLabel(status: string, active: boolean | null) {
+  if (active === null) return "-";
+  if (active) return status ? `${status} · 판매중` : "판매중";
+  return `${status || "미확인"} · 제외`;
+}
+
 export default async function InternalChinaCostPriceReviewPage() {
   const latest = await loadLatestInternalChinaGroupCostPriceProposal();
   const proposal = latest.proposal;
@@ -49,7 +55,7 @@ export default async function InternalChinaCostPriceReviewPage() {
               실제원가 · 상품그룹 가격조정 검토
             </h1>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. 실제 Shopling 가격 쓰기는 승인 이후 별도 단계입니다.
+              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. Shopling sale_status도 실시간 재조회해 현재 판매중이 아닌 구형 listing은 가격조정 대상에서 제외합니다. 실제 Shopling 가격 쓰기는 승인 이후 별도 단계입니다.
             </p>
           </div>
           <Link
@@ -70,7 +76,7 @@ export default async function InternalChinaCostPriceReviewPage() {
         </>
       ) : (
         <>
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-9">
             <Metric label="사이클" value={monthLabel(proposal.cycleMonth)} />
             <Metric label="대상 B-code" value={number.format(proposal.affectedBarcodeCount)} />
             <Metric label="원가 방어 인상" value={number.format(proposal.increaseCount)} />
@@ -78,6 +84,8 @@ export default async function InternalChinaCostPriceReviewPage() {
             <Metric label="유지" value={number.format(proposal.holdCount)} />
             <Metric label="검토 차단" value={number.format(proposal.blockedCount)} />
             <Metric label="그룹 미확정" value={number.format(proposal.unresolvedGroupCount)} />
+            <Metric label="판매중지 제외" value={number.format(proposal.inactiveListingCount)} />
+            <Metric label="Shopling 실조회 누락" value={number.format(proposal.liveListingMissingCount)} />
           </section>
 
           {proposal.unresolvedGroupCount > 0 ? (
@@ -102,7 +110,7 @@ export default async function InternalChinaCostPriceReviewPage() {
                   {approval
                     ? "상품그룹 가격조정안 승인 완료"
                     : proposal.unresolvedGroupCount > 0
-                      ? "상품그룹 백필 필요"
+                      ? "판매중 상품의 그룹 확인 필요"
                       : proposal.state === "AWAITING_APPROVAL"
                         ? "상품그룹 가격조정안 승인 대기"
                         : proposal.state === "NO_CHANGE"
@@ -110,11 +118,11 @@ export default async function InternalChinaCostPriceReviewPage() {
                           : "일부 검토 차단"}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-700">
-                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 그룹 미확정 {number.format(proposal.unresolvedGroupCount)}개 · 실제 Shopling 가격 write 0건
+                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 판매중 그룹 미확정 {number.format(proposal.unresolvedGroupCount)}개 · 판매중지 제외 {number.format(proposal.inactiveListingCount)}개 · Shopling 실조회 누락 {number.format(proposal.liveListingMissingCount)}개 · 실제 Shopling 가격 write 0건
                 </p>
                 {proposal.unresolvedGroupCount > 0 ? (
                   <p className="mt-2 text-xs font-bold text-amber-800">
-                    GOODSKEY 상품그룹을 코드 형태로 추측하지 않습니다. 구형 6개 그룹파일을 1회 백필하기 전에는 전체 V2 승인을 차단합니다.
+                    현재 판매중인 GOODSKEY만 그룹확정 대상으로 남깁니다. 상품그룹을 코드 형태로 추측하지 않으며 판매중 그룹 미확정이 0이 되기 전에는 전체 V2 승인을 차단합니다.
                   </p>
                 ) : null}
               </div>
@@ -138,7 +146,7 @@ export default async function InternalChinaCostPriceReviewPage() {
               <div>
                 <h2 className="text-lg font-black text-slate-950">상품그룹 가격조정안 상세</h2>
                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                  그룹 기준가 = 확정원가 × 주문당 수량 × 2 × 그룹배수, 10원 올림 · 도매1 1.00 / 도매2 1.15 / 도매3 1.10 / 도매4 1.30 / 소매1 1.30 / 소매2 1.40 · 카페24 0.97배 / 도매창고 +500원 / 에이블리 +3,000원은 쇼핑몰 목표가에 별도 반영
+                  그룹 기준가 = 확정원가 × 주문당 수량 × 2 × 그룹배수, 10원 올림 · 도매1 1.00 / 도매2 1.15 / 도매3 1.10 / 도매4 1.30 / 소매1 1.30 / 소매2 1.40 · 카페24 0.97배 / 도매창고 +500원 / 에이블리 +3,000원은 쇼핑몰 목표가에 별도 반영 · Shopling sale_status B 또는 빈값만 판매중으로 취급
                 </p>
               </div>
               <span className="text-xs font-bold text-slate-500">
@@ -146,12 +154,13 @@ export default async function InternalChinaCostPriceReviewPage() {
               </span>
             </div>
             <div className="mt-4 overflow-x-auto">
-              <table className="min-w-[2050px] text-left text-xs">
+              <table className="min-w-[2180px] text-left text-xs">
                 <thead className="text-slate-500">
                   <tr>
                     <th className="px-3 py-2">B-code</th>
                     <th className="px-3 py-2">상품 / 옵션</th>
                     <th className="px-3 py-2">goods_key</th>
+                    <th className="px-3 py-2">Shopling 상태</th>
                     <th className="px-3 py-2">OPS 내부 그룹</th>
                     <th className="px-3 py-2">그룹근거</th>
                     <th className="px-3 py-2">그룹배수</th>
@@ -181,6 +190,9 @@ export default async function InternalChinaCostPriceReviewPage() {
                         {row.goodsKey || "-"}
                         <br />
                         <span className="text-slate-400">{row.optionId || "단품"}</span>
+                      </td>
+                      <td className={`px-3 py-2 font-bold ${row.saleStatusActive === false ? "text-amber-700" : "text-slate-700"}`}>
+                        {saleStatusLabel(row.saleStatus, row.saleStatusActive)}
                       </td>
                       <td className="px-3 py-2 font-black">{row.productGroup || "미확정"}</td>
                       <td className="px-3 py-2 text-slate-500">{row.productGroupSource}</td>
