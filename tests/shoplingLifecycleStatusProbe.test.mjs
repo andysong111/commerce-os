@@ -22,7 +22,7 @@ test("lifecycle status probe reads sale_status without any Shopling write path",
 
 test("lifecycle status probe validates numeric goods keys and keeps response no-store", async () => {
   const source = await readFile(routePath, "utf8");
-  assert.match(source, /const GOODS_KEY = \^\\d\+\$/);
+  assert.match(source, /const GOODS_KEY = \/\^\\d\+\$\//);
   assert.match(source, /invalid_goods_keys/);
   assert.match(source, /cache-control.*no-store/s);
   assert.match(source, /x-content-type-options/);
