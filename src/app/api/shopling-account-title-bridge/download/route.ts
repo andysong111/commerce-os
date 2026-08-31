@@ -162,20 +162,20 @@ function rewriteLifecycleExecutor(source: string) {
   return rewritten;
 }
 
-function buildV060Manifest(source: Record<string, unknown>) {
+function buildV061Manifest(source: Record<string, unknown>) {
   const manifest = structuredClone(source) as Record<string, unknown> & {
     permissions?: string[];
     content_scripts?: Array<Record<string, unknown> & { js?: string[] }>;
   };
-  manifest.version = "0.6.0";
-  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 판매상태 자동화는 background chrome.scripting이 Shopling MAIN world를 직접 실행합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
+  manifest.version = "0.6.1";
+  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 판매상태 자동화는 background chrome.scripting으로 Shopling MAIN world를 직접 실행하며 독립 recurring keeper로 polling을 지속합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
   manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms", "scripting"])];
 
   const scripts = manifest.content_scripts ?? [];
   const productScriptIndex = scripts.findIndex((entry) =>
     Array.isArray(entry.matches) && entry.matches.includes("https://a.shopling.co.kr/prod/*") && !entry.world,
   );
-  if (productScriptIndex < 0) throw new Error("shopling_v060_product_content_script_missing");
+  if (productScriptIndex < 0) throw new Error("shopling_v061_product_content_script_missing");
 
   scripts.splice(productScriptIndex + 1, 0,
     {
@@ -196,7 +196,7 @@ export async function GET() {
   for (const fileName of FILES) {
     if (fileName === "manifest.json") {
       const sourceManifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
-      const manifest = buildV060Manifest(sourceManifest);
+      const manifest = buildV061Manifest(sourceManifest);
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
@@ -217,13 +217,13 @@ export async function GET() {
     entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.6.0\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.6.1\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.6.0.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.6.1.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
