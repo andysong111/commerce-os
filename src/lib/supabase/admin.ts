@@ -1,6 +1,8 @@
-type AdminResult = { data: unknown; error: { message: string } | null; count: number | null };
+type AdminResult = { data: unknown; error: { message: string; code?: string } | null; count: number | null };
 type OrderOptions = { ascending?: boolean };
 type SelectOptions = { count?: "exact"; head?: boolean };
+type UpsertOptions = { onConflict?: string; ignoreDuplicates?: boolean };
+type WriteBody = Record<string, unknown> | Array<Record<string, unknown>>;
 
 // Fail before a stalled PostgREST request can consume the whole Vercel function
 // invocation. Reads are intentionally short; writes/RPCs get a larger window but
@@ -32,8 +34,9 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
   private readonly params = new URLSearchParams();
   private count: "exact" | undefined;
   private head = false;
-  private method: "GET" | "PATCH" = "GET";
-  private requestBody: Record<string, unknown> | null = null;
+  private method: "GET" | "PATCH" | "POST" = "GET";
+  private requestBody: WriteBody | null = null;
+  private resolution: "merge-duplicates" | "ignore-duplicates" | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -48,12 +51,36 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     return this;
   }
 
+  insert(values: WriteBody) {
+    if (!values || typeof values !== "object") {
+      throw new TypeError("Supabase REST insert requires an object or object array body.");
+    }
+    this.method = "POST";
+    this.requestBody = values;
+    this.resolution = null;
+    this.head = false;
+    return this;
+  }
+
+  upsert(values: WriteBody, options: UpsertOptions = {}) {
+    if (!values || typeof values !== "object") {
+      throw new TypeError("Supabase REST upsert requires an object or object array body.");
+    }
+    this.method = "POST";
+    this.requestBody = values;
+    this.resolution = options.ignoreDuplicates ? "ignore-duplicates" : "merge-duplicates";
+    if (options.onConflict) this.params.set("on_conflict", options.onConflict);
+    this.head = false;
+    return this;
+  }
+
   update(values: Record<string, unknown>) {
     if (!values || typeof values !== "object" || Array.isArray(values)) {
       throw new TypeError("Supabase REST update requires an object body.");
     }
     this.method = "PATCH";
     this.requestBody = values;
+    this.resolution = null;
     this.head = false;
     return this;
   }
@@ -131,17 +158,18 @@ class SupabaseRestQuery implements PromiseLike<AdminResult> {
     const headers = createSupabaseAdminHeaders(this.secretKey);
     const preferences: string[] = [];
     if (this.count === "exact") preferences.push("count=exact");
-    if (this.method === "PATCH") preferences.push("return=representation");
+    if (this.method === "PATCH" || this.method === "POST") preferences.push("return=representation");
+    if (this.method === "POST" && this.resolution) preferences.push(`resolution=${this.resolution}`);
     if (preferences.length > 0) headers.Prefer = preferences.join(",");
     const timeoutMs =
-      this.method === "PATCH"
-        ? SUPABASE_ADMIN_WRITE_TIMEOUT_MS
-        : SUPABASE_ADMIN_READ_TIMEOUT_MS;
+      this.method === "GET"
+        ? SUPABASE_ADMIN_READ_TIMEOUT_MS
+        : SUPABASE_ADMIN_WRITE_TIMEOUT_MS;
     try {
       const response = await fetch(`${this.baseUrl}/rest/v1/${encodeURIComponent(this.table)}?${this.params.toString()}`, {
         method: this.head ? "HEAD" : this.method,
         headers,
-        body: this.method === "PATCH" ? JSON.stringify(this.requestBody ?? {}) : undefined,
+        body: this.method === "GET" ? undefined : JSON.stringify(this.requestBody ?? {}),
         cache: "no-store",
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -208,7 +236,10 @@ async function readAdminResponse(response: Response): Promise<AdminResult> {
     const message = body && typeof body === "object" && "message" in body && typeof (body as { message?: unknown }).message === "string"
       ? (body as { message: string }).message
       : `Supabase REST 요청에 실패했습니다. status=${response.status}`;
-    return { data: null, error: { message }, count: null };
+    const code = body && typeof body === "object" && "code" in body && typeof (body as { code?: unknown }).code === "string"
+      ? (body as { code: string }).code
+      : undefined;
+    return { data: null, error: { message, code }, count: null };
   }
   const total = response.headers.get("content-range")?.match(/\/(\d+)$/)?.[1];
   return { data: body, error: null, count: total === undefined ? null : Number(total) };
