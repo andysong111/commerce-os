@@ -46,10 +46,17 @@ test("서비스 인증은 별도 Bearer secret과 timing-safe 비교를 사용�
   assert.match(authSource, /PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID/);
 });
 
-test("Ops Center에는 상품등급·가격조정 그림자 운영 카드가 노출된다", () => {
-  assert.match(moduleRegistry, /title: "상품등급·가격조정"/);
-  assert.match(moduleRegistry, /\+6~-4 상품등급/);
-  assert.match(moduleRegistry, /숨은 시즌을 자동 구분/);
-  assert.match(moduleRegistry, /그림자 운영 · 실제 미반영/);
-  assert.match(moduleRegistry, /priceAdjustmentEngineModule/);
+test("상품등급은 감사용으로 보존하되 활성 운영 제어는 생애주기·슬롯 엔진으로 통합한다", () => {
+  assert.match(moduleRegistry, /export const priceAdjustmentEngineModule/);
+  assert.match(moduleRegistry, /레거시 감사용 화면/);
+  assert.match(moduleRegistry, /상품등급은 가격·발주·Shopling 실행의 제어값으로 사용하지 않습니다/);
+  assert.match(moduleRegistry, /export const productLifecycleSlotModule/);
+  assert.match(moduleRegistry, /title: "상품 생애주기 · 슬롯 최적화"/);
+
+  const activeRegistry = moduleRegistry.slice(
+    moduleRegistry.indexOf("export const extendedModuleRegistry"),
+  );
+  assert.match(activeRegistry, /productLifecycleSlotModule/);
+  assert.doesNotMatch(activeRegistry, /priceAdjustmentEngineModule/);
+  assert.doesNotMatch(activeRegistry, /priceGradeShadowComparisonModule/);
 });
