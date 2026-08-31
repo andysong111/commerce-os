@@ -25,7 +25,7 @@ test("background duplicates the original A18 control tab and adopts only the clo
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /chrome\.tabs\.duplicate\(controlTabId\)/);
   assert.match(source, /chrome\.windows\.create\(\{[\s\S]*tabId: duplicate\.id/);
-  assert.match(source, /chrome\.tabs\.reload\(workerTabId\)/);
+  assert.doesNotMatch(source, /chrome\.tabs\.reload\(workerTabId\)/);
   assert.match(source, /a18CloneVerified: true/);
   assert.match(source, /controlTabId/);
   assert.match(source, /WORKER_META_KEY = "commerceOsShoplingFreshWorkerMetaV033"/);
@@ -91,10 +91,12 @@ test("partial claim endpoint still accepts the v0.3 run id used by the driver", 
   assert.match(source, /resumedPartialProduct: Boolean\(recentPartial\)/);
 });
 
-test("v0.3.3 download syntax-checks the exact A18 clone package", async () => {
+test("v0.3.3 download syntax-checks and isolates the exact A18 clone runtime", async () => {
   const source = await readFile(downloadPath, "utf8");
   assert.match(source, /const VERSION = "0\.3\.3"/);
   assert.match(source, /new Function\(source\)/);
+  assert.match(source, /buildDownloadScript/);
+  assert.match(source, /commerceOsShoplingMarketFreshWorkerCanaryV033/);
   assert.match(source, /a18_duplicate_missing/);
   assert.match(source, /duplicate_window_adoption_missing/);
   assert.match(source, /obsolete_manager_launcher_present/);
