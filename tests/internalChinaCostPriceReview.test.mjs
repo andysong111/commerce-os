@@ -21,7 +21,7 @@ const [review, approvalRoute, dispatcherRoute, reviewPage, receiptPanel] =
     ),
   ]);
 
-test("cost defense raises price when current price is below confirmed-cost floor", () => {
+test("v1 cost snapshot still raises price below bare confirmed-cost floor", () => {
   const result = buildInternalChinaCostPriceDecision({
     currentPrice: 1000,
     latestCostKrw: 600,
@@ -32,7 +32,7 @@ test("cost defense raises price when current price is below confirmed-cost floor
   assert.equal(result.changeRequired, true);
 });
 
-test("confirmed cost drop can lower price to the new two-times cost floor", () => {
+test("v1 cost snapshot still recognizes confirmed-cost drop", () => {
   const result = buildInternalChinaCostPriceDecision({
     currentPrice: 1500,
     latestCostKrw: 500,
@@ -43,7 +43,7 @@ test("confirmed cost drop can lower price to the new two-times cost floor", () =
   assert.equal(result.changeRequired, true);
 });
 
-test("first confirmed cost never causes an automatic markdown", () => {
+test("first confirmed cost never causes a v1 automatic markdown", () => {
   const result = buildInternalChinaCostPriceDecision({
     currentPrice: 1500,
     latestCostKrw: 500,
@@ -54,7 +54,7 @@ test("first confirmed cost never causes an automatic markdown", () => {
   assert.equal(result.changeRequired, false);
 });
 
-test("unchanged cost with sufficient margin holds current price", () => {
+test("unchanged cost with sufficient margin holds current price in v1 snapshot", () => {
   const result = buildInternalChinaCostPriceDecision({
     currentPrice: 1000,
     latestCostKrw: 500,
@@ -76,7 +76,7 @@ test("missing current price is fail-closed", () => {
   assert.equal(result.changeRequired, false);
 });
 
-test("multi-unit listings defend the cost of every unit sold in one order", () => {
+test("multi-unit v1 snapshot preserves every unit cost before v2 group overlay", () => {
   assert.equal(costDefensePrice(500, 3), 3000);
   const result = buildInternalChinaCostPriceDecision({
     currentPrice: 2500,
@@ -89,35 +89,39 @@ test("multi-unit listings defend the cost of every unit sold in one order", () =
   assert.equal(result.direction, "INCREASE");
 });
 
-test("internal China pricing is cost-only and never imports the product-grade engine", () => {
-  assert.ok(review.includes('INTERNAL_CHINA_COST_PRICE_PROPOSAL'));
-  assert.ok(review.includes('INTERNAL_CHINA_COST_PRICE_APPROVAL'));
-  assert.ok(review.includes('shoplingWritesEnabled: false'));
-  assert.ok(review.includes('buildInternalChinaCostPriceDecision'));
-  assert.equal(review.includes('priceGradeEngine'), false);
-  assert.equal(review.includes('productGrade'), false);
-  assert.ok(reviewPage.includes('상품등급·매출등급은 사용하지 않습니다'));
+test("v1 remains a cost snapshot and never imports the product-grade engine", () => {
+  assert.ok(review.includes("INTERNAL_CHINA_COST_PRICE_PROPOSAL"));
+  assert.ok(review.includes("shoplingWritesEnabled: false"));
+  assert.ok(review.includes("buildInternalChinaCostPriceDecision"));
+  assert.equal(review.includes("priceGradeEngine"), false);
+  assert.equal(review.includes("productGrade"), false);
+  assert.ok(reviewPage.includes("상품등급"));
+  assert.ok(reviewPage.includes("사용하지 않습니다"));
 });
 
-test("approval records intent only and does not write Shopling prices", () => {
-  assert.ok(approvalRoute.includes('approveInternalChinaCostPriceProposal'));
-  assert.ok(approvalRoute.includes('실제 Shopling 판매가격은 아직 변경하지 않습니다'));
-  assert.equal(approvalRoute.includes('shoplingApply'), false);
-  assert.equal(approvalRoute.includes('savePrice'), false);
+test("legacy v1 approval API is hard-retired and cannot be used after v2", () => {
+  assert.ok(approvalRoute.includes("INTERNAL_CHINA_COST_PRICE_V1_RETIRED"));
+  assert.ok(approvalRoute.includes("status: 410"));
+  assert.ok(approvalRoute.includes("shoplingPriceWritesEnabled: false"));
+  assert.equal(approvalRoute.includes("approveInternalChinaCostPriceProposal"), false);
+  assert.equal(reviewPage.includes("InternalChinaCostPriceApprovalButton"), false);
 });
 
-test("existing dispatcher generates cost-only proposal before legacy receipt proposal", () => {
-  const costIndex = dispatcherRoute.indexOf('runInternalChinaCostPriceProposalStep');
-  const legacyIndex = dispatcherRoute.indexOf('runReceiptLivePriceProposalStep');
+test("dispatcher orders cost snapshot then group-aware v2 before legacy receipt proposal", () => {
+  const costIndex = dispatcherRoute.indexOf("runInternalChinaCostPriceProposalStep");
+  const groupIndex = dispatcherRoute.indexOf("runInternalChinaGroupCostPriceProposalStep");
+  const legacyIndex = dispatcherRoute.indexOf("runReceiptLivePriceProposalStep");
   assert.ok(costIndex >= 0);
-  assert.ok(legacyIndex > costIndex);
-  assert.ok(dispatcherRoute.includes('flow: "internal_china_cost_price"'));
-  assert.ok(dispatcherRoute.includes('productGradeUsed: false'));
-  assert.ok(dispatcherRoute.includes('shoplingPriceWritesEnabled: false'));
+  assert.ok(groupIndex > costIndex);
+  assert.ok(legacyIndex > groupIndex);
+  assert.ok(dispatcherRoute.includes('flow: "internal_china_group_cost_price_v2"'));
+  assert.ok(dispatcherRoute.includes("productGradeUsed: false"));
+  assert.ok(dispatcherRoute.includes("productGroupGuessingEnabled: false"));
+  assert.ok(dispatcherRoute.includes("shoplingPriceWritesEnabled: false"));
 });
 
-test("landed-cost close hands off to price review without product-grade wording", () => {
-  assert.ok(receiptPanel.includes('가격조정 검토'));
-  assert.ok(receiptPanel.includes('/china-order-manager/price-review'));
-  assert.equal(receiptPanel.includes('가격조정·상품등급'), false);
+test("landed-cost close still hands off to price review without product-grade wording", () => {
+  assert.ok(receiptPanel.includes("가격조정 검토"));
+  assert.ok(receiptPanel.includes("/china-order-manager/price-review"));
+  assert.equal(receiptPanel.includes("가격조정·상품등급"), false);
 });
