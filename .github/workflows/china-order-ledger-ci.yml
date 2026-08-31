@@ -8,6 +8,8 @@ on:
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
       - "src/lib/internalChinaReceipt.ts"
       - "src/lib/internalChinaForwarderCost.ts"
+      - "src/lib/productMasterCanonicalSync.ts"
+      - "src/lib/productMasterCanonicalBatchContext.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
       - "src/lib/monthlyPurchaseDraftConsolidation.ts"
       - "src/lib/monthlyPurchaseDraftDisplayMetadata.ts"
@@ -22,6 +24,7 @@ on:
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
       - "tests/internalChinaReceipt.test.mjs"
       - "tests/internalChinaForwarderCost.test.mjs"
+      - "tests/productMasterCanonicalBatchContext.test.mjs"
       - "tests/monthlyPurchasePolicy.test.mjs"
       - "tests/monthlyPurchaseDraftConsolidation.test.mjs"
       - ".github/workflows/china-order-ledger-ci.yml"
@@ -53,6 +56,8 @@ jobs:
           src/lib/internalChinaPurchaseBudgetAudit.ts
           src/lib/internalChinaReceipt.ts
           src/lib/internalChinaForwarderCost.ts
+          src/lib/productMasterCanonicalSync.ts
+          src/lib/productMasterCanonicalBatchContext.ts
           src/lib/monthlyPurchasePolicy.ts
           src/lib/monthlyPurchaseDraftConsolidation.ts
           src/lib/monthlyPurchaseDraftDisplayMetadata.ts
@@ -75,6 +80,7 @@ jobs:
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
+          tests/productMasterCanonicalBatchContext.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Run China order ledger and monthly budget tests
@@ -85,6 +91,7 @@ jobs:
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
+          tests/productMasterCanonicalBatchContext.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
       - name: Build Ops Center
