@@ -37,6 +37,8 @@ export const shoplingPriceAdjustmentModule: CommerceModule = {
   safetyBadge: "첫 10개 안전 확인",
 };
 
+// Legacy product-grade modules remain exportable for historical routes and audits,
+// but are intentionally removed from the active Commerce OS module registry.
 export const priceAdjustmentEngineModule: CommerceModule = {
   id: "price-adjustment-engine",
   title: "상품등급·가격조정",
@@ -50,10 +52,10 @@ export const priceAdjustmentEngineModule: CommerceModule = {
   outputType: "상품등급, 자동 시즌판정, 등급 목표가격, -3~-4 재고정리 상태와 이력",
   historySupport: true,
   externalProject: false,
-  note: "Ops Center 내부 이전 1단계입니다. 가격판정과 실행원장을 읽기만 하며 자체 등급 엔진과 실제 가격변경은 아직 분리되어 있습니다.",
-  helperNote: "Ops Center 내부 · 조회 전용",
-  actionLabel: "내부 상품등급 대시보드 보기",
-  safetyBadge: "그림자 운영 · 실제 미반영",
+  note: "레거시 감사용 화면입니다. 새 운영 판단은 상품 생애주기·슬롯 최적화가 담당하며 상품등급은 가격·발주·Shopling 실행의 제어값으로 사용하지 않습니다.",
+  helperNote: "레거시 감사 전용",
+  actionLabel: "레거시 상품등급 기록 보기",
+  safetyBadge: "운영 제어에서 제외",
 };
 
 export const priceGradeShadowComparisonModule: CommerceModule = {
@@ -69,10 +71,10 @@ export const priceGradeShadowComparisonModule: CommerceModule = {
   outputType: "완전 일치, 오래된 판정, 구형 규칙 차이, 원인 추가분석 대상",
   historySupport: true,
   externalProject: false,
-  note: "비교 결과만 불변 실행원장에 저장합니다. 원인 추가분석 건수가 0이 되기 전에는 가격 실행기로 전달하지 않습니다.",
-  helperNote: "자체 엔진 검증 · 실제 미반영",
-  actionLabel: "그림자 비교 실행",
-  safetyBadge: "가격·등급 쓰기 차단",
+  note: "레거시 검증용입니다. 정기 실행은 중단하고 기존 데이터만 감사·회귀 확인에 보존합니다.",
+  helperNote: "레거시 검증 전용",
+  actionLabel: "레거시 그림자 기록 보기",
+  safetyBadge: "운영 제어에서 제외",
 };
 
 export const productMasterShoplingDiagnosticModule: CommerceModule = {
@@ -94,6 +96,25 @@ export const productMasterShoplingDiagnosticModule: CommerceModule = {
   safetyBadge: "상품·재고·가격 쓰기 차단",
 };
 
+export const productLifecycleSlotModule: CommerceModule = {
+  id: "product-lifecycle-slot-engine",
+  title: "상품 생애주기 · 슬롯 최적화",
+  navigationLabel: "상품 순환·슬롯 최적화",
+  description:
+    "상품등급 없이 마지막 판매일, 최근 판매속도, 재고확인 상태를 바탕으로 테스트·확대·유지·축소·휴면·재시험·단종을 결정하고 Shopling 판매상태와 발주권장에 연결합니다.",
+  status: "check_mode",
+  route: "/product-lifecycle",
+  category: "상품 운영 자동화",
+  inputType: "Product Master 365일 판매·마지막 판매일·확인재고, Shopling listing goods_key",
+  outputType: "상품 생애주기, 판매중/품절/삭제 목표상태, 재발주 STOP, 예외 처리함",
+  historySupport: true,
+  externalProject: false,
+  note: "현재 Shadow Mode입니다. 365일 무판매 + 검증된 재고 0 조건이 아니면 삭제 후보를 만들지 않으며, 실제 Shopling 반영 전 브라우저 회귀검증이 필요합니다.",
+  helperNote: "상품등급 대체 · 예외 중심",
+  actionLabel: "상품 순환·예외 화면 보기",
+  safetyBadge: "Shadow · 삭제 안전선",
+};
+
 export const productDecisionAgentModule: CommerceModule = {
   id: "product-decision-agent",
   title: "발주 추천",
@@ -107,10 +128,10 @@ export const productDecisionAgentModule: CommerceModule = {
   outputType: "바코드별 신규 주문 필요량, 예산·MOQ·박스입수 반영 발주안",
   historySupport: true,
   externalProject: false,
-  note: "Ops Center 자체 계산 엔진과 검증 D1 그림자 재계산까지 완료했습니다. 실시간 판매·재고·미입고 원장 연결과 Worker 전환을 진행 중입니다.",
-  helperNote: "자체 엔진 · 실시간 연결 진행",
+  note: "상품 생애주기 엔진이 운영모드로 전환되면 휴면·단종 SKU의 재발주를 최종 차단합니다. 상품등급은 발주 제어값으로 사용하지 않습니다.",
+  helperNote: "자체 엔진 · 생애주기 연결",
   actionLabel: "내부 발주 추천 보기",
-  safetyBadge: "원인불명 0 · 쓰기 차단",
+  safetyBadge: "생애주기 Shadow 연결",
 };
 
 export const shoplingCategoryReviewQueueModule: CommerceModule = {
@@ -162,8 +183,7 @@ export const extendedModuleRegistry: readonly CommerceModule[] = [
   ...renamedModuleRegistry,
   shoplingCategoryReviewQueueModule,
   productMasterShoplingDiagnosticModule,
+  productLifecycleSlotModule,
   productDecisionAgentModule,
-  priceAdjustmentEngineModule,
-  priceGradeShadowComparisonModule,
   shoplingPriceAdjustmentModule,
 ];

@@ -4,6 +4,10 @@ import {
   type ProductDecisionInventoryRow,
   type ProductDecisionLiveOverlaySummary,
 } from "@/lib/productDecisionLiveOverlay";
+import {
+  applyProductLifecyclePurchaseOverlay,
+  type ProductLifecyclePurchaseOverlaySummary,
+} from "@/lib/productLifecyclePurchaseOverlay";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   type ProductDecisionRow,
@@ -30,6 +34,7 @@ export type ProductDecisionIntegrationResult = {
     | "legacy_site";
   writesEnabled: false;
   liveOverlay: ProductDecisionLiveOverlaySummary;
+  lifecycleOverlay: ProductLifecyclePurchaseOverlaySummary;
 };
 
 type InventoryPayload = {
@@ -78,6 +83,17 @@ function emptyOverlay(
     inventoryGeneratedAt: null,
     inventoryError,
     commitmentError,
+  };
+}
+
+function emptyLifecycleOverlay(): ProductLifecyclePurchaseOverlaySummary {
+  return {
+    configured: false,
+    matchedCount: 0,
+    stopPolicyCount: 0,
+    simulatedStopCount: 0,
+    appliedStopCount: 0,
+    shadowCount: 0,
   };
 }
 
@@ -229,8 +245,9 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
   const internal = await loadInternalSnapshot();
   if (internal.snapshot) {
     const overlaid = await applyLiveOverlay(internal.snapshot);
+    const lifecycle = await applyProductLifecyclePurchaseOverlay(overlaid.snapshot);
     return {
-      snapshot: overlaid.snapshot,
+      snapshot: lifecycle.snapshot,
       error: null,
       sourceHost:
         "Ops Center 검증 수요 · Product Master 확인재고 · 중국 미입고 원장",
@@ -239,6 +256,7 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
         : "internal_snapshot",
       writesEnabled: false,
       liveOverlay: overlaid.summary,
+      lifecycleOverlay: lifecycle.summary,
     };
   }
 
@@ -258,14 +276,16 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
       throw new Error(`기존 발주 추천 조회 실패 · HTTP ${response.status}`);
     }
     const snapshot = normalizeSnapshot(await response.json());
+    const lifecycle = await applyProductLifecyclePurchaseOverlay(snapshot);
 
     return {
-      snapshot,
+      snapshot: lifecycle.snapshot,
       error: null,
       sourceHost,
       sourceMode: "legacy_site",
       writesEnabled: false,
       liveOverlay: emptyOverlay(),
+      lifecycleOverlay: lifecycle.summary,
     };
   } catch (error) {
     const legacyError =
@@ -281,6 +301,7 @@ export async function loadProductDecisionSnapshot(): Promise<ProductDecisionInte
       sourceMode: "legacy_site",
       writesEnabled: false,
       liveOverlay: emptyOverlay(),
+      lifecycleOverlay: emptyLifecycleOverlay(),
     };
   }
 }
