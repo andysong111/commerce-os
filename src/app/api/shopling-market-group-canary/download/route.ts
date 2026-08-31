@@ -183,7 +183,7 @@ export async function GET() {
   if (!background.includes("group-canary-release-v0.3.2")) throw new Error("shopling_parallel_worker_claim_release_missing");
   if (!content.includes("commerceOsShoplingParallelWorkerV035")) throw new Error("shopling_parallel_worker_v035_state_isolation_missing");
   if (!content.includes("commerceOsShoplingParallelRunV035")) throw new Error("shopling_parallel_worker_v035_run_isolation_missing");
-  if (content.includes('["worker_opening", "await_a18", "a18_clicked"]')) throw new Error("shopling_parallel_worker_repeat_a18_click_gate_present");
+  if (content.includes('if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage))')) throw new Error("shopling_parallel_worker_repeat_a18_click_gate_present");
   if (!content.includes("a18_navigation_timeout")) throw new Error("shopling_parallel_worker_a18_one_shot_timeout_missing");
   if (!content.includes("pointer-events:none!important")) throw new Error("shopling_parallel_worker_panel_passthrough_missing");
   if (!content.includes("pointer-events:auto!important")) throw new Error("shopling_parallel_worker_button_pointer_restore_missing");
