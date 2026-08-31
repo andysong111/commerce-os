@@ -35,6 +35,21 @@ test("normal active product stays MAINTAIN and selling", () => {
   assert.equal(decision.requiresReview, false);
 });
 
+test("unverified baseline data status does not flood CEO exceptions for non-destructive active decisions", () => {
+  const decision = evaluateProductLifecycle(
+    base({
+      dataStatus: "REVIEW",
+      inventoryConfirmed: false,
+      inventoryRequiresReview: false,
+    }),
+    NOW,
+  );
+  assert.equal(decision.lifecycleState, "MAINTAIN");
+  assert.equal(decision.desiredShoplingState, "SELLING");
+  assert.equal(decision.requiresReview, false);
+  assert.equal(decision.reviewReason, null);
+});
+
 test("accelerating product expands", () => {
   const decision = evaluateProductLifecycle(
     base({ salesQuantity30: 20, salesQuantity90: 35, salesTrend: "RISING" }),
@@ -73,6 +88,26 @@ test("180 day no-sale product becomes dormant without deleting remaining stock",
   assert.equal(decision.desiredShoplingState, "SELLING");
   assert.equal(decision.purchasePolicy, "STOP");
   assert.ok(decision.nextEvaluationAt);
+});
+
+test("dormant product with unverified baseline stays safe without becoming a CEO exception", () => {
+  const decision = evaluateProductLifecycle(
+    base({
+      lastSaleAt: "2026-02-01T00:00:00.000Z",
+      salesQuantity30: 0,
+      salesQuantity90: 0,
+      salesQuantity365: 4,
+      inventoryQuantity: 0,
+      inventoryConfirmed: false,
+      inventoryRequiresReview: false,
+      dataStatus: "REVIEW",
+    }),
+    NOW,
+  );
+  assert.equal(decision.lifecycleState, "DORMANT");
+  assert.equal(decision.desiredShoplingState, "SELLING");
+  assert.equal(decision.purchasePolicy, "STOP");
+  assert.equal(decision.requiresReview, false);
 });
 
 test("dormant zero-stock product uses sold-out instead of permanent deletion", () => {
@@ -134,7 +169,7 @@ test("365 day no-sale product can delete only after confirmed zero inventory", (
   assert.equal(decision.destructiveActionEligible, true);
 });
 
-test("365 day no-sale product never deletes when inventory is unverified", () => {
+test("365 day no-sale product never deletes when inventory is unverified even when Product Master data is REVIEW", () => {
   const decision = evaluateProductLifecycle(
     base({
       lastSaleAt: "2025-08-01T00:00:00.000Z",
@@ -143,6 +178,7 @@ test("365 day no-sale product never deletes when inventory is unverified", () =>
       salesQuantity365: 0,
       inventoryQuantity: 0,
       inventoryConfirmed: false,
+      dataStatus: "REVIEW",
     }),
     NOW,
   );
@@ -150,6 +186,21 @@ test("365 day no-sale product never deletes when inventory is unverified", () =>
   assert.equal(decision.desiredShoplingState, "SELLING");
   assert.equal(decision.destructiveActionEligible, false);
   assert.equal(decision.requiresReview, true);
+  assert.equal(decision.reviewReason, "INVENTORY_NOT_SAFE_FOR_DESTRUCTIVE_ACTION");
+});
+
+test("negative or otherwise inconsistent inventory remains an actionable exception", () => {
+  const decision = evaluateProductLifecycle(
+    base({
+      inventoryConfirmed: false,
+      inventoryRequiresReview: true,
+      dataStatus: "REVIEW",
+    }),
+    NOW,
+  );
+  assert.equal(decision.lifecycleState, "MAINTAIN");
+  assert.equal(decision.requiresReview, true);
+  assert.equal(decision.reviewReason, "INVENTORY_DATA_REVIEW_REQUIRED");
 });
 
 test("new unsold item is tested instead of being discontinued", () => {
