@@ -58,7 +58,7 @@ export type InternalChinaForwarderCostSummary = {
   actualMultiplier: number | null;
   closedAt: string | null;
   appliesToProductUnitCost: true;
-  appliesToPriceGrade: true;
+  appliesToPriceAdjustment: true;
   receiptCostReconciliation?: InternalChinaReceiptCostReconciliation | null;
 };
 
@@ -220,7 +220,7 @@ function summaryFrom(
         : Math.round(actualMultiplierRaw * 10_000) / 10_000,
     closedAt,
     appliesToProductUnitCost: true,
-    appliesToPriceGrade: true,
+    appliesToPriceAdjustment: true,
     receiptCostReconciliation,
   };
 }
