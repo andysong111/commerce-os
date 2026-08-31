@@ -66,7 +66,7 @@ test("background scripting executor runs only in top-frame Shopling MAIN world a
   assert.match(source, /location\.pathname !== "\/prod\/prodLst\.phtml"/);
 });
 
-test("v0.6.0 schedules the verified Shopling button click directly in MAIN world without cross-world CustomEvent transport", async () => {
+test("v0.6.0+ schedules the verified Shopling button click directly in MAIN world without cross-world CustomEvent transport", async () => {
   const source = await readFile(mainExecPath, "utf8");
   assert.match(source, /const BRIDGE_VERSION = "v0\.6\.0"/);
   assert.match(source, /button\.click\(\)/);
@@ -87,9 +87,14 @@ test("delete remains double-gated in isolated executor and MAIN-world scripting 
   assert.match(mainExec, /status_chg\\s\*\\\(/);
 });
 
-test("background root loads the direct MAIN-world lifecycle executor", async () => {
+test("background root loads the direct MAIN-world lifecycle executor and keeps an independent recurring poller", async () => {
   const source = await readFile(backgroundRootPath, "utf8");
   assert.match(source, /background-shopling-lifecycle-main-exec\.js/);
+  assert.match(source, /SHOPLING_LIFECYCLE_RECURRING_KEEPER_ALARM/);
+  assert.match(source, /commerce-os-shopling-lifecycle-recurring-keeper/);
+  assert.match(source, /periodInMinutes:\s*1/);
+  assert.match(source, /lifecycleProcessExecutorQueue/);
+  assert.doesNotMatch(source, /commerce-os-shopling-lifecycle-executor"/);
 });
 
 test("background executor is serialized, yields to existing Shopling workers, and times out fail-closed", async () => {
@@ -119,9 +124,9 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.6.0 with scripting permission and top-frame lifecycle executor", async () => {
+test("download package upgrades baseline manifest to v0.6.1 with scripting permission and recurring keeper", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.6\.0"/);
+  assert.match(source, /manifest\.version = "0\.6\.1"/);
   assert.match(source, /"alarms", "scripting"/);
   assert.match(source, /background-shopling-lifecycle-main-exec\.js/);
   assert.match(
@@ -129,8 +134,9 @@ test("download package upgrades baseline manifest to v0.6.0 with scripting permi
     /js: \["content-shopling-lifecycle-executor\.js"\],[\s\S]{0,120}all_frames: false/,
   );
   assert.doesNotMatch(source, /world: "MAIN"/);
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.6\.0\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.6\.0/);
+  assert.match(source, /recurring keeper/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.6\.1\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.6\.1/);
 });
 
 test("download package rewrites legacy event invokeMutation into background scripting message transport", async () => {
