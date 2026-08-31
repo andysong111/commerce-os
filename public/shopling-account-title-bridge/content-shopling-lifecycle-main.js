@@ -3,9 +3,43 @@
 
   const COMMAND_EVENT = "commerce-os-shopling-lifecycle-main-command";
   const RESULT_EVENT = "commerce-os-shopling-lifecycle-main-result";
+  const SESSION_KEY = "commerceOsShoplingLifecycleTaskContext";
+  const READY_ATTR = "data-commerce-os-shopling-lifecycle-main";
+  const BRIDGE_VERSION = "v0.5.8";
 
   function text(value) {
     return String(value ?? "").normalize("NFKC").trim();
+  }
+
+  function readStoredContext() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+      if (!stored || typeof stored !== "object") return null;
+      const runId = text(stored.runId);
+      const taskId = text(stored.taskId);
+      const goodsKey = text(stored.goodsKey);
+      const desiredState = text(stored.desiredState);
+      if (!/^[A-Za-z0-9._:-]{12,180}$/.test(runId)) return null;
+      if (!taskId || !/^\d{5,9}$/.test(goodsKey)) return null;
+      if (!["SELLING", "SOLD_OUT", "DELETE"].includes(desiredState)) return null;
+      return { runId, taskId, goodsKey, desiredState, allowDelete: stored.allowDelete === true };
+    } catch {
+      return null;
+    }
+  }
+
+  function contextToken(context) {
+    if (!context) return "";
+    return `${context.runId}:${context.taskId}`.slice(0, 180);
+  }
+
+  function automationContextMatches(token, action, allowDelete) {
+    const stored = readStoredContext();
+    if (stored && contextToken(stored) === token) {
+      if (action === "delete") return stored.desiredState === "DELETE" && stored.allowDelete === true && allowDelete === true;
+      return ["SELLING", "SOLD_OUT"].includes(stored.desiredState);
+    }
+    return new URLSearchParams(location.search).get("commerce_os_lifecycle") === "1";
   }
 
   function exactButton(action) {
@@ -24,6 +58,12 @@
     }) || null;
   }
 
+  try {
+    document.documentElement?.setAttribute(READY_ATTR, BRIDGE_VERSION);
+  } catch {
+    // Readiness marker is diagnostic only.
+  }
+
   window.addEventListener(COMMAND_EVENT, (event) => {
     const detail = event instanceof CustomEvent && event.detail && typeof event.detail === "object"
       ? event.detail
@@ -31,10 +71,15 @@
     const token = text(detail.token);
     const action = text(detail.action);
     const allowDelete = detail.allowDelete === true;
-    const automated = new URLSearchParams(location.search).get("commerce_os_lifecycle") === "1";
 
-    if (!automated || !/^[A-Za-z0-9._:-]{12,180}$/.test(token)) return;
+    if (!/^[A-Za-z0-9._:-]{12,180}$/.test(token)) return;
     if (!["status-change", "delete"].includes(action)) return;
+    if (!automationContextMatches(token, action, allowDelete)) {
+      window.dispatchEvent(new CustomEvent(RESULT_EVENT, {
+        detail: { token, ok: false, error: "lifecycle_automation_context_mismatch" },
+      }));
+      return;
+    }
     if (action === "delete" && !allowDelete) {
       window.dispatchEvent(new CustomEvent(RESULT_EVENT, {
         detail: { token, ok: false, error: "delete_canary_not_armed" },
@@ -76,7 +121,7 @@
 
     if (clicked) {
       window.dispatchEvent(new CustomEvent(RESULT_EVENT, {
-        detail: { token, ok: true, clicked: true },
+        detail: { token, ok: true, clicked: true, bridgeVersion: BRIDGE_VERSION },
       }));
     }
   });

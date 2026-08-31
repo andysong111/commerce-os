@@ -6,7 +6,7 @@ const downloadRoutePath = new URL("../src/app/api/shopling-account-title-bridge/
 
 test("Shopling v0.5.6+ downloadable package requires goods key plus self-code exact identity", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.5\.[67]"/);
+  assert.match(source, /manifest\.version = "0\.5\.[678]"/);
   assert.match(source, /rowMatchesExactIdentity/);
   assert.match(source, /context\?\.goodsKey/);
   assert.match(source, /goodsKeyPattern/);
@@ -14,7 +14,7 @@ test("Shopling v0.5.6+ downloadable package requires goods key plus self-code ex
   assert.match(source, /상품번호/);
   assert.match(source, /다른 상품을 건드리지 않고 중단/);
   assert.match(source, /\.replace\(LEGACY_IDENTITY_MATCH, \(\) => DUAL_IDENTITY_MATCH\)/);
-  assert.match(source, /shopling_v05[67]_identity_rewrite_failed/);
+  assert.match(source, /shopling_v05[678]_identity_rewrite_failed/);
 });
 
 test("Shopling v0.5.6+ uses function replacers so generated $& source cannot corrupt the ZIP", async () => {
@@ -22,13 +22,13 @@ test("Shopling v0.5.6+ uses function replacers so generated $& source cannot cor
   assert.match(source, /\\\\\$&/);
   assert.match(source, /\.replace\(CANONICAL_SNIPPET, \(\) =>/);
   assert.match(source, /new Function\(rewritten\)/);
-  assert.match(source, /shopling_v05[67]_generated_pipeline_syntax_invalid/);
+  assert.match(source, /shopling_v05[678]_generated_pipeline_syntax_invalid/);
 });
 
 test("Shopling v0.5.6+ package carries the field-verified category mapping controls", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.match(source, /매핑된 카테고리로 전송/);
   assert.match(source, /무시하고\.\*쇼핑몰기본정보\.\*카테고리로/);
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.[67]\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.[67]/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.[678]\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.[678]/);
 });

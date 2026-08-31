@@ -48,6 +48,20 @@ test("lifecycle executor mutates only one exact goods-key row and verifies again
   assert.ok(verifyBlock >= 0 && successCall > verifyBlock);
 });
 
+test("MAIN-world bridge accepts persisted lifecycle context after Shopling GET search strips action query parameters", async () => {
+  const main = await readFile(mainPath, "utf8");
+  assert.doesNotThrow(() => new Function(main));
+  assert.match(main, /const SESSION_KEY = "commerceOsShoplingLifecycleTaskContext"/);
+  assert.match(main, /const BRIDGE_VERSION = "v0\.5\.8"/);
+  assert.match(main, /function readStoredContext/);
+  assert.match(main, /sessionStorage\.getItem\(SESSION_KEY\)/);
+  assert.match(main, /function contextToken/);
+  assert.match(main, /function automationContextMatches/);
+  assert.match(main, /contextToken\(stored\) === token/);
+  assert.match(main, /lifecycle_automation_context_mismatch/);
+  assert.match(main, /data-commerce-os-shopling-lifecycle-main/);
+});
+
 test("delete remains double-gated in isolated and main worlds", async () => {
   const executor = await readFile(executorPath, "utf8");
   const main = await readFile(mainPath, "utf8");
@@ -55,8 +69,8 @@ test("delete remains double-gated in isolated and main worlds", async () => {
   assert.match(executor, /context\.desiredState === "DELETE" && !context\.allowDelete/);
   assert.match(executor, /삭제 Canary가 서버에서 승인되지 않아 삭제를 실행하지 않았습니다/);
   assert.match(main, /action === "delete" && !allowDelete/);
+  assert.match(main, /stored\.desiredState === "DELETE" && stored\.allowDelete === true && allowDelete === true/);
   assert.match(main, /delete_canary_not_armed/);
-  assert.match(main, /commerce_os_lifecycle.*=== "1"/s);
   assert.match(main, /del_submit\\s\*\\\(/);
   assert.match(main, /status_chg\\s\*\\\(/);
 });
@@ -88,9 +102,9 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.5.7 with top-frame-only lifecycle workers", async () => {
+test("download package upgrades baseline manifest to v0.5.8 with top-frame-only lifecycle workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.5\.7"/);
+  assert.match(source, /manifest\.version = "0\.5\.8"/);
   assert.match(source, /"alarms"/);
   assert.match(
     source,
@@ -100,6 +114,6 @@ test("download package upgrades baseline manifest to v0.5.7 with top-frame-only 
     source,
     /js: \["content-shopling-lifecycle-main\.js"\],[\s\S]{0,120}all_frames: false[\s\S]{0,120}world: "MAIN"/,
   );
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.7\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.7/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.8\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.8/);
 });
