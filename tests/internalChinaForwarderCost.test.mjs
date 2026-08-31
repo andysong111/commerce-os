@@ -12,14 +12,27 @@ const [engine, route, panel, fallbackPanel, layout, receiptEngine, workflow] = a
   readFile(".github/workflows/china-order-ledger-ci.yml", "utf8"),
 ]);
 
-test("actual forwarder charges are persisted as a separate monthly cash-out ledger", () => {
+test("actual forwarder charge closes the landed-cost multiplier instead of remaining a detached expense", () => {
   assert.ok(engine.includes('INTERNAL_CHINA_FORWARDER_COST_CLOSE'));
   assert.ok(engine.includes("actualCostKrw"));
-  assert.ok(engine.includes("estimatedForwarderCostKrw"));
-  assert.ok(engine.includes("actualTotalOutflowKrw"));
-  assert.ok(engine.includes("appliesToProductUnitCost: false"));
-  assert.ok(engine.includes("appliesToPriceGrade: false"));
+  assert.ok(engine.includes("actualMultiplier"));
+  assert.ok(engine.includes("appliesToProductUnitCost: true"));
+  assert.ok(engine.includes("appliesToPriceGrade: true"));
   assert.ok(engine.includes("CHINA_FORWARDER_COST_RECEIPT_OPEN"));
+});
+
+test("historical landed-cost formula uses product purchase total as the multiplier base", () => {
+  assert.ok(engine.includes("(productCost + actualForwarderCostKrw) / productCost"));
+  assert.ok(engine.includes("decimal(line.unitPriceCny) * line.quantity"));
+  assert.ok(engine.includes("domesticChinaFreightKrw"));
+  assert.ok(engine.includes("productUnitKrw * multiplier + freightPerUnitKrw"));
+});
+
+test("China domestic freight is added after the multiplier and not included in its base", () => {
+  assert.ok(engine.includes("function domesticChinaFreightKrw"));
+  assert.ok(engine.includes("const productCost = productPurchaseCostKrw(draft)"));
+  assert.ok(engine.includes("productCost + actualCostKrw + domesticFreight"));
+  assert.ok(engine.includes("group.freightCny / group.quantity"));
 });
 
 test("receipt close requires the exact forwarder amount only for the final receipt", () => {
@@ -31,7 +44,7 @@ test("receipt close requires the exact forwarder amount only for the final recei
   assert.ok(panel.includes("최종 전량 입고"));
 });
 
-test("completed monthly drafts remain visible until forwarder cost is closed", () => {
+test("completed monthly drafts remain visible until actual landed cost is closed", () => {
   assert.ok(layout.includes("draft.orderedQuantity > 0"));
   assert.ok(layout.includes("currentCycleDrafts.map"));
   assert.ok(layout.includes("배송비 미마감"));
@@ -45,37 +58,48 @@ test("China order manager fails fast instead of exhausting the Vercel function t
   assert.ok(layout.includes("Promise.race"));
   assert.ok(layout.includes("발주원장 실시간 조회 지연"));
   assert.ok(layout.includes("실제 원장 데이터는 변경되지 않았습니다"));
-  assert.ok(layout.includes("상품 표시정보 조회가 지연되어 B-code 중심으로 먼저 화면을 열었습니다"));
 });
 
-test("forwarder amount input remains available even when the cost summary times out", () => {
+test("forwarder amount input remains available even when the detailed cost summary times out", () => {
   assert.ok(layout.includes("InternalChinaForwarderCostFallback"));
   assert.ok(layout.includes("실제비용 입력 기능은 계속 사용할 수 있습니다"));
   assert.ok(fallbackPanel.includes("배송대행지 실제비용(원)"));
-  assert.ok(fallbackPanel.includes("배송대행 비용 마감"));
+  assert.ok(fallbackPanel.includes("배송대행 비용 · 원가 마감"));
   assert.ok(fallbackPanel.includes('/api/china-order-manager/forwarder-cost'));
-  assert.ok(fallbackPanel.includes("상품 원가·판매가·상품등급에는 합산하지 않습니다"));
+  assert.ok(fallbackPanel.includes("실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액"));
+  assert.equal(fallbackPanel.includes("상품 원가·판매가·상품등급에는 합산하지 않습니다"), false);
 });
 
-test("forwarder cost API is same-origin protected and never claims price inclusion", () => {
+test("normal receipt panel previews the actual multiplier and downstream cost semantics", () => {
+  assert.ok(panel.includes("actualMultiplierPreview"));
+  assert.ok(panel.includes("forwarderCost.domesticChinaFreightKrw"));
+  assert.ok(panel.includes("실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액"));
+  assert.ok(panel.includes("최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임"));
+  assert.ok(panel.includes("실제 판매가격은 별도 승인 절차 없이 즉시 변경하지 않습니다"));
+});
+
+test("forwarder cost API reports the actual multiplier and landed receipt-cost synchronization", () => {
   assert.ok(route.includes("isSameOriginOpsRequest"));
   assert.ok(route.includes("recordInternalChinaForwarderCost"));
-  assert.ok(route.includes("상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다"));
+  assert.ok(route.includes("실제 원가배수"));
+  assert.ok(route.includes("최종 SKU 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임"));
+  assert.ok(route.includes("가격조정·상품등급 판단의 원가로 사용됩니다"));
+  assert.equal(route.includes("상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다"), false);
 });
 
-test("Product Master receipt cost excludes the temporary 1.45 estimate", () => {
+test("initial receipt still excludes the temporary 1.45 until actual forwarder cost is known", () => {
   assert.ok(receiptEngine.includes("actualUnitCny * draft.exchangeRateKrwPerCny"));
   assert.equal(receiptEngine.includes("draft.internalOrderCostMultiplier"), false);
 });
 
-test("closing the forwarding expense repairs same-cycle receipt cache rows before Product Master sync", () => {
+test("closing the forwarding expense rewrites same-cycle receipt costs with the actual multiplier before Product Master sync", () => {
   assert.ok(engine.includes("readPriceAdjustmentReceiptCache"));
   assert.ok(engine.includes("mergePriceAdjustmentReceiptCachePage"));
   assert.ok(engine.includes('row.id.startsWith("china-receipt:")'));
-  assert.ok(engine.includes("row.batchId !== cycleBatchId"));
+  assert.ok(engine.includes("landedCostMultiplier(draft, actualForwarderCostKrw)"));
   assert.ok(engine.includes("unitCostKrw: nextUnitCostKrw"));
   assert.ok(engine.includes("pushCanonicalProductMasterSnapshotFromTrackerState"));
-  assert.ok(route.includes("1.45를 제거한 상품대금·중국내 운임 기준"));
+  assert.ok(route.includes("Product Master에 재동기화했습니다"));
 });
 
 test("the forwarder regression suite is permanently wired into China Order Ledger CI", () => {
