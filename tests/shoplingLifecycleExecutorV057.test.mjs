@@ -6,16 +6,16 @@ const executorPath = new URL(
   "../public/shopling-account-title-bridge/content-shopling-lifecycle-executor.js",
   import.meta.url,
 );
-const mainPath = new URL(
-  "../public/shopling-account-title-bridge/content-shopling-lifecycle-main.js",
-  import.meta.url,
-);
-const relayPath = new URL(
-  "../public/shopling-account-title-bridge/content-shopling-lifecycle-cross-world-relay.js",
+const mainExecPath = new URL(
+  "../public/shopling-account-title-bridge/background-shopling-lifecycle-main-exec.js",
   import.meta.url,
 );
 const backgroundPath = new URL(
   "../public/shopling-account-title-bridge/background-shopling-lifecycle.js",
+  import.meta.url,
+);
+const backgroundRootPath = new URL(
+  "../public/shopling-account-title-bridge/background-shopling-root.js",
   import.meta.url,
 );
 const bridgeRoutePath = new URL(
@@ -52,43 +52,44 @@ test("lifecycle executor mutates only one exact goods-key row and verifies again
   assert.ok(verifyBlock >= 0 && successCall > verifyBlock);
 });
 
-test("MAIN-world bridge accepts persisted lifecycle context after Shopling GET search strips action query parameters", async () => {
-  const main = await readFile(mainPath, "utf8");
-  assert.doesNotThrow(() => new Function(main));
-  assert.match(main, /const SESSION_KEY = "commerceOsShoplingLifecycleTaskContext"/);
-  assert.match(main, /const BRIDGE_VERSION = "v0\.5\.8"/);
-  assert.match(main, /function readStoredContext/);
-  assert.match(main, /sessionStorage\.getItem\(SESSION_KEY\)/);
-  assert.match(main, /function contextToken/);
-  assert.match(main, /function automationContextMatches/);
-  assert.match(main, /contextToken\(stored\) === token/);
-  assert.match(main, /lifecycle_automation_context_mismatch/);
-  assert.match(main, /data-commerce-os-shopling-lifecycle-main/);
+test("background scripting executor runs only in top-frame Shopling MAIN world and validates persisted context", async () => {
+  const source = await readFile(mainExecPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /commerce-os-shopling-lifecycle-main-execute/);
+  assert.match(source, /chrome\.scripting\.executeScript/);
+  assert.match(source, /world: "MAIN"/);
+  assert.match(source, /frameId !== 0/);
+  assert.match(source, /commerceOsShoplingLifecycleTaskContext/);
+  assert.match(source, /storedToken !== cleanToken/);
+  assert.match(source, /lifecycle_main_exec_context_mismatch/);
+  assert.match(source, /location\.hostname !== "a\.shopling\.co\.kr"/);
+  assert.match(source, /location\.pathname !== "\/prod\/prodLst\.phtml"/);
 });
 
-test("v0.5.9 relays cross-world lifecycle events into world-local CustomEvents before legacy instanceof checks", async () => {
-  const relay = await readFile(relayPath, "utf8");
-  assert.doesNotThrow(() => new Function(relay));
-  assert.match(relay, /const RELAY_VERSION = "v0\.5\.9"/);
-  assert.match(relay, /chrome\?\.runtime\?\.id/);
-  assert.match(relay, /event\.detail/);
-  assert.match(relay, /stopImmediatePropagation/);
-  assert.match(relay, /window\.dispatchEvent\(new CustomEvent/);
-  assert.match(relay, /__commerceOsShoplingLifecycleRelayed/);
-  assert.doesNotMatch(relay, /event instanceof CustomEvent/);
+test("v0.6.0 schedules the verified Shopling button click directly in MAIN world without cross-world CustomEvent transport", async () => {
+  const source = await readFile(mainExecPath, "utf8");
+  assert.match(source, /const BRIDGE_VERSION = "v0\.6\.0"/);
+  assert.match(source, /button\.click\(\)/);
+  assert.match(source, /window\.confirm = \(\) => true/);
+  assert.match(source, /commerceOsShoplingLifecycleMainScheduled/);
+  assert.doesNotMatch(source, /CustomEvent|main_world_submit_timeout/);
 });
 
-test("delete remains double-gated in isolated and main worlds", async () => {
+test("delete remains double-gated in isolated executor and MAIN-world scripting executor", async () => {
   const executor = await readFile(executorPath, "utf8");
-  const main = await readFile(mainPath, "utf8");
-  assert.doesNotThrow(() => new Function(main));
+  const mainExec = await readFile(mainExecPath, "utf8");
   assert.match(executor, /context\.desiredState === "DELETE" && !context\.allowDelete/);
   assert.match(executor, /삭제 Canary가 서버에서 승인되지 않아 삭제를 실행하지 않았습니다/);
-  assert.match(main, /action === "delete" && !allowDelete/);
-  assert.match(main, /stored\.desiredState === "DELETE" && stored\.allowDelete === true && allowDelete === true/);
-  assert.match(main, /delete_canary_not_armed/);
-  assert.match(main, /del_submit\\s\*\\\(/);
-  assert.match(main, /status_chg\\s\*\\\(/);
+  assert.match(mainExec, /cleanAction === "delete"/);
+  assert.match(mainExec, /desiredState !== "DELETE" \|\| stored\.allowDelete !== true \|\| allowDelete !== true/);
+  assert.match(mainExec, /delete_canary_not_armed/);
+  assert.match(mainExec, /del_submit\\s\*\\\(/);
+  assert.match(mainExec, /status_chg\\s\*\\\(/);
+});
+
+test("background root loads the direct MAIN-world lifecycle executor", async () => {
+  const source = await readFile(backgroundRootPath, "utf8");
+  assert.match(source, /background-shopling-lifecycle-main-exec\.js/);
 });
 
 test("background executor is serialized, yields to existing Shopling workers, and times out fail-closed", async () => {
@@ -118,19 +119,25 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.5.9 with relay before both lifecycle worlds", async () => {
+test("download package upgrades baseline manifest to v0.6.0 with scripting permission and top-frame lifecycle executor", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.5\.9"/);
-  assert.match(source, /"alarms"/);
-  assert.match(source, /content-shopling-lifecycle-cross-world-relay\.js/);
+  assert.match(source, /manifest\.version = "0\.6\.0"/);
+  assert.match(source, /"alarms", "scripting"/);
+  assert.match(source, /background-shopling-lifecycle-main-exec\.js/);
   assert.match(
     source,
-    /js: \["content-shopling-lifecycle-cross-world-relay\.js"\],[\s\S]{0,180}js: \["content-shopling-lifecycle-executor\.js"\]/,
+    /js: \["content-shopling-lifecycle-executor\.js"\],[\s\S]{0,120}all_frames: false/,
   );
-  assert.match(
-    source,
-    /js: \["content-shopling-lifecycle-cross-world-relay\.js"\],[\s\S]{0,180}world: "MAIN"[\s\S]{0,220}js: \["content-shopling-lifecycle-main\.js"\]/,
-  );
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.5\.9\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.5\.9/);
+  assert.doesNotMatch(source, /world: "MAIN"/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.6\.0\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.6\.0/);
+});
+
+test("download package rewrites legacy event invokeMutation into background scripting message transport", async () => {
+  const source = await readFile(downloadRoutePath, "utf8");
+  assert.match(source, /LEGACY_LIFECYCLE_INVOKE_MUTATION/);
+  assert.match(source, /SCRIPTING_LIFECYCLE_INVOKE_MUTATION/);
+  assert.match(source, /commerce-os-shopling-lifecycle-main-execute/);
+  assert.match(source, /shopling_v060_legacy_event_bridge_still_present/);
+  assert.match(source, /rewriteLifecycleExecutor/);
 });
