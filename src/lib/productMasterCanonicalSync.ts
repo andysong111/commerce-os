@@ -13,6 +13,8 @@ type CanonicalPayload = Omit<ProductMasterSnapshotPayload, "skus"> & {
   skus: StableSku[];
 };
 
+type DependentCanonicalKey = "listingMappings" | "receiptCosts";
+
 const PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
 const SOURCE_SYSTEM = "ops_product_launch_tracker";
 const BATCH_SIZE = 500;
@@ -76,6 +78,31 @@ function sharedBarcodeIdentityMap(state: R) {
   }
 
   return result;
+}
+
+function dependentSkuContext(
+  key: DependentCanonicalKey,
+  rows: unknown[],
+  skuById: ReadonlyMap<string, StableSku>,
+) {
+  const skuIds = new Set<string>();
+  for (const raw of rows) {
+    const skuId = text(object(raw).skuId);
+    if (!skuId) {
+      throw new Error(`PRODUCT_MASTER_DEPENDENT_SKU_CONTEXT_MISSING:${key}:EMPTY`);
+    }
+    skuIds.add(skuId);
+  }
+
+  return [...skuIds].map((skuId) => {
+    const sku = skuById.get(skuId);
+    if (!sku) {
+      throw new Error(
+        `PRODUCT_MASTER_DEPENDENT_SKU_CONTEXT_MISSING:${key}:${skuId}`,
+      );
+    }
+    return sku;
+  });
 }
 
 export function buildCanonicalProductMasterSnapshot(input: unknown) {
@@ -157,6 +184,9 @@ export async function pushCanonicalProductMasterSnapshotFromTrackerState(
     .replace(/\/$/, "");
   const built = buildCanonicalProductMasterSnapshot(input);
   const counts: Record<string, number> = {};
+  const skuById = new Map(
+    built.payload.skus.map((sku) => [sku.id, sku] as const),
+  );
   const groups: Array<[keyof CanonicalPayload, unknown[]]> = [
     ["products", built.payload.products],
     ["skus", built.payload.skus],
@@ -168,6 +198,10 @@ export async function pushCanonicalProductMasterSnapshotFromTrackerState(
     counts[key] = 0;
     for (let index = 0; index < rows.length; index += BATCH_SIZE) {
       const batch = rows.slice(index, index + BATCH_SIZE);
+      const requestPayload: Record<string, unknown> = { [key]: batch };
+      if (key === "listingMappings" || key === "receiptCosts") {
+        requestPayload.skus = dependentSkuContext(key, batch, skuById);
+      }
       const response = await fetch(
         `${baseUrl}/api/integrations/canonical-snapshot`,
         {
@@ -176,7 +210,7 @@ export async function pushCanonicalProductMasterSnapshotFromTrackerState(
             "content-type": "application/json",
             "x-commerce-os-integration-secret": secret,
           },
-          body: JSON.stringify({ [key]: batch }),
+          body: JSON.stringify(requestPayload),
           cache: "no-store",
           signal: AbortSignal.timeout(30_000),
         },
