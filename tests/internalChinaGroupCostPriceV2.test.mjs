@@ -163,6 +163,19 @@ test("v2.1 proposal resolves registry and fresh Shopling sale status before grou
   assert.equal(reviewV2.includes("productGrade"), false);
 });
 
+test("unresolved active listings stay fail-closed per row without blocking resolved approval scope", () => {
+  assert.ok(reviewV2.includes("managedListingCount > 0"));
+  assert.ok(reviewV2.includes('row.productGroupSource !== "UNRESOLVED"'));
+  assert.ok(reviewV2.includes("INTERNAL_CHINA_GROUP_COST_PRICE_APPROVAL_SCOPE_MISMATCH"));
+  assert.ok(reviewV2.includes("excludedUnresolvedGroupCount"));
+  assert.equal(
+    reviewV2.includes('proposal.unresolvedGroupCount > 0 || proposal.state !== "AWAITING_APPROVAL"'),
+    false,
+  );
+  assert.ok(page.includes("그룹 미확정 자동제외"));
+  assert.ok(page.includes("이 행들 때문에 근거가 확정된 다른 상품의 가격 검토 전체를 막지 않습니다"));
+});
+
 test("legacy xlsx import treats six filenames as authoritative and refuses conflicts", () => {
   for (const group of ["도매1", "도매2", "도매3", "도매4", "소매1", "소매2"]) {
     assert.ok(parser.includes(group));
