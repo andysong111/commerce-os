@@ -7,6 +7,7 @@ import {
   buildInternalChinaGroupCostPriceDecision,
   INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION,
 } from "@/lib/internalChinaGroupCostPricePolicy";
+import { shoplingSaleStatusActive } from "@/lib/internalChinaShoplingSaleStatus";
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
 import { loadShoplingCurrentPriceSnapshot } from "@/lib/shopling/shoplingCurrentPrice";
 import {
@@ -176,11 +177,6 @@ function listingKey(barcode: unknown, goodsKey: unknown, optionId: unknown) {
   return `${normalizeBarcode(barcode)}|${text(goodsKey)}|${text(optionId)}`;
 }
 
-export function shoplingSaleStatusActive(value: unknown) {
-  const status = text(value).toUpperCase();
-  return !status || status === "B";
-}
-
 async function loadLiveListingStatuses(v1: InternalChinaCostPriceProposal) {
   const affectedBarcodes = new Set(v1.rows.map((row) => normalizeBarcode(row.barcode)));
   const planning = await loadProductPlanningSnapshot();
@@ -259,8 +255,7 @@ export async function buildInternalChinaGroupCostPriceProposal(
       saleStatus: liveStatus?.saleStatus ?? "",
       saleStatusActive: row.goodsKey ? (liveStatus ? liveStatus.active : false) : null,
       direction: liveMissing || liveInactive ? "BLOCKED" : decision.direction,
-      changeRequired:
-        liveMissing || liveInactive ? false : decision.changeRequired,
+      changeRequired: liveMissing || liveInactive ? false : decision.changeRequired,
       blockedReason,
       reason,
     };
