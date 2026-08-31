@@ -49,6 +49,7 @@ export type InternalChinaForwarderCostSummary = {
   draftId: string;
   cycleMonth: string;
   productPurchaseCostKrw: number;
+  domesticChinaFreightKrw: number;
   estimatedMultiplier: number;
   estimatedForwarderCostKrw: number;
   estimatedTotalOutflowKrw: number;
@@ -56,8 +57,8 @@ export type InternalChinaForwarderCostSummary = {
   actualTotalOutflowKrw: number | null;
   actualMultiplier: number | null;
   closedAt: string | null;
-  appliesToProductUnitCost: false;
-  appliesToPriceGrade: false;
+  appliesToProductUnitCost: true;
+  appliesToPriceGrade: true;
   receiptCostReconciliation?: InternalChinaReceiptCostReconciliation | null;
 };
 
@@ -83,9 +84,7 @@ function decimal(value: unknown) {
 
 function validDraftId(value: unknown) {
   const draftId = text(value);
-  if (!DRAFT_ID.test(draftId)) {
-    throw new Error("CHINA_FORWARDER_COST_DRAFT_INVALID");
-  }
+  if (!DRAFT_ID.test(draftId)) throw new Error("CHINA_FORWARDER_COST_DRAFT_INVALID");
   return draftId;
 }
 
@@ -99,9 +98,7 @@ function validCycleMonth(value: unknown) {
 
 function validActualCostKrw(value: unknown) {
   const actualCostKrw = integer(value);
-  if (actualCostKrw <= 0) {
-    throw new Error("CHINA_FORWARDER_COST_AMOUNT_REQUIRED");
-  }
+  if (actualCostKrw <= 0) throw new Error("CHINA_FORWARDER_COST_AMOUNT_REQUIRED");
   if (actualCostKrw > MAX_ACTUAL_COST_KRW) {
     throw new Error("CHINA_FORWARDER_COST_AMOUNT_EXCEEDED");
   }
@@ -125,38 +122,63 @@ function supabaseConnection() {
   return { baseUrl, secret };
 }
 
-function productUnitCostByBarcode(draft: InternalChinaPurchaseDraft) {
-  const groups = new Map<string, { quantity: number; freight: number }>();
+function freightGroups(draft: InternalChinaPurchaseDraft) {
+  const groups = new Map<string, { quantity: number; freightCny: number }>();
   for (const line of draft.lines) {
     const key = line.freightGroupId.trim() || `__${line.barcode}`;
-    const current = groups.get(key) ?? { quantity: 0, freight: 0 };
+    const current = groups.get(key) ?? { quantity: 0, freightCny: 0 };
     current.quantity += line.quantity;
-    current.freight += decimal(line.domesticChinaFreightCny);
+    current.freightCny += decimal(line.domesticChinaFreightCny);
     groups.set(key, current);
   }
-
-  const result = new Map<string, number>();
-  for (const line of draft.lines) {
-    const key = line.freightGroupId.trim() || `__${line.barcode}`;
-    const group = groups.get(key) ?? { quantity: line.quantity, freight: 0 };
-    const freightPerUnitCny =
-      group.quantity > 0 ? group.freight / group.quantity : 0;
-    const unitCny = decimal(line.unitPriceCny) + freightPerUnitCny;
-    result.set(
-      line.barcode,
-      Math.max(1, Math.round(unitCny * draft.exchangeRateKrwPerCny)),
-    );
-  }
-  return result;
+  return groups;
 }
 
 function productPurchaseCostKrw(draft: InternalChinaPurchaseDraft) {
-  const unitCosts = productUnitCostByBarcode(draft);
-  return draft.lines.reduce(
-    (total, line) =>
-      total + (unitCosts.get(line.barcode) ?? 0) * line.quantity,
+  const totalCny = draft.lines.reduce(
+    (sum, line) => sum + decimal(line.unitPriceCny) * line.quantity,
     0,
   );
+  return Math.max(1, Math.round(totalCny * draft.exchangeRateKrwPerCny));
+}
+
+function domesticChinaFreightKrw(draft: InternalChinaPurchaseDraft) {
+  const totalCny = [...freightGroups(draft).values()].reduce(
+    (sum, group) => sum + group.freightCny,
+    0,
+  );
+  return Math.max(0, Math.round(totalCny * draft.exchangeRateKrwPerCny));
+}
+
+function landedCostMultiplier(
+  draft: InternalChinaPurchaseDraft,
+  actualForwarderCostKrw: number,
+) {
+  const productCost = productPurchaseCostKrw(draft);
+  return productCost > 0
+    ? (productCost + actualForwarderCostKrw) / productCost
+    : 1;
+}
+
+function productUnitCostByBarcode(
+  draft: InternalChinaPurchaseDraft,
+  multiplier: number,
+) {
+  const groups = freightGroups(draft);
+  const result = new Map<string, number>();
+  for (const line of draft.lines) {
+    const key = line.freightGroupId.trim() || `__${line.barcode}`;
+    const group = groups.get(key) ?? { quantity: line.quantity, freightCny: 0 };
+    const freightPerUnitKrw =
+      group.quantity > 0
+        ? (group.freightCny / group.quantity) * draft.exchangeRateKrwPerCny
+        : 0;
+    const productUnitKrw =
+      decimal(line.unitPriceCny) * draft.exchangeRateKrwPerCny;
+    const landedUnitKrw = productUnitKrw * multiplier + freightPerUnitKrw;
+    result.set(line.barcode, Math.max(1, Math.round(landedUnitKrw)));
+  }
+  return result;
 }
 
 function summaryFrom(
@@ -167,31 +189,38 @@ function summaryFrom(
   receiptCostReconciliation: InternalChinaReceiptCostReconciliation | null = null,
 ): InternalChinaForwarderCostSummary {
   const productCost = productPurchaseCostKrw(draft);
-  const estimatedTotal = Math.max(
-    productCost,
-    Math.round(productCost * draft.internalOrderCostMultiplier),
+  const domesticFreight = domesticChinaFreightKrw(draft);
+  const estimatedForwarder = Math.max(
+    0,
+    Math.round(productCost * (draft.internalOrderCostMultiplier - 1)),
   );
-  const estimatedForwarder = Math.max(0, estimatedTotal - productCost);
-  const actualTotal =
-    actualCostKrw === null ? null : productCost + actualCostKrw;
-  const actualMultiplier =
-    actualTotal === null || productCost <= 0
+  const estimatedTotal = productCost + estimatedForwarder + domesticFreight;
+  const actualMultiplierRaw =
+    actualCostKrw === null || productCost <= 0
       ? null
-      : Math.round((actualTotal / productCost) * 10_000) / 10_000;
+      : (productCost + actualCostKrw) / productCost;
+  const actualTotal =
+    actualCostKrw === null
+      ? null
+      : productCost + actualCostKrw + domesticFreight;
 
   return {
     draftId: draft.draftId,
     cycleMonth,
     productPurchaseCostKrw: productCost,
+    domesticChinaFreightKrw: domesticFreight,
     estimatedMultiplier: draft.internalOrderCostMultiplier,
     estimatedForwarderCostKrw: estimatedForwarder,
     estimatedTotalOutflowKrw: estimatedTotal,
     actualCostKrw,
     actualTotalOutflowKrw: actualTotal,
-    actualMultiplier,
+    actualMultiplier:
+      actualMultiplierRaw === null
+        ? null
+        : Math.round(actualMultiplierRaw * 10_000) / 10_000,
     closedAt,
-    appliesToProductUnitCost: false,
-    appliesToPriceGrade: false,
+    appliesToProductUnitCost: true,
+    appliesToPriceGrade: true,
     receiptCostReconciliation,
   };
 }
@@ -207,9 +236,10 @@ async function syncReceiptCostsToProductMaster() {
   return pushCanonicalProductMasterSnapshotFromTrackerState(stored.state_payload);
 }
 
-async function reconcileProductOnlyReceiptCosts(
+async function reconcileReceiptCosts(
   draft: InternalChinaPurchaseDraft,
   cycleMonth: string,
+  actualForwarderCostKrw: number,
 ): Promise<InternalChinaReceiptCostReconciliation> {
   const cache = await readPriceAdjustmentReceiptCache();
   if (!cache) {
@@ -221,7 +251,8 @@ async function reconcileProductOnlyReceiptCosts(
     };
   }
 
-  const unitCosts = productUnitCostByBarcode(draft);
+  const multiplier = landedCostMultiplier(draft, actualForwarderCostKrw);
+  const unitCosts = productUnitCostByBarcode(draft, multiplier);
   const cycleBatchId = Number(cycleMonth.replace("-", ""));
   const corrections: PriceAdjustmentReceipt[] = [];
   let matchedRows = 0;
@@ -238,10 +269,7 @@ async function reconcileProductOnlyReceiptCosts(
         continue;
       }
       matchedRows += 1;
-      corrections.push({
-        ...row,
-        unitCostKrw: nextUnitCostKrw,
-      });
+      corrections.push({ ...row, unitCostKrw: nextUnitCostKrw });
     }
   }
 
@@ -250,7 +278,7 @@ async function reconcileProductOnlyReceiptCosts(
       matchedRows,
       updatedRows: 0,
       productMasterSynced: false,
-      productMasterError: "PRODUCT_ONLY_RECEIPT_ROWS_NOT_FOUND",
+      productMasterError: "LANDED_RECEIPT_ROWS_NOT_FOUND",
     };
   }
 
@@ -277,7 +305,7 @@ async function reconcileProductOnlyReceiptCosts(
       productMasterError:
         error instanceof Error
           ? error.message
-          : "PRODUCT_MASTER_PRODUCT_ONLY_RECEIPT_SYNC_FAILED",
+          : "PRODUCT_MASTER_LANDED_RECEIPT_SYNC_FAILED",
     };
   }
 }
@@ -289,7 +317,7 @@ async function readStoredCost(draftId: string) {
     {
       headers: createSupabaseAdminHeaders(secret),
       cache: "no-store",
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(5_000),
     },
   );
   if (!response.ok) {
@@ -309,6 +337,55 @@ async function readStoredCost(draftId: string) {
       text(row?.started_at) ||
       null,
   };
+}
+
+async function storeSummary(
+  draftId: string,
+  actualCycleMonth: string,
+  actualCostKrw: number,
+  summary: InternalChinaForwarderCostSummary,
+  reconciliation: InternalChinaReceiptCostReconciliation,
+  now: string,
+) {
+  const { baseUrl, secret } = supabaseConnection();
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?on_conflict=source_event_id&select=source_event_id,result_snapshot,updated_at`,
+    {
+      method: "POST",
+      headers: {
+        ...createSupabaseAdminHeaders(secret),
+        Prefer: "resolution=merge-duplicates,return=representation",
+      },
+      body: JSON.stringify([
+        {
+          operation_type: INTERNAL_CHINA_FORWARDER_COST_OPERATION_TYPE,
+          status: reconciliation.productMasterSynced ? "SUCCEEDED" : "PARTIAL",
+          source: SOURCE,
+          source_event_id: sourceEventId(draftId),
+          correlation_id: correlationId(draftId),
+          actor_type: "OPS_OPERATOR",
+          input_snapshot: {
+            draftId,
+            cycleMonth: actualCycleMonth,
+            actualCostKrw,
+          },
+          result_snapshot: summary,
+          error_message: reconciliation.productMasterError,
+          started_at: now,
+          finished_at: now,
+          updated_at: now,
+        },
+      ]),
+      cache: "no-store",
+      signal: AbortSignal.timeout(12_000),
+    },
+  );
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `CHINA_FORWARDER_COST_STORE_FAILED:${response.status}:${body.slice(0, 300)}`,
+    );
+  }
 }
 
 export async function loadInternalChinaForwarderCostSummary(
@@ -343,9 +420,8 @@ export async function recordInternalChinaForwarderCost(
   const commitments = ledger.commitments.filter(
     (row) => row.sourceSystem === SOURCE_SYSTEM && row.sourceRunId === draftId,
   );
-  if (!commitments.length) {
-    throw new Error("CHINA_FORWARDER_COST_DRAFT_NOT_FOUND");
-  }
+  if (!commitments.length) throw new Error("CHINA_FORWARDER_COST_DRAFT_NOT_FOUND");
+
   const actualCycleMonth = seoulCalendarMonth(
     commitments.reduce((earliest, row) => {
       const candidate = row.reservedAt || row.updatedAt;
@@ -358,10 +434,7 @@ export async function recordInternalChinaForwarderCost(
       `CHINA_FORWARDER_COST_CYCLE_MONTH_CONFLICT:${requestedCycleMonth}:${actualCycleMonth}`,
     );
   }
-  const openQuantity = commitments.reduce(
-    (sum, row) => sum + row.openQuantity,
-    0,
-  );
+  const openQuantity = commitments.reduce((sum, row) => sum + row.openQuantity, 0);
   if (openQuantity > 0) {
     throw new Error(`CHINA_FORWARDER_COST_RECEIPT_OPEN:${openQuantity}`);
   }
@@ -371,9 +444,10 @@ export async function recordInternalChinaForwarderCost(
   );
   let reconciliation: InternalChinaReceiptCostReconciliation;
   try {
-    reconciliation = await reconcileProductOnlyReceiptCosts(
+    reconciliation = await reconcileReceiptCosts(
       draft,
       actualCycleMonth,
+      actualCostKrw,
     );
   } catch (error) {
     reconciliation = {
@@ -383,7 +457,7 @@ export async function recordInternalChinaForwarderCost(
       productMasterError:
         error instanceof Error
           ? error.message
-          : "PRODUCT_ONLY_RECEIPT_RECONCILIATION_FAILED",
+          : "LANDED_RECEIPT_RECONCILIATION_FAILED",
     };
   }
 
@@ -395,44 +469,13 @@ export async function recordInternalChinaForwarderCost(
     now,
     reconciliation,
   );
-  const { baseUrl, secret } = supabaseConnection();
-  const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?on_conflict=source_event_id&select=source_event_id,result_snapshot,updated_at`,
-    {
-      method: "POST",
-      headers: {
-        ...createSupabaseAdminHeaders(secret),
-        Prefer: "resolution=merge-duplicates,return=representation",
-      },
-      body: JSON.stringify([
-        {
-          operation_type: INTERNAL_CHINA_FORWARDER_COST_OPERATION_TYPE,
-          status: reconciliation.productMasterSynced ? "SUCCEEDED" : "PARTIAL",
-          source: SOURCE,
-          source_event_id: sourceEventId(draftId),
-          correlation_id: correlationId(draftId),
-          actor_type: "OPS_OPERATOR",
-          input_snapshot: {
-            draftId,
-            cycleMonth: actualCycleMonth,
-            actualCostKrw,
-          },
-          result_snapshot: summary,
-          error_message: reconciliation.productMasterError,
-          started_at: now,
-          finished_at: now,
-          updated_at: now,
-        },
-      ]),
-      cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
-    },
+  await storeSummary(
+    draftId,
+    actualCycleMonth,
+    actualCostKrw,
+    summary,
+    reconciliation,
+    now,
   );
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      `CHINA_FORWARDER_COST_STORE_FAILED:${response.status}:${body.slice(0, 300)}`,
-    );
-  }
   return summary;
 }
