@@ -71,6 +71,11 @@ const REGISTRY: Record<string, RegistryEntry> = {
     load: async () =>
       (await import("@/app/api/cron/product-decision-live-refresh/route")).GET as CronHandler,
   },
+  "product-lifecycle-refresh": {
+    routePath: "/api/cron/product-lifecycle-refresh",
+    load: async () =>
+      (await import("@/app/api/cron/product-lifecycle-refresh/route")).GET as CronHandler,
+  },
   "product-master-shopling-diagnostic": {
     routePath: "/api/cron/product-master-shopling-diagnostic",
     load: async () =>
