@@ -6,8 +6,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BASE_VERSION = "0.3.4";
-const VERSION = "0.3.6";
-const CONTROL_START_MESSAGE = "commerce-os-shopling-parallel-control-start-v036";
+const VERSION = "0.3.7";
+const CONTROL_START_MESSAGE = "commerce-os-shopling-parallel-control-start-v037";
 
 function assertScript(name: string, source: string) {
   try {
@@ -37,44 +37,65 @@ function rewriteBackground(source: string) {
   const rewritten = replaceOnce(
     source,
     'const WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV034";',
-    'const WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV036";',
-    "shopling_parallel_worker_v036_background_state_anchor_missing",
+    'const WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV037";',
+    "shopling_parallel_worker_v037_background_state_anchor_missing",
   );
-  assertScript("background-root-v036", rewritten);
+  assertScript("background-root-v037", rewritten);
   return rewritten;
 }
 
 function rewriteContent(source: string) {
   let rewritten = source;
-  rewritten = replaceOnce(rewritten, 'const VERSION = "0.3.4";', 'const VERSION = "0.3.6";', "shopling_parallel_worker_v036_content_version_anchor_missing");
-  rewritten = replaceOnce(rewritten, 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV034";', 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV036";', "shopling_parallel_worker_v036_run_state_anchor_missing");
-  rewritten = replaceOnce(rewritten, 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV034";', 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV036";', "shopling_parallel_worker_v036_worker_state_anchor_missing");
+  rewritten = replaceOnce(rewritten, 'const VERSION = "0.3.4";', 'const VERSION = "0.3.7";', "shopling_parallel_worker_v037_content_version_anchor_missing");
+  rewritten = replaceOnce(rewritten, 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV034";', 'const RUN_STATE_KEY = "commerceOsShoplingParallelRunV037";', "shopling_parallel_worker_v037_run_state_anchor_missing");
+  rewritten = replaceOnce(rewritten, 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV034";', 'const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV037";', "shopling_parallel_worker_v037_worker_state_anchor_missing");
   rewritten = replaceOnce(
     rewritten,
     '  const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";',
     `  const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";\n  const CONTROL_START_MESSAGE = "${CONTROL_START_MESSAGE}";\n  const CONTROL_UI_MODE = "extension-action-only-no-shopling-dom";`,
-    "shopling_parallel_worker_v036_control_message_anchor_missing",
+    "shopling_parallel_worker_v037_control_message_anchor_missing",
   );
-  rewritten = replaceOnce(rewritten, "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;", "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;\n  const A18_NAVIGATION_TIMEOUT_MS = 20000;", "shopling_parallel_worker_v036_a18_timeout_anchor_missing");
-  rewritten = replaceOnce(rewritten, '    if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) return;', '    if (!["worker_opening", "await_a18"].includes(state.stage)) return;', "shopling_parallel_worker_v036_repeat_a18_gate_anchor_missing");
+  rewritten = replaceOnce(rewritten, "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;", "  const SUBMIT_CONFIRM_TIMEOUT_MS = 90000;\n  const A18_NAVIGATION_TIMEOUT_MS = 20000;\n  const RESULT_SETTLE_MS = 2500;", "shopling_parallel_worker_v037_a18_timeout_anchor_missing");
+  rewritten = replaceOnce(rewritten, '    if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage)) return;', '    if (!["worker_opening", "await_a18"].includes(state.stage)) return;', "shopling_parallel_worker_v037_repeat_a18_gate_anchor_missing");
+
+  rewritten = replaceOnce(
+    rewritten,
+    `  function isSubmitResultPage() {\n    return /\\/prod_a\\/prod_rgst_rspt\\.phtml$/i.test(location.pathname)\n      && /shopling\\.co\\.kr$/i.test(location.hostname);\n  }`,
+    `  function isSubmitResultPage() {\n    return /\\/prod_a\\/prod_rgst_(?:rspt|tsrmt)\\.phtml$/i.test(location.pathname)\n      && /shopling\\.co\\.kr$/i.test(location.hostname);\n  }\n\n  function isMallResultFrame() {\n    return /\\/prod\\/rgst\\/[^/]+_rgst\\.phtml$/i.test(location.pathname)\n      && /shopling\\.co\\.kr$/i.test(location.hostname);\n  }\n\n  function resultEvidenceKey(runId, goodsKey, frameId) {\n    return \`commerceOsShoplingParallelResultV037:\${runId}:\${goodsKey}:\${frameId}\`;\n  }\n\n  async function storeMallResultEvidence(state) {\n    if (!isMallResultFrame()) return false;\n    const body = bodyText();\n    if (!/성공건수|실패건수|성공여부|상품 등록 전송 결과/i.test(body)) return false;\n    const successCount = countFrom(body, /성공건수\\s*[:：]?\\s*([\\d,]+)/i);\n    const failureCount = countFrom(body, /실패건수\\s*[:：]?\\s*([\\d,]+)/i);\n    const success = successCount > 0 || /성공여부\\s*성공/i.test(body);\n    const failure = failureCount > 0 || /성공여부\\s*실패/i.test(body);\n    const isSelpa = /셀파/i.test(body);\n    const frameId = [location.hostname, location.pathname, location.search].join(\"|\").slice(0, 500);\n    await storageSet({\n      [resultEvidenceKey(state.runId, state.task.goodsKey, frameId)]: {\n        runId: state.runId,\n        goodsKey: state.task.goodsKey,\n        frameId,\n        isSelpa,\n        success,\n        failure,\n        successCount,\n        failureCount,\n        capturedAt: Date.now(),\n      },\n    });\n    return true;\n  }\n\n  async function collectedMallEvidence(state) {\n    const all = await storageGet(null);\n    const prefix = \`commerceOsShoplingParallelResultV037:\${state.runId}:\${state.task.goodsKey}:\`;\n    return Object.keys(all)\n      .filter((key) => key.startsWith(prefix))\n      .map((key) => all[key])\n      .filter(Boolean);\n  }`,
+    "shopling_parallel_worker_v037_result_page_anchor_missing",
+  );
 
   const driveAnchor = `      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
-  const driveReplacement = `      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (state.stage === "a18_clicked") {\n        const age = Date.now() - Number(state.stepAt || 0);\n        if (age >= A18_NAVIGATION_TIMEOUT_MS) {\n          await failTask(state, "a18_navigation_timeout", "A18 진입 클릭 후 상품등록 화면을 확인하지 못했습니다. 메뉴를 반복 클릭하지 않고 이 채널만 안전중단했습니다.");\n        }\n        return;\n      }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
-  rewritten = replaceOnce(rewritten, driveAnchor, driveReplacement, "shopling_parallel_worker_v036_drive_wait_anchor_missing");
+  const driveReplacement = `      if (isMallResultFrame()) {\n        await storeMallResultEvidence(state);\n        return;\n      }\n      if (isIdChoicePage()) { await driveIdChoice(state); return; }\n      if (isPreProdChoicePage()) { await drivePreProd(state); return; }\n      if (isProductListUi()) { await driveProductList(state); return; }\n      if (state.stage === "a18_clicked") {\n        const age = Date.now() - Number(state.stepAt || 0);\n        if (age >= A18_NAVIGATION_TIMEOUT_MS) {\n          await failTask(state, "a18_navigation_timeout", "A18 진입 클릭 후 상품등록 화면을 확인하지 못했습니다. 메뉴를 반복 클릭하지 않고 이 채널만 안전중단했습니다.");\n        }\n        return;\n      }\n      if (window.top === window && isAdminShell()) await navigateWorkerShell(state);`;
+  rewritten = replaceOnce(rewritten, driveAnchor, driveReplacement, "shopling_parallel_worker_v037_drive_wait_anchor_missing");
+
+  rewritten = replaceOnce(
+    rewritten,
+    `  async function checkSubmitOutcome(state) {\n    if (state.stage !== "submit_clicked" || !isSubmitResultPage()) return;\n    const task = state.task;\n    const evidence = submitEvidence();\n    if (evidence.success) {\n      const ignored = evidence.ignoredSelpaFailures > 0\n        ? \` · 셀파 실패 \${evidence.ignoredSelpaFailures}건은 운영정책상 무시\`\n        : "";\n      await completeTask(\n        state,\n        "sent",\n        "shopling_submit_success_parallel_worker",\n        \`\${task.profile} 실제 Shopling 결과 화면에서 비셀파 성공을 확인했습니다\${ignored}.\`,\n      );\n      return;\n    }\n    if (evidence.failure) {\n      await failTask(state, "shopling_submit_result_has_nonselfa_failure", \`\${task.profile} 송신 결과에 셀파 외 실패가 있어 이 채널만 확인필요로 보존합니다.\`);\n      return;\n    }\n    const age = Date.now() - Number(state.submitClickedAt || 0);\n    if (!evidence.processing && age >= SUBMIT_CONFIRM_TIMEOUT_MS) {\n      await failTask(state, "submit_result_requires_manual_check", \`\${task.profile} 실제 결과 페이지에서 \${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 확정 성공결과를 확인하지 못했습니다.\`);\n    }\n  }`,
+    `  async function checkSubmitOutcome(state) {\n    if (state.stage !== "submit_clicked" || !isSubmitResultPage()) return;\n    const task = state.task;\n    const age = Date.now() - Number(state.submitClickedAt || 0);\n    if (age < RESULT_SETTLE_MS) return;\n\n    const direct = submitEvidence();\n    const frames = await collectedMallEvidence(state);\n    const frameHasSuccess = frames.some((row) => row && row.success === true);\n    const ignoredSelpaFailures = frames.filter((row) => row && row.isSelpa === true && row.failure === true).length;\n    const nonIgnoredFrameFailure = frames.some((row) => row && row.isSelpa !== true && row.failure === true);\n    const hasSuccess = direct.success || frameHasSuccess;\n    const hasFailure = direct.failure || nonIgnoredFrameFailure;\n\n    if (hasFailure) {\n      await failTask(state, "shopling_submit_result_has_nonselfa_failure", \`\${task.profile} 송신 결과에 셀파 외 실패가 있어 이 채널만 확인필요로 보존합니다.\`);\n      return;\n    }\n    if (hasSuccess) {\n      const ignored = Math.max(Number(direct.ignoredSelpaFailures || 0), ignoredSelpaFailures) > 0\n        ? \` · 셀파 실패 \${Math.max(Number(direct.ignoredSelpaFailures || 0), ignoredSelpaFailures)}건은 운영정책상 무시\`\n        : "";\n      await completeTask(\n        state,\n        "sent",\n        "shopling_submit_success_parallel_worker_v037",\n        \`\${task.profile} 실제 Shopling 결과창/쇼핑몰별 결과 프레임에서 비셀파 성공을 확인했습니다\${ignored}.\`,\n      );\n      return;\n    }\n    if (!direct.processing && age >= SUBMIT_CONFIRM_TIMEOUT_MS) {\n      await failTask(state, "submit_result_requires_manual_check", \`\${task.profile} 실제 결과 페이지에서 \${SUBMIT_CONFIRM_TIMEOUT_MS / 1000}초 동안 확정 성공결과를 확인하지 못했습니다.\`);\n    }\n  }`,
+    "shopling_parallel_worker_v037_submit_outcome_anchor_missing",
+  );
+
+  rewritten = replaceOnce(
+    rewritten,
+    `      if (state.stage === "submit_clicked") {\n        if (isSubmitResultPage()) await checkSubmitOutcome(state);\n        return;\n      }`,
+    `      if (state.stage === "submit_clicked") {\n        if (isMallResultFrame()) {\n          await storeMallResultEvidence(state);\n          return;\n        }\n        if (isSubmitResultPage()) await checkSubmitOutcome(state);\n        return;\n      }`,
+    "shopling_parallel_worker_v037_submit_frame_drive_anchor_missing",
+  );
 
   rewritten = replaceBetween(
     rewritten,
     "  function mount() {",
     "\n  chrome.storage.onChanged.addListener",
     `  function mount() {\n    return CONTROL_UI_MODE;\n  }\n`,
-    "shopling_parallel_worker_v036_mount_block",
+    "shopling_parallel_worker_v037_mount_block",
   );
 
   const startupAnchor = `  mount();\n  const observer = new MutationObserver(() => mount());\n  observer.observe(document.documentElement, { childList: true, subtree: true });\n  timer = setInterval(() => void drive(), 800);\n  panelTimer = setInterval(() => void refreshPanel(), 1200);\n  void drive();`;
   const startupReplacement = `  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {\n    if (!message || message.type !== CONTROL_START_MESSAGE || !isProductListUi()) return false;\n    startParallelCanary()\n      .then(() => sendResponse({ ok: true, version: VERSION }))\n      .catch((error) => sendResponse({ ok: false, error: "parallel_control_start_failed", message: error instanceof Error ? error.message : String(error || "start failed") }));\n    return true;\n  });\n\n  timer = setInterval(() => void drive(), 800);\n  panelTimer = null;\n  void drive();`;
-  rewritten = replaceOnce(rewritten, startupAnchor, startupReplacement, "shopling_parallel_worker_v036_popup_startup_anchor_missing");
+  rewritten = replaceOnce(rewritten, startupAnchor, startupReplacement, "shopling_parallel_worker_v037_popup_startup_anchor_missing");
 
-  assertScript("content-group-canary-v036", rewritten);
+  assertScript("content-group-canary-v037", rewritten);
   return rewritten;
 }
 
@@ -90,21 +111,21 @@ h1{font-size:14px;margin:0 0 6px;color:#0f766e}p{margin:0 0 10px;color:#64748b}#
 </style>
 </head>
 <body>
-<h1>Parallel Fresh Worker v0.3.6</h1>
-<p>A18 화면에는 어떤 패널도 올리지 않습니다. 아래 버튼은 현재 열려 있는 Shopling A18 탭에만 시작 신호를 보냅니다.</p>
+<h1>Parallel Fresh Worker v0.3.7</h1>
+<p>A18 화면에는 어떤 패널도 올리지 않습니다. 실제 Shopling 결과창과 쇼핑몰별 결과 프레임까지 확인해 성공/실패를 자동 확정합니다.</p>
 <div id="status">상태 확인 중...</div>
 <button id="start" type="button">남은 채널 병렬 처리 시작</button>
-<div class="guard">goods_key + 자사상품코드 이중일치 · 채널별 독립잠금 · A18 진입 1회</div>
+<div class="guard">goods_key + 자사상품코드 이중일치 · 채널별 독립잠금 · 결과창 자동판정 · A18 진입 1회</div>
 <script src="popup.js"></script>
 </body>
 </html>
 `;
 
 const POPUP_JS = `"use strict";
-const VERSION = "0.3.6";
+const VERSION = "0.3.7";
 const START_MESSAGE = "${CONTROL_START_MESSAGE}";
-const RUN_STATE_KEY = "commerceOsShoplingParallelRunV036";
-const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV036:";
+const RUN_STATE_KEY = "commerceOsShoplingParallelRunV037";
+const WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV037:";
 const statusNode = document.getElementById("status");
 const startButton = document.getElementById("start");
 
@@ -170,7 +191,7 @@ export async function GET() {
   if (manifest.permissions?.includes("scripting")) throw new Error("shopling_parallel_worker_obsolete_launcher_script_permission_present");
 
   manifest.version = VERSION;
-  manifest.description = "Shopling A18 DOM에 제어 패널을 전혀 삽입하지 않고 Chrome 확장 팝업에서만 병렬 등록을 시작하는 클릭충돌 제거 버전입니다.";
+  manifest.description = "Shopling A18 DOM에는 제어 UI를 삽입하지 않고, 실제 prod_rgst_tsrmt 결과창과 쇼핑몰별 결과 프레임까지 자동 판정하는 병렬 등록 버전입니다.";
   manifest.action = { default_title: "Commerce OS Shopling Parallel Worker", default_popup: "popup.html" };
   manifest.content_scripts = (manifest.content_scripts || []).map((entry) => ({ ...entry, js: ["content-group-canary.mjs"] }));
   entries["manifest.json"] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
@@ -187,25 +208,29 @@ export async function GET() {
   const popup = new TextDecoder().decode(entries["popup.js"]);
   if (!background.includes("chrome.tabs.duplicate")) throw new Error("shopling_parallel_worker_a18_duplicate_missing");
   if (!background.includes("Promise.allSettled")) throw new Error("shopling_parallel_worker_parallel_clone_missing");
-  if (!background.includes("commerceOsShoplingParallelWorkerMetaV036")) throw new Error("shopling_parallel_worker_v036_background_state_isolation_missing");
+  if (!background.includes("commerceOsShoplingParallelWorkerMetaV037")) throw new Error("shopling_parallel_worker_v037_background_state_isolation_missing");
   if (!background.includes("parallel: true")) throw new Error("shopling_parallel_worker_parallel_contract_missing");
   if (background.includes("clickManagerAccessOnLauncher")) throw new Error("shopling_parallel_worker_obsolete_manager_launcher_present");
   if (!background.includes("group-canary-release-v0.3.2")) throw new Error("shopling_parallel_worker_claim_release_missing");
-  if (!content.includes("commerceOsShoplingParallelWorkerV036")) throw new Error("shopling_parallel_worker_v036_state_isolation_missing");
-  if (!content.includes("commerceOsShoplingParallelRunV036")) throw new Error("shopling_parallel_worker_v036_run_isolation_missing");
-  if (!content.includes("extension-action-only-no-shopling-dom")) throw new Error("shopling_parallel_worker_v036_no_dom_mode_missing");
-  if (content.includes("document.documentElement.appendChild(box)")) throw new Error("shopling_parallel_worker_v036_shopling_dom_panel_present");
-  if (!content.includes(CONTROL_START_MESSAGE)) throw new Error("shopling_parallel_worker_v036_control_listener_missing");
+  if (!content.includes("commerceOsShoplingParallelWorkerV037")) throw new Error("shopling_parallel_worker_v037_state_isolation_missing");
+  if (!content.includes("commerceOsShoplingParallelRunV037")) throw new Error("shopling_parallel_worker_v037_run_isolation_missing");
+  if (!content.includes("extension-action-only-no-shopling-dom")) throw new Error("shopling_parallel_worker_v037_no_dom_mode_missing");
+  if (content.includes("document.documentElement.appendChild(box)")) throw new Error("shopling_parallel_worker_v037_shopling_dom_panel_present");
+  if (!content.includes(CONTROL_START_MESSAGE)) throw new Error("shopling_parallel_worker_v037_control_listener_missing");
+  if (!content.includes("prod_rgst_(?:rspt|tsrmt)")) throw new Error("shopling_parallel_worker_v037_tsrmt_result_missing");
+  if (!content.includes("isMallResultFrame")) throw new Error("shopling_parallel_worker_v037_mall_frame_missing");
+  if (!content.includes("collectedMallEvidence")) throw new Error("shopling_parallel_worker_v037_frame_aggregation_missing");
+  if (!content.includes("shopling_submit_success_parallel_worker_v037")) throw new Error("shopling_parallel_worker_v037_success_contract_missing");
   if (content.includes('if (!["worker_opening", "await_a18", "a18_clicked"].includes(state.stage))')) throw new Error("shopling_parallel_worker_repeat_a18_click_gate_present");
   if (!content.includes("a18_navigation_timeout")) throw new Error("shopling_parallel_worker_a18_one_shot_timeout_missing");
   if (!content.includes("ignoredSelpaFailures")) throw new Error("shopling_parallel_worker_selfa_policy_missing");
   if (!content.includes("nonIgnoredFailure")) throw new Error("shopling_parallel_worker_nonselfa_failure_guard_missing");
-  if (!popup.includes("chrome.tabs.sendMessage")) throw new Error("shopling_parallel_worker_v036_popup_send_missing");
-  if (!popup.includes(CONTROL_START_MESSAGE)) throw new Error("shopling_parallel_worker_v036_popup_contract_missing");
-  assertScript("popup-v036", popup);
+  if (!popup.includes("chrome.tabs.sendMessage")) throw new Error("shopling_parallel_worker_v037_popup_send_missing");
+  if (!popup.includes(CONTROL_START_MESSAGE)) throw new Error("shopling_parallel_worker_v037_popup_contract_missing");
+  assertScript("popup-v037", popup);
 
   const readme = await readFile(path.join(root, "README.txt"), "utf8");
-  entries["README.txt"] = strToU8(`v${VERSION} CLICK-SAFE HOTFIX\n- Shopling A18 페이지 안에는 제어 패널/버튼/오버레이를 0개 삽입합니다.\n- 확장프로그램 아이콘을 눌러 열린 popup에서만 병렬 작업을 시작합니다.\n- A18 페이지는 조회/검색/체크박스/버튼 클릭을 Shopling 원본 그대로 유지합니다.\n- 복제 Worker의 A18 메뉴 hover/click은 최초 1회만 수행합니다.\n- 20초 안에 A18 화면 전환이 확인되지 않으면 반복 클릭 대신 해당 채널만 안전중단합니다.\n\n${readme}`);
+  entries["README.txt"] = strToU8(`v${VERSION} RESULT-AWARE HOTFIX\n- Shopling A18 페이지에는 제어 패널/버튼/오버레이를 삽입하지 않습니다.\n- 실제 prod_rgst_tsrmt 결과 컨테이너와 각 /prod/rgst/*_rgst.phtml 프레임을 함께 판정합니다.\n- 비셀파 실패가 하나라도 있으면 해당 채널만 confirm_needed, 셀파 단독 실패는 무시합니다.\n- 성공이 확인되면 sent 기록 후 그 복제 Worker 창만 닫습니다.\n- 복제 Worker의 A18 메뉴 hover/click은 최초 1회만 수행합니다.\n\n${readme}`);
   entries["VERSION.txt"] = strToU8(`Commerce OS Shopling Market Parallel Fresh Worker Canary v${VERSION}\n`);
 
   const archive = zipSync(entries, { level: 0 });
