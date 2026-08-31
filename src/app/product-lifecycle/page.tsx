@@ -23,11 +23,6 @@ function text(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function number(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function reasons(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
 }
@@ -75,6 +70,7 @@ export default async function ProductLifecyclePage() {
     .map((row) => Date.parse(text(row.evaluated_at)))
     .filter(Number.isFinite)
     .sort((left, right) => right - left)[0];
+  const hasEvaluatedAt = typeof evaluatedAt === "number" && Number.isFinite(evaluatedAt);
 
   return (
     <main className="mx-auto min-h-screen max-w-[1500px] space-y-6 px-5 py-8 text-slate-900">
@@ -119,7 +115,7 @@ export default async function ProductLifecyclePage() {
         </div>
 
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-slate-500">
-          <span>마지막 평가: {Number.isFinite(evaluatedAt) ? date(evaluatedAt) : "아직 없음"}</span>
+          <span>마지막 평가: {hasEvaluatedAt ? date(evaluatedAt) : "아직 없음"}</span>
           <span>상품 {dashboard.states.length.toLocaleString("ko-KR")}개</span>
           <span>CEO 확인 필요 {exceptions.length + queueExceptions.length}건</span>
           <span>Shopling Shadow 작업 {shadowQueue.length}건</span>
