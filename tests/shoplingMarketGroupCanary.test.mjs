@@ -22,13 +22,19 @@ test("fresh worker background is syntactically valid and rotates one admin windo
   const source = await readFile(backgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /chrome\.windows\.create/);
-  assert.match(source, /url:ADMIN_HOME_URL/);
-  assert.match(source, /focused:false/);
+  assert.match(source, /url: ADMIN_HOME_URL/);
+  assert.match(source, /focused: false/);
   assert.match(source, /OPEN_WORKER_MESSAGE/);
   assert.match(source, /CLOSE_WORKERS_MESSAGE/);
-  assert.match(source, /const controlTabId=sameRun && Number\.isInteger\(previous\?\.controlTabId\)/);
+  assert.match(source, /const controlTabId = sameRun && Number\.isInteger\(previous\?\.controlTabId\)/);
   assert.match(source, /openerTabId/);
   assert.match(source, /recordWorkerContext/);
+});
+
+test("fresh worker starts from the real Shopling public manager-entry page, not direct admin root", async () => {
+  const source = await readFile(backgroundPath, "utf8");
+  assert.match(source, /const ADMIN_HOME_URL = "https:\/\/shopling\.co\.kr\/index\.php"/);
+  assert.doesNotMatch(source, /const ADMIN_HOME_URL = "https:\/\/a\.shopling\.co\.kr\/"/);
 });
 
 test("fresh worker content starts every channel from a new admin shell and A18", async () => {
