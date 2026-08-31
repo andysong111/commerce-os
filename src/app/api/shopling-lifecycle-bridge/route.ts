@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 const BRIDGE_VERSION = "lifecycle-v1";
 const MAX_CLAIM = 20;
+const STALE_CLAIM_MINUTES = 15;
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
@@ -27,12 +28,51 @@ function json(body: unknown, status = 200) {
 }
 
 function validRunId(value: string) {
-  return /^[A-Za-z0-9._:-]{12,160}$/.test(value);
+  return /^[A-Za-z0-9._:-]{12,180}$/.test(value);
 }
 
 function dueNow(value: unknown, nowMs: number) {
   const parsed = Date.parse(text(value));
   return Number.isFinite(parsed) && parsed <= nowMs;
+}
+
+function deleteExecutionEnabled() {
+  return process.env.SHOPLING_LIFECYCLE_DELETE_EXECUTION_ENABLED === "true";
+}
+
+function claimableDesiredState(value: unknown, allowDelete: boolean) {
+  const desired = text(value);
+  if (desired === "SELLING" || desired === "SOLD_OUT") return true;
+  return desired === "DELETE" && allowDelete;
+}
+
+async function recoverStaleClaims(admin: NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>) {
+  const cutoff = new Date(Date.now() - STALE_CLAIM_MINUTES * 60_000).toISOString();
+  const stale = await admin
+    .from("shopling_lifecycle_action_queue")
+    .select("id")
+    .eq("status", "claimed")
+    .eq("shadow_mode", false)
+    .lt("claimed_at", cutoff)
+    .limit(50);
+  if (stale.error) return stale.error;
+  for (const row of Array.isArray(stale.data) ? stale.data : []) {
+    const id = text(row.id);
+    if (!id) continue;
+    const now = new Date().toISOString();
+    const recovered = await admin
+      .from("shopling_lifecycle_action_queue")
+      .update({
+        status: "confirm_needed",
+        last_error: `Lifecycle browser claim exceeded ${STALE_CLAIM_MINUTES} minutes without verified completion.`,
+        updated_at: now,
+      })
+      .eq("id", id)
+      .eq("status", "claimed")
+      .eq("shadow_mode", false);
+    if (recovered.error) return recovered.error;
+  }
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -49,6 +89,12 @@ export async function POST(request: Request) {
     if (!validRunId(runId)) return json({ ok: false, error: "invalid_run_id" }, 400);
     const rawLimit = Number(payload.limit ?? 5);
     const limit = Math.max(1, Math.min(Number.isFinite(rawLimit) ? Math.floor(rawLimit) : 5, MAX_CLAIM));
+    const allowDelete = deleteExecutionEnabled();
+
+    const staleError = await recoverStaleClaims(admin);
+    if (staleError) {
+      return json({ ok: false, error: "stale_claim_recovery_failed", message: staleError.message }, 503);
+    }
 
     const recovered = await admin
       .from("shopling_lifecycle_action_queue")
@@ -61,8 +107,18 @@ export async function POST(request: Request) {
     if (recovered.error) {
       return json({ ok: false, error: "claim_recovery_failed", message: recovered.error.message }, 503);
     }
-    if (Array.isArray(recovered.data) && recovered.data.length) {
-      return json({ ok: true, bridge: BRIDGE_VERSION, runId, tasks: recovered.data, recovered: true });
+    const recoveredRows = (Array.isArray(recovered.data) ? recovered.data : []).filter((row) =>
+      claimableDesiredState(row.desired_state, allowDelete),
+    );
+    if (recoveredRows.length) {
+      return json({
+        ok: true,
+        bridge: BRIDGE_VERSION,
+        runId,
+        tasks: recoveredRows,
+        recovered: true,
+        deleteExecutionEnabled: allowDelete,
+      });
     }
 
     const candidates = await admin
@@ -71,7 +127,7 @@ export async function POST(request: Request) {
       .eq("status", "pending")
       .eq("shadow_mode", false)
       .order("scheduled_for", { ascending: true })
-      .limit(limit * 4);
+      .limit(limit * 12);
     if (candidates.error) {
       return json({ ok: false, error: "claim_candidates_failed", message: candidates.error.message }, 503);
     }
@@ -79,7 +135,8 @@ export async function POST(request: Request) {
     const tasks: unknown[] = [];
     const claimedAt = new Date().toISOString();
     const claimable = (Array.isArray(candidates.data) ? candidates.data : []).filter((candidate) =>
-      dueNow(candidate.scheduled_for, Date.parse(claimedAt)),
+      dueNow(candidate.scheduled_for, Date.parse(claimedAt)) &&
+      claimableDesiredState(candidate.desired_state, allowDelete),
     );
     for (const candidate of claimable) {
       if (tasks.length >= limit) break;
@@ -104,7 +161,14 @@ export async function POST(request: Request) {
       if (claimed.data) tasks.push(claimed.data);
     }
 
-    return json({ ok: true, bridge: BRIDGE_VERSION, runId, tasks, recovered: false });
+    return json({
+      ok: true,
+      bridge: BRIDGE_VERSION,
+      runId,
+      tasks,
+      recovered: false,
+      deleteExecutionEnabled: allowDelete,
+    });
   }
 
   if (action === "report") {
