@@ -35,6 +35,11 @@ test("China domestic freight is added after the multiplier and not included in i
   assert.ok(engine.includes("group.freightCny / group.quantity"));
 });
 
+test("forwarder close always uses a legal operation-ledger status even when downstream sync needs attention", () => {
+  assert.ok(engine.includes('status: "SUCCEEDED"'));
+  assert.equal(engine.includes('? "SUCCEEDED" : "PARTIAL"'), false);
+});
+
 test("receipt close requires the exact forwarder amount only for the final receipt", () => {
   assert.ok(panel.includes("배송대행지 실제비용(원)"));
   assert.ok(panel.includes("selectedQuantity === remainingTotal"));

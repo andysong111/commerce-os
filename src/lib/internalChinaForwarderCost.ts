@@ -359,7 +359,7 @@ async function storeSummary(
       body: JSON.stringify([
         {
           operation_type: INTERNAL_CHINA_FORWARDER_COST_OPERATION_TYPE,
-          status: reconciliation.productMasterSynced ? "SUCCEEDED" : "PARTIAL",
+          status: "SUCCEEDED",
           source: SOURCE,
           source_event_id: sourceEventId(draftId),
           correlation_id: correlationId(draftId),
