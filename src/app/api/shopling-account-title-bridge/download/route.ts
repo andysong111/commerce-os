@@ -19,9 +19,7 @@ const FILES = [
   "content-shopling-product-list-batch.js",
   "content-shopling-product-list-registry-bridge.js",
   "content-shopling-lifecycle-diagnostic.js",
-  "content-shopling-lifecycle-cross-world-relay.js",
   "content-shopling-lifecycle-executor.js",
-  "content-shopling-lifecycle-main.js",
   "content-shopling-pipeline.js",
   "content-shopling-pipeline-frame-bridge.js",
   "content-shopling-onebutton-stability-v054.js",
@@ -31,6 +29,7 @@ const FILES = [
   "background-shopling-seo-keywords.js",
   "background-shopling-pipeline.js",
   "background-shopling-lifecycle.js",
+  "background-shopling-lifecycle-main-exec.js",
   "README.txt",
 ] as const;
 
@@ -76,6 +75,45 @@ const VERIFIED_CATEGORY_BLOCK = String.raw`      { name: "매핑된 카테고리
         pattern: /무시하고.*쇼핑몰기본정보.*카테고리로\s*전송/i,
       },`;
 
+const LEGACY_LIFECYCLE_INVOKE_MUTATION = String.raw`  function invokeMutation(context) {
+    return new Promise((resolve) => {
+      const token = commandToken(context);
+      let settled = false;
+      const handler = (event) => {
+        const detail = event instanceof CustomEvent ? event.detail : null;
+        if (!detail || text(detail.token) !== token || settled) return;
+        settled = true;
+        window.removeEventListener(MAIN_RESULT_EVENT, handler);
+        resolve(detail);
+      };
+      window.addEventListener(MAIN_RESULT_EVENT, handler);
+      window.dispatchEvent(new CustomEvent(COMMAND_EVENT, {
+        detail: {
+          token,
+          action: context.desiredState === "DELETE" ? "delete" : "status-change",
+          allowDelete: context.allowDelete === true,
+        },
+      }));
+      window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener(MAIN_RESULT_EVENT, handler);
+        resolve({ ok: false, error: "main_world_submit_timeout" });
+      }, 2500);
+    });
+  }
+`;
+
+const SCRIPTING_LIFECYCLE_INVOKE_MUTATION = String.raw`  async function invokeMutation(context) {
+    return sendRuntimeMessage({
+      type: "commerce-os-shopling-lifecycle-main-execute",
+      token: commandToken(context),
+      action: context.desiredState === "DELETE" ? "delete" : "status-change",
+      allowDelete: context.allowDelete === true,
+    });
+  }
+`;
+
 function rewritePipeline(source: string) {
   if (!source.includes(CANONICAL_SNIPPET)) throw new Error("shopling_v057_canonical_anchor_missing");
   if (!source.includes(LEGACY_IDENTITY_MATCH)) throw new Error("shopling_v057_identity_anchor_missing");
@@ -101,47 +139,50 @@ function rewritePipeline(source: string) {
   return rewritten;
 }
 
-function buildV059Manifest(source: Record<string, unknown>) {
+function rewriteLifecycleExecutor(source: string) {
+  if (!source.includes(LEGACY_LIFECYCLE_INVOKE_MUTATION)) {
+    throw new Error("shopling_v060_lifecycle_invoke_anchor_missing");
+  }
+  const rewritten = source.replace(
+    LEGACY_LIFECYCLE_INVOKE_MUTATION,
+    () => SCRIPTING_LIFECYCLE_INVOKE_MUTATION,
+  );
+  if (!rewritten.includes("commerce-os-shopling-lifecycle-main-execute")) {
+    throw new Error("shopling_v060_lifecycle_invoke_rewrite_failed");
+  }
+  if (rewritten.includes("main_world_submit_timeout")) {
+    throw new Error("shopling_v060_legacy_event_bridge_still_present");
+  }
+  try {
+    new Function(rewritten);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "unknown syntax error");
+    throw new Error(`shopling_v060_generated_lifecycle_executor_syntax_invalid: ${message}`);
+  }
+  return rewritten;
+}
+
+function buildV060Manifest(source: Record<string, unknown>) {
   const manifest = structuredClone(source) as Record<string, unknown> & {
     permissions?: string[];
     content_scripts?: Array<Record<string, unknown> & { js?: string[] }>;
   };
-  manifest.version = "0.5.9";
-  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 판매상태 자동화는 Chrome 격리 world와 MAIN world 사이 이벤트를 로컬 CustomEvent로 안전하게 릴레이합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
-  manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms"])];
+  manifest.version = "0.6.0";
+  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 판매상태 자동화는 background chrome.scripting이 Shopling MAIN world를 직접 실행합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
+  manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms", "scripting"])];
 
   const scripts = manifest.content_scripts ?? [];
   const productScriptIndex = scripts.findIndex((entry) =>
     Array.isArray(entry.matches) && entry.matches.includes("https://a.shopling.co.kr/prod/*") && !entry.world,
   );
-  if (productScriptIndex < 0) throw new Error("shopling_v059_product_content_script_missing");
+  if (productScriptIndex < 0) throw new Error("shopling_v060_product_content_script_missing");
 
   scripts.splice(productScriptIndex + 1, 0,
-    {
-      matches: ["https://a.shopling.co.kr/prod/*"],
-      js: ["content-shopling-lifecycle-cross-world-relay.js"],
-      all_frames: false,
-      run_at: "document_idle",
-    },
     {
       matches: ["https://a.shopling.co.kr/prod/*"],
       js: ["content-shopling-lifecycle-executor.js"],
       all_frames: false,
       run_at: "document_idle",
-    },
-    {
-      matches: ["https://a.shopling.co.kr/prod/*"],
-      js: ["content-shopling-lifecycle-cross-world-relay.js"],
-      all_frames: false,
-      run_at: "document_idle",
-      world: "MAIN",
-    },
-    {
-      matches: ["https://a.shopling.co.kr/prod/*"],
-      js: ["content-shopling-lifecycle-main.js"],
-      all_frames: false,
-      run_at: "document_idle",
-      world: "MAIN",
     },
   );
   manifest.content_scripts = scripts;
@@ -155,7 +196,7 @@ export async function GET() {
   for (const fileName of FILES) {
     if (fileName === "manifest.json") {
       const sourceManifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
-      const manifest = buildV059Manifest(sourceManifest);
+      const manifest = buildV060Manifest(sourceManifest);
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
@@ -166,17 +207,23 @@ export async function GET() {
       continue;
     }
 
+    if (fileName === "content-shopling-lifecycle-executor.js") {
+      const source = await readFile(path.join(root, fileName), "utf8");
+      entries[fileName] = strToU8(rewriteLifecycleExecutor(source));
+      continue;
+    }
+
     const bytes = await readFile(path.join(root, fileName));
     entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.9\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.6.0\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.9.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.6.0.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
