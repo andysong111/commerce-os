@@ -13,7 +13,8 @@ test("Shopling v0.5.5 downloadable package requires goods key plus self-code exa
   assert.match(source, /exact_product_identity_ambiguous/);
   assert.match(source, /상품번호/);
   assert.match(source, /다른 상품을 건드리지 않고 중단/);
-  assert.doesNotMatch(source, /matchingRows = dataRowsWithCheckboxes\(\)\.filter\(\(entry\) => canonical\(entry\.label\)\.includes\(exact\)\)/);
+  assert.match(source, /\.replace\(LEGACY_IDENTITY_MATCH, DUAL_IDENTITY_MATCH\)/);
+  assert.match(source, /shopling_v055_identity_rewrite_failed/);
 });
 
 test("Shopling v0.5.5 package carries the field-verified category mapping controls", async () => {
