@@ -1,0 +1,6 @@
+Parallel Shopling Fresh Worker v0.3.4
+- one immutable A18 control tab
+- one duplicate A18 worker window per remaining channel
+- all remaining channel workers start concurrently
+- per-goods_key assignment isolation
+- Selpa-only failures do not block channel success
