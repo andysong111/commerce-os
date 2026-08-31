@@ -1,6 +1,14 @@
 name: Shopling Market Group Canary CI
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "public/shopling-market-group-canary/**"
+      - "src/app/api/shopling-market-group-canary/**"
+      - "tests/shoplingMarketGroupCanary.test.mjs"
+      - ".github/workflows/shopling-market-group-canary-ci.yml"
   pull_request:
     paths:
       - "public/shopling-market-group-canary/**"
