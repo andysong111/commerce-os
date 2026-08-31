@@ -55,7 +55,7 @@ export default async function InternalChinaCostPriceReviewPage() {
               실제원가 · 상품그룹 가격조정 검토
             </h1>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. Shopling sale_status도 실시간 재조회해 현재 판매중이 아닌 구형 listing은 가격조정 대상에서 제외합니다. 실제 Shopling 가격 쓰기는 승인 이후 별도 단계입니다.
+              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. Shopling sale_status도 실시간 재조회해 현재 판매중이 아닌 구형 listing은 가격조정 대상에서 제외합니다. 내부 그룹 근거가 없는 판매중 listing도 그룹을 추측하지 않고 행 단위로 자동 제외하며, 확정 그룹 행만 승인 범위에 들어갑니다. 실제 Shopling 가격 쓰기는 승인 이후 별도 단계입니다.
             </p>
           </div>
           <Link
@@ -83,13 +83,15 @@ export default async function InternalChinaCostPriceReviewPage() {
             <Metric label="원가 하락 인하" value={number.format(proposal.decreaseCount)} />
             <Metric label="유지" value={number.format(proposal.holdCount)} />
             <Metric label="검토 차단" value={number.format(proposal.blockedCount)} />
-            <Metric label="그룹 미확정" value={number.format(proposal.unresolvedGroupCount)} />
+            <Metric label="그룹 미확정 자동제외" value={number.format(proposal.unresolvedGroupCount)} />
             <Metric label="판매중지 제외" value={number.format(proposal.inactiveListingCount)} />
             <Metric label="Shopling 실조회 누락" value={number.format(proposal.liveListingMissingCount)} />
           </section>
 
           {proposal.unresolvedGroupCount > 0 ? (
-            <InternalChinaHistoricalProductGroupImport />
+            <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+              판매중이지만 6개 내부 가격그룹 근거가 없는 {number.format(proposal.unresolvedGroupCount)}개 옵션행은 가격 자동화 범위에서 제외했습니다. 기존 그룹파일·GOODSKEY·가격 패턴으로 임의 추정하지 않으며, 이 행들 때문에 근거가 확정된 다른 상품의 가격 검토 전체를 막지 않습니다.
+            </section>
           ) : null}
 
           <section
@@ -98,7 +100,7 @@ export default async function InternalChinaCostPriceReviewPage() {
                 ? "border-emerald-200 bg-emerald-50"
                 : proposal.state === "AWAITING_APPROVAL"
                   ? "border-blue-200 bg-blue-50"
-                  : proposal.unresolvedGroupCount > 0
+                  : proposal.state === "BLOCKED"
                     ? "border-amber-200 bg-amber-50"
                     : "border-slate-200 bg-slate-50"
             }`}
@@ -108,21 +110,19 @@ export default async function InternalChinaCostPriceReviewPage() {
                 <span className="text-xs font-bold text-slate-500">PRICE REVIEW STATE</span>
                 <h2 className="mt-1 text-xl font-black text-slate-950">
                   {approval
-                    ? "상품그룹 가격조정안 승인 완료"
-                    : proposal.unresolvedGroupCount > 0
-                      ? "판매중 상품의 그룹 확인 필요"
-                      : proposal.state === "AWAITING_APPROVAL"
-                        ? "상품그룹 가격조정안 승인 대기"
-                        : proposal.state === "NO_CHANGE"
-                          ? "가격변경 없음"
-                          : "일부 검토 차단"}
+                    ? "확정 그룹 가격조정안 승인 완료"
+                    : proposal.state === "AWAITING_APPROVAL"
+                      ? "확정 그룹 가격조정안 승인 대기"
+                      : proposal.state === "NO_CHANGE"
+                        ? "확정 그룹 가격변경 없음"
+                        : "관리 가능한 가격행 없음 · 검토 차단"}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-700">
-                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 판매중 그룹 미확정 {number.format(proposal.unresolvedGroupCount)}개 · 판매중지 제외 {number.format(proposal.inactiveListingCount)}개 · Shopling 실조회 누락 {number.format(proposal.liveListingMissingCount)}개 · 실제 Shopling 가격 write 0건
+                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 판매중 그룹 미확정 자동제외 {number.format(proposal.unresolvedGroupCount)}개 · 판매중지 제외 {number.format(proposal.inactiveListingCount)}개 · Shopling 실조회 누락 {number.format(proposal.liveListingMissingCount)}개 · 실제 Shopling 가격 write 0건
                 </p>
                 {proposal.unresolvedGroupCount > 0 ? (
                   <p className="mt-2 text-xs font-bold text-amber-800">
-                    현재 판매중인 GOODSKEY만 그룹확정 대상으로 남깁니다. 상품그룹을 코드 형태로 추측하지 않으며 판매중 그룹 미확정이 0이 되기 전에는 전체 V2 승인을 차단합니다.
+                    미확정 GOODSKEY는 승인·향후 가격 write 범위에 들어가지 않습니다. 확정 그룹 + 판매중 + 차단사유 없음 조건을 모두 만족하는 가격변경 행만 승인 대상으로 계산합니다.
                   </p>
                 ) : null}
               </div>
@@ -130,9 +130,10 @@ export default async function InternalChinaCostPriceReviewPage() {
                 <div className="rounded-xl bg-white px-4 py-3 text-right text-xs text-emerald-800">
                   <strong className="block">승인 기록 완료</strong>
                   <span className="mt-1 block">{new Date(approval.approvedAt).toLocaleString("ko-KR")}</span>
+                  <span className="mt-1 block">승인 {number.format(approval.approvedChangedRowCount)}행 · 제외 {number.format(approval.excludedBlockedRowCount ?? proposal.blockedCount)}행</span>
                   <span className="mt-1 block font-bold">SHOPLING WRITE OFF</span>
                 </div>
-              ) : proposal.state === "AWAITING_APPROVAL" && proposal.unresolvedGroupCount === 0 ? (
+              ) : proposal.state === "AWAITING_APPROVAL" ? (
                 <InternalChinaGroupCostPriceApprovalButton
                   proposalFingerprint={proposal.fingerprint}
                   changedRowCount={proposal.changedRowCount}
