@@ -6,26 +6,30 @@ const manifestPath = new URL("../public/shopling-account-title-bridge/manifest.j
 const titleContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-account-titles.js", import.meta.url);
 const listContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-batch.js", import.meta.url);
 const registryListBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js", import.meta.url);
+const lifecycleDiagnosticPath = new URL("../public/shopling-account-title-bridge/content-shopling-lifecycle-diagnostic.js", import.meta.url);
 const pipelineContentPath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline.js", import.meta.url);
 const frameBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js", import.meta.url);
 const stabilityBridgePath = new URL("../public/shopling-account-title-bridge/content-shopling-onebutton-stability-v054.js", import.meta.url);
 const titleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-batch.js", import.meta.url);
 const titleRegistryBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-title-registry.js", import.meta.url);
 const pipelineBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-pipeline.js", import.meta.url);
+const lifecycleBackgroundPath = new URL("../public/shopling-account-title-bridge/background-shopling-lifecycle.js", import.meta.url);
 const backgroundRootPath = new URL("../public/shopling-account-title-bridge/background-shopling-root.js", import.meta.url);
 const backgroundSeoPath = new URL("../public/shopling-account-title-bridge/background-shopling-seo-keywords.js", import.meta.url);
 const downloadRoutePath = new URL("../src/app/api/shopling-account-title-bridge/download/route.ts", import.meta.url);
 const keywordPoolRoutePath = new URL("../src/app/api/shopling-account-title-bridge/keyword-pool/route.ts", import.meta.url);
 const titleRegistryRoutePath = new URL("../src/app/api/shopling-account-title-bridge/title-registry/route.ts", import.meta.url);
 const pipelineRoutePath = new URL("../src/app/api/shopling-account-title-bridge/pipeline/route.ts", import.meta.url);
+const lifecycleDiagnosticRoutePath = new URL("../src/app/api/shopling-lifecycle-diagnostic/route.ts", import.meta.url);
+const lifecycleBridgeRoutePath = new URL("../src/app/api/shopling-lifecycle-bridge/route.ts", import.meta.url);
 const keywordPoolLibPath = new URL("../src/lib/shoplingTitleKeywordPool.ts", import.meta.url);
 const pipelineMigrationPath = new URL("../supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql", import.meta.url);
 const titleLedgerMigrationPath = new URL("../supabase/migrations/202608300002_shopling_title_diversification_ledger_v053.sql", import.meta.url);
 
-test("Shopling bridge v0.5.4 keeps durable idempotency and adds handoff recovery", async () => {
+test("Shopling bridge source v0.5.5 keeps durable idempotency and adds lifecycle diagnostics", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.5.4");
+  assert.equal(manifest.version, "0.5.5");
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(manifest.host_permissions, [
     "https://a.shopling.co.kr/*",
@@ -35,6 +39,7 @@ test("Shopling bridge v0.5.4 keeps durable idempotency and adds handoff recovery
   assert.deepEqual(manifest.content_scripts[1].js, [
     "content-shopling-product-list-batch.js",
     "content-shopling-product-list-registry-bridge.js",
+    "content-shopling-lifecycle-diagnostic.js",
   ]);
   assert.deepEqual(manifest.content_scripts[2].js, [
     "content-shopling-pipeline.js",
@@ -53,12 +58,13 @@ test("mall-title bridge still uses verified Shopling and SEO tokens only", async
   assert.doesNotMatch(source, /password|document\.cookie/i);
 });
 
-test("background root loads title batch, durable title ledger bridge, SEO pool and market pipeline", async () => {
+test("background root loads title, SEO, market pipeline and lifecycle bridges", async () => {
   const root = await readFile(backgroundRootPath, "utf8");
   assert.match(root, /background-shopling-title-batch\.js/);
   assert.match(root, /background-shopling-title-registry\.js/);
   assert.match(root, /background-shopling-seo-keywords\.js/);
   assert.match(root, /background-shopling-pipeline\.js/);
+  assert.match(root, /background-shopling-lifecycle\.js/);
 });
 
 test("SEO keyword background remains read-only and never sends Shopling credentials", async () => {
@@ -128,6 +134,48 @@ test("title registry API is ledger-backed, recoverable by run id, and never retu
   assert.match(source, /recoveredClaimRowCount/);
   assert.doesNotMatch(source, /\.from\("shopling_product_group_registry"\)/);
   assert.doesNotMatch(source, /password|cookie/i);
+});
+
+test("lifecycle DOM scanner is read-only and only reports structural status controls", async () => {
+  const source = await readFile(lifecycleDiagnosticPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /판매\\s\*중|판매\\s\*상태|품절|삭제/);
+  assert.match(source, /MutationObserver/);
+  assert.match(source, /REPORT_MESSAGE/);
+  assert.match(source, /formActionPath/);
+  assert.match(source, /optionSnapshot/);
+  assert.doesNotMatch(source, /\.click\s*\(|dispatchEvent\s*\(|requestSubmit\s*\(|\.submit\s*\(/);
+  assert.doesNotMatch(source, /document\.cookie|password/i);
+});
+
+test("lifecycle background uses public bridge endpoints without Shopling credentials", async () => {
+  const source = await readFile(lifecycleBackgroundPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /shopling-lifecycle-diagnostic/);
+  assert.match(source, /shopling-lifecycle-bridge/);
+  assert.match(source, /lifecycle-dom-v0\.5\.5/);
+  assert.match(source, /lifecycle-v1/);
+  assert.match(source, /credentials: "omit"/);
+  assert.doesNotMatch(source, /document\.cookie|password/i);
+});
+
+test("lifecycle diagnostic API sanitizes and stores read-only structural evidence", async () => {
+  const source = await readFile(lifecycleDiagnosticRoutePath, "utf8");
+  assert.match(source, /SHOPLING_LIFECYCLE_DOM_DIAGNOSTIC/);
+  assert.match(source, /MAX_PAYLOAD_BYTES/);
+  assert.match(source, /createHash\("sha256"\)/);
+  assert.match(source, /commerce_operation_runs/);
+  assert.match(source, /ignoreDuplicates: true/);
+  assert.match(source, /readOnly: true/);
+  assert.doesNotMatch(source, /password|cookie/i);
+});
+
+test("lifecycle queue bridge stays fail-closed to non-shadow pending rows", async () => {
+  const source = await readFile(lifecycleBridgeRoutePath, "utf8");
+  assert.match(source, /\.eq\("status", "pending"\)/);
+  assert.match(source, /\.eq\("shadow_mode", false\)/);
+  assert.match(source, /claim_run_id/);
+  assert.match(source, /confirm_needed/);
 });
 
 test("orange one-button content still uses exact ptn_goods_cd and durable submit lock", async () => {
@@ -213,13 +261,16 @@ test("market pipeline duplicate protections remain unchanged and claim response 
   assert.match(migration, /stale_claim_requires_review/);
 });
 
-test("Shopling bridge v0.5.4 download ZIP contains stability, title and market workers", async () => {
+test("Shopling downloadable v0.5.6 ZIP contains lifecycle diagnostics plus existing safety workers", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
   assert.ok(source.includes('"content-shopling-product-list-registry-bridge.js"'));
-  assert.ok(source.includes('"background-shopling-title-registry.js"'));
+  assert.ok(source.includes('"content-shopling-lifecycle-diagnostic.js"'));
+  assert.ok(source.includes('"background-shopling-lifecycle.js"'));
   assert.ok(source.includes('"content-shopling-pipeline-frame-bridge.js"'));
   assert.ok(source.includes('"content-shopling-onebutton-stability-v054.js"'));
   assert.ok(source.includes('"background-shopling-pipeline.js"'));
-  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.4.zip"));
-  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.4"));
+  assert.ok(source.includes('manifest.version = "0.5.6"'));
+  assert.ok(source.includes("commerce-os-shopling-account-title-bridge-v0.5.6.zip"));
+  assert.ok(source.includes("Commerce OS Shopling Account Title Bridge v0.5.6"));
+  assert.ok(source.includes("상품 생애주기 판매상태 자동화"));
 });
