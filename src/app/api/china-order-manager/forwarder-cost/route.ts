@@ -53,16 +53,17 @@ export async function POST(request: Request) {
       await request.json().catch(() => ({})),
     );
     const reconciliation = result.receiptCostReconciliation;
+    const multiplier = result.actualMultiplier?.toFixed(4) ?? "-";
     const receiptMessage = reconciliation?.productMasterSynced
-      ? ` 같은 월의 입고원가 ${reconciliation.updatedRows.toLocaleString("ko-KR")}행도 1.45를 제거한 상품대금·중국내 운임 기준으로 재동기화했습니다.`
+      ? ` 같은 월의 입고원가 ${reconciliation.updatedRows.toLocaleString("ko-KR")}행도 실제 원가배수 ${multiplier} 기준으로 Product Master에 재동기화했습니다.`
       : reconciliation?.productMasterError
-        ? ` 배송대행 비용은 저장했지만 상품 매입원가 재동기화는 확인이 필요합니다: ${reconciliation.productMasterError}`
+        ? ` 배송대행 비용과 실제 원가배수는 저장했지만 Product Master 입고원가 재동기화는 확인이 필요합니다: ${reconciliation.productMasterError}`
         : "";
     return Response.json(
       {
         ok: true,
         result,
-        message: `배송대행지 실제비용 ${result.actualCostKrw?.toLocaleString("ko-KR")}원을 ${result.cycleMonth} 월 발주비용으로 별도 마감했습니다. 상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다.${receiptMessage}`,
+        message: `배송대행지 실제비용 ${result.actualCostKrw?.toLocaleString("ko-KR")}원을 반영해 실제 원가배수 ${multiplier}를 확정했습니다. 최종 SKU 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임으로 계산되며 이후 가격조정·상품등급 판단의 원가로 사용됩니다.${receiptMessage}`,
       },
       { headers: { "cache-control": "no-store" } },
     );
