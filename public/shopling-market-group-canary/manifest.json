@@ -2,12 +2,10 @@
   "manifest_version": 3,
   "name": "Commerce OS Shopling Market Fresh Worker Canary",
   "short_name": "Shopling Fresh Worker",
-  "version": "0.3.2",
-  "description": "기존 로그인 Shopling 메인 탭을 고정 런처로 사용하고, 관리자 팝업을 확인한 뒤 채널마다 새 관리자 작업창에서 마켓 등록을 검증합니다.",
-  "permissions": ["storage", "tabs", "windows", "scripting", "contentSettings"],
+  "version": "0.3.3",
+  "description": "현재 정상 로그인된 Shopling A18 탭을 원본 템플릿으로 유지하고, 채널마다 A18 복제 작업창을 만들어 마켓 등록을 검증합니다.",
+  "permissions": ["storage", "tabs", "windows"],
   "host_permissions": [
-    "https://shopling.co.kr/*",
-    "https://www.shopling.co.kr/*",
     "*://*.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
@@ -17,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.shopling.co.kr/*"],
-      "js": ["content-group-canary.mjs", "content-version-v032.mjs"],
+      "js": ["content-group-canary.mjs", "content-version-v033.mjs"],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
