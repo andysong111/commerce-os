@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Commerce OS Shopling Market Fresh Worker Canary",
-  "short_name": "Shopling Fresh Worker",
-  "version": "0.3.3",
-  "description": "현재 정상 로그인된 Shopling A18 탭을 원본 템플릿으로 유지하고, 채널마다 A18 복제 작업창을 만들어 마켓 등록을 검증합니다.",
+  "name": "Commerce OS Shopling Market Parallel Fresh Worker Canary",
+  "short_name": "Shopling Parallel Worker",
+  "version": "0.3.4",
+  "description": "현재 정상 로그인된 Shopling A18 탭을 원본으로 유지하고, 남은 채널마다 독립 A18 복제 작업창을 동시에 생성해 병렬 등록을 검증합니다.",
   "permissions": ["storage", "tabs", "windows"],
   "host_permissions": [
     "*://*.shopling.co.kr/*",
@@ -15,7 +15,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.shopling.co.kr/*"],
-      "js": ["content-group-canary.mjs", "content-version-v033.mjs"],
+      "js": ["content-group-canary.mjs", "content-version-v034.mjs"],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
