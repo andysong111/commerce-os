@@ -32,6 +32,17 @@ test("group canary uses the partial-product claim endpoint and accepts one to si
   assert.doesNotMatch(claimRoute, /count\(\*\) = 6/);
 });
 
+test("group canary prioritizes the most recently proven partial product before a generic oldest queue", async () => {
+  const claimRoute = await readFile(claimRoutePath, "utf8");
+  assert.match(claimRoute, /const recentSent = await supabase/);
+  assert.match(claimRoute, /\.eq\("status", "sent"\)/);
+  assert.match(claimRoute, /\.eq\("market_status", "sent"\)/);
+  assert.match(claimRoute, /\.order\("completed_at", \{ ascending: false, nullsFirst: false \}\)/);
+  assert.match(claimRoute, /const recentPartial =/);
+  assert.match(claimRoute, /queuedIdentities\.has/);
+  assert.match(claimRoute, /resumedPartialProduct: Boolean\(recentPartial\)/);
+});
+
 test("group canary still requires goods key plus self-code in the same row before selection", async () => {
   const source = await readFile(contentPath, "utf8");
   assert.match(source, /rowMatchesExactIdentity/);
