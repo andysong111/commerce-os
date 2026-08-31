@@ -8,6 +8,7 @@ on:
       - "src/lib/internalChinaPurchaseBudgetAudit.ts"
       - "src/lib/internalChinaReceipt.ts"
       - "src/lib/internalChinaForwarderCost.ts"
+      - "src/lib/internalChinaForwarderStoredClose.ts"
       - "src/lib/productMasterCanonicalSync.ts"
       - "src/lib/productMasterCanonicalBatchContext.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
@@ -56,6 +57,7 @@ jobs:
           src/lib/internalChinaPurchaseBudgetAudit.ts
           src/lib/internalChinaReceipt.ts
           src/lib/internalChinaForwarderCost.ts
+          src/lib/internalChinaForwarderStoredClose.ts
           src/lib/productMasterCanonicalSync.ts
           src/lib/productMasterCanonicalBatchContext.ts
           src/lib/monthlyPurchasePolicy.ts
