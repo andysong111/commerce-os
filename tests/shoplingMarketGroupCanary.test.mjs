@@ -5,49 +5,66 @@ import test from "node:test";
 const manifestPath = new URL("../public/shopling-market-group-canary/manifest.json", import.meta.url);
 const backgroundPath = new URL("../public/shopling-market-group-canary/background-root.mjs", import.meta.url);
 const contentPath = new URL("../public/shopling-market-group-canary/content-group-canary.mjs", import.meta.url);
+const overlayPath = new URL("../public/shopling-market-group-canary/content-version-v031.mjs", import.meta.url);
 const downloadPath = new URL("../src/app/api/shopling-market-group-canary/download/route.ts", import.meta.url);
 const claimRoutePath = new URL("../src/app/api/shopling-market-group-canary/claim/route.ts", import.meta.url);
 
-test("fresh worker canary v0.3.0 has explicit window orchestration permissions", async () => {
+test("fresh worker canary v0.3.1 has persistent-launcher permissions", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, "0.3.0");
+  assert.equal(manifest.version, "0.3.1");
   assert.equal(manifest.name, "Commerce OS Shopling Market Fresh Worker Canary");
-  assert.deepEqual(manifest.permissions, ["storage", "tabs", "windows"]);
+  assert.deepEqual(manifest.permissions, ["storage", "tabs", "windows", "scripting"]);
+  assert.ok(manifest.host_permissions.includes("https://shopling.co.kr/*"));
   assert.ok(manifest.host_permissions.includes("*://*.shopling.co.kr/*"));
-  assert.deepEqual(manifest.content_scripts[0].matches, ["*://*.shopling.co.kr/*"]);
+  assert.ok(manifest.content_scripts[0].js.includes("content-version-v031.mjs"));
   assert.equal(manifest.background.service_worker, "background-root.mjs");
 });
 
-test("fresh worker background is syntactically valid and rotates one admin window per channel", async () => {
+test("fresh worker background is syntactically valid and never creates a replacement public launcher window", async () => {
   const source = await readFile(backgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /chrome\.windows\.create/);
-  assert.match(source, /url: ADMIN_HOME_URL/);
-  assert.match(source, /focused: false/);
-  assert.match(source, /OPEN_WORKER_MESSAGE/);
-  assert.match(source, /CLOSE_WORKERS_MESSAGE/);
-  assert.match(source, /const controlTabId = sameRun && Number\.isInteger\(previous\?\.controlTabId\)/);
-  assert.match(source, /openerTabId/);
-  assert.match(source, /recordWorkerContext/);
+  assert.doesNotMatch(source, /chrome\.windows\.create/);
+  assert.match(source, /findPersistentLauncherTab/);
+  assert.match(source, /isPersistentLauncherUrl/);
+  assert.match(source, /chrome\.tabs\.query/);
+  assert.match(source, /chrome\.scripting\.executeScript/);
+  assert.match(source, /persistent_shopling_launcher_missing/);
+  assert.match(source, /로그인해 둔 Shopling 메인/);
 });
 
-test("fresh worker starts from the real Shopling public manager-entry page, not direct admin root", async () => {
+test("persistent launcher is never classified or closed as a disposable worker", async () => {
   const source = await readFile(backgroundPath, "utf8");
-  assert.match(source, /const ADMIN_HOME_URL = "https:\/\/shopling\.co\.kr\/index\.php"/);
-  assert.doesNotMatch(source, /const ADMIN_HOME_URL = "https:\/\/a\.shopling\.co\.kr\/"/);
+  assert.match(source, /openerTabId === meta\.launcherTabId/);
+  assert.match(source, /launcherWindowId/);
+  assert.match(source, /id !== meta\.launcherWindowId/);
+  assert.match(source, /launcher: tabId === meta\.launcherTabId/);
 });
 
-test("fresh worker content starts every channel from a new admin shell and A18", async () => {
+test("manager access click is resolved from the existing logged-in launcher tab", async () => {
+  const source = await readFile(backgroundPath, "utf8");
+  assert.match(source, /clickManagerAccessOnLauncher/);
+  assert.match(source, /관리자\\s\*접속/);
+  assert.match(source, /target: \{ tabId, allFrames: true \}/);
+  assert.match(source, /waitingForAdminPopup: true/);
+});
+
+test("fresh worker content starts every admin popup at A18", async () => {
   const source = await readFile(contentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /const VERSION = "0\.3\.0"/);
   assert.match(source, /commerceOsShoplingMarketFreshWorkerCanaryV030/);
-  assert.match(source, /관리자\\s\*접속/);
   assert.match(source, /쇼핑몰\\s\*상품등록/);
   assert.match(source, /findA18Link/);
   assert.match(source, /stage: "worker_opening"/);
   assert.match(source, /openNextFreshWorker\(next\)/);
   assert.match(source, /1채널=1새창/);
+});
+
+test("v0.3.1 overlay is syntax-valid and updates only the visible version label", async () => {
+  const source = await readFile(overlayPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /v0\.3\.0/);
+  assert.match(source, /v0\.3\.1/);
+  assert.match(source, /commerce-os-shopling-market-fresh-worker-panel/);
 });
 
 test("fresh worker still requires goods key plus self-code in the same result row", async () => {
@@ -100,12 +117,13 @@ test("partial claim endpoint accepts v0.3 run ids and prioritizes the most recen
   assert.match(source, /\.eq\("launch_item_id", launchItemId\)/);
 });
 
-test("v0.3.0 ZIP is Windows Explorer friendly and syntax-checks exact downloadable scripts", async () => {
+test("v0.3.1 ZIP syntax-checks exact scripts and rejects public-window creation", async () => {
   const source = await readFile(downloadPath, "utf8");
-  assert.match(source, /const VERSION = "0\.3\.0"/);
+  assert.match(source, /const VERSION = "0\.3\.1"/);
   assert.match(source, /new Function\(source\)/);
-  assert.match(source, /chrome\.windows\.create/);
+  assert.match(source, /findPersistentLauncherTab/);
+  assert.match(source, /chrome\.scripting\.executeScript/);
+  assert.match(source, /must_not_create_public_launcher_window/);
   assert.match(source, /zipSync\(entries, \{ level: 0 \}\)/);
   assert.match(source, /commerce-os-shopling-market-fresh-worker-canary-v\$\{VERSION\}\.zip/);
-  assert.doesNotMatch(source, /rewriteContent/);
 });
