@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 // Commerce OS Shopling Account Title Bridge v0.5.4
 // commerce-os-shopling-account-title-bridge-v0.5.6.zip
 // Commerce OS Shopling Account Title Bridge v0.5.6
+// manifest.version = "0.5.6"
+// 상품 생애주기 판매상태 자동화
 
 const FILES = [
   "manifest.json",
@@ -98,15 +100,42 @@ function rewritePipeline(source: string) {
   return rewritten;
 }
 
+function buildV057Manifest(source: Record<string, unknown>) {
+  const manifest = structuredClone(source) as Record<string, unknown> & {
+    permissions?: string[];
+    content_scripts?: Array<Record<string, unknown> & { js?: string[] }>;
+  };
+  manifest.version = "0.5.7";
+  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 산출값은 goods key 단일행 선택과 재조회 검증 후 판매중/품절 상태에 자동 반영합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
+  manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms"])];
+
+  const scripts = manifest.content_scripts ?? [];
+  const productScript = scripts.find((entry) =>
+    Array.isArray(entry.matches) && entry.matches.includes("https://a.shopling.co.kr/prod/*") && !entry.world,
+  );
+  if (!productScript) throw new Error("shopling_v057_product_content_script_missing");
+  productScript.js = [...new Set([...(productScript.js ?? []), "content-shopling-lifecycle-executor.js"])];
+
+  scripts.splice(2, 0, {
+    matches: ["https://a.shopling.co.kr/prod/*"],
+    js: ["content-shopling-lifecycle-main.js"],
+    all_frames: true,
+    match_about_blank: true,
+    run_at: "document_idle",
+    world: "MAIN",
+  });
+  manifest.content_scripts = scripts;
+  return manifest;
+}
+
 export async function GET() {
   const root = path.join(process.cwd(), "public", "shopling-account-title-bridge");
   const entries: Record<string, Uint8Array> = {};
 
   for (const fileName of FILES) {
     if (fileName === "manifest.json") {
-      const manifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
-      manifest.version = "0.5.7";
-      manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 산출값은 goods key 단일행 선택과 재조회 검증 후 판매중/품절 상태에 자동 반영합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
+      const sourceManifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
+      const manifest = buildV057Manifest(sourceManifest);
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
