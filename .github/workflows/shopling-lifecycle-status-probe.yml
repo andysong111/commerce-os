@@ -4,13 +4,19 @@ on:
   pull_request:
     paths:
       - "src/app/api/shopling-lifecycle-status-probe/**"
+      - "src/app/api/shopling-lifecycle-bridge/**"
+      - "src/lib/shopling/shoplingLifecycleStatus.ts"
       - "tests/shoplingLifecycleStatusProbe.test.mjs"
+      - "tests/shoplingLifecycleBridgePreflight.test.mjs"
       - ".github/workflows/shopling-lifecycle-status-probe.yml"
   push:
     branches: [main]
     paths:
       - "src/app/api/shopling-lifecycle-status-probe/**"
+      - "src/app/api/shopling-lifecycle-bridge/**"
+      - "src/lib/shopling/shoplingLifecycleStatus.ts"
       - "tests/shoplingLifecycleStatusProbe.test.mjs"
+      - "tests/shoplingLifecycleBridgePreflight.test.mjs"
       - ".github/workflows/shopling-lifecycle-status-probe.yml"
   workflow_dispatch:
 
@@ -28,10 +34,17 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint status probe
-        run: npx eslint src/app/api/shopling-lifecycle-status-probe/route.ts
-      - name: Test read-only contract
-        run: node --experimental-strip-types --test tests/shoplingLifecycleStatusProbe.test.mjs
+      - name: Lint lifecycle preflight
+        run: >-
+          npx eslint
+          src/app/api/shopling-lifecycle-status-probe/route.ts
+          src/app/api/shopling-lifecycle-bridge/route.ts
+          src/lib/shopling/shoplingLifecycleStatus.ts
+      - name: Test lifecycle preflight contracts
+        run: >-
+          node --experimental-strip-types --test
+          tests/shoplingLifecycleStatusProbe.test.mjs
+          tests/shoplingLifecycleBridgePreflight.test.mjs
       - name: Build
         run: npm run build
         env:
