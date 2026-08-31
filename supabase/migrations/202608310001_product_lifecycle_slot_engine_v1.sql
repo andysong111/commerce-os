@@ -114,6 +114,9 @@ revoke all on table public.product_lifecycle_states from anon, authenticated;
 revoke all on table public.product_lifecycle_events from anon, authenticated;
 revoke all on table public.shopling_lifecycle_action_queue from anon, authenticated;
 
+-- Stage the dispatcher disabled. Production cutover is a separate, explicit step
+-- after the route is deployed and verified. This prevents pre-deploy 404 loops and
+-- keeps the legacy grade shadow task available until the new control plane is proven.
 insert into public.ops_dispatch_tasks (
   task_key,
   route_path,
@@ -131,7 +134,7 @@ insert into public.ops_dispatch_tasks (
   '/api/cron/product-lifecycle-refresh',
   'operational',
   115,
-  true,
+  false,
   3600,
   300,
   21600,
@@ -143,22 +146,11 @@ on conflict (task_key) do update set
   route_path = excluded.route_path,
   workload_class = excluded.workload_class,
   priority = excluded.priority,
-  enabled = true,
+  enabled = false,
   normal_interval_seconds = excluded.normal_interval_seconds,
   busy_interval_seconds = excluded.busy_interval_seconds,
   recovery_interval_seconds = excluded.recovery_interval_seconds,
   timeout_seconds = excluded.timeout_seconds,
-  next_run_at = least(public.ops_dispatch_tasks.next_run_at, now()),
   updated_at = now();
-
-update public.ops_dispatch_tasks
-set
-  enabled = false,
-  last_result = jsonb_build_object(
-    'retiredAt', now(),
-    'reason', 'Product grade shadow bootstrap retired; lifecycle/slot engine is the single product-state control plane.'
-  ),
-  updated_at = now()
-where task_key = 'price-grade-receipt-shadow-bootstrap';
 
 commit;
