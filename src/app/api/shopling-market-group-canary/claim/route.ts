@@ -78,6 +78,10 @@ function sortTasks<T extends { productGroupKey: string; goodsKey: string }>(rows
   });
 }
 
+function identityKey(ownerId: string, launchItemId: string) {
+  return `${ownerId}::${launchItemId}`;
+}
+
 export async function POST(request: Request) {
   const payload = record(await request.json().catch(() => null));
   if (text(payload.bridge) !== BRIDGE) return json({ ok: false, error: "unsupported_group_canary_bridge" }, 400);
@@ -117,9 +121,40 @@ export async function POST(request: Request) {
   const rows = Array.isArray(candidates.data) ? candidates.data : [];
   if (!rows.length) return json({ ok: true, bridge: BRIDGE, runId, tasks: [], empty: true });
 
-  const first = record(rows[0]);
-  const ownerId = text(first.owner_id);
-  const launchItemId = text(first.launch_item_id);
+  const queuedIdentities = new Set(
+    rows.map((raw) => {
+      const row = record(raw);
+      return identityKey(text(row.owner_id), text(row.launch_item_id));
+    }).filter((value) => !value.startsWith("::") && !value.endsWith("::")),
+  );
+
+  const recentSent = await supabase
+    .from("shopling_market_pipeline_ledger")
+    .select("owner_id,launch_item_id,completed_at,updated_at")
+    .eq("status", "sent")
+    .eq("market_status", "sent")
+    .order("completed_at", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(50);
+  if (recentSent.error) {
+    return json({ ok: false, error: "group_canary_recent_sent_lookup_failed", message: recentSent.error.message }, 503);
+  }
+
+  const recentPartial = (Array.isArray(recentSent.data) ? recentSent.data : [])
+    .map(record)
+    .find((row) => queuedIdentities.has(identityKey(text(row.owner_id), text(row.launch_item_id))));
+
+  const first = recentPartial
+    ? rows.find((raw) => {
+        const row = record(raw);
+        return text(row.owner_id) === text(recentPartial.owner_id)
+          && text(row.launch_item_id) === text(recentPartial.launch_item_id);
+      }) || rows[0]
+    : rows[0];
+
+  const firstRecord = record(first);
+  const ownerId = text(firstRecord.owner_id);
+  const launchItemId = text(firstRecord.launch_item_id);
   if (!ownerId || !launchItemId) return json({ ok: false, error: "group_canary_candidate_identity_missing" }, 503);
 
   const claimedAt = new Date().toISOString();
@@ -161,6 +196,7 @@ export async function POST(request: Request) {
     tasks: sortTasks(tasks),
     taskCount: tasks.length,
     launchItemId,
+    resumedPartialProduct: Boolean(recentPartial),
     recovered: false,
   });
 }
