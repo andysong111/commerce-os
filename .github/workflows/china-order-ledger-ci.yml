@@ -11,6 +11,12 @@ on:
       - "src/lib/internalChinaForwarderStoredClose.ts"
       - "src/lib/internalChinaCostPricePolicy.ts"
       - "src/lib/internalChinaCostPriceReview.ts"
+      - "src/lib/internalChinaPriceGroupPolicy.ts"
+      - "src/lib/internalChinaGroupCostPricePolicy.ts"
+      - "src/lib/internalChinaGroupCostPriceReview.ts"
+      - "src/lib/shopling/shoplingProductGroupRegistry.ts"
+      - "src/lib/shopling/historicalProductGroupXlsx.ts"
+      - "src/lib/shopling/historicalProductGroupImport.ts"
       - "src/lib/productMasterCanonicalSync.ts"
       - "src/lib/productMasterCanonicalBatchContext.ts"
       - "src/lib/monthlyPurchasePolicy.ts"
@@ -29,6 +35,7 @@ on:
       - "tests/internalChinaReceipt.test.mjs"
       - "tests/internalChinaForwarderCost.test.mjs"
       - "tests/internalChinaCostPriceReview.test.mjs"
+      - "tests/internalChinaGroupCostPriceV2.test.mjs"
       - "tests/productMasterCanonicalBatchContext.test.mjs"
       - "tests/monthlyPurchasePolicy.test.mjs"
       - "tests/monthlyPurchaseDraftConsolidation.test.mjs"
@@ -64,6 +71,12 @@ jobs:
           src/lib/internalChinaForwarderStoredClose.ts
           src/lib/internalChinaCostPricePolicy.ts
           src/lib/internalChinaCostPriceReview.ts
+          src/lib/internalChinaPriceGroupPolicy.ts
+          src/lib/internalChinaGroupCostPricePolicy.ts
+          src/lib/internalChinaGroupCostPriceReview.ts
+          src/lib/shopling/shoplingProductGroupRegistry.ts
+          src/lib/shopling/historicalProductGroupXlsx.ts
+          src/lib/shopling/historicalProductGroupImport.ts
           src/lib/productMasterCanonicalSync.ts
           src/lib/productMasterCanonicalBatchContext.ts
           src/lib/monthlyPurchasePolicy.ts
@@ -76,6 +89,8 @@ jobs:
           src/app/api/china-order-manager/receipts/route.ts
           src/app/api/china-order-manager/forwarder-cost/route.ts
           src/app/api/china-order-manager/price-review/approve/route.ts
+          src/app/api/china-order-manager/price-review/group-aware-approve/route.ts
+          src/app/api/china-order-manager/price-review/product-groups/import/route.ts
           src/app/api/cron/receipt-live-price-proposals/route.ts
           src/app/china-order-manager/layout.tsx
           src/app/china-order-manager/page.tsx
@@ -86,6 +101,8 @@ jobs:
           src/components/china-order-manager/InternalChinaReceiptPanel.tsx
           src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx
           src/components/china-order-manager/InternalChinaCostPriceApprovalButton.tsx
+          src/components/china-order-manager/InternalChinaGroupCostPriceApprovalButton.tsx
+          src/components/china-order-manager/InternalChinaHistoricalProductGroupImport.tsx
           src/components/china-order-manager/MonthlyDraftConsolidation.tsx
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
           tests/chinaOrderLedger.test.mjs
@@ -94,6 +111,7 @@ jobs:
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
+          tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
@@ -106,6 +124,7 @@ jobs:
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
+          tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
           tests/monthlyPurchasePolicy.test.mjs
           tests/monthlyPurchaseDraftConsolidation.test.mjs
