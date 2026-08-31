@@ -35,7 +35,7 @@ function json(body: unknown, status = 200) {
 }
 
 function validRunId(runId: string) {
-  return /^canary-group-v021-[A-Za-z0-9._:-]{12,140}$/.test(runId);
+  return /^canary-group-v0(?:21|30)-[A-Za-z0-9._:-]{12,140}$/.test(runId);
 }
 
 function profileSearchCode(productGroupKey: string) {
