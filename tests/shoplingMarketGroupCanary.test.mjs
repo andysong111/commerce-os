@@ -75,7 +75,7 @@ test("result parser ignores Selpa-only failures but blocks every non-Selpa failu
   assert.match(source, /shopling_submit_result_has_nonselfa_failure/);
 });
 
-test("v0.3.4 overlay describes simultaneous channel windows", async () => {
+test("v0.3.4 source overlay describes simultaneous channel windows", async () => {
   const source = await readFile(overlayPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /DISPLAY_VERSION = "0\.3\.4"/);
@@ -91,11 +91,20 @@ test("server claim and release compatibility remains available for v030 driver r
   assert.match(release, /status: "queued"/);
 });
 
-test("v0.3.4 download syntax-checks exact parallel runtime", async () => {
+test("v0.3.5 download rewrites the v0.3.4 checkpoint into a click-through one-shot A18 runtime", async () => {
   const source = await readFile(downloadPath, "utf8");
-  assert.match(source, /const VERSION = "0\.3\.4"/);
+  assert.match(source, /const BASE_VERSION = "0\.3\.4"/);
+  assert.match(source, /const VERSION = "0\.3\.5"/);
+  assert.match(source, /const OUTPUT_OVERLAY = "content-version-v035\.mjs"/);
   assert.match(source, /new Function\(source\)/);
-  assert.match(source, /content-version-v034\.mjs/);
+  assert.match(source, /commerceOsShoplingParallelWorkerMetaV035/);
+  assert.match(source, /commerceOsShoplingParallelRunV035/);
+  assert.match(source, /commerceOsShoplingParallelWorkerV035/);
+  assert.match(source, /a18_navigation_timeout/);
+  assert.match(source, /pointer-events:none!important/);
+  assert.match(source, /pointer-events:auto!important/);
+  assert.match(source, /\["worker_opening", "await_a18"\]/);
+  assert.match(source, /repeat_a18_click_gate_present/);
   assert.match(source, /parallel_clone_missing/);
   assert.match(source, /assignment_map_missing/);
   assert.match(source, /selfa_policy_missing/);
