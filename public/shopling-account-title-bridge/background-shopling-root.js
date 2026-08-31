@@ -6,4 +6,5 @@ importScripts(
   "background-shopling-seo-keywords.js",
   "background-shopling-pipeline.js",
   "background-shopling-lifecycle.js",
+  "background-shopling-lifecycle-main-exec.js",
 );
