@@ -7,6 +7,9 @@ import {
   buildInternalChinaGroupCostPriceDecision,
   INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION,
 } from "@/lib/internalChinaGroupCostPricePolicy";
+import { shoplingSaleStatusActive } from "@/lib/internalChinaShoplingSaleStatus";
+import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadShoplingCurrentPriceSnapshot } from "@/lib/shopling/shoplingCurrentPrice";
 import {
   loadShoplingProductGroupsByGoodsKey,
   resolveInternalPriceGroup,
@@ -55,6 +58,8 @@ export type InternalChinaGroupCostPriceReviewRow = {
     policyMultiplier: number;
     policyAddKrw: number;
   }[];
+  saleStatus: string;
+  saleStatusActive: boolean | null;
   direction: "INCREASE" | "DECREASE" | "HOLD" | "BLOCKED";
   changeRequired: boolean;
   blockedReason: string | null;
@@ -75,6 +80,8 @@ export type InternalChinaGroupCostPriceProposal = {
   holdCount: number;
   blockedCount: number;
   unresolvedGroupCount: number;
+  inactiveListingCount: number;
+  liveListingMissingCount: number;
   changedRowCount: number;
   fingerprint: string;
   shoplingWritesEnabled: false;
@@ -92,6 +99,10 @@ export type InternalChinaGroupCostPriceApproval = {
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
+}
+
+function normalizeBarcode(value: unknown) {
+  return text(value).toUpperCase().replace(/\s+/g, "");
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -162,11 +173,39 @@ function parseProposal(row: OperationRow | undefined) {
   return value as unknown as InternalChinaGroupCostPriceProposal;
 }
 
+function listingKey(barcode: unknown, goodsKey: unknown, optionId: unknown) {
+  return `${normalizeBarcode(barcode)}|${text(goodsKey)}|${text(optionId)}`;
+}
+
+async function loadLiveListingStatuses(v1: InternalChinaCostPriceProposal) {
+  const affectedBarcodes = new Set(v1.rows.map((row) => normalizeBarcode(row.barcode)));
+  const planning = await loadProductPlanningSnapshot();
+  const affectedPlanning = planning.products.filter(
+    (product) =>
+      product.skuActive !== false && affectedBarcodes.has(normalizeBarcode(product.barcode)),
+  );
+  const live = await loadShoplingCurrentPriceSnapshot(affectedPlanning);
+  const result = new Map<string, { saleStatus: string; active: boolean }>();
+  for (const row of live.rows) {
+    for (const listing of row.listings) {
+      const saleStatus = text(listing.saleStatus);
+      result.set(listingKey(row.barcode, listing.goodsKey, listing.optionId), {
+        saleStatus,
+        active: shoplingSaleStatusActive(saleStatus),
+      });
+    }
+  }
+  return result;
+}
+
 export async function buildInternalChinaGroupCostPriceProposal(
   v1: InternalChinaCostPriceProposal,
 ): Promise<InternalChinaGroupCostPriceProposal> {
   const goodsKeys = v1.rows.map((row) => row.goodsKey).filter(Boolean);
-  const registry = await loadShoplingProductGroupsByGoodsKey(goodsKeys);
+  const [registry, liveStatuses] = await Promise.all([
+    loadShoplingProductGroupsByGoodsKey(goodsKeys),
+    loadLiveListingStatuses(v1),
+  ]);
   const rows: InternalChinaGroupCostPriceReviewRow[] = v1.rows.map((row) => {
     const resolution = resolveInternalPriceGroup({
       goodsKey: row.goodsKey,
@@ -180,6 +219,21 @@ export async function buildInternalChinaGroupCostPriceProposal(
       unitsPerOrder: row.unitsPerOrder,
       productGroup: resolution.group,
     });
+    const liveStatus = row.goodsKey
+      ? liveStatuses.get(listingKey(row.barcode, row.goodsKey, row.optionId)) ?? null
+      : null;
+    const liveMissing = Boolean(row.goodsKey && !liveStatus);
+    const liveInactive = Boolean(row.goodsKey && liveStatus && !liveStatus.active);
+    const blockedReason = liveMissing
+      ? "SHOPLING_LIVE_LISTING_NOT_FOUND"
+      : liveInactive
+        ? "SHOPLING_SALE_STATUS_INACTIVE"
+        : decision.blockedReason;
+    const reason = liveMissing
+      ? "Shopling 실조회에서 현재 GOODSKEY/옵션을 다시 찾지 못해 가격조정 대상에서 제외했습니다."
+      : liveInactive
+        ? `Shopling sale_status=${liveStatus?.saleStatus || "(빈값)"}로 현재 판매중이 아니어서 가격조정 대상에서 제외했습니다.`
+        : decision.reason;
     return {
       barcode: row.barcode,
       skuId: row.skuId,
@@ -198,10 +252,12 @@ export async function buildInternalChinaGroupCostPriceProposal(
       groupMultiplier: decision.groupMultiplier,
       targetPrice: decision.targetPrice,
       mallTargets: decision.mallTargets,
-      direction: decision.direction,
-      changeRequired: decision.changeRequired,
-      blockedReason: decision.blockedReason,
-      reason: decision.reason,
+      saleStatus: liveStatus?.saleStatus ?? "",
+      saleStatusActive: row.goodsKey ? (liveStatus ? liveStatus.active : false) : null,
+      direction: liveMissing || liveInactive ? "BLOCKED" : decision.direction,
+      changeRequired: liveMissing || liveInactive ? false : decision.changeRequired,
+      blockedReason,
+      reason,
     };
   });
 
@@ -210,7 +266,16 @@ export async function buildInternalChinaGroupCostPriceProposal(
   const holdCount = rows.filter((row) => row.direction === "HOLD").length;
   const blockedCount = rows.filter((row) => row.direction === "BLOCKED").length;
   const unresolvedGroupCount = rows.filter(
-    (row) => row.goodsKey && row.blockedReason === "PRODUCT_GROUP_NOT_RESOLVED",
+    (row) =>
+      row.goodsKey &&
+      row.saleStatusActive === true &&
+      row.blockedReason === "PRODUCT_GROUP_NOT_RESOLVED",
+  ).length;
+  const inactiveListingCount = rows.filter(
+    (row) => row.blockedReason === "SHOPLING_SALE_STATUS_INACTIVE",
+  ).length;
+  const liveListingMissingCount = rows.filter(
+    (row) => row.blockedReason === "SHOPLING_LIVE_LISTING_NOT_FOUND",
   ).length;
   const changedRowCount = increaseCount + decreaseCount;
   const stable = {
@@ -231,6 +296,8 @@ export async function buildInternalChinaGroupCostPriceProposal(
       previousCostKrw: row.previousCostKrw,
       targetPrice: row.targetPrice,
       mallTargets: row.mallTargets,
+      saleStatus: row.saleStatus,
+      saleStatusActive: row.saleStatusActive,
       direction: row.direction,
       blockedReason: row.blockedReason,
     })),
@@ -257,6 +324,8 @@ export async function buildInternalChinaGroupCostPriceProposal(
     holdCount,
     blockedCount,
     unresolvedGroupCount,
+    inactiveListingCount,
+    liveListingMissingCount,
     changedRowCount,
     fingerprint: sha256(stable),
     shoplingWritesEnabled: false,
@@ -343,6 +412,8 @@ export async function runInternalChinaGroupCostPriceProposalStep() {
     state: proposal.state,
     proposalFingerprint: proposal.fingerprint,
     unresolvedGroupCount: proposal.unresolvedGroupCount,
+    inactiveListingCount: proposal.inactiveListingCount,
+    liveListingMissingCount: proposal.liveListingMissingCount,
     shoplingWritesEnabled: false as const,
   };
 }

@@ -8,7 +8,7 @@ import {
 import type { InternalChinaCostPriceDirection } from "./internalChinaCostPricePolicy.ts";
 
 export const INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION =
-  "commerce-os-cost-price-group-v2.0.0";
+  "commerce-os-cost-price-group-v2.1.0";
 
 export type InternalChinaGroupCostPriceDecision = {
   currentPrice: number;

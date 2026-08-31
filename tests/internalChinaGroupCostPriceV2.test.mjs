@@ -12,6 +12,7 @@ import {
   buildInternalChinaGroupCostPriceDecision,
   INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION,
 } from "../src/lib/internalChinaGroupCostPricePolicy.ts";
+import { shoplingSaleStatusActive } from "../src/lib/internalChinaShoplingSaleStatus.ts";
 
 const [reviewV2, page, importer, parser, importRoute, dispatcher, approvalRoute] =
   await Promise.all([
@@ -139,10 +140,22 @@ test("group mall sets and special mall policies are preserved", () => {
   assert.equal(retail1.find((row) => row.mallName === "에이블리")?.targetPrice, 4000);
 });
 
-test("v2 proposal resolves registry first and blocks approval while legacy groups are unresolved", () => {
-  assert.equal(INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION, "commerce-os-cost-price-group-v2.0.0");
+test("Shopling sale status B or empty stays active and other states are excluded", () => {
+  assert.equal(shoplingSaleStatusActive("B"), true);
+  assert.equal(shoplingSaleStatusActive(" b "), true);
+  assert.equal(shoplingSaleStatusActive(""), true);
+  assert.equal(shoplingSaleStatusActive(null), true);
+  assert.equal(shoplingSaleStatusActive("A"), false);
+  assert.equal(shoplingSaleStatusActive("C"), false);
+});
+
+test("v2.1 proposal resolves registry and fresh Shopling sale status before group approval", () => {
+  assert.equal(INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION, "commerce-os-cost-price-group-v2.1.0");
   assert.ok(reviewV2.includes("loadShoplingProductGroupsByGoodsKey"));
-  assert.ok(reviewV2.includes("resolveInternalPriceGroup"));
+  assert.ok(reviewV2.includes("loadShoplingCurrentPriceSnapshot"));
+  assert.ok(reviewV2.includes("SHOPLING_SALE_STATUS_INACTIVE"));
+  assert.ok(reviewV2.includes("SHOPLING_LIVE_LISTING_NOT_FOUND"));
+  assert.ok(reviewV2.includes("row.saleStatusActive === true"));
   assert.ok(reviewV2.includes("unresolvedGroupCount > 0"));
   assert.ok(reviewV2.includes("INTERNAL_CHINA_GROUP_COST_PRICE_PROPOSAL_STALE"));
   assert.ok(reviewV2.includes("shoplingWritesEnabled: false"));
@@ -166,6 +179,8 @@ test("new SEO products keep Shopling product group unspecified while OPS interna
   assert.ok(page.includes("신규 SEO 상품은 Shopling 상품그룹을 계속 미지정"));
   assert.ok(page.includes("OPS 내부 가격그룹"));
   assert.ok(page.includes("그룹 기준가 = 확정원가 × 주문당 수량 × 2 × 그룹배수"));
+  assert.ok(page.includes("판매중지 제외"));
+  assert.ok(page.includes("Shopling 실조회 누락"));
   assert.ok(dispatcher.includes("productGroupGuessingEnabled: false"));
   assert.ok(dispatcher.includes("shoplingProductGroupWritesEnabled: false"));
 });
