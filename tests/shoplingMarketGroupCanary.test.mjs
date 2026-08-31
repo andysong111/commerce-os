@@ -45,7 +45,8 @@ test("original A18 control window is excluded from disposable worker cleanup", a
   const source = await readFile(backgroundPath, "utf8");
   assert.match(source, /id !== controlWindowId/);
   assert.match(source, /id !== meta\.controlWindowId/);
-  assert.match(source, /control: tabId === meta\.controlTabId/);
+  assert.match(source, /const control = tabId === meta\.controlTabId/);
+  assert.match(source, /return \{ worker, control \}/);
 });
 
 test("clone preparation failures release pre-submit claims", async () => {
