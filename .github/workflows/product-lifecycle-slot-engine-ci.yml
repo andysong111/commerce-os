@@ -8,6 +8,7 @@ on:
       - "src/lib/productLifecyclePurchaseOverlay.ts"
       - "src/lib/integrations/productDecisionAgent.ts"
       - "src/lib/extendedModuleRegistry.ts"
+      - "src/lib/supabase/admin.ts"
       - "src/app/product-lifecycle/**"
       - "src/app/api/cron/product-lifecycle-refresh/**"
       - "src/app/api/shopling-lifecycle-bridge/**"
@@ -42,6 +43,7 @@ jobs:
           src/lib/productLifecyclePurchaseOverlay.ts
           src/lib/integrations/productDecisionAgent.ts
           src/lib/extendedModuleRegistry.ts
+          src/lib/supabase/admin.ts
           src/app/product-lifecycle/page.tsx
           src/app/api/cron/product-lifecycle-refresh/route.ts
           src/app/api/shopling-lifecycle-bridge/route.ts
