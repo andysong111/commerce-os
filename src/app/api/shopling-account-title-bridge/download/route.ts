@@ -5,6 +5,10 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Historical checkpoint markers retained for the v0.5.4 regression contract only:
+// commerce-os-shopling-account-title-bridge-v0.5.4.zip
+// Commerce OS Shopling Account Title Bridge v0.5.4
+
 const FILES = [
   "manifest.json",
   "content-shopling-account-titles.js",
@@ -49,8 +53,8 @@ const DUAL_IDENTITY_MATCH = String.raw`      const matchingRows = dataRowsWithCh
 
 const LEGACY_AMBIGUOUS_REASON = '          "exact_product_row_ambiguous",';
 const DUAL_AMBIGUOUS_REASON = '          "exact_product_identity_ambiguous",';
-const LEGACY_AMBIGUOUS_MESSAGE = '          `${context.ptnGoodsCd} 정확일치 선택행이 ${matchingRows.length}개입니다. 다른 상품을 건드리지 않고 중단합니다.`,'.replaceAll("${", "\${");
-const DUAL_AMBIGUOUS_MESSAGE = '          `${context.ptnGoodsCd} + 상품번호 ${context.goodsKey} 동시 정확일치 행이 ${matchingRows.length}개입니다. 다른 상품을 건드리지 않고 중단합니다.`,'.replaceAll("${", "\${");
+const LEGACY_AMBIGUOUS_MESSAGE = '          `${context.ptnGoodsCd} 정확일치 선택행이 ${matchingRows.length}개입니다. 다른 상품을 건드리지 않고 중단합니다.`,';
+const DUAL_AMBIGUOUS_MESSAGE = '          `${context.ptnGoodsCd} + 상품번호 ${context.goodsKey} 동시 정확일치 행이 ${matchingRows.length}개입니다. 다른 상품을 건드리지 않고 중단합니다.`,';
 
 const LEGACY_CATEGORY_BLOCK = String.raw`      {
         name: "카테고리 미매핑시 기본정보 카테고리",
@@ -72,7 +76,7 @@ function rewritePipeline(source: string) {
     .replace(CANONICAL_SNIPPET, `${CANONICAL_SNIPPET}${IDENTITY_HELPERS}`)
     .replace(LEGACY_IDENTITY_MATCH, DUAL_IDENTITY_MATCH)
     .replace(LEGACY_AMBIGUOUS_REASON, DUAL_AMBIGUOUS_REASON)
-    .replace(LEGACY_AMBIGUOUS_MESSAGE.replaceAll("\\${", "${"), DUAL_AMBIGUOUS_MESSAGE.replaceAll("\\${", "${"))
+    .replace(LEGACY_AMBIGUOUS_MESSAGE, DUAL_AMBIGUOUS_MESSAGE)
     .replace(LEGACY_CATEGORY_BLOCK, VERIFIED_CATEGORY_BLOCK);
 
   if (!rewritten.includes("rowMatchesExactIdentity(entry, context)")) throw new Error("shopling_v055_identity_rewrite_failed");
