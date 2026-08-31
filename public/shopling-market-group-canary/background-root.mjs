@@ -91,11 +91,13 @@ async function claimOneProduct(runId) {
   const rawTasks = Array.isArray(response.tasks) ? response.tasks : [];
   if (!rawTasks.length) return { ok: true, tasks: [], empty: true };
   const tasks = rawTasks.map(normalizeTask).filter(Boolean);
-  const launchIds = new Set(tasks.map((task) => task.launchItemId).filter(Boolean));
+  const identityKeys = new Set(
+    tasks.map((task) => task.launchItemId || task.modelNumber).filter(Boolean),
+  );
   const valid = tasks.length === rawTasks.length
     && tasks.length >= 1
     && tasks.length <= 6
-    && launchIds.size <= 1;
+    && identityKeys.size === 1;
   if (!valid) {
     const releasable = tasks.length ? tasks : rawTasks.map((row) => ({ goodsKey: text(row?.goodsKey) })).filter((row) => /^\d{5,9}$/.test(row.goodsKey));
     const released = await releaseClaimed(
@@ -118,6 +120,7 @@ async function claimOneProduct(runId) {
     tasks,
     taskCount: tasks.length,
     launchItemId: tasks[0]?.launchItemId || "",
+    modelNumber: tasks[0]?.modelNumber || "",
   };
 }
 
