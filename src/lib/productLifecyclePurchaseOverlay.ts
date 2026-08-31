@@ -28,6 +28,11 @@ function reasons(value: unknown) {
     : [];
 }
 
+function nonnegative(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
 export async function applyProductLifecyclePurchaseOverlay(
   snapshot: ProductDecisionSnapshot,
 ): Promise<{
@@ -82,7 +87,7 @@ export async function applyProductLifecyclePurchaseOverlay(
   let appliedStopCount = 0;
   let shadowCount = 0;
 
-  const products = snapshot.products.map((product) => {
+  const products = (snapshot.products ?? []).map((product) => {
     const lifecycle = byBarcode.get(text(product.barcode));
     if (!lifecycle) return product;
     matchedCount += 1;
@@ -90,10 +95,12 @@ export async function applyProductLifecyclePurchaseOverlay(
     const purchasePolicy = text(lifecycle.purchase_policy);
     const shadowMode = lifecycle.shadow_mode !== false;
     const reasonCodes = reasons(lifecycle.reason_codes);
+    const currentRecommendedQty = nonnegative(product.recommendedQty);
+    const currentExpectedCost = nonnegative(product.expectedCost);
     if (shadowMode) shadowCount += 1;
     if (purchasePolicy === "STOP") stopPolicyCount += 1;
 
-    const shouldStop = purchasePolicy === "STOP" && product.recommendedQty > 0;
+    const shouldStop = purchasePolicy === "STOP" && currentRecommendedQty > 0;
     if (shouldStop && shadowMode) simulatedStopCount += 1;
     if (shouldStop && !shadowMode) appliedStopCount += 1;
 
@@ -103,9 +110,9 @@ export async function applyProductLifecyclePurchaseOverlay(
       lifecyclePurchasePolicy: purchasePolicy,
       lifecycleShadowMode: shadowMode,
       lifecycleReasonCodes: reasonCodes,
-      lifecycleOriginalRecommendedQty: product.recommendedQty,
-      recommendedQty: shouldStop && !shadowMode ? 0 : product.recommendedQty,
-      expectedCost: shouldStop && !shadowMode ? 0 : product.expectedCost,
+      lifecycleOriginalRecommendedQty: currentRecommendedQty,
+      recommendedQty: shouldStop && !shadowMode ? 0 : currentRecommendedQty,
+      expectedCost: shouldStop && !shadowMode ? 0 : currentExpectedCost,
     };
   });
 
