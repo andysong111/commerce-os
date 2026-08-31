@@ -5,12 +5,12 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const FILES = [
   "manifest.json",
   "background-root.mjs",
   "content-group-canary.mjs",
-  "content-version-v031.mjs",
+  "content-version-v032.mjs",
   "README.txt",
 ] as const;
 
@@ -28,8 +28,9 @@ export async function GET() {
   const entries: Record<string, Uint8Array> = {};
 
   const manifestSource = await readFile(path.join(root, "manifest.json"), "utf8");
-  const manifest = JSON.parse(manifestSource) as { version?: string };
+  const manifest = JSON.parse(manifestSource) as { version?: string; permissions?: string[] };
   if (manifest.version !== VERSION) throw new Error("shopling_fresh_worker_manifest_version_mismatch");
+  if (!manifest.permissions?.includes("contentSettings")) throw new Error("shopling_fresh_worker_popup_permission_missing");
   entries["manifest.json"] = strToU8(manifestSource);
 
   for (const fileName of FILES.filter((file) => file.endsWith(".mjs"))) {
@@ -43,7 +44,10 @@ export async function GET() {
   if (background.includes("chrome.windows.create")) throw new Error("shopling_fresh_worker_must_not_create_public_launcher_window");
   if (!background.includes("findPersistentLauncherTab")) throw new Error("shopling_fresh_worker_persistent_launcher_lookup_missing");
   if (!background.includes("chrome.scripting.executeScript")) throw new Error("shopling_fresh_worker_launcher_click_missing");
-  if (!background.includes("persistent_shopling_launcher_missing")) throw new Error("shopling_fresh_worker_launcher_guard_missing");
+  if (!background.includes("chrome.contentSettings.popups.set")) throw new Error("shopling_fresh_worker_popup_allow_missing");
+  if (!background.includes("waitForAdminPopup")) throw new Error("shopling_fresh_worker_popup_verification_missing");
+  if (!background.includes("restoreLauncherTab")) throw new Error("shopling_fresh_worker_launcher_recovery_missing");
+  if (!background.includes("group-canary-release-v0.3.2")) throw new Error("shopling_fresh_worker_claim_release_missing");
   if (!content.includes("1채널=1새창")) throw new Error("shopling_fresh_worker_contract_missing");
   if (!content.includes("isSubmitResultPage")) throw new Error("shopling_fresh_worker_result_guard_missing");
 
