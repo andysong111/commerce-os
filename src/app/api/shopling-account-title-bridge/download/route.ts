@@ -5,9 +5,11 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Historical checkpoint markers retained for the v0.5.4 regression contract only:
+// Historical checkpoint markers retained for regression compatibility only:
 // commerce-os-shopling-account-title-bridge-v0.5.4.zip
 // Commerce OS Shopling Account Title Bridge v0.5.4
+// commerce-os-shopling-account-title-bridge-v0.5.6.zip
+// Commerce OS Shopling Account Title Bridge v0.5.6
 
 const FILES = [
   "manifest.json",
@@ -15,6 +17,8 @@ const FILES = [
   "content-shopling-product-list-batch.js",
   "content-shopling-product-list-registry-bridge.js",
   "content-shopling-lifecycle-diagnostic.js",
+  "content-shopling-lifecycle-executor.js",
+  "content-shopling-lifecycle-main.js",
   "content-shopling-pipeline.js",
   "content-shopling-pipeline-frame-bridge.js",
   "content-shopling-onebutton-stability-v054.js",
@@ -70,13 +74,10 @@ const VERIFIED_CATEGORY_BLOCK = String.raw`      { name: "매핑된 카테고리
       },`;
 
 function rewritePipeline(source: string) {
-  if (!source.includes(CANONICAL_SNIPPET)) throw new Error("shopling_v056_canonical_anchor_missing");
-  if (!source.includes(LEGACY_IDENTITY_MATCH)) throw new Error("shopling_v056_identity_anchor_missing");
-  if (!source.includes(LEGACY_CATEGORY_BLOCK)) throw new Error("shopling_v056_category_anchor_missing");
+  if (!source.includes(CANONICAL_SNIPPET)) throw new Error("shopling_v057_canonical_anchor_missing");
+  if (!source.includes(LEGACY_IDENTITY_MATCH)) throw new Error("shopling_v057_identity_anchor_missing");
+  if (!source.includes(LEGACY_CATEGORY_BLOCK)) throw new Error("shopling_v057_category_anchor_missing");
 
-  // IMPORTANT: function replacers are required here. A plain replacement string
-  // interprets `$&` inside the generated escapeRegex source as "insert the whole
-  // matched canonical function", which corrupts the downloadable extension.
   const rewritten = source
     .replace(CANONICAL_SNIPPET, () => `${CANONICAL_SNIPPET}${IDENTITY_HELPERS}`)
     .replace(LEGACY_IDENTITY_MATCH, () => DUAL_IDENTITY_MATCH)
@@ -84,17 +85,15 @@ function rewritePipeline(source: string) {
     .replace(LEGACY_AMBIGUOUS_MESSAGE, () => DUAL_AMBIGUOUS_MESSAGE)
     .replace(LEGACY_CATEGORY_BLOCK, () => VERIFIED_CATEGORY_BLOCK);
 
-  if (!rewritten.includes("rowMatchesExactIdentity(entry, context)")) throw new Error("shopling_v056_identity_rewrite_failed");
-  if (!rewritten.includes("exact_product_identity_ambiguous")) throw new Error("shopling_v056_identity_reason_rewrite_failed");
-  if (!rewritten.includes("/무시하고.*쇼핑몰기본정보.*카테고리로\\s*전송/i")) throw new Error("shopling_v056_category_rewrite_failed");
+  if (!rewritten.includes("rowMatchesExactIdentity(entry, context)")) throw new Error("shopling_v057_identity_rewrite_failed");
+  if (!rewritten.includes("exact_product_identity_ambiguous")) throw new Error("shopling_v057_identity_reason_rewrite_failed");
+  if (!rewritten.includes("/무시하고.*쇼핑몰기본정보.*카테고리로\\s*전송/i")) throw new Error("shopling_v057_category_rewrite_failed");
 
-  // Validate the exact generated content that will be placed in the ZIP, not
-  // only the source file in Git. Never distribute a syntactically broken worker.
   try {
     new Function(rewritten);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "unknown syntax error");
-    throw new Error(`shopling_v056_generated_pipeline_syntax_invalid: ${message}`);
+    throw new Error(`shopling_v057_generated_pipeline_syntax_invalid: ${message}`);
   }
   return rewritten;
 }
@@ -106,8 +105,8 @@ export async function GET() {
   for (const fileName of FILES) {
     if (fileName === "manifest.json") {
       const manifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
-      manifest.version = "0.5.6";
-      manifest.description = "상품번호+자사상품코드 동시 정확일치 후에만 마켓 전송하고, 상품 생애주기 판매상태 자동화를 위한 Shopling DOM은 읽기 전용으로 진단합니다.";
+      manifest.version = "0.5.7";
+      manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 산출값은 goods key 단일행 선택과 재조회 검증 후 판매중/품절 상태에 자동 반영합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
@@ -122,13 +121,13 @@ export async function GET() {
     entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.6\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.5.7\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.6.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.5.7.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },
