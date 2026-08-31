@@ -4,8 +4,8 @@ import {
   internalPriceGroupTarget,
   normalizeInternalPriceGroup,
   type InternalPriceGroup,
-} from "@/lib/internalChinaPriceGroupPolicy";
-import type { InternalChinaCostPriceDirection } from "@/lib/internalChinaCostPricePolicy";
+} from "./internalChinaPriceGroupPolicy.ts";
+import type { InternalChinaCostPriceDirection } from "./internalChinaCostPricePolicy.ts";
 
 export const INTERNAL_CHINA_GROUP_COST_PRICE_RULE_VERSION =
   "commerce-os-cost-price-group-v2.0.0";
