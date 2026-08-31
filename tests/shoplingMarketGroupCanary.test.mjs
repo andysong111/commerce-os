@@ -24,7 +24,8 @@ test("group canary scripts are syntactically valid and claim only one product gr
   assert.doesNotThrow(() => new Function(content));
   assert.match(background, /action: "claim", runId, groupLimit: 1/);
   assert.match(background, /tasks\.length <= 6/);
-  assert.match(background, /launchIds\.size <= 1/);
+  assert.match(background, /identityKeys\.size === 1/);
+  assert.match(background, /task\.launchItemId \|\| task\.modelNumber/);
   assert.match(background, /canary-group-v020-/);
 });
 
