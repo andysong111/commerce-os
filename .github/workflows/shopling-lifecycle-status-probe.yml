@@ -1,0 +1,39 @@
+name: Shopling Lifecycle Status Probe CI
+
+on:
+  pull_request:
+    paths:
+      - "src/app/api/shopling-lifecycle-status-probe/**"
+      - "tests/shoplingLifecycleStatusProbe.test.mjs"
+      - ".github/workflows/shopling-lifecycle-status-probe.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/app/api/shopling-lifecycle-status-probe/**"
+      - "tests/shoplingLifecycleStatusProbe.test.mjs"
+      - ".github/workflows/shopling-lifecycle-status-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - name: Lint status probe
+        run: npx eslint src/app/api/shopling-lifecycle-status-probe/route.ts
+      - name: Test read-only contract
+        run: node --experimental-strip-types --test tests/shoplingLifecycleStatusProbe.test.mjs
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://shopling-status-probe-build-check.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_shopling_status_probe_build_check
