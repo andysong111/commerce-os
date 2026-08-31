@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { loadShoplingLifecycleStatusSnapshot } from "@/lib/shopling/shoplingLifecycleStatus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,6 +7,8 @@ export const dynamic = "force-dynamic";
 const BRIDGE_VERSION = "lifecycle-v1";
 const MAX_CLAIM = 20;
 const STALE_CLAIM_MINUTES = 15;
+
+type AdminClient = NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>;
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
@@ -46,7 +49,39 @@ function claimableDesiredState(value: unknown, allowDelete: boolean) {
   return desired === "DELETE" && allowDelete;
 }
 
-async function recoverStaleClaims(admin: NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>) {
+function desiredSaleStatusCode(value: unknown) {
+  const desired = text(value);
+  if (desired === "SELLING") return "B";
+  if (desired === "SOLD_OUT") return "C";
+  return "";
+}
+
+function noopOnlyCanary(evidence: unknown) {
+  return object(evidence).canaryNoopOnly === true;
+}
+
+function preflightEvidence(
+  evidence: unknown,
+  input: {
+    at: string;
+    state: string;
+    currentSaleStatus: string;
+    noop: boolean;
+    error?: string;
+  },
+) {
+  return {
+    ...object(evidence),
+    preflightAt: input.at,
+    preflightSource: "shopling_product_read_api",
+    preflightState: input.state,
+    preflightCurrentSaleStatus: input.currentSaleStatus,
+    preflightNoop: input.noop,
+    ...(input.error ? { preflightError: input.error } : {}),
+  };
+}
+
+async function recoverStaleClaims(admin: AdminClient) {
   const cutoff = new Date(Date.now() - STALE_CLAIM_MINUTES * 60_000).toISOString();
   const stale = await admin
     .from("shopling_lifecycle_action_queue")
@@ -123,7 +158,7 @@ export async function POST(request: Request) {
 
     const candidates = await admin
       .from("shopling_lifecycle_action_queue")
-      .select("id,sku_id,barcode,goods_key,desired_state,lifecycle_state,reason_codes,scheduled_for")
+      .select("id,sku_id,barcode,goods_key,desired_state,lifecycle_state,reason_codes,scheduled_for,evidence")
       .eq("status", "pending")
       .eq("shadow_mode", false)
       .order("scheduled_for", { ascending: true })
@@ -138,16 +173,118 @@ export async function POST(request: Request) {
       dueNow(candidate.scheduled_for, Date.parse(claimedAt)) &&
       claimableDesiredState(candidate.desired_state, allowDelete),
     );
+
+    const preflightGoodsKeys = [
+      ...new Set(
+        claimable
+          .filter((candidate) => desiredSaleStatusCode(candidate.desired_state))
+          .map((candidate) => text(candidate.goods_key))
+          .filter(Boolean),
+      ),
+    ];
+    let preflightError = "";
+    let preflightStatuses = new Map<string, { state: string; currentSaleStatus: string }>();
+    if (preflightGoodsKeys.length) {
+      try {
+        const snapshot = await loadShoplingLifecycleStatusSnapshot(preflightGoodsKeys);
+        preflightStatuses = new Map(
+          snapshot.statuses.map((status) => [
+            status.goodsKey,
+            { state: status.state, currentSaleStatus: status.currentSaleStatus },
+          ]),
+        );
+      } catch (error) {
+        preflightError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    let preflightNoopCount = 0;
+    let preflightBlockedCanaryCount = 0;
     for (const candidate of claimable) {
       if (tasks.length >= limit) break;
       const id = text(candidate.id);
       if (!id) continue;
+      const desiredCode = desiredSaleStatusCode(candidate.desired_state);
+      const goodsKey = text(candidate.goods_key);
+      const preflight = desiredCode ? preflightStatuses.get(goodsKey) : undefined;
+      const evidence = object(candidate.evidence);
+
+      if (desiredCode && preflight?.state === "READY" && preflight.currentSaleStatus === desiredCode) {
+        const completed = await admin
+          .from("shopling_lifecycle_action_queue")
+          .update({
+            status: "succeeded",
+            executed_at: claimedAt,
+            last_error: null,
+            evidence: preflightEvidence(evidence, {
+              at: claimedAt,
+              state: preflight.state,
+              currentSaleStatus: preflight.currentSaleStatus,
+              noop: true,
+            }),
+            updated_at: claimedAt,
+          })
+          .eq("id", id)
+          .eq("status", "pending")
+          .eq("shadow_mode", false)
+          .select("id")
+          .maybeSingle();
+        if (completed.error) {
+          return json({ ok: false, error: "preflight_noop_update_failed", message: completed.error.message }, 503);
+        }
+        if (completed.data) preflightNoopCount += 1;
+        continue;
+      }
+
+      if (desiredCode && noopOnlyCanary(evidence)) {
+        const current = preflight?.currentSaleStatus || "UNKNOWN";
+        const state = preflight?.state || (preflightError ? "ERROR" : "MISSING");
+        const message = preflightError
+          ? `No-op Canary Shopling 상태조회 실패로 변경을 실행하지 않았습니다: ${preflightError}`
+          : `No-op Canary는 목표 ${desiredCode} 상태만 허용합니다. 현재=${current}, 조회상태=${state}; 브라우저 변경을 실행하지 않았습니다.`;
+        const blocked = await admin
+          .from("shopling_lifecycle_action_queue")
+          .update({
+            status: "confirm_needed",
+            executed_at: null,
+            last_error: message.slice(0, 1000),
+            evidence: preflightEvidence(evidence, {
+              at: claimedAt,
+              state,
+              currentSaleStatus: current,
+              noop: false,
+              ...(preflightError ? { error: preflightError } : {}),
+            }),
+            updated_at: claimedAt,
+          })
+          .eq("id", id)
+          .eq("status", "pending")
+          .eq("shadow_mode", false)
+          .select("id")
+          .maybeSingle();
+        if (blocked.error) {
+          return json({ ok: false, error: "preflight_canary_block_failed", message: blocked.error.message }, 503);
+        }
+        if (blocked.data) preflightBlockedCanaryCount += 1;
+        continue;
+      }
+
+      const evidenceWithPreflight = desiredCode
+        ? preflightEvidence(evidence, {
+            at: claimedAt,
+            state: preflight?.state || (preflightError ? "ERROR" : "MISSING"),
+            currentSaleStatus: preflight?.currentSaleStatus || "",
+            noop: false,
+            ...(preflightError ? { error: preflightError } : {}),
+          })
+        : evidence;
       const claimed = await admin
         .from("shopling_lifecycle_action_queue")
         .update({
           status: "claimed",
           claim_run_id: runId,
           claimed_at: claimedAt,
+          evidence: evidenceWithPreflight,
           updated_at: claimedAt,
         })
         .eq("id", id)
@@ -168,6 +305,9 @@ export async function POST(request: Request) {
       tasks,
       recovered: false,
       deleteExecutionEnabled: allowDelete,
+      preflightNoopCount,
+      preflightBlockedCanaryCount,
+      preflightReadError: preflightError || null,
     });
   }
 
