@@ -11,6 +11,7 @@ export type InternalChinaCostPriceDecision = {
   currentPrice: number;
   latestCostKrw: number;
   previousCostKrw: number | null;
+  unitsPerOrder: number;
   costChangeRate: number | null;
   targetPrice: number;
   direction: InternalChinaCostPriceDirection;
@@ -24,15 +25,24 @@ function integer(value: unknown) {
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
 }
 
-export function costDefensePrice(latestCostKrw: unknown) {
+function positiveInteger(value: unknown) {
+  return Math.max(1, integer(value) || 1);
+}
+
+export function costDefensePrice(
+  latestCostKrw: unknown,
+  unitsPerOrder: unknown = 1,
+) {
   const cost = integer(latestCostKrw);
-  return cost > 0 ? Math.ceil((cost * 2) / 10) * 10 : 0;
+  const units = positiveInteger(unitsPerOrder);
+  return cost > 0 ? Math.ceil((cost * units * 2) / 10) * 10 : 0;
 }
 
 export function buildInternalChinaCostPriceDecision(input: {
   currentPrice: number;
   latestCostKrw: number;
   previousCostKrw?: number | null;
+  unitsPerOrder?: number | null;
 }): InternalChinaCostPriceDecision {
   const currentPrice = integer(input.currentPrice);
   const latestCostKrw = integer(input.latestCostKrw);
@@ -40,7 +50,8 @@ export function buildInternalChinaCostPriceDecision(input: {
     input.previousCostKrw === null || input.previousCostKrw === undefined
       ? null
       : integer(input.previousCostKrw);
-  const targetPrice = costDefensePrice(latestCostKrw);
+  const unitsPerOrder = positiveInteger(input.unitsPerOrder);
+  const targetPrice = costDefensePrice(latestCostKrw, unitsPerOrder);
   const costChangeRate =
     previousCostKrw && previousCostKrw > 0
       ? Math.round((latestCostKrw / previousCostKrw - 1) * 10_000) / 10_000
@@ -51,6 +62,7 @@ export function buildInternalChinaCostPriceDecision(input: {
       currentPrice,
       latestCostKrw,
       previousCostKrw,
+      unitsPerOrder,
       costChangeRate,
       targetPrice,
       direction: "BLOCKED",
@@ -64,6 +76,7 @@ export function buildInternalChinaCostPriceDecision(input: {
       currentPrice,
       latestCostKrw,
       previousCostKrw,
+      unitsPerOrder,
       costChangeRate,
       targetPrice,
       direction: "BLOCKED",
@@ -77,12 +90,13 @@ export function buildInternalChinaCostPriceDecision(input: {
       currentPrice,
       latestCostKrw,
       previousCostKrw,
+      unitsPerOrder,
       costChangeRate,
       targetPrice,
       direction: "INCREASE",
       changeRequired: true,
       blockedReason: null,
-      reason: `현재 판매가가 최신 확정원가 2배(${targetPrice.toLocaleString("ko-KR")}원)보다 낮아 원가 방어 인상안입니다.`,
+      reason: `현재 판매가가 최신 확정원가 × 주문당 ${unitsPerOrder}개 × 2인 ${targetPrice.toLocaleString("ko-KR")}원보다 낮아 원가 방어 인상안입니다.`,
     };
   }
   if (
@@ -95,12 +109,13 @@ export function buildInternalChinaCostPriceDecision(input: {
       currentPrice,
       latestCostKrw,
       previousCostKrw,
+      unitsPerOrder,
       costChangeRate,
       targetPrice,
       direction: "DECREASE",
       changeRequired: true,
       blockedReason: null,
-      reason: `최신 확정원가가 직전 ${previousCostKrw.toLocaleString("ko-KR")}원에서 ${latestCostKrw.toLocaleString("ko-KR")}원으로 내려 새 원가 2배 기준까지 인하하는 안입니다.`,
+      reason: `최신 확정원가가 직전 ${previousCostKrw.toLocaleString("ko-KR")}원에서 ${latestCostKrw.toLocaleString("ko-KR")}원으로 내려 새 원가 × 주문당 ${unitsPerOrder}개 × 2 기준까지 인하하는 안입니다.`,
     };
   }
 
@@ -108,6 +123,7 @@ export function buildInternalChinaCostPriceDecision(input: {
     currentPrice,
     latestCostKrw,
     previousCostKrw,
+    unitsPerOrder,
     costChangeRate,
     targetPrice,
     direction: "HOLD",
