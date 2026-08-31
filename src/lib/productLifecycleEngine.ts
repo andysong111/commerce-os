@@ -55,10 +55,6 @@ function iso(value: unknown) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
-function array(value: unknown) {
-  return Array.isArray(value) ? value.map(text).filter(Boolean) : [];
-}
-
 function lifecycleState(value: unknown): ProductLifecycleState | null {
   const candidate = text(value) as ProductLifecycleState;
   return [
@@ -387,7 +383,7 @@ export async function loadProductLifecycleDashboard() {
         "sku_id,barcode,lifecycle_state,desired_shopling_state,purchase_policy,warehouse_policy,shadow_mode,requires_review,review_reason,last_sale_at,no_sale_days,sales_quantity_30,sales_quantity_90,sales_quantity_365,sales_trend,inventory_quantity,inventory_confirmed,next_evaluation_at,reason_codes,evidence,evaluated_at",
       )
       .order("requires_review", { ascending: false })
-      .order("no_sale_days", { ascending: false, nullsFirst: false })
+      .order("no_sale_days", { ascending: false })
       .limit(1000),
     admin
       .from(SHOPLING_QUEUE_TABLE)
