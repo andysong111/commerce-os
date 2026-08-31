@@ -6,6 +6,8 @@ on:
       - "public/shopling-account-title-bridge/**"
       - "public/shopling-market-canary/**"
       - "src/app/api/shopling-account-title-bridge/**"
+      - "src/app/api/shopling-lifecycle-bridge/**"
+      - "src/app/api/shopling-lifecycle-diagnostic/**"
       - "src/app/api/shopling-market-canary/**"
       - "src/lib/shoplingTitleKeywordPool.ts"
       - "supabase/migrations/202608300001_shopling_market_pipeline_idempotency_v05.sql"
@@ -13,6 +15,7 @@ on:
       - "supabase/migrations/202608300003_shopling_bridge_security_definer_acl_lockdown.sql"
       - "supabase/migrations/202608300004_shopling_claim_owner_id_ambiguity_fix.sql"
       - "tests/shoplingAccountTitleBridge.test.mjs"
+      - "tests/shoplingLifecycleExecutorV057.test.mjs"
       - "tests/shoplingMarketCanary.test.mjs"
       - "tests/shoplingBridgeRpcAclLockdown.test.mjs"
       - "tests/shoplingClaimRpcAmbiguity.test.mjs"
@@ -39,6 +42,9 @@ jobs:
           node --check public/shopling-account-title-bridge/content-shopling-account-titles.js &&
           node --check public/shopling-account-title-bridge/content-shopling-product-list-batch.js &&
           node --check public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-lifecycle-diagnostic.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-lifecycle-executor.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-lifecycle-main.js &&
           node --check public/shopling-account-title-bridge/content-shopling-pipeline.js &&
           node --check public/shopling-account-title-bridge/content-shopling-pipeline-frame-bridge.js &&
           node --check public/shopling-account-title-bridge/content-shopling-onebutton-stability-v054.js &&
@@ -47,12 +53,20 @@ jobs:
           node --check public/shopling-account-title-bridge/background-shopling-title-registry.js &&
           node --check public/shopling-account-title-bridge/background-shopling-seo-keywords.js &&
           node --check public/shopling-account-title-bridge/background-shopling-pipeline.js &&
+          node --check public/shopling-account-title-bridge/background-shopling-lifecycle.js &&
           node --check public/shopling-market-canary/background-root.js &&
           node --check public/shopling-market-canary/background-market-canary.js &&
           node --check public/shopling-market-canary/content-canary-frame-router.js &&
           node --check public/shopling-market-canary/content-market-canary.js
       - name: Test extension safety contract
-        run: node --test tests/shoplingAccountTitleBridge.test.mjs tests/shoplingMarketCanary.test.mjs tests/shoplingBridgeRpcAclLockdown.test.mjs tests/shoplingClaimRpcAmbiguity.test.mjs tests/shoplingV055DualIdentityPackage.test.mjs
+        run: >-
+          node --test
+          tests/shoplingAccountTitleBridge.test.mjs
+          tests/shoplingLifecycleExecutorV057.test.mjs
+          tests/shoplingMarketCanary.test.mjs
+          tests/shoplingBridgeRpcAclLockdown.test.mjs
+          tests/shoplingClaimRpcAmbiguity.test.mjs
+          tests/shoplingV055DualIdentityPackage.test.mjs
       - name: Build
         run: npm run build
         env:
