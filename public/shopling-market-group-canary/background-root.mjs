@@ -9,11 +9,10 @@ const RELEASE_API_BRIDGE = "group-canary-release-v0.3.2";
 const CLAIM_MESSAGE = "commerce-os-shopling-group-canary-claim";
 const ARM_MESSAGE = "commerce-os-shopling-group-canary-arm";
 const REPORT_MESSAGE = "commerce-os-shopling-group-canary-report";
-const OPEN_WORKER_MESSAGE = "commerce-os-shopling-fresh-worker-open";
-const CLOSE_WORKERS_MESSAGE = "commerce-os-shopling-fresh-worker-close";
-const CONTEXT_MESSAGE = "commerce-os-shopling-fresh-worker-context";
-const ADMIN_READY_MESSAGE = "commerce-os-shopling-fresh-worker-admin-ready";
-const WORKER_META_KEY = "commerceOsShoplingFreshWorkerMetaV033";
+const OPEN_WORKERS_MESSAGE = "commerce-os-shopling-parallel-workers-open";
+const CLOSE_WORKER_MESSAGE = "commerce-os-shopling-parallel-worker-close";
+const CONTEXT_MESSAGE = "commerce-os-shopling-parallel-worker-context";
+const WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV034";
 const ALLOWED = new Map([
   ["DM1", "도매1"],
   ["DM2", "도매2"],
@@ -22,6 +21,8 @@ const ALLOWED = new Map([
   ["SM1", "소매1"],
   ["SM2", "소매2"],
 ]);
+
+let metaMutationQueue = Promise.resolve();
 
 function text(value) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -32,7 +33,8 @@ function sleep(ms) {
 }
 
 function validRunId(runId) {
-  return /^canary-group-v0(?:21|30)-[A-Za-z0-9._:-]{12,150}$/.test(runId);
+  // v0.3.4 keeps the server-compatible v030 run-id prefix.
+  return /^canary-group-v030-[A-Za-z0-9._:-]{12,150}$/.test(runId);
 }
 
 async function requestJson(endpoint, payload) {
@@ -49,7 +51,7 @@ async function requestJson(endpoint, payload) {
     if (!response.ok || body?.ok !== true) {
       return {
         ok: false,
-        error: text(body?.error) || `fresh_worker_http_${response.status}`,
+        error: text(body?.error) || `parallel_worker_http_${response.status}`,
         message: text(body?.message),
       };
     }
@@ -57,7 +59,7 @@ async function requestJson(endpoint, payload) {
   } catch (error) {
     return {
       ok: false,
-      error: "fresh_worker_transport_failed",
+      error: "parallel_worker_transport_failed",
       message: error instanceof Error ? error.message : String(error || "request failed"),
     };
   }
@@ -132,12 +134,12 @@ async function claimOneProduct(runId) {
     const released = await releaseClaimed(
       runId,
       releasable,
-      "fresh_worker_claim_guard_failed",
+      "parallel_worker_claim_guard_failed",
       "1개 상품 범위를 벗어나 송신 전 원복했습니다.",
     );
     return {
       ok: false,
-      error: released ? "fresh_worker_claim_guard_failed" : "fresh_worker_claim_guard_release_failed",
+      error: released ? "parallel_worker_claim_guard_failed" : "parallel_worker_claim_guard_release_failed",
     };
   }
   const order = new Map(["DM1", "DM2", "DM3", "DM4", "SM1", "SM2"].map((code, index) => [code, index]));
@@ -170,6 +172,18 @@ function setWorkerMeta(meta) {
   });
 }
 
+function mutateWorkerMeta(mutator) {
+  const operation = metaMutationQueue.then(async () => {
+    const current = await getWorkerMeta();
+    const next = await mutator(current);
+    if (next === undefined) return current;
+    await setWorkerMeta(next);
+    return next;
+  });
+  metaMutationQueue = operation.catch(() => null);
+  return operation;
+}
+
 function isAdminControlUrl(url) {
   try {
     const parsed = new URL(String(url || ""));
@@ -198,6 +212,22 @@ async function releaseRunBeforeSubmit(runId, reasonCode, message) {
     ok: false,
     error: result?.error || "release_failed",
     message: result?.message || "claim 원복 실패",
+  };
+}
+
+async function releaseTaskBeforeSubmit(runId, task, reasonCode, message) {
+  const result = await api({
+    action: "report",
+    runId,
+    goodsKey: task.goodsKey,
+    outcome: "failed",
+    reasonCode,
+    message,
+  });
+  return result?.ok ? result : {
+    ok: false,
+    error: result?.error || "task_release_failed",
+    message: result?.message || "개별 claim 원복 실패",
   };
 }
 
@@ -281,23 +311,53 @@ async function cloneControlTabIntoWorker(controlTabId) {
     controlWindowId: control.windowId,
     workerWindowId,
     workerTabId,
+    a18CloneVerified: true,
   };
 }
 
-async function openFreshWorker(runId, sender) {
-  if (!validRunId(runId)) return { ok: false, error: "invalid_fresh_worker_run_id" };
-  const previous = await getWorkerMeta();
-  const sameRun = previous?.runId === runId;
-  const controlTabId = sameRun && Number.isInteger(previous?.controlTabId)
-    ? previous.controlTabId
-    : (sender?.tab?.id ?? null);
-  const controlWindowId = sameRun && Number.isInteger(previous?.controlWindowId)
-    ? previous.controlWindowId
-    : (sender?.tab?.windowId ?? null);
-  const oldWorkerWindowIds = sameRun && Array.isArray(previous?.windowIds)
-    ? [...previous.windowIds]
-    : [];
+function assignmentArray(meta) {
+  return Object.values(meta?.assignments && typeof meta.assignments === "object" ? meta.assignments : {});
+}
 
+function findAssignment(meta, sender, allowOpener = true) {
+  if (!meta || !sender?.tab) return null;
+  const tabId = sender.tab.id;
+  const windowId = sender.tab.windowId;
+  const openerTabId = sender.tab.openerTabId;
+  for (const assignment of assignmentArray(meta)) {
+    const tabs = Array.isArray(assignment?.tabIds) ? assignment.tabIds : [];
+    const windows = Array.isArray(assignment?.windowIds) ? assignment.windowIds : [];
+    if (tabs.includes(tabId) || windows.includes(windowId)) return assignment;
+  }
+  if (allowOpener && Number.isInteger(openerTabId)) {
+    for (const assignment of assignmentArray(meta)) {
+      const tabs = Array.isArray(assignment?.tabIds) ? assignment.tabIds : [];
+      if (tabs.includes(openerTabId)) return assignment;
+    }
+  }
+  return null;
+}
+
+async function openParallelWorkers(runId, rawTasks, sender) {
+  if (!validRunId(runId)) return { ok: false, error: "invalid_parallel_worker_run_id" };
+  const tasks = (Array.isArray(rawTasks) ? rawTasks : []).map(normalizeTask).filter(Boolean);
+  if (!tasks.length || tasks.length > 6) return { ok: false, error: "invalid_parallel_worker_tasks" };
+  const identities = new Set(tasks.map((task) => task.launchItemId));
+  const goodsKeys = new Set(tasks.map((task) => task.goodsKey));
+  if (identities.size !== 1 || goodsKeys.size !== tasks.length) return { ok: false, error: "parallel_worker_task_identity_invalid" };
+
+  const previous = await getWorkerMeta();
+  if (previous?.runId === runId && assignmentArray(previous).some((assignment) => assignment?.status === "active")) {
+    return {
+      ok: true,
+      resumed: true,
+      openedCount: assignmentArray(previous).filter((assignment) => assignment?.status === "active").length,
+      assignments: assignmentArray(previous),
+    };
+  }
+
+  const controlTabId = sender?.tab?.id ?? null;
+  const controlWindowId = sender?.tab?.windowId ?? null;
   if (!Number.isInteger(controlTabId) || !Number.isInteger(controlWindowId)) {
     await releaseRunBeforeSubmit(
       runId,
@@ -307,171 +367,236 @@ async function openFreshWorker(runId, sender) {
     return { ok: false, error: "a18_control_identity_missing" };
   }
 
-  const cloned = await cloneControlTabIntoWorker(controlTabId);
-  if (!cloned?.ok) {
+  const control = await chrome.tabs.get(controlTabId).catch(() => null);
+  if (!control || !isAdminControlUrl(control.url)) {
     await releaseRunBeforeSubmit(
       runId,
-      cloned?.error || "a18_clone_worker_failed",
-      `A18 복제 작업창 생성 실패로 송신 전에 claim을 원복했습니다. ${text(cloned?.message)}`,
+      "a18_control_tab_missing",
+      "원본 A18 관리자 탭 확인 실패로 송신 전에 claim을 원복했습니다.",
     );
-    return cloned;
+    return { ok: false, error: "a18_control_tab_missing" };
   }
 
   await setWorkerMeta({
     runId,
     controlTabId,
     controlWindowId,
-    rootWindowId: cloned.workerWindowId,
-    rootTabId: cloned.workerTabId,
-    windowIds: [cloned.workerWindowId],
-    tabIds: [cloned.workerTabId],
+    assignments: {},
     openedAt: Date.now(),
     updatedAt: Date.now(),
   });
 
-  const disposable = oldWorkerWindowIds
-    .filter((id) => id !== cloned.workerWindowId)
-    .filter((id) => id !== controlWindowId);
-  if (disposable.length) setTimeout(() => void closeWindowIds(disposable), 650);
+  const cloneResults = await Promise.allSettled(
+    tasks.map(async (task) => {
+      const cloned = await cloneControlTabIntoWorker(controlTabId);
+      if (!cloned?.ok) throw Object.assign(new Error(text(cloned?.message || cloned?.error)), { code: cloned?.error || "a18_clone_worker_failed", task });
+      const assignment = {
+        goodsKey: task.goodsKey,
+        task,
+        rootWindowId: cloned.workerWindowId,
+        rootTabId: cloned.workerTabId,
+        windowIds: [cloned.workerWindowId],
+        tabIds: [cloned.workerTabId],
+        status: "active",
+        openedAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      await mutateWorkerMeta((meta) => {
+        if (!meta || meta.runId !== runId) return meta;
+        return {
+          ...meta,
+          assignments: { ...(meta.assignments || {}), [task.goodsKey]: assignment },
+          updatedAt: Date.now(),
+        };
+      });
+      return assignment;
+    }),
+  );
+
+  const opened = [];
+  const failed = [];
+  for (let index = 0; index < cloneResults.length; index += 1) {
+    const result = cloneResults[index];
+    const task = tasks[index];
+    if (result.status === "fulfilled") {
+      opened.push(result.value);
+      continue;
+    }
+    const code = text(result.reason?.code) || "a18_clone_worker_failed";
+    const message = text(result.reason?.message) || "A18 복제 작업창 생성 실패";
+    const released = await releaseTaskBeforeSubmit(
+      runId,
+      task,
+      code,
+      `${task.profile} 병렬 A18 복제창 생성 실패로 송신 전 claim을 원복했습니다. ${message}`,
+    );
+    failed.push({ goodsKey: task.goodsKey, profile: task.profile, error: code, message, released: Boolean(released?.ok) });
+  }
+
+  if (!opened.length) {
+    return { ok: false, error: "parallel_worker_all_clones_failed", failed };
+  }
 
   return {
     ok: true,
-    controlTabId,
-    workerWindowId: cloned.workerWindowId,
-    workerTabId: cloned.workerTabId,
+    runId,
+    openedCount: opened.length,
+    failedCount: failed.length,
+    assignments: opened,
+    failed,
     a18CloneVerified: true,
+    parallel: true,
   };
 }
 
-async function recordWorkerContext(runId, sender, allowOpener = true) {
+async function recordWorkerContext(sender, allowOpener = true) {
   const meta = await getWorkerMeta();
-  if (!meta || meta.runId !== runId || !sender?.tab) return { worker: false, control: false };
+  if (!meta || !sender?.tab) return { worker: false, control: false };
   const tabId = sender.tab.id;
   const windowId = sender.tab.windowId;
-  const openerTabId = sender.tab.openerTabId;
-  const tabs = new Set(Array.isArray(meta.tabIds) ? meta.tabIds : []);
-  const windows = new Set(Array.isArray(meta.windowIds) ? meta.windowIds : []);
   const control = tabId === meta.controlTabId;
-  let worker = tabs.has(tabId) || windows.has(windowId);
-  const fromWorker = Number.isInteger(openerTabId) && tabs.has(openerTabId);
-  if (!worker && allowOpener && fromWorker) {
-    worker = true;
-    tabs.add(tabId);
-    windows.add(windowId);
-    await setWorkerMeta({
-      ...meta,
-      tabIds: [...tabs],
-      windowIds: [...windows],
-      updatedAt: Date.now(),
+  let assignment = findAssignment(meta, sender, allowOpener);
+  if (!assignment) return { worker: false, control, runId: meta.runId };
+
+  const tracked = (Array.isArray(assignment.tabIds) && assignment.tabIds.includes(tabId))
+    || (Array.isArray(assignment.windowIds) && assignment.windowIds.includes(windowId));
+  if (!tracked && allowOpener) {
+    await mutateWorkerMeta((latest) => {
+      if (!latest || latest.runId !== meta.runId) return latest;
+      const current = latest.assignments?.[assignment.goodsKey];
+      if (!current) return latest;
+      const tabs = new Set(Array.isArray(current.tabIds) ? current.tabIds : []);
+      const windows = new Set(Array.isArray(current.windowIds) ? current.windowIds : []);
+      if (Number.isInteger(tabId)) tabs.add(tabId);
+      if (Number.isInteger(windowId)) windows.add(windowId);
+      const nextAssignment = { ...current, tabIds: [...tabs], windowIds: [...windows], updatedAt: Date.now() };
+      assignment = nextAssignment;
+      return {
+        ...latest,
+        assignments: { ...latest.assignments, [current.goodsKey]: nextAssignment },
+        updatedAt: Date.now(),
+      };
     });
   }
-  return { worker, control };
+
+  return {
+    worker: true,
+    control: false,
+    runId: meta.runId,
+    goodsKey: assignment.goodsKey,
+    task: assignment.task,
+  };
 }
 
-async function closeFreshWorkers(runId, sender, preserveSender = false) {
+async function verifyWorkerMessage(runId, goodsKey, sender) {
+  const context = await recordWorkerContext(sender, true);
+  return context.worker && context.runId === runId && context.goodsKey === goodsKey ? context : null;
+}
+
+async function closeParallelWorker(runId, goodsKey, sender, preserveSender = false) {
   const meta = await getWorkerMeta();
   if (!meta || meta.runId !== runId) return { ok: true, closed: 0 };
+  const assignment = meta.assignments?.[goodsKey];
+  if (!assignment) return { ok: true, closed: 0 };
   const senderWindowId = sender?.tab?.windowId;
-  const ids = (Array.isArray(meta.windowIds) ? meta.windowIds : [])
+  const ids = (Array.isArray(assignment.windowIds) ? assignment.windowIds : [])
     .filter((id) => id !== meta.controlWindowId)
     .filter((id) => !preserveSender || id !== senderWindowId);
-  await setWorkerMeta({
-    ...meta,
-    rootWindowId: null,
-    rootTabId: null,
-    windowIds: preserveSender && Number.isInteger(senderWindowId) ? [senderWindowId] : [],
-    tabIds: [],
-    updatedAt: Date.now(),
+
+  await mutateWorkerMeta((latest) => {
+    if (!latest || latest.runId !== runId) return latest;
+    const current = latest.assignments?.[goodsKey];
+    if (!current) return latest;
+    return {
+      ...latest,
+      assignments: {
+        ...latest.assignments,
+        [goodsKey]: {
+          ...current,
+          status: preserveSender ? "confirm_needed" : "closed",
+          windowIds: preserveSender && Number.isInteger(senderWindowId) ? [senderWindowId] : [],
+          tabIds: preserveSender && Number.isInteger(sender?.tab?.id) ? [sender.tab.id] : [],
+          updatedAt: Date.now(),
+        },
+      },
+      updatedAt: Date.now(),
+    };
   });
+
   if (ids.length) setTimeout(() => void closeWindowIds(ids), 350);
   return { ok: true, closed: ids.length };
-}
-
-async function adminReady(runId, sender) {
-  const context = await recordWorkerContext(runId, sender, true);
-  if (!context.worker) return { ok: false, error: "fresh_worker_admin_not_tracked" };
-  const meta = await getWorkerMeta();
-  if (!meta || meta.runId !== runId) return { ok: false, error: "fresh_worker_meta_missing" };
-  const senderWindowId = sender?.tab?.windowId;
-  const senderTabId = sender?.tab?.id;
-  const windows = new Set(Array.isArray(meta.windowIds) ? meta.windowIds : []);
-  const tabs = new Set(Array.isArray(meta.tabIds) ? meta.tabIds : []);
-  if (Number.isInteger(senderWindowId)) windows.add(senderWindowId);
-  if (Number.isInteger(senderTabId)) tabs.add(senderTabId);
-  await setWorkerMeta({
-    ...meta,
-    rootWindowId: senderWindowId,
-    rootTabId: senderTabId,
-    windowIds: [...windows],
-    tabIds: [...tabs],
-    updatedAt: Date.now(),
-  });
-  return { ok: true };
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return false;
   const runId = text(message.runId);
+  const goodsKey = text(message.goodsKey);
+
   if (message.type === CLAIM_MESSAGE) {
     claimOneProduct(runId).then(sendResponse).catch((error) => sendResponse({
       ok: false,
-      error: "fresh_worker_claim_exception",
+      error: "parallel_worker_claim_exception",
       message: String(error?.message || error),
     }));
     return true;
   }
-  if (message.type === OPEN_WORKER_MESSAGE) {
-    openFreshWorker(runId, sender).then(sendResponse).catch((error) => sendResponse({
+
+  if (message.type === OPEN_WORKERS_MESSAGE) {
+    openParallelWorkers(runId, message.tasks, sender).then(sendResponse).catch((error) => sendResponse({
       ok: false,
-      error: "fresh_worker_open_exception",
+      error: "parallel_worker_open_exception",
       message: String(error?.message || error),
     }));
     return true;
   }
-  if (message.type === CLOSE_WORKERS_MESSAGE) {
-    closeFreshWorkers(runId, sender, Boolean(message.preserveSenderWindow)).then(sendResponse).catch((error) => sendResponse({
-      ok: false,
-      error: "fresh_worker_close_exception",
-      message: String(error?.message || error),
-    }));
-    return true;
-  }
+
   if (message.type === CONTEXT_MESSAGE) {
-    recordWorkerContext(runId, sender, true).then(sendResponse).catch(() => sendResponse({ worker: false, control: false }));
+    recordWorkerContext(sender, true).then(sendResponse).catch(() => sendResponse({ worker: false, control: false }));
     return true;
   }
-  if (message.type === ADMIN_READY_MESSAGE) {
-    adminReady(runId, sender).then(sendResponse).catch((error) => sendResponse({
-      ok: false,
-      error: "fresh_worker_admin_ready_exception",
-      message: String(error?.message || error),
-    }));
-    return true;
-  }
-  if (message.type === ARM_MESSAGE) {
-    void recordWorkerContext(runId, sender, true);
-    api({ action: "arm-submit", runId, goodsKey: text(message.goodsKey) }).then(sendResponse).catch((error) => sendResponse({
-      ok: false,
-      error: "fresh_worker_arm_exception",
-      message: String(error?.message || error),
-    }));
-    return true;
-  }
-  if (message.type === REPORT_MESSAGE) {
-    void recordWorkerContext(runId, sender, true);
-    api({
-      action: "report",
-      runId,
-      goodsKey: text(message.goodsKey),
-      outcome: text(message.outcome),
-      reasonCode: text(message.reasonCode),
-      message: text(message.message),
+
+  if (message.type === CLOSE_WORKER_MESSAGE) {
+    verifyWorkerMessage(runId, goodsKey, sender).then((context) => {
+      if (!context) return { ok: false, error: "parallel_worker_close_identity_mismatch" };
+      return closeParallelWorker(runId, goodsKey, sender, Boolean(message.preserveSenderWindow));
     }).then(sendResponse).catch((error) => sendResponse({
       ok: false,
-      error: "fresh_worker_report_exception",
+      error: "parallel_worker_close_exception",
       message: String(error?.message || error),
     }));
     return true;
   }
+
+  if (message.type === ARM_MESSAGE) {
+    verifyWorkerMessage(runId, goodsKey, sender).then((context) => {
+      if (!context) return { ok: false, error: "parallel_worker_arm_identity_mismatch" };
+      return api({ action: "arm-submit", runId, goodsKey });
+    }).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "parallel_worker_arm_exception",
+      message: String(error?.message || error),
+    }));
+    return true;
+  }
+
+  if (message.type === REPORT_MESSAGE) {
+    verifyWorkerMessage(runId, goodsKey, sender).then((context) => {
+      if (!context) return { ok: false, error: "parallel_worker_report_identity_mismatch" };
+      return api({
+        action: "report",
+        runId,
+        goodsKey,
+        outcome: text(message.outcome),
+        reasonCode: text(message.reasonCode),
+        message: text(message.message),
+      });
+    }).then(sendResponse).catch((error) => sendResponse({
+      ok: false,
+      error: "parallel_worker_report_exception",
+      message: String(error?.message || error),
+    }));
+    return true;
+  }
+
   return false;
 });
