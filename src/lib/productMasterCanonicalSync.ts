@@ -1,3 +1,4 @@
+import { dependentSkuContext } from "./productMasterCanonicalBatchContext";
 import {
   buildProductMasterSnapshotFromTrackerState,
   type ProductMasterSnapshotPayload,
@@ -12,8 +13,6 @@ type StableSku = ProductMasterSnapshotPayload["skus"][number] & {
 type CanonicalPayload = Omit<ProductMasterSnapshotPayload, "skus"> & {
   skus: StableSku[];
 };
-
-type DependentCanonicalKey = "listingMappings" | "receiptCosts";
 
 const PRODUCT_MASTER_URL = "https://commerce-os-product-master.vercel.app";
 const SOURCE_SYSTEM = "ops_product_launch_tracker";
@@ -78,31 +77,6 @@ function sharedBarcodeIdentityMap(state: R) {
   }
 
   return result;
-}
-
-function dependentSkuContext(
-  key: DependentCanonicalKey,
-  rows: unknown[],
-  skuById: ReadonlyMap<string, StableSku>,
-) {
-  const skuIds = new Set<string>();
-  for (const raw of rows) {
-    const skuId = text(object(raw).skuId);
-    if (!skuId) {
-      throw new Error(`PRODUCT_MASTER_DEPENDENT_SKU_CONTEXT_MISSING:${key}:EMPTY`);
-    }
-    skuIds.add(skuId);
-  }
-
-  return [...skuIds].map((skuId) => {
-    const sku = skuById.get(skuId);
-    if (!sku) {
-      throw new Error(
-        `PRODUCT_MASTER_DEPENDENT_SKU_CONTEXT_MISSING:${key}:${skuId}`,
-      );
-    }
-    return sku;
-  });
 }
 
 export function buildCanonicalProductMasterSnapshot(input: unknown) {
