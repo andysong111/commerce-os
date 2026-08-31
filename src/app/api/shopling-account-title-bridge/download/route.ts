@@ -14,6 +14,7 @@ const FILES = [
   "content-shopling-account-titles.js",
   "content-shopling-product-list-batch.js",
   "content-shopling-product-list-registry-bridge.js",
+  "content-shopling-lifecycle-diagnostic.js",
   "content-shopling-pipeline.js",
   "content-shopling-pipeline-frame-bridge.js",
   "content-shopling-onebutton-stability-v054.js",
@@ -22,6 +23,7 @@ const FILES = [
   "background-shopling-title-registry.js",
   "background-shopling-seo-keywords.js",
   "background-shopling-pipeline.js",
+  "background-shopling-lifecycle.js",
   "README.txt",
 ] as const;
 
@@ -105,7 +107,7 @@ export async function GET() {
     if (fileName === "manifest.json") {
       const manifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
       manifest.version = "0.5.6";
-      manifest.description = "신규 goods key만 처리하고 상품번호+자사상품코드 동시 정확일치 후에만 마켓 전송하며, 생성된 확장 스크립트까지 문법검증한 뒤 배포합니다.";
+      manifest.description = "상품번호+자사상품코드 동시 정확일치 후에만 마켓 전송하고, 상품 생애주기 판매상태 자동화를 위한 Shopling DOM은 읽기 전용으로 진단합니다.";
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
