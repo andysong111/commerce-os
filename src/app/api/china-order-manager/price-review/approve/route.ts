@@ -27,7 +27,7 @@ export async function POST(request: Request) {
         ok: true,
         approval,
         message:
-          "가격조정안 승인을 기록했습니다. 이 단계에서는 Shopling 판매가격을 변경하지 않습니다.",
+          "가격조정안 승인을 기록했습니다. 실제 Shopling 판매가격은 아직 변경하지 않습니다.",
       },
       { headers: { "cache-control": "no-store" } },
     );
