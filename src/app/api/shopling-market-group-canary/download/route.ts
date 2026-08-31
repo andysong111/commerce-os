@@ -23,6 +23,17 @@ function assertScript(name: string, source: string) {
   }
 }
 
+function buildDownloadScript(fileName: string, source: string) {
+  if (fileName !== "content-group-canary.mjs") return source;
+  const rewritten = source
+    .replace('const VERSION = "0.3.0";', 'const VERSION = "0.3.3";')
+    .replaceAll("commerceOsShoplingMarketFreshWorkerCanaryV030", "commerceOsShoplingMarketFreshWorkerCanaryV033");
+  if (!rewritten.includes('const VERSION = "0.3.3";')) throw new Error("shopling_fresh_worker_content_version_rewrite_failed");
+  if (!rewritten.includes("commerceOsShoplingMarketFreshWorkerCanaryV033")) throw new Error("shopling_fresh_worker_state_key_rewrite_failed");
+  if (rewritten.includes("commerceOsShoplingMarketFreshWorkerCanaryV030")) throw new Error("shopling_fresh_worker_stale_state_key_present");
+  return rewritten;
+}
+
 export async function GET() {
   const root = path.join(process.cwd(), "public", "shopling-market-group-canary");
   const entries: Record<string, Uint8Array> = {};
@@ -36,7 +47,8 @@ export async function GET() {
   entries["manifest.json"] = strToU8(manifestSource);
 
   for (const fileName of FILES.filter((file) => file.endsWith(".mjs"))) {
-    const source = await readFile(path.join(root, fileName), "utf8");
+    const raw = await readFile(path.join(root, fileName), "utf8");
+    const source = buildDownloadScript(fileName, raw);
     assertScript(fileName.replace(/\.mjs$/, ""), source);
     entries[fileName] = strToU8(source);
   }
@@ -50,6 +62,7 @@ export async function GET() {
   if (background.includes("clickManagerAccessOnLauncher")) throw new Error("shopling_fresh_worker_obsolete_manager_launcher_present");
   if (background.includes("chrome.contentSettings")) throw new Error("shopling_fresh_worker_obsolete_popup_logic_present");
   if (!background.includes("group-canary-release-v0.3.2")) throw new Error("shopling_fresh_worker_claim_release_missing");
+  if (!content.includes("commerceOsShoplingMarketFreshWorkerCanaryV033")) throw new Error("shopling_fresh_worker_download_state_isolation_missing");
   if (!content.includes("1채널=1새창")) throw new Error("shopling_fresh_worker_contract_missing");
   if (!content.includes("isSubmitResultPage")) throw new Error("shopling_fresh_worker_result_guard_missing");
 
