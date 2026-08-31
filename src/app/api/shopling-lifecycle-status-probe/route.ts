@@ -35,6 +35,13 @@ function normalizeGoodsKeys(value: unknown) {
   return [...new Set(value.map(text).filter((key) => GOODS_KEY.test(key)))];
 }
 
+function invalidGoodsKeys() {
+  return Response.json(
+    { ok: false, error: "invalid_goods_keys", maxGoodsKeys: MAX_GOODS_KEYS },
+    { status: 400, headers: { "cache-control": "no-store" } },
+  );
+}
+
 function normalizedRow(row: Record<string, unknown>) {
   return {
     goodsKey: text(row.goods_key),
@@ -44,16 +51,8 @@ function normalizedRow(row: Record<string, unknown>) {
   };
 }
 
-export async function POST(request: Request) {
-  const payload = object(await request.json().catch(() => null));
-  const goodsKeys = normalizeGoodsKeys(payload.goodsKeys);
-  if (!goodsKeys.length || goodsKeys.length > MAX_GOODS_KEYS) {
-    return Response.json(
-      { ok: false, error: "invalid_goods_keys", maxGoodsKeys: MAX_GOODS_KEYS },
-      { status: 400, headers: { "cache-control": "no-store" } },
-    );
-  }
-
+async function runProbe(goodsKeys: string[]) {
+  if (!goodsKeys.length || goodsKeys.length > MAX_GOODS_KEYS) return invalidGoodsKeys();
   try {
     const config = shoplingReadConfigFromEnv(shoplingEnvironment());
     const xml = buildShoplingProductIdLookupXml(config, goodsKeys, PRODUCT_FIELDS);
@@ -104,4 +103,21 @@ export async function POST(request: Request) {
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
+}
+
+export async function POST(request: Request) {
+  const payload = object(await request.json().catch(() => null));
+  return runProbe(normalizeGoodsKeys(payload.goodsKeys));
+}
+
+export async function GET(request: Request) {
+  if (process.env.VERCEL_ENV !== "preview") {
+    return Response.json(
+      { ok: false, error: "preview_probe_only" },
+      { status: 405, headers: { "cache-control": "no-store" } },
+    );
+  }
+  const url = new URL(request.url);
+  const goodsKeys = normalizeGoodsKeys((url.searchParams.get("goodsKeys") ?? "").split(","));
+  return runProbe(goodsKeys);
 }
