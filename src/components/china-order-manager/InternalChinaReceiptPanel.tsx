@@ -137,7 +137,7 @@ export function InternalChinaReceiptPanel({
     }
     if (
       !window.confirm(
-        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 반영해 실제 원가배수를 확정할까요?\n\n실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액\n최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임\n\n이 확정원가는 이후 가격조정·상품등급 판단에 사용되며, 실제 판매가는 별도 승인 절차 없이 즉시 변경하지 않습니다.`,
+        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 반영해 실제 원가배수를 확정할까요?\n\n실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액\n최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임\n\n이 확정원가는 이후 가격조정 판단에 사용되며, 실제 판매가는 별도 승인 절차 없이 즉시 변경하지 않습니다.`,
       )
     ) {
       return;
@@ -176,7 +176,7 @@ export function InternalChinaReceiptPanel({
       ? `${monthLabel(cycleMonth)} 발주 건의 남은 ${number.format(remainingTotal)}개를 전량 입고확정하고 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원으로 실제 원가배수까지 확정할까요?`
       : `${monthLabel(cycleMonth)} 발주 건에서 ${number.format(selected.length)} SKU · ${number.format(selectedQuantity)}개를 부분입고로 확정할까요?`;
     const detail = fullReceipt
-      ? "입고수량을 원장과 Product Master에 반영한 뒤 실제 원가배수를 계산합니다. SKU 최종 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임으로 확정되고 가격조정·상품등급 판단의 원가로 이어집니다."
+      ? "입고수량을 원장과 Product Master에 반영한 뒤 실제 원가배수를 계산합니다. SKU 최종 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임으로 확정되고 이후 가격조정 판단의 원가로 이어집니다."
       : "확정 즉시 중국 발주·입고 원장의 미입고 수량이 차감됩니다. 실제 원가배수는 최종 전량 입고 시 배송대행 비용으로 확정합니다.";
     if (!window.confirm(`${prompt}\n\n${detail}`)) return;
 
@@ -266,17 +266,27 @@ export function InternalChinaReceiptPanel({
           </p>
           <p className="mt-1 font-mono text-[11px] text-slate-400">{draftId}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-800"
-        >
-          {expanded
-            ? "입력 닫기"
-            : openLines.length
-              ? "입고 처리 열기"
-              : "배송대행 비용 · 원가 입력"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {forwarderCost.actualCostKrw ? (
+            <a
+              href="/china-order-manager/price-review"
+              className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-black text-blue-800 hover:bg-blue-100"
+            >
+              가격조정 검토
+            </a>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-black text-white hover:bg-emerald-800"
+          >
+            {expanded
+              ? "입력 닫기"
+              : openLines.length
+                ? "입고 처리 열기"
+                : "배송대행 비용 · 원가 입력"}
+          </button>
+        </div>
       </div>
 
       {expanded ? (
@@ -335,7 +345,7 @@ export function InternalChinaReceiptPanel({
               />
             </div>
             <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-bold leading-5 text-blue-950">
-              실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액. 최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임. 이 확정원가는 Product Master와 가격조정·상품등급 판단에 사용되지만, 실제 판매가격은 별도 승인 절차 없이 즉시 변경하지 않습니다.
+              실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액. 최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임. 이 확정원가는 Product Master와 가격조정 판단에 사용되지만, 실제 판매가격은 별도 승인 절차 없이 즉시 변경하지 않습니다.
             </p>
             {forwarderCost.closedAt ? (
               <p className="mt-2 text-xs text-blue-800">
