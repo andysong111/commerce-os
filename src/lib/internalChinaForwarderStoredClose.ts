@@ -99,7 +99,7 @@ export function parseStoredInternalChinaForwarderClose(
       text(row?.started_at) ||
       null,
     appliesToProductUnitCost: true,
-    appliesToPriceGrade: true,
+    appliesToPriceAdjustment: true,
     receiptCostReconciliation: reconciliation(snapshot.receiptCostReconciliation),
   };
 }
