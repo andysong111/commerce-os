@@ -19,25 +19,35 @@ test("lifecycle bridge preflights SELLING and SOLD_OUT before browser claim", as
   assert.match(source, /preflightSource: "shopling_product_read_api"/);
 });
 
-test("matching current status succeeds as noop without browser claim", async () => {
+test("matching current status succeeds as server noop unless an explicitly verified browser noop canary is armed", async () => {
   const source = await readFile(bridgePath, "utf8");
-  const noopBlock = source.indexOf('preflight.currentSaleStatus === desiredCode');
-  const succeeded = source.indexOf('status: "succeeded"', noopBlock);
-  const continueIndex = source.indexOf("continue;", succeeded);
-  const claimed = source.indexOf('status: "claimed"', noopBlock);
-  assert.ok(noopBlock >= 0 && succeeded > noopBlock && continueIndex > succeeded);
-  assert.ok(claimed === -1 || continueIndex < claimed);
+  assert.match(source, /forceBrowserNoopCanary === true/);
+  assert.match(source, /strictNoopCanary/);
+  assert.match(source, /verifiedSameState/);
+  assert.match(source, /if \(verifiedSameState && !forceBrowser\)/);
+  assert.match(source, /status: "succeeded"/);
   assert.match(source, /preflightNoopCount/);
   assert.match(source, /noop: true/);
 });
 
-test("noop-only canary never reaches browser when current status differs or preflight fails", async () => {
+test("all strict noop canaries block browser mutation unless current state is already the requested state", async () => {
   const source = await readFile(bridgePath, "utf8");
   assert.match(source, /canaryNoopOnly === true/);
+  assert.match(source, /forceBrowserNoopCanary === true/);
+  assert.match(source, /strictNoopCanary\(evidence\) && !verifiedSameState/);
   assert.match(source, /status: "confirm_needed"/);
   assert.match(source, /브라우저 변경을 실행하지 않았습니다/);
   assert.match(source, /preflightBlockedCanaryCount/);
   assert.match(source, /preflightError/);
+});
+
+test("verified force-browser noop canary can be claimed only after the read API proves same state", async () => {
+  const source = await readFile(bridgePath, "utf8");
+  const verified = source.indexOf("const verifiedSameState");
+  const serverNoop = source.indexOf("if (verifiedSameState && !forceBrowser)", verified);
+  const strictBlock = source.indexOf("strictNoopCanary(evidence) && !verifiedSameState", serverNoop);
+  const browserClaim = source.indexOf('status: "claimed"', strictBlock);
+  assert.ok(verified >= 0 && serverNoop > verified && strictBlock > serverNoop && browserClaim > strictBlock);
 });
 
 test("DELETE remains behind the existing explicit execution gate", async () => {

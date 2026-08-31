@@ -60,6 +60,14 @@ function noopOnlyCanary(evidence: unknown) {
   return object(evidence).canaryNoopOnly === true;
 }
 
+function forceBrowserNoopCanary(evidence: unknown) {
+  return object(evidence).forceBrowserNoopCanary === true;
+}
+
+function strictNoopCanary(evidence: unknown) {
+  return noopOnlyCanary(evidence) || forceBrowserNoopCanary(evidence);
+}
+
 function preflightEvidence(
   evidence: unknown,
   input: {
@@ -208,8 +216,12 @@ export async function POST(request: Request) {
       const goodsKey = text(candidate.goods_key);
       const preflight = desiredCode ? preflightStatuses.get(goodsKey) : undefined;
       const evidence = object(candidate.evidence);
+      const forceBrowser = forceBrowserNoopCanary(evidence);
+      const verifiedSameState = Boolean(
+        desiredCode && preflight?.state === "READY" && preflight.currentSaleStatus === desiredCode,
+      );
 
-      if (desiredCode && preflight?.state === "READY" && preflight.currentSaleStatus === desiredCode) {
+      if (verifiedSameState && !forceBrowser) {
         const completed = await admin
           .from("shopling_lifecycle_action_queue")
           .update({
@@ -218,8 +230,8 @@ export async function POST(request: Request) {
             last_error: null,
             evidence: preflightEvidence(evidence, {
               at: claimedAt,
-              state: preflight.state,
-              currentSaleStatus: preflight.currentSaleStatus,
+              state: preflight?.state || "READY",
+              currentSaleStatus: preflight?.currentSaleStatus || desiredCode,
               noop: true,
             }),
             updated_at: claimedAt,
@@ -236,7 +248,7 @@ export async function POST(request: Request) {
         continue;
       }
 
-      if (desiredCode && noopOnlyCanary(evidence)) {
+      if (desiredCode && strictNoopCanary(evidence) && !verifiedSameState) {
         const current = preflight?.currentSaleStatus || "UNKNOWN";
         const state = preflight?.state || (preflightError ? "ERROR" : "MISSING");
         const message = preflightError
