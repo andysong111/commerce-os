@@ -38,7 +38,7 @@ export function InternalChinaForwarderCostFallback({
     }
     if (
       !window.confirm(
-        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualCostKrw)}원을 반영해 실제 원가배수를 확정할까요?\n\n실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액\n최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임\n\n이 확정원가는 이후 가격조정·상품등급 판단에 사용됩니다.`,
+        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualCostKrw)}원을 반영해 실제 원가배수를 확정할까요?\n\n실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액\n최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임\n\n이 확정원가는 이후 가격조정 판단에 사용됩니다.`,
       )
     ) {
       return;

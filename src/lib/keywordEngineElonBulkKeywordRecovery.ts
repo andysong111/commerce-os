@@ -5,8 +5,8 @@ import {
   type KeywordElonCandidate,
   type KeywordElonIdentity,
   type KeywordElonSourceDraft,
-} from "@/lib/keywordEngineElonLabV2";
-import { filterKeywordElonProhibitedKeywords } from "@/lib/keywordEngineElonLabV2Step4";
+} from "./keywordEngineElonLabV2.ts";
+import { filterKeywordElonProhibitedKeywords } from "./keywordEngineElonLabV2Step4.ts";
 
 const OPENAI_URL = "https://api.openai.com/v1/responses";
 const OPENAI_TIMEOUT_MS = 35_000;
@@ -14,6 +14,7 @@ const DEFAULT_MODEL = "gpt-5-mini";
 const TARGET_CANDIDATES = 24;
 const SEARCH_TERM_BYTE_LIMIT = 30;
 const MODIFIER_LIMIT = 10;
+const SINGLE_CHAR_SEARCH_TOKENS = new Set(["캡"]);
 
 // These words describe metadata or prose structure, not something a shopper should
 // type into a marketplace search box. They were the source of bad V11 terms such as
@@ -118,7 +119,7 @@ function phraseWords(value: unknown) {
     .map((word) => compactKeywordElonKey(word))
     .filter(
       (word) =>
-        word.length >= 2
+        (word.length >= 2 || SINGLE_CHAR_SEARCH_TOKENS.has(word))
         && !/\d/.test(word)
         && /[가-힣]/.test(word)
         && keywordElonUtf8Bytes(word) <= SEARCH_TERM_BYTE_LIMIT

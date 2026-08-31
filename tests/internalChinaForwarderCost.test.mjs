@@ -18,7 +18,8 @@ test("actual forwarder charge closes the landed-cost multiplier instead of remai
   assert.ok(engine.includes("actualCostKrw"));
   assert.ok(engine.includes("actualMultiplier"));
   assert.ok(engine.includes("appliesToProductUnitCost: true"));
-  assert.ok(engine.includes("appliesToPriceGrade: true"));
+  assert.ok(engine.includes("appliesToPriceAdjustment: true"));
+  assert.equal(engine.includes("appliesToPriceGrade"), false);
   assert.ok(engine.includes("CHINA_FORWARDER_COST_RECEIPT_OPEN"));
 });
 
@@ -77,6 +78,8 @@ test("stored forwarder close is checked before the slower detailed summary", () 
   assert.ok(storedClose.includes("READ_TIMEOUT_MS = 1_800"));
   assert.ok(storedClose.includes("actualMultiplier"));
   assert.ok(storedClose.includes("receiptCostReconciliation"));
+  assert.ok(storedClose.includes("appliesToPriceAdjustment: true"));
+  assert.equal(storedClose.includes("appliesToPriceGrade"), false);
 });
 
 test("unknown close status fails closed and never exposes a duplicate cost input", () => {
@@ -92,7 +95,7 @@ test("forwarder amount input remains available only after stored close absence i
   assert.ok(fallbackPanel.includes("배송대행 비용 · 원가 마감"));
   assert.ok(fallbackPanel.includes('/api/china-order-manager/forwarder-cost'));
   assert.ok(fallbackPanel.includes("실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액"));
-  assert.equal(fallbackPanel.includes("상품 원가·판매가·상품등급에는 합산하지 않습니다"), false);
+  assert.equal(fallbackPanel.includes("상품등급"), false);
 });
 
 test("normal receipt panel previews the actual multiplier and downstream cost semantics", () => {
@@ -101,6 +104,8 @@ test("normal receipt panel previews the actual multiplier and downstream cost se
   assert.ok(panel.includes("실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액"));
   assert.ok(panel.includes("최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임"));
   assert.ok(panel.includes("실제 판매가격은 별도 승인 절차 없이 즉시 변경하지 않습니다"));
+  assert.ok(panel.includes("가격조정 검토"));
+  assert.equal(panel.includes("상품등급"), false);
 });
 
 test("forwarder cost API reports the actual multiplier and landed receipt-cost synchronization", () => {
@@ -108,8 +113,8 @@ test("forwarder cost API reports the actual multiplier and landed receipt-cost s
   assert.ok(route.includes("recordInternalChinaForwarderCost"));
   assert.ok(route.includes("실제 원가배수"));
   assert.ok(route.includes("최종 SKU 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임"));
-  assert.ok(route.includes("가격조정·상품등급 판단의 원가로 사용됩니다"));
-  assert.equal(route.includes("상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다"), false);
+  assert.ok(route.includes("이후 가격조정 판단의 원가로 사용됩니다"));
+  assert.equal(route.includes("상품등급"), false);
 });
 
 test("initial receipt still excludes the temporary 1.45 until actual forwarder cost is known", () => {
