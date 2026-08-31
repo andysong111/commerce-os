@@ -78,9 +78,16 @@ export function InternalChinaReceiptPanel({
   const remainingTotal = openLines.reduce((sum, line) => sum + line.openQuantity, 0);
   const actualForwarderCostKrw = won(forwarderCostInput);
   const existingForwarderCostKrw = forwarderCost.actualCostKrw ?? 0;
+  const actualMultiplierPreview =
+    actualForwarderCostKrw > 0 && forwarderCost.productPurchaseCostKrw > 0
+      ? (forwarderCost.productPurchaseCostKrw + actualForwarderCostKrw) /
+        forwarderCost.productPurchaseCostKrw
+      : null;
   const actualTotalOutflowKrw =
     actualForwarderCostKrw > 0
-      ? forwarderCost.productPurchaseCostKrw + actualForwarderCostKrw
+      ? forwarderCost.productPurchaseCostKrw +
+        forwarderCost.domesticChinaFreightKrw +
+        actualForwarderCostKrw
       : null;
 
   function fillAll() {
@@ -113,7 +120,7 @@ export function InternalChinaReceiptPanel({
     const body = (await response.json().catch(() => ({}))) as ForwarderCostResponse;
     if (!response.ok || body.ok !== true || !body.result) {
       throw new Error(
-        body.message || `배송대행 비용 마감 실패 (${response.status})`,
+        body.message || `배송대행 비용·원가 마감 실패 (${response.status})`,
       );
     }
     return body;
@@ -121,7 +128,7 @@ export function InternalChinaReceiptPanel({
 
   async function saveForwarderCost() {
     if (openLines.length > 0) {
-      setNotice("남은 미입고를 전량 입고확정할 때 배송대행 비용도 함께 마감합니다.");
+      setNotice("남은 미입고를 전량 입고확정할 때 배송대행 비용과 실제 원가배수를 함께 마감합니다.");
       return;
     }
     if (actualForwarderCostKrw <= 0) {
@@ -130,7 +137,7 @@ export function InternalChinaReceiptPanel({
     }
     if (
       !window.confirm(
-        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 별도 월 발주비용으로 마감할까요?\n\n이 금액은 상품 매입원가·판매가·상품등급 계산에는 합산하지 않습니다.`,
+        `${monthLabel(cycleMonth)} 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 반영해 실제 원가배수를 확정할까요?\n\n실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액\n최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임\n\n이 확정원가는 이후 가격조정·상품등급 판단에 사용되며, 실제 판매가는 별도 승인 절차 없이 즉시 변경하지 않습니다.`,
       )
     ) {
       return;
@@ -140,13 +147,13 @@ export function InternalChinaReceiptPanel({
     setNotice("");
     try {
       const body = await persistForwarderCost();
-      setNotice(body.message || "배송대행 비용을 마감했습니다.");
+      setNotice(body.message || "배송대행 비용과 실제 원가배수를 마감했습니다.");
       router.refresh();
     } catch (error) {
       setNotice(
         error instanceof Error
           ? error.message
-          : "배송대행 비용을 마감하지 못했습니다.",
+          : "배송대행 비용·원가 마감을 완료하지 못했습니다.",
       );
     } finally {
       setSaving(false);
@@ -166,11 +173,11 @@ export function InternalChinaReceiptPanel({
       return;
     }
     const prompt = fullReceipt
-      ? `${monthLabel(cycleMonth)} 발주 건의 남은 ${number.format(remainingTotal)}개를 전량 입고확정하고 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원을 별도 마감할까요?`
+      ? `${monthLabel(cycleMonth)} 발주 건의 남은 ${number.format(remainingTotal)}개를 전량 입고확정하고 배송대행지 실제비용 ${number.format(actualForwarderCostKrw)}원으로 실제 원가배수까지 확정할까요?`
       : `${monthLabel(cycleMonth)} 발주 건에서 ${number.format(selected.length)} SKU · ${number.format(selectedQuantity)}개를 부분입고로 확정할까요?`;
     const detail = fullReceipt
-      ? "입고수량은 원장과 Product Master에 반영하고, 배송대행 비용은 월 발주비용으로만 별도 저장합니다. 상품 매입원가·판매가·상품등급에는 합산하지 않습니다."
-      : "확정 즉시 중국 발주·입고 원장의 미입고 수량이 차감됩니다. 배송대행 비용은 최종 전량 입고 시 입력합니다.";
+      ? "입고수량을 원장과 Product Master에 반영한 뒤 실제 원가배수를 계산합니다. SKU 최종 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임으로 확정되고 가격조정·상품등급 판단의 원가로 이어집니다."
+      : "확정 즉시 중국 발주·입고 원장의 미입고 수량이 차감됩니다. 실제 원가배수는 최종 전량 입고 시 배송대행 비용으로 확정합니다.";
     if (!window.confirm(`${prompt}\n\n${detail}`)) return;
 
     setSaving(true);
@@ -206,11 +213,11 @@ export function InternalChinaReceiptPanel({
         try {
           const costBody = await persistForwarderCost();
           setNotice(
-            `${body.message || "입고확정을 완료했습니다."} ${costBody.message || "배송대행 비용도 별도 마감했습니다."}`,
+            `${body.message || "입고확정을 완료했습니다."} ${costBody.message || "배송대행 비용과 실제 원가배수도 마감했습니다."}`,
           );
         } catch (error) {
           setNotice(
-            `${body.message || "입고확정을 완료했습니다."} 다만 배송대행 비용 마감은 실패했습니다. 아래 입력값을 확인해 다시 저장하세요: ${
+            `${body.message || "입고확정을 완료했습니다."} 다만 배송대행 비용·실제 원가 마감은 실패했습니다. 아래 입력값을 확인해 다시 저장하세요: ${
               error instanceof Error ? error.message : "재시도 필요"
             }`,
           );
@@ -245,17 +252,17 @@ export function InternalChinaReceiptPanel({
             </span>
             {forwarderCost.actualCostKrw ? (
               <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-800">
-                배송대행 비용 마감완료
+                실제 원가 마감완료
               </span>
             ) : null}
           </div>
           <h2 className="mt-3 text-lg font-black text-slate-950">
-            {openLines.length ? "입고 처리" : "배송대행지 비용 마감"}
+            {openLines.length ? "입고 처리" : "배송대행지 비용 · 실제 원가 마감"}
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             {openLines.length
-              ? `${openLines.length.toLocaleString("ko-KR")} SKU · 남은 미입고 ${number.format(remainingTotal)}개. 전량 도착했다면 실제 배송대행지 총비용을 입력한 뒤 그대로 확정하고, 일부만 왔다면 실제 도착수량만 수정하세요.`
-              : `입고수량은 모두 마감됐습니다. 관세·부가세·바코드 스티커 작업 등을 포함한 배송대행지 실제 청구 총액을 월 발주비용으로 별도 저장하세요.`}
+              ? `${openLines.length.toLocaleString("ko-KR")} SKU · 남은 미입고 ${number.format(remainingTotal)}개. 전량 도착했다면 배송대행지 실제 청구 총액을 입력해 실제 원가배수까지 함께 마감하고, 일부만 왔다면 실제 도착수량만 수정하세요.`
+              : `입고수량은 모두 마감됐습니다. 배송대행지 실제 청구 총액으로 기존 임시 ${forwarderCost.estimatedMultiplier.toFixed(2)} 대신 실제 원가배수를 확정하세요.`}
           </p>
           <p className="mt-1 font-mono text-[11px] text-slate-400">{draftId}</p>
         </div>
@@ -268,23 +275,28 @@ export function InternalChinaReceiptPanel({
             ? "입력 닫기"
             : openLines.length
               ? "입고 처리 열기"
-              : "배송대행 비용 입력"}
+              : "배송대행 비용 · 원가 입력"}
         </button>
       </div>
 
       {expanded ? (
         <div className="mt-5 space-y-4">
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <CostMetric
-                label="상품 실주문 원가"
+                label="상품 총 매입금액"
                 value={`${number.format(forwarderCost.productPurchaseCostKrw)}원`}
-                note="상품대금 + 중국내 운임"
+                note="상품대금만 · 중국내운임 제외"
+              />
+              <CostMetric
+                label="중국내운임"
+                value={`${number.format(forwarderCost.domesticChinaFreightKrw)}원`}
+                note="원가배수 적용 후 SKU별 별도 가산"
               />
               <CostMetric
                 label={`기존 ${forwarderCost.estimatedMultiplier.toFixed(2)} 추정 배대지 비용`}
                 value={`${number.format(forwarderCost.estimatedForwarderCostKrw)}원`}
-                note={`예상 총지출 ${number.format(forwarderCost.estimatedTotalOutflowKrw)}원`}
+                note={`임시 예상 총지출 ${number.format(forwarderCost.estimatedTotalOutflowKrw)}원`}
               />
               <div className="rounded-lg border border-blue-200 bg-white p-3">
                 <label
@@ -301,25 +313,29 @@ export function InternalChinaReceiptPanel({
                   step={1}
                   value={forwarderCostInput}
                   onChange={(event) => setForwarderCostInput(event.target.value)}
-                  placeholder="예: 780000"
+                  placeholder="예: 907820"
                   className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-right font-black outline-none focus:border-blue-500"
                 />
                 <span className="mt-1 block text-[11px] text-slate-500">
-                  관세·부가세·스티커 작업 등 청구 총액
+                  관세·부가세·스티커 작업 등 최종 청구 총액
                 </span>
               </div>
               <CostMetric
-                label="실제 총 지출"
+                label="실제 원가배수"
                 value={
-                  actualTotalOutflowKrw === null
+                  actualMultiplierPreview === null
                     ? "입력 대기"
-                    : `${number.format(actualTotalOutflowKrw)}원`
+                    : actualMultiplierPreview.toFixed(4)
                 }
-                note="상품 실주문 원가 + 배송대행지 실제비용"
+                note={
+                  actualTotalOutflowKrw === null
+                    ? "실제비용 입력 후 자동 계산"
+                    : `실제 총지출 ${number.format(actualTotalOutflowKrw)}원`
+                }
               />
             </div>
             <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-bold leading-5 text-blue-950">
-              배송대행지 실제비용은 월 발주비용·현금지출 정산에만 사용합니다. SKU별 상품 매입원가, 판매가, 가격조정, 상품등급 계산에는 배분하거나 합산하지 않습니다.
+              실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액. 최종 SKU 매입원가 = (상품원가 × 실제 원가배수) + 중국내운임. 이 확정원가는 Product Master와 가격조정·상품등급 판단에 사용되지만, 실제 판매가격은 별도 승인 절차 없이 즉시 변경하지 않습니다.
             </p>
             {forwarderCost.closedAt ? (
               <p className="mt-2 text-xs text-blue-800">
@@ -335,10 +351,10 @@ export function InternalChinaReceiptPanel({
                   className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {saving
-                    ? "배송대행 비용 저장 중…"
+                    ? "실제 원가 저장 중…"
                     : forwarderCost.actualCostKrw
-                      ? "배송대행 비용 수정 저장"
-                      : "배송대행 비용 마감"}
+                      ? "배송대행 비용 · 원가 수정 저장"
+                      : "배송대행 비용 · 원가 마감"}
                 </button>
               </div>
             ) : null}
@@ -430,7 +446,7 @@ export function InternalChinaReceiptPanel({
 
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                 <p className="text-xs leading-5 text-emerald-950">
-                  일부만 입력하면 PARTIALLY_RECEIVED, 남은 수량까지 모두 입고되면 RECEIVED로 자동 전환합니다. Product Master에는 중국 상품대금과 중국내 운임 기준 상품 매입원가만 연결하고, 배송대행지 비용은 별도 월 비용으로 마감합니다.
+                  일부만 입력하면 PARTIALLY_RECEIVED, 남은 수량까지 모두 입고되면 RECEIVED로 자동 전환합니다. 전량 입고 시 배송대행지 실제비용으로 원가배수를 확정하고, 최종 SKU 매입원가는 (상품원가 × 실제 원가배수) + 중국내운임으로 Product Master에 연결합니다.
                 </p>
                 <button
                   type="button"
