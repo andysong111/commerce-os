@@ -110,20 +110,26 @@ function buildV057Manifest(source: Record<string, unknown>) {
   manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms"])];
 
   const scripts = manifest.content_scripts ?? [];
-  const productScript = scripts.find((entry) =>
+  const productScriptIndex = scripts.findIndex((entry) =>
     Array.isArray(entry.matches) && entry.matches.includes("https://a.shopling.co.kr/prod/*") && !entry.world,
   );
-  if (!productScript) throw new Error("shopling_v057_product_content_script_missing");
-  productScript.js = [...new Set([...(productScript.js ?? []), "content-shopling-lifecycle-executor.js"])];
+  if (productScriptIndex < 0) throw new Error("shopling_v057_product_content_script_missing");
 
-  scripts.splice(2, 0, {
-    matches: ["https://a.shopling.co.kr/prod/*"],
-    js: ["content-shopling-lifecycle-main.js"],
-    all_frames: true,
-    match_about_blank: true,
-    run_at: "document_idle",
-    world: "MAIN",
-  });
+  scripts.splice(productScriptIndex + 1, 0,
+    {
+      matches: ["https://a.shopling.co.kr/prod/*"],
+      js: ["content-shopling-lifecycle-executor.js"],
+      all_frames: false,
+      run_at: "document_idle",
+    },
+    {
+      matches: ["https://a.shopling.co.kr/prod/*"],
+      js: ["content-shopling-lifecycle-main.js"],
+      all_frames: false,
+      run_at: "document_idle",
+      world: "MAIN",
+    },
+  );
   manifest.content_scripts = scripts;
   return manifest;
 }
