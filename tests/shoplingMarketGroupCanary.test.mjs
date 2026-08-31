@@ -91,22 +91,48 @@ test("server claim and release compatibility remains available for v030 driver r
   assert.match(release, /status: "queued"/);
 });
 
-test("v0.3.5 download rewrites the v0.3.4 checkpoint into a click-through one-shot A18 runtime", async () => {
+test("v0.3.7 download keeps click-safe popup-only control", async () => {
   const source = await readFile(downloadPath, "utf8");
   assert.match(source, /const BASE_VERSION = "0\.3\.4"/);
-  assert.match(source, /const VERSION = "0\.3\.5"/);
-  assert.match(source, /const OUTPUT_OVERLAY = "content-version-v035\.mjs"/);
-  assert.match(source, /new Function\(source\)/);
-  assert.match(source, /commerceOsShoplingParallelWorkerMetaV035/);
-  assert.match(source, /commerceOsShoplingParallelRunV035/);
-  assert.match(source, /commerceOsShoplingParallelWorkerV035/);
+  assert.match(source, /const VERSION = "0\.3\.7"/);
+  assert.match(source, /commerceOsShoplingParallelWorkerMetaV037/);
+  assert.match(source, /commerceOsShoplingParallelRunV037/);
+  assert.match(source, /commerceOsShoplingParallelWorkerV037/);
+  assert.match(source, /extension-action-only-no-shopling-dom/);
+  assert.match(source, /default_popup: "popup\.html"/);
+  assert.match(source, /chrome\.tabs\.sendMessage/);
   assert.match(source, /a18_navigation_timeout/);
-  assert.match(source, /pointer-events:none!important/);
-  assert.match(source, /pointer-events:auto!important/);
   assert.match(source, /\["worker_opening", "await_a18"\]/);
   assert.match(source, /repeat_a18_click_gate_present/);
-  assert.match(source, /parallel_clone_missing/);
-  assert.match(source, /assignment_map_missing/);
-  assert.match(source, /selfa_policy_missing/);
+  assert.doesNotMatch(source, /pointer-events:auto!important/);
+});
+
+test("v0.3.7 recognizes actual Shopling tsrmt result container and child result frames", async () => {
+  const source = await readFile(downloadPath, "utf8");
+  assert.match(source, /prod_rgst_\(\?:rspt\|tsrmt\)/);
+  assert.match(source, /function isMallResultFrame/);
+  assert.match(source, /expectedMallResultFrames/);
+  assert.match(source, /commerceOsShoplingParallelResultV037/);
+  assert.match(source, /collectedMallEvidence/);
+  assert.match(source, /allFramesSettled/);
+  assert.match(source, /frameHasSuccess/);
+  assert.match(source, /nonIgnoredFrameFailure/);
+  assert.match(source, /shopling_submit_success_parallel_worker_v037/);
+  assert.match(source, /RESULT_SETTLE_MS = 2500/);
+});
+
+test("v0.3.7 does not finalize from a partial child-frame success", async () => {
+  const source = await readFile(downloadPath, "utf8");
+  assert.match(source, /const allFramesSettled = expectedFrames > 0 && frames\.length >= expectedFrames/);
+  assert.match(source, /if \(!directDefinitive && expectedFrames > 0 && !allFramesSettled\)/);
+  assert.match(source, /const hasSuccess = direct\.success \|\| \(allFramesSettled && frameHasSuccess\)/);
+  assert.match(source, /const hasFailure = direct\.failure \|\| \(allFramesSettled && nonIgnoredFrameFailure\)/);
+});
+
+test("v0.3.7 download syntax-checks exact generated runtime", async () => {
+  const source = await readFile(downloadPath, "utf8");
+  assert.match(source, /new Function\(source\)/);
+  assert.match(source, /assertScript\("content-group-canary-v037"/);
+  assert.match(source, /assertScript\("popup-v037"/);
   assert.match(source, /zipSync\(entries, \{ level: 0 \}\)/);
 });
