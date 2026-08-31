@@ -5,65 +5,53 @@ import test from "node:test";
 const manifestPath = new URL("../public/shopling-market-group-canary/manifest.json", import.meta.url);
 const backgroundPath = new URL("../public/shopling-market-group-canary/background-root.mjs", import.meta.url);
 const contentPath = new URL("../public/shopling-market-group-canary/content-group-canary.mjs", import.meta.url);
-const overlayPath = new URL("../public/shopling-market-group-canary/content-version-v033.mjs", import.meta.url);
+const overlayPath = new URL("../public/shopling-market-group-canary/content-version-v034.mjs", import.meta.url);
 const downloadPath = new URL("../src/app/api/shopling-market-group-canary/download/route.ts", import.meta.url);
 const claimRoutePath = new URL("../src/app/api/shopling-market-group-canary/claim/route.ts", import.meta.url);
 const releaseRoutePath = new URL("../src/app/api/shopling-market-group-canary/release/route.ts", import.meta.url);
 
-test("fresh worker v0.3.3 uses only A18 clone permissions", async () => {
+test("parallel fresh worker v0.3.4 keeps minimal A18 clone permissions", async () => {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, "0.3.3");
+  assert.equal(manifest.version, "0.3.4");
   assert.deepEqual(manifest.permissions, ["storage", "tabs", "windows"]);
   assert.ok(manifest.host_permissions.includes("*://*.shopling.co.kr/*"));
-  assert.ok(manifest.content_scripts[0].js.includes("content-version-v033.mjs"));
+  assert.ok(manifest.content_scripts[0].js.includes("content-version-v034.mjs"));
   assert.ok(!manifest.permissions.includes("scripting"));
   assert.ok(!manifest.permissions.includes("contentSettings"));
 });
 
-test("background duplicates the original A18 control tab and adopts only the clone into a worker window", async () => {
+test("background clones the immutable A18 control tab once per remaining task in parallel", async () => {
   const source = await readFile(backgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /chrome\.tabs\.duplicate\(controlTabId\)/);
   assert.match(source, /chrome\.windows\.create\(\{[\s\S]*tabId: duplicate\.id/);
-  assert.doesNotMatch(source, /chrome\.tabs\.reload\(workerTabId\)/);
-  assert.match(source, /a18CloneVerified: true/);
-  assert.match(source, /controlTabId/);
-  assert.match(source, /WORKER_META_KEY = "commerceOsShoplingFreshWorkerMetaV033"/);
+  assert.match(source, /Promise\.allSettled\(/);
+  assert.match(source, /tasks\.map\(async \(task\)/);
+  assert.match(source, /parallel: true/);
+  assert.match(source, /WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV034"/);
+  assert.doesNotMatch(source, /chrome\.tabs\.reload\(/);
 });
 
-test("v0.3.3 removes public launcher and synthetic 관리자접속 automation", async () => {
+test("parallel worker maps every popup and result tab back to exactly one goods_key assignment", async () => {
   const source = await readFile(backgroundPath, "utf8");
-  assert.doesNotMatch(source, /clickManagerAccessOnLauncher/);
-  assert.doesNotMatch(source, /findPersistentLauncherTab/);
-  assert.doesNotMatch(source, /chrome\.scripting/);
-  assert.doesNotMatch(source, /chrome\.contentSettings/);
-  assert.doesNotMatch(source, /login_proc/);
-  assert.doesNotMatch(source, /관리자접속/);
+  assert.match(source, /assignments: \{ \.\.\.\(meta\.assignments \|\| \{\}\), \[task\.goodsKey\]: assignment \}/);
+  assert.match(source, /findAssignment\(meta, sender, allowOpener\)/);
+  assert.match(source, /context\.goodsKey === goodsKey/);
+  assert.match(source, /parallel_worker_arm_identity_mismatch/);
+  assert.match(source, /parallel_worker_report_identity_mismatch/);
 });
 
-test("original A18 control window is excluded from disposable worker cleanup", async () => {
-  const source = await readFile(backgroundPath, "utf8");
-  assert.match(source, /id !== controlWindowId/);
-  assert.match(source, /id !== meta\.controlWindowId/);
-  assert.match(source, /const control = tabId === meta\.controlTabId/);
-  assert.match(source, /return \{ worker, control \}/);
-});
-
-test("clone preparation failures release pre-submit claims", async () => {
+test("one worker failure releases only that task and does not close sibling workers", async () => {
   const background = await readFile(backgroundPath, "utf8");
-  const releaseRoute = await readFile(releaseRoutePath, "utf8");
-  assert.match(background, /releaseRunBeforeSubmit/);
-  assert.match(background, /a18_duplicate_failed/);
-  assert.match(background, /a18_worker_not_ready/);
-  assert.match(background, /group-canary-release-v0\.3\.2/);
-  assert.match(releaseRoute, /\.eq\("claim_run_id", runId\)/);
-  assert.match(releaseRoute, /\.eq\("status", "claimed"\)/);
-  assert.match(releaseRoute, /\.eq\("market_status", "pending"\)/);
-  assert.match(releaseRoute, /\.is\("submit_armed_at", null\)/);
-  assert.match(releaseRoute, /status: "queued"/);
+  const content = await readFile(contentPath, "utf8");
+  assert.match(background, /releaseTaskBeforeSubmit/);
+  assert.match(background, /goodsKey: task\.goodsKey/);
+  assert.match(background, /closeParallelWorker/);
+  assert.match(content, /이 채널만 대기열로 원복했습니다\. 다른 병렬 채널은 계속 진행합니다/);
+  assert.doesNotMatch(content, /releaseTasks\(state, Number\(state\.index/);
 });
 
-test("field-tested product selection and send guards remain intact", async () => {
+test("field-tested product selection, saved-profile mapping and per-channel submit lock remain intact", async () => {
   const source = await readFile(contentPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
   assert.match(source, /rowMatchesExactIdentity/);
@@ -71,36 +59,45 @@ test("field-tested product selection and send guards remain intact", async () =>
   assert.match(source, /goods_mallReg_idChoice/);
   assert.match(source, /goods_mallReg_preProdChoice/);
   assert.match(source, /savedProfileSelect\(task\.profile\)/);
-  assert.match(source, /isSubmitResultPage/);
   assert.match(source, /SUBMIT_CONFIRM_TIMEOUT_MS = 90000/);
+  assert.match(source, /workerStateKey\(runId, goodsKey\)/);
   const armIndex = source.indexOf("type: ARM_MESSAGE");
   const clickIndex = source.indexOf("click(sendButton)");
   assert.ok(armIndex >= 0 && clickIndex > armIndex);
 });
 
-test("v0.3.3 overlay is syntax-valid and describes A18 clone rotation", async () => {
+test("result parser ignores Selpa-only failures but blocks every non-Selpa failure", async () => {
+  const source = await readFile(contentPath, "utf8");
+  assert.match(source, /const isSelpa = \/셀파\/i\.test\(head\)/);
+  assert.match(source, /ignoredSelpaFailures/);
+  assert.match(source, /const nonIgnoredFailure = parsed\.some\(\(row\) => !row\.isSelpa && row\.failure\)/);
+  assert.match(source, /hasSuccess && !nonIgnoredFailure/);
+  assert.match(source, /shopling_submit_result_has_nonselfa_failure/);
+});
+
+test("v0.3.4 overlay describes simultaneous channel windows", async () => {
   const source = await readFile(overlayPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
-  assert.match(source, /DISPLAY_VERSION = "0\.3\.3"/);
-  assert.match(source, /원본 A18 유지/);
-  assert.match(source, /A18 복제 작업창/);
+  assert.match(source, /DISPLAY_VERSION = "0\.3\.4"/);
+  assert.match(source, /남은 채널별 A18 복제창 동시 생성/);
 });
 
-test("partial claim endpoint still accepts the v0.3 run id used by the driver", async () => {
-  const source = await readFile(claimRoutePath, "utf8");
-  assert.match(source, /canary-group-v0\(\?:21\|30\)/);
-  assert.match(source, /resumedPartialProduct: Boolean\(recentPartial\)/);
+test("server claim and release compatibility remains available for v030 driver run ids", async () => {
+  const claim = await readFile(claimRoutePath, "utf8");
+  const release = await readFile(releaseRoutePath, "utf8");
+  assert.match(claim, /canary-group-v0\(\?:21\|30\)/);
+  assert.match(claim, /resumedPartialProduct: Boolean\(recentPartial\)/);
+  assert.match(release, /\.is\("submit_armed_at", null\)/);
+  assert.match(release, /status: "queued"/);
 });
 
-test("v0.3.3 download syntax-checks and isolates the exact A18 clone runtime", async () => {
+test("v0.3.4 download syntax-checks exact parallel runtime", async () => {
   const source = await readFile(downloadPath, "utf8");
-  assert.match(source, /const VERSION = "0\.3\.3"/);
+  assert.match(source, /const VERSION = "0\.3\.4"/);
   assert.match(source, /new Function\(source\)/);
-  assert.match(source, /buildDownloadScript/);
-  assert.match(source, /commerceOsShoplingMarketFreshWorkerCanaryV033/);
-  assert.match(source, /a18_duplicate_missing/);
-  assert.match(source, /duplicate_window_adoption_missing/);
-  assert.match(source, /obsolete_manager_launcher_present/);
-  assert.match(source, /obsolete_popup_logic_present/);
+  assert.match(source, /content-version-v034\.mjs/);
+  assert.match(source, /parallel_clone_missing/);
+  assert.match(source, /assignment_map_missing/);
+  assert.match(source, /selfa_policy_missing/);
   assert.match(source, /zipSync\(entries, \{ level: 0 \}\)/);
 });
