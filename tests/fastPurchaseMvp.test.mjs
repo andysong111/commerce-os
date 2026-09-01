@@ -7,6 +7,8 @@ const [
   resilient,
   page,
   workspace,
+  handoff,
+  handoffPanel,
   registry,
   policy,
   trackerMetadata,
@@ -16,6 +18,8 @@ const [
   readFile("src/lib/fastPurchaseMvpResilient.ts", "utf8"),
   readFile("src/app/fast-purchase-mvp/page.tsx", "utf8"),
   readFile("src/components/fast-purchase-mvp/FastPurchaseTriageWorkspace.tsx", "utf8"),
+  readFile("src/lib/internalChinaPurchaseCycleHandoff.ts", "utf8"),
+  readFile("src/components/fast-purchase-mvp/PreviousPurchaseCycleHandoff.tsx", "utf8"),
   readFile("src/lib/opsModuleRegistry.ts", "utf8"),
   readFile("docs/fast-purchase-mvp-operating-policy.md", "utf8"),
   readFile("src/lib/productLaunchPurchaseMetadata.ts", "utf8"),
@@ -46,14 +50,18 @@ test("v2.3 page keeps browser triage and adds internal draft without external au
   assert.ok(page.includes("내부 발주 Draft 저장"));
 });
 
-test("prior funding close is visible as read-only evidence and never mutates the current purchase budget", () => {
-  assert.ok(page.includes("loadInternalChinaFundingCloseByCycleMonth"));
-  assert.ok(page.includes("previousCalendarMonth(currentCycleMonth)"));
-  assert.ok(page.includes("PREVIOUS PURCHASE FUNDING CLOSE"));
-  assert.ok(page.includes("자금 마감 연결 완료"));
-  assert.ok(page.includes("이월 현금은 현재 발주예산에는 자동 가감하지 않습니다"));
-  assert.ok(page.includes("1.45 주문비용 배수"));
-  assert.doesNotMatch(page, /worldFirstEnding(?:Usd|Cnh).*recommendedQuantity/);
+test("prior closed cycle is visible as read-only evidence and never mutates the current purchase budget", () => {
+  assert.ok(page.includes("loadInternalChinaPurchaseCycleHandoff"));
+  assert.ok(page.includes("PreviousPurchaseCycleHandoff"));
+  assert.ok(handoff.includes("loadFastPurchaseInternalDrafts"));
+  assert.ok(handoff.includes("loadInternalChinaFundingCloseByCycleMonth"));
+  assert.ok(handoff.includes("INTERNAL_CHINA_GROUP_COST_PRICE_BROWSER_READBACK"));
+  assert.ok(handoffPanel.includes("PREVIOUS CYCLE → CURRENT PURCHASE INPUT"));
+  assert.ok(handoffPanel.includes("이번 발주 수량 계산에는 직전 사이클의"));
+  assert.ok(handoffPanel.includes("미입고"));
+  assert.ok(handoffPanel.includes("WorldFirst 기말잔액"));
+  assert.ok(handoffPanel.includes("이번 월 발주예산이나 권장수량을 자동으로 더하거나 빼지 않습니다"));
+  assert.doesNotMatch(handoffPanel, /worldFirstEnding(?:Usd|Cnh).*recommendedQuantity/);
 });
 
 test("transient live failures retry before opening a manual-only last-known fallback", () => {
