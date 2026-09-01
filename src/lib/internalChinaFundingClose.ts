@@ -10,6 +10,8 @@ const SOURCE = "ops-center-internal-china-funding-close";
 const DRAFT_ID = /^fast-purchase-draft:[a-f0-9]{20}$/;
 const MAX_KRW = 1_000_000_000;
 const MAX_CURRENCY_BALANCE = 1_000_000_000;
+const RECENT_CLOSE_READ_TIMEOUT_MS = 3_000;
+const RECENT_CLOSE_LIMIT = 12;
 
 export type InternalChinaFundingCloseInput = {
   draftId?: unknown;
@@ -229,11 +231,11 @@ export async function loadInternalChinaFundingClose(
   const draftId = validDraftId(draftIdInput);
   const { baseUrl, secret } = supabaseConnection();
   const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(fundingSourceEventId(draftId))}&select=result_snapshot,started_at,updated_at&limit=1`,
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(fundingSourceEventId(draftId))}&status=eq.SUCCEEDED&select=result_snapshot,started_at,updated_at&limit=1`,
     {
       headers: createSupabaseAdminHeaders(secret),
       cache: "no-store",
-      signal: AbortSignal.timeout(3_000),
+      signal: AbortSignal.timeout(RECENT_CLOSE_READ_TIMEOUT_MS),
     },
   );
   if (!response.ok) {
@@ -241,6 +243,45 @@ export async function loadInternalChinaFundingClose(
   }
   const rows = (await response.json().catch(() => [])) as StoredRow[];
   return parseInternalChinaFundingClose(rows[0]?.result_snapshot);
+}
+
+export async function loadRecentInternalChinaFundingCloses(
+  limitInput: unknown = RECENT_CLOSE_LIMIT,
+): Promise<InternalChinaFundingCloseSummary[]> {
+  const parsedLimit = Math.round(Number(limitInput));
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(24, Math.max(1, parsedLimit))
+    : RECENT_CLOSE_LIMIT;
+  const { baseUrl, secret } = supabaseConnection();
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE}&status=eq.SUCCEEDED&select=result_snapshot,started_at,updated_at&order=started_at.desc&limit=${limit}`,
+    {
+      headers: createSupabaseAdminHeaders(secret),
+      cache: "no-store",
+      signal: AbortSignal.timeout(RECENT_CLOSE_READ_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`CHINA_FUNDING_CLOSE_RECENT_READ_FAILED:${response.status}`);
+  }
+  const rows = (await response.json().catch(() => [])) as StoredRow[];
+  const byCycleMonth = new Map<string, InternalChinaFundingCloseSummary>();
+  for (const row of rows) {
+    const summary = parseInternalChinaFundingClose(row.result_snapshot);
+    if (!summary || byCycleMonth.has(summary.cycleMonth)) continue;
+    byCycleMonth.set(summary.cycleMonth, summary);
+  }
+  return [...byCycleMonth.values()].sort((left, right) =>
+    right.cycleMonth.localeCompare(left.cycleMonth),
+  );
+}
+
+export async function loadInternalChinaFundingCloseByCycleMonth(
+  cycleMonthInput: unknown,
+): Promise<InternalChinaFundingCloseSummary | null> {
+  const cycleMonth = validCycleMonth(cycleMonthInput);
+  const recent = await loadRecentInternalChinaFundingCloses(RECENT_CLOSE_LIMIT);
+  return recent.find((summary) => summary.cycleMonth === cycleMonth) ?? null;
 }
 
 export async function recordInternalChinaFundingClose(
