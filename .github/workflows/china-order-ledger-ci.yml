@@ -9,6 +9,7 @@ on:
       - "src/lib/internalChinaReceipt.ts"
       - "src/lib/internalChinaForwarderCost.ts"
       - "src/lib/internalChinaForwarderStoredClose.ts"
+      - "src/lib/internalChinaFundingClose.ts"
       - "src/lib/internalChinaCostPricePolicy.ts"
       - "src/lib/internalChinaCostPriceReview.ts"
       - "src/lib/internalChinaPriceGroupPolicy.ts"
@@ -35,6 +36,7 @@ on:
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
       - "tests/internalChinaReceipt.test.mjs"
       - "tests/internalChinaForwarderCost.test.mjs"
+      - "tests/internalChinaFundingClose.test.mjs"
       - "tests/internalChinaCostPriceReview.test.mjs"
       - "tests/internalChinaGroupCostPriceV2.test.mjs"
       - "tests/productMasterCanonicalBatchContext.test.mjs"
@@ -70,6 +72,7 @@ jobs:
           src/lib/internalChinaReceipt.ts
           src/lib/internalChinaForwarderCost.ts
           src/lib/internalChinaForwarderStoredClose.ts
+          src/lib/internalChinaFundingClose.ts
           src/lib/internalChinaCostPricePolicy.ts
           src/lib/internalChinaCostPriceReview.ts
           src/lib/internalChinaPriceGroupPolicy.ts
@@ -90,6 +93,7 @@ jobs:
           src/app/api/china-order-manager/monthly-finalize/route.ts
           src/app/api/china-order-manager/receipts/route.ts
           src/app/api/china-order-manager/forwarder-cost/route.ts
+          src/app/api/china-order-manager/funding-close/route.ts
           src/app/api/china-order-manager/price-review/approve/route.ts
           src/app/api/china-order-manager/price-review/group-aware-approve/route.ts
           src/app/api/china-order-manager/price-review/product-groups/import/route.ts
@@ -103,6 +107,7 @@ jobs:
           src/components/china-order-manager/InternalChinaReceiptPanel.tsx
           src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx
           src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx
+          src/components/china-order-manager/InternalChinaFundingClosePanel.tsx
           src/components/china-order-manager/InternalChinaCostPriceApprovalButton.tsx
           src/components/china-order-manager/InternalChinaGroupCostPriceApprovalButton.tsx
           src/components/china-order-manager/InternalChinaHistoricalProductGroupImport.tsx
@@ -113,6 +118,7 @@ jobs:
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
+          tests/internalChinaFundingClose.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
           tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
@@ -126,6 +132,7 @@ jobs:
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
+          tests/internalChinaFundingClose.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
           tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
