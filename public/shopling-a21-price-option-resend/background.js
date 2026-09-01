@@ -1,9 +1,11 @@
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const PLAN_URL = "https://commerce-os-ops-center.vercel.app/api/shopling-a21-price-option-resend/plan";
-const STATE_KEY = "commerceOsShoplingA21PriceOptionResendV010";
+const STATE_KEY = "commerceOsShoplingA21PriceOptionResendV011";
 const MAX_CONCURRENT = 4;
 const MAX_SEARCH_CODES = 200;
 const MODES = ["PRICE", "OPTION"];
+const SHOPLING_ORIGIN = "https://a.shopling.co.kr/";
+const FRAME_WAIT_MS = 25_000;
 
 const now = () => Date.now();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -91,8 +93,10 @@ function addBatchJobs(state, batch) {
       stage: "OPENING",
       workerWindowId: null,
       workerTabId: null,
+      workerFrameId: null,
       popupWindowId: null,
       popupTabId: null,
+      popupFrameId: null,
       selectedRowCount: 0,
       totalResultCount: 0,
       createdAt: now(),
@@ -104,13 +108,10 @@ function addBatchJobs(state, batch) {
 }
 
 async function validateSourceTab(tabId) {
+  if (!Number.isInteger(tabId)) throw new Error("현재 Shopling 탭을 확인하지 못했습니다.");
   const tab = await chrome.tabs.get(tabId);
-  if (!tab?.url?.startsWith("https://a.shopling.co.kr/")) {
-    throw new Error("샵플링 A21 화면에서 확장프로그램을 실행해주세요.");
-  }
-  const response = await sendWithRetry(tabId, { type: "A21_IDENTIFY" }, 20, 250);
-  if (!response?.ok || response.role !== "A21_LIST") {
-    throw new Error("현재 탭이 샵플링 A21 쇼핑몰상품수정 목록 화면이 아닙니다.");
+  if (!tab?.url?.startsWith(SHOPLING_ORIGIN)) {
+    throw new Error("Shopling 로그인 탭(A18 빈 화면 포함)에서 확장프로그램을 열어주세요.");
   }
   return tab;
 }
@@ -126,7 +127,7 @@ async function startRun(sourceTabId) {
     fingerprint: plan.proposalFingerprint,
     goodsKeyCount: plan.goodsKeyCount,
     mallCheckCount: plan.readback?.mallCheckCount || 0,
-    sourceUrl: sourceTab.url,
+    sourceUrl: sourceTab.url || SHOPLING_ORIGIN,
     batches,
     jobs: [],
     stopped: false,
@@ -140,11 +141,71 @@ async function startRun(sourceTabId) {
   return publicState(await loadState());
 }
 
-async function sendWithRetry(tabId, message, attempts = 30, delay = 300) {
+async function executeAllFrames(tabId, func, args = []) {
+  try {
+    return await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, func, args });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "scripting failed");
+    if (/Cannot access|No tab with id|The extensions gallery cannot/i.test(message)) throw error;
+    return [];
+  }
+}
+
+async function identifyFrames(tabId) {
+  return executeAllFrames(tabId, () => {
+    const normalize = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+    const text = normalize(document.body?.innerText || document.body?.textContent || "");
+    let role = "OTHER";
+    if (/상품수정\s*송신/i.test(text) && /일반내용수정/i.test(text) && /옵션송신/i.test(text)) role = "A21_POPUP";
+    else if (/쇼핑몰상품수정/i.test(text) && /상품\s*수정전송/i.test(text) && /검색항목/i.test(text)) role = "A21_LIST";
+    const resultEvidence = /성공건수|실패건수|성공여부|상품\s*등록\s*전송\s*결과|수정\s*전송\s*결과/i.test(text);
+    return { role, resultEvidence, href: location.href };
+  });
+}
+
+function frameByRole(results, role) {
+  const found = (results || []).find((item) => item?.result?.role === role);
+  return found ? found.frameId : null;
+}
+
+function resultFrame(results) {
+  const found = (results || []).find((item) => item?.result?.resultEvidence === true);
+  return found ? found.frameId : null;
+}
+
+async function clickA21Menu(tabId) {
+  const results = await executeAllFrames(tabId, () => {
+    const normalize = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+    const nodes = [...document.querySelectorAll('a,button,input[type="button"],input[type="submit"],input[type="image"]')];
+    const candidate = nodes.find((node) => {
+      const text = normalize(node instanceof HTMLInputElement ? `${node.value || ""} ${node.title || ""}` : `${node.textContent || ""} ${node.getAttribute("title") || ""}`);
+      return /쇼핑몰상품수정/i.test(text) || (/\[?21\]?/.test(text) && /상품수정/i.test(text));
+    });
+    if (!candidate) return false;
+    candidate.click();
+    return true;
+  });
+  return results.some((item) => item?.result === true);
+}
+
+async function injectContentIfMissing(tabId, frameId) {
+  try {
+    const probe = await chrome.tabs.sendMessage(tabId, { type: "A21_IDENTIFY" }, Number.isInteger(frameId) ? { frameId } : undefined);
+    if (probe?.ok) return;
+  } catch { /* install-time or navigated frame: inject below */ }
+  await chrome.scripting.executeScript({
+    target: Number.isInteger(frameId) ? { tabId, frameIds: [frameId] } : { tabId, allFrames: true },
+    files: ["content-a21.js"],
+  });
+  await sleep(100);
+}
+
+async function sendFrame(tabId, frameId, message, attempts = 20, delay = 250) {
   let lastError = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      return await chrome.tabs.sendMessage(tabId, message);
+      await injectContentIfMissing(tabId, frameId);
+      return await chrome.tabs.sendMessage(tabId, message, Number.isInteger(frameId) ? { frameId } : undefined);
     } catch (error) {
       lastError = error;
       await sleep(delay);
@@ -153,9 +214,37 @@ async function sendWithRetry(tabId, message, attempts = 30, delay = 300) {
   throw lastError || new Error("content script unavailable");
 }
 
+async function waitForA21ListFrame(tabId) {
+  const deadline = now() + FRAME_WAIT_MS;
+  let clicked = false;
+  while (now() < deadline) {
+    const frames = await identifyFrames(tabId);
+    const frameId = frameByRole(frames, "A21_LIST");
+    if (Number.isInteger(frameId)) return frameId;
+    if (!clicked) clicked = await clickA21Menu(tabId);
+    await sleep(clicked ? 500 : 350);
+  }
+  throw new Error("A18/A21 Shopling 화면에서 [21] 쇼핑몰상품수정 목록으로 자동 진입하지 못했습니다.");
+}
+
+async function waitForPopupFrame(tabId, allowResult = false) {
+  const deadline = now() + FRAME_WAIT_MS;
+  while (now() < deadline) {
+    const frames = await identifyFrames(tabId);
+    if (allowResult) {
+      const evidenceFrame = resultFrame(frames);
+      if (Number.isInteger(evidenceFrame)) return evidenceFrame;
+    }
+    const popupFrameId = frameByRole(frames, "A21_POPUP");
+    if (Number.isInteger(popupFrameId)) return popupFrameId;
+    await sleep(300);
+  }
+  throw new Error(allowResult ? "Shopling 전송 결과 화면을 확인하지 못했습니다." : "Shopling 상품수정 송신 팝업을 확인하지 못했습니다.");
+}
+
 async function launchJob(state, job) {
   const created = await chrome.windows.create({
-    url: state.sourceUrl,
+    url: state.sourceUrl || SHOPLING_ORIGIN,
     type: "popup",
     width: 1420,
     height: 900,
@@ -166,8 +255,8 @@ async function launchJob(state, job) {
   job.workerWindowId = created.id;
   job.workerTabId = tab.id;
   job.status = "RUNNING";
-  job.stage = "SEARCH_CONFIG";
-  job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 작업창 준비 중`;
+  job.stage = "A21_BOOTSTRAP";
+  job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 작업창에서 A21 자동 진입 중`;
   job.updatedAt = now();
   await saveState(state);
   void assignWorkerTab(tab.id);
@@ -178,46 +267,87 @@ async function assignWorkerTab(tabId) {
   if (!state || state.state !== "RUNNING" || state.stopped) return;
   const job = state.jobs.find((item) => item.workerTabId === tabId && item.status === "RUNNING");
   if (!job) return;
+  if (job.assignmentBusy) return;
+  job.assignmentBusy = true;
+  await saveState(state);
   try {
-    await sendWithRetry(tabId, {
+    const frameId = await waitForA21ListFrame(tabId);
+    const latest = await loadState();
+    const current = latest?.jobs?.find((item) => item.id === job.id);
+    if (!latest || !current || current.status !== "RUNNING") return;
+    current.workerFrameId = frameId;
+    if (current.stage === "A21_BOOTSTRAP" || current.stage === "OPENING" || current.stage === "SEARCH_CONFIG") current.stage = "SEARCH_CONFIG";
+    current.message = `${current.mode === "PRICE" ? "판매가" : "옵션"} A21 목록 준비 완료`;
+    current.assignmentBusy = false;
+    current.updatedAt = now();
+    await saveState(latest);
+    await sendFrame(tabId, frameId, {
       type: "A21_LIST_ASSIGNMENT",
-      runId: state.runId,
-      jobId: job.id,
-      mode: job.mode,
-      goodsKeys: job.goodsKeys,
-      stage: job.stage,
+      runId: latest.runId,
+      jobId: current.id,
+      mode: current.mode,
+      goodsKeys: current.goodsKeys,
+      stage: current.stage,
     });
   } catch (error) {
-    await failJob(job.id, "WORKER_CONTENT_UNAVAILABLE", error instanceof Error ? error.message : String(error));
+    const latest = await loadState();
+    const current = latest?.jobs?.find((item) => item.id === job.id);
+    if (current) {
+      current.assignmentBusy = false;
+      await saveState(latest);
+    }
+    await failJob(job.id, "WORKER_A21_BOOTSTRAP_FAILED", error instanceof Error ? error.message : String(error));
   }
 }
 
 async function assignPopupTab(tabId, openerTabId) {
   const state = await loadState();
   if (!state || state.state !== "RUNNING" || state.stopped) return;
-  const job = state.jobs.find((item) => item.workerTabId === openerTabId && item.status === "RUNNING");
+  let job = state.jobs.find((item) => item.popupTabId === tabId && item.status === "RUNNING");
+  if (!job && Number.isInteger(openerTabId)) job = state.jobs.find((item) => item.workerTabId === openerTabId && item.status === "RUNNING");
   if (!job) return;
-  try {
-    const tab = await chrome.tabs.get(tabId);
+  if (job.popupAssignmentBusy) return;
+  job.popupAssignmentBusy = true;
+  if (!job.popupTabId) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
     job.popupTabId = tabId;
-    job.popupWindowId = tab.windowId;
+    job.popupWindowId = tab?.windowId ?? null;
+  }
+  await saveState(state);
+  try {
     const waitingForResult = ["SUBMIT_CLICKED", "RESULT_WAIT"].includes(job.stage);
+    const frameId = await waitForPopupFrame(tabId, waitingForResult);
+    const latest = await loadState();
+    const current = latest?.jobs?.find((item) => item.id === job.id);
+    if (!latest || !current || current.status !== "RUNNING") return;
+    current.popupFrameId = frameId;
+    current.popupAssignmentBusy = false;
     if (!waitingForResult) {
-      if (job.stage === "POPUP_CONFIG" && job.popupAssignedAt && now() - job.popupAssignedAt < 2500) return;
-      job.stage = "POPUP_CONFIG";
-      job.popupAssignedAt = now();
-      job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 전송 팝업 설정 중`;
+      current.stage = "POPUP_CONFIG";
+      current.message = `${current.mode === "PRICE" ? "판매가" : "옵션"} 전송 팝업 설정 중`;
+    } else {
+      current.message = "Shopling 전송 결과 확인 중";
     }
-    job.updatedAt = now();
-    await saveState(state);
-    await sendWithRetry(tabId, {
+    current.updatedAt = now();
+    await saveState(latest);
+    await sendFrame(tabId, frameId, {
       type: waitingForResult ? "A21_POPUP_RESULT_ASSIGNMENT" : "A21_POPUP_ASSIGNMENT",
-      runId: state.runId,
-      jobId: job.id,
-      mode: job.mode,
+      runId: latest.runId,
+      jobId: current.id,
+      mode: current.mode,
     });
   } catch (error) {
-    await failJob(job.id, "POPUP_CONTENT_UNAVAILABLE", error instanceof Error ? error.message : String(error));
+    const latest = await loadState();
+    const current = latest?.jobs?.find((item) => item.id === job.id);
+    if (current) {
+      current.popupAssignmentBusy = false;
+      await saveState(latest);
+    }
+    if (["SUBMIT_CLICKED", "RESULT_WAIT"].includes(job.stage)) {
+      await failJob(job.id, "A21_RESULT_CONTENT_UNAVAILABLE", error instanceof Error ? error.message : String(error));
+    } else {
+      await failJob(job.id, "POPUP_CONTENT_UNAVAILABLE", error instanceof Error ? error.message : String(error));
+    }
   }
 }
 
@@ -254,6 +384,8 @@ async function failJob(jobId, code, message) {
   job.stage = "FAILED";
   job.error = code || "A21_JOB_FAILED";
   job.message = message || "작업 실패";
+  job.assignmentBusy = false;
+  job.popupAssignmentBusy = false;
   job.updatedAt = now();
   await saveState(state);
   await closeJobWindows(job);
@@ -354,6 +486,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       await assignWorkerTab(tabId);
       return;
     }
+    const popupJob = state.jobs.find((job) => job.popupTabId === tabId && job.status === "RUNNING");
+    if (popupJob) {
+      await assignPopupTab(tabId, tab.openerTabId);
+      return;
+    }
     if (tab.openerTabId && state.jobs.some((job) => job.workerTabId === tab.openerTabId && job.status === "RUNNING")) {
       await assignPopupTab(tabId, tab.openerTabId);
     }
@@ -405,8 +542,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           job.selectedRowCount = Number(message.selectedRowCount || job.selectedRowCount || 0);
           job.totalResultCount = Number(message.totalResultCount || job.totalResultCount || 0);
           job.message = String(message.message || job.message || "");
+          job.assignmentBusy = false;
+          job.popupAssignmentBusy = false;
           job.updatedAt = now();
           await saveState(state);
+          if (job.stage === "SEARCH_SUBMITTED" && Number.isInteger(job.workerTabId)) {
+            setTimeout(() => void assignWorkerTab(job.workerTabId), 600);
+          }
+          if (["SUBMIT_CLICKED", "RESULT_WAIT"].includes(job.stage) && Number.isInteger(job.popupTabId)) {
+            setTimeout(() => void assignPopupTab(job.popupTabId, job.workerTabId), 500);
+          }
         }
         sendResponse({ ok: true });
         return;
@@ -428,7 +573,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       sendResponse({ ok: false, error: "unsupported_message" });
     } catch (error) {
-      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error || "A21 background error") });
     }
   })();
   return true;
