@@ -28,11 +28,19 @@ test("landed cost close is checked against every prior ordered draft", () => {
   assert.ok(handoff.includes("close?.cycleMonth === previousCycleMonth"));
 });
 
-test("price verification joins cycle approval fingerprint to the exact aggregate browser readback", () => {
+test("price verification joins approval to the prior ordered draft and matches the live browser-readback fingerprint", () => {
   assert.ok(handoff.includes("INTERNAL_CHINA_GROUP_COST_PRICE_APPROVAL"));
+  assert.ok(handoff.includes("proposalSourceEventId"));
+  assert.ok(handoff.includes("proposalSourceEventId.endsWith(draftId)"));
   assert.ok(handoff.includes("proposalFingerprint"));
   assert.ok(handoff.includes("INTERNAL_CHINA_GROUP_COST_PRICE_BROWSER_READBACK"));
-  assert.ok(handoff.includes("internal-china-group-cost-price-browser-readback:${fingerprint}:aggregate"));
+  assert.ok(handoff.includes("snapshot.proposalFingerprint"));
+  assert.ok(handoff.includes("snapshot.mallCheckCount"));
+  assert.ok(handoff.includes("snapshot.mallMatchCount"));
+  assert.ok(handoff.includes("snapshot.mallMismatchCount"));
+  assert.ok(handoff.includes("snapshot.mallMissingCount"));
+  assert.ok(handoff.includes("snapshot.failedGoodsKeyCount"));
+  assert.ok(handoff.includes('text(snapshot.state) === "VERIFIED"'));
   assert.ok(handoff.includes("verifiedGoodsKeyCount === goodsKeyCount"));
   assert.ok(handoff.includes("matchedMallPriceCount === totalMallTargetCount"));
   assert.ok(handoff.includes("mismatchMallPriceCount === 0"));
