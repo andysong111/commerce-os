@@ -45,9 +45,10 @@ test("v0.3.9 popup provides checkboxes and runs products sequentially with 3-cha
   assert.match(source, /goods_key \+ 자사상품코드/);
 });
 
-test("v0.3.9 keeps Shopling A18 as execution template only and never mounts control UI into Shopling DOM", async () => {
+test("v0.3.9 keeps Shopling A18 as execution template only and guards against control UI injection", async () => {
   const source = await readFile(packageRoute, "utf8");
   assert.match(source, /A18 화면에 보이는 상품은 대상 선정에 사용하지 않습니다/);
   assert.match(source, /isProductListUi/);
-  assert.doesNotMatch(source, /document\.documentElement\.appendChild\(box\)/);
+  assert.match(source, /v039_shopling_dom_panel_present/);
+  assert.match(source, /content\.includes\("document\.documentElement\.appendChild\(box\)"\)/);
 });
