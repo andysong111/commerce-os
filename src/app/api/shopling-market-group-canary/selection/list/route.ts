@@ -65,6 +65,9 @@ export async function GET(request: Request) {
     return Response.json({ ok: false, error: "invalid_shopling_upload_date_range" }, { status: 400 });
   }
   const dateFiltered = Boolean(fromIso || toIso);
+  const fromExclusiveIso = fromIso
+    ? new Date(new Date(fromIso).getTime() - 1).toISOString()
+    : "";
 
   const supabase = await createSupabaseAdminClient();
   if (!supabase) {
@@ -76,7 +79,7 @@ export async function GET(request: Request) {
     .select("id,owner_id,launch_item_id,status,payload,result,created_at,completed_at")
     .in("status", ["success", "partial_failure"])
     .order("completed_at", { ascending: false });
-  if (fromIso) jobsQuery = jobsQuery.gte("completed_at", fromIso);
+  if (fromExclusiveIso) jobsQuery = jobsQuery.gt("completed_at", fromExclusiveIso);
   if (toIso) jobsQuery = jobsQuery.lt("completed_at", toIso);
   const jobsResult = await jobsQuery.limit(dateFiltered ? 240 : 120);
   if (jobsResult.error) {
