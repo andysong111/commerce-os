@@ -82,11 +82,14 @@ test("v0.3.4 source overlay describes simultaneous channel windows", async () =>
   assert.match(source, /남은 채널별 A18 복제창 동시 생성/);
 });
 
-test("server claim and release compatibility remains available for v030 driver run ids", async () => {
+test("server claim keeps v030 compatibility while requiring visible A18 identity", async () => {
   const claim = await readFile(claimRoutePath, "utf8");
   const release = await readFile(releaseRoutePath, "utf8");
   assert.match(claim, /canary-group-v0\(\?:21\|30\)/);
-  assert.match(claim, /resumedPartialProduct: Boolean\(recentPartial\)/);
+  assert.match(claim, /group_canary_visible_goods_keys_required/);
+  assert.match(claim, /\.in\("goods_key", requestedVisibleGoodsKeys\)/);
+  assert.match(claim, /anchoredToVisibleA18: true/);
+  assert.doesNotMatch(claim, /recentPartial/);
   assert.match(release, /\.is\("submit_armed_at", null\)/);
   assert.match(release, /status: "queued"/);
 });
