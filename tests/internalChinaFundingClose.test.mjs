@@ -2,11 +2,22 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, route, panel, history, fastPurchasePage, workflow] = await Promise.all([
+const [
+  engine,
+  route,
+  panel,
+  history,
+  handoff,
+  handoffPanel,
+  fastPurchasePage,
+  workflow,
+] = await Promise.all([
   readFile("src/lib/internalChinaFundingClose.ts", "utf8"),
   readFile("src/app/api/china-order-manager/funding-close/route.ts", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaFundingClosePanel.tsx", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx", "utf8"),
+  readFile("src/lib/internalChinaPurchaseCycleHandoff.ts", "utf8"),
+  readFile("src/components/fast-purchase-mvp/PreviousPurchaseCycleHandoff.tsx", "utf8"),
   readFile("src/app/fast-purchase-mvp/page.tsx", "utf8"),
   readFile(".github/workflows/china-order-ledger-ci.yml", "utf8"),
 ]);
@@ -75,20 +86,21 @@ test("successful funding closes can be read by cycle month for the next purchase
   assert.ok(engine.includes("byCycleMonth"));
 });
 
-test("fast purchase shows prior-cycle funding evidence without changing the current purchase budget formula", () => {
-  assert.ok(fastPurchasePage.includes("loadInternalChinaFundingCloseByCycleMonth"));
-  assert.ok(fastPurchasePage.includes("previousCalendarMonth(currentCycleMonth)"));
-  assert.ok(fastPurchasePage.includes("직전 발주 사이클 자금 마감"));
-  assert.ok(fastPurchasePage.includes("WorldFirst 기말잔액"));
-  assert.ok(fastPurchasePage.includes("한국계좌 비상금 적립"));
-  assert.ok(fastPurchasePage.includes("이월 현금은 현재 발주예산에는 자동 가감하지 않습니다"));
-  assert.ok(fastPurchasePage.includes("1.45 주문비용 배수"));
+test("fast purchase receives funding evidence through the prior-cycle handoff without changing current budget math", () => {
+  assert.ok(fastPurchasePage.includes("loadInternalChinaPurchaseCycleHandoff"));
+  assert.ok(handoff.includes("loadInternalChinaFundingCloseByCycleMonth"));
+  assert.ok(handoffPanel.includes("WorldFirst 기말잔액"));
+  assert.ok(handoffPanel.includes("한국계좌 비상금 적립"));
+  assert.ok(handoffPanel.includes("이번 월 발주예산이나 권장수량을 자동으로 더하거나 빼지 않습니다"));
+  assert.ok(handoffPanel.includes("미입고"));
 });
 
 test("funding close regression is wired into China order CI", () => {
   assert.ok(workflow.includes("src/lib/internalChinaFundingClose.ts"));
+  assert.ok(workflow.includes("src/lib/internalChinaPurchaseCycleHandoff.ts"));
   assert.ok(workflow.includes("src/app/api/china-order-manager/funding-close/route.ts"));
   assert.ok(workflow.includes("src/components/china-order-manager/InternalChinaFundingClosePanel.tsx"));
+  assert.ok(workflow.includes("src/components/fast-purchase-mvp/PreviousPurchaseCycleHandoff.tsx"));
   assert.ok(workflow.includes("src/app/fast-purchase-mvp/page.tsx"));
   assert.ok(workflow.includes("tests/internalChinaFundingClose.test.mjs"));
 });
