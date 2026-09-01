@@ -46,6 +46,16 @@ test("v2.3 page keeps browser triage and adds internal draft without external au
   assert.ok(page.includes("내부 발주 Draft 저장"));
 });
 
+test("prior funding close is visible as read-only evidence and never mutates the current purchase budget", () => {
+  assert.ok(page.includes("loadInternalChinaFundingCloseByCycleMonth"));
+  assert.ok(page.includes("previousCalendarMonth(currentCycleMonth)"));
+  assert.ok(page.includes("PREVIOUS PURCHASE FUNDING CLOSE"));
+  assert.ok(page.includes("자금 마감 연결 완료"));
+  assert.ok(page.includes("이월 현금은 현재 발주예산에는 자동 가감하지 않습니다"));
+  assert.ok(page.includes("1.45 주문비용 배수"));
+  assert.doesNotMatch(page, /worldFirstEnding(?:Usd|Cnh).*recommendedQuantity/);
+});
+
 test("transient live failures retry before opening a manual-only last-known fallback", () => {
   assert.ok(resilient.includes("const LOAD_ATTEMPTS = 2"));
   assert.ok(resilient.includes("await loadFastPurchaseMvp()"));
