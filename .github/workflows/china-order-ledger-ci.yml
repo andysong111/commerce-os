@@ -10,6 +10,7 @@ on:
       - "src/lib/internalChinaForwarderCost.ts"
       - "src/lib/internalChinaForwarderStoredClose.ts"
       - "src/lib/internalChinaFundingClose.ts"
+      - "src/lib/internalChinaPurchaseCycleHandoff.ts"
       - "src/lib/internalChinaCostPricePolicy.ts"
       - "src/lib/internalChinaCostPriceReview.ts"
       - "src/lib/internalChinaPriceGroupPolicy.ts"
@@ -32,12 +33,14 @@ on:
       - "src/app/fast-purchase-mvp/page.tsx"
       - "src/components/china-order-manager/**"
       - "src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx"
+      - "src/components/fast-purchase-mvp/PreviousPurchaseCycleHandoff.tsx"
       - "tests/chinaOrderLedger.test.mjs"
       - "tests/internalChinaPurchaseDraftMvp.test.mjs"
       - "tests/internalChinaPurchaseBudgetAudit.test.mjs"
       - "tests/internalChinaReceipt.test.mjs"
       - "tests/internalChinaForwarderCost.test.mjs"
       - "tests/internalChinaFundingClose.test.mjs"
+      - "tests/internalChinaPurchaseCycleHandoff.test.mjs"
       - "tests/internalChinaCostPriceReview.test.mjs"
       - "tests/internalChinaGroupCostPriceV2.test.mjs"
       - "tests/productMasterCanonicalBatchContext.test.mjs"
@@ -74,6 +77,7 @@ jobs:
           src/lib/internalChinaForwarderCost.ts
           src/lib/internalChinaForwarderStoredClose.ts
           src/lib/internalChinaFundingClose.ts
+          src/lib/internalChinaPurchaseCycleHandoff.ts
           src/lib/internalChinaCostPricePolicy.ts
           src/lib/internalChinaCostPriceReview.ts
           src/lib/internalChinaPriceGroupPolicy.ts
@@ -115,12 +119,14 @@ jobs:
           src/components/china-order-manager/InternalChinaHistoricalProductGroupImport.tsx
           src/components/china-order-manager/MonthlyDraftConsolidation.tsx
           src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx
+          src/components/fast-purchase-mvp/PreviousPurchaseCycleHandoff.tsx
           tests/chinaOrderLedger.test.mjs
           tests/internalChinaPurchaseDraftMvp.test.mjs
           tests/internalChinaPurchaseBudgetAudit.test.mjs
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
           tests/internalChinaFundingClose.test.mjs
+          tests/internalChinaPurchaseCycleHandoff.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
           tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
@@ -135,6 +141,7 @@ jobs:
           tests/internalChinaReceipt.test.mjs
           tests/internalChinaForwarderCost.test.mjs
           tests/internalChinaFundingClose.test.mjs
+          tests/internalChinaPurchaseCycleHandoff.test.mjs
           tests/internalChinaCostPriceReview.test.mjs
           tests/internalChinaGroupCostPriceV2.test.mjs
           tests/productMasterCanonicalBatchContext.test.mjs
