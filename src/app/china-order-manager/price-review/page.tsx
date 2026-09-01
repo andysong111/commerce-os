@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { InternalChinaGroupCostPriceApprovalButton } from "@/components/china-order-manager/InternalChinaGroupCostPriceApprovalButton";
+import { InternalChinaGroupCostPriceExecutionButton } from "@/components/china-order-manager/InternalChinaGroupCostPriceExecutionButton";
 import { InternalChinaHistoricalProductGroupImport } from "@/components/china-order-manager/InternalChinaHistoricalProductGroupImport";
+import {
+  buildInternalChinaDirectTargetExecutionPlan,
+  INTERNAL_CHINA_DIRECT_TARGET_EXECUTION_POLICY,
+  loadInternalChinaDirectTargetExecution,
+} from "@/lib/internalChinaGroupCostPriceExecution";
 import {
   loadInternalChinaGroupCostPriceApproval,
   loadLatestInternalChinaGroupCostPriceProposal,
@@ -42,6 +48,17 @@ export default async function InternalChinaCostPriceReviewPage() {
   const approval = proposal
     ? await loadInternalChinaGroupCostPriceApproval(proposal.fingerprint)
     : null;
+  const execution = proposal
+    ? await loadInternalChinaDirectTargetExecution(proposal.fingerprint)
+    : null;
+  let executionPlan: ReturnType<typeof buildInternalChinaDirectTargetExecutionPlan> | null = null;
+  if (proposal) {
+    try {
+      executionPlan = buildInternalChinaDirectTargetExecutionPlan(proposal);
+    } catch {
+      executionPlan = null;
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -55,7 +72,7 @@ export default async function InternalChinaCostPriceReviewPage() {
               실제원가 · 상품그룹 가격조정 검토
             </h1>
             <p className="mt-2 max-w-5xl text-sm leading-6 text-slate-600">
-              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. Shopling sale_status도 실시간 재조회해 현재 판매중이 아닌 구형 listing은 가격조정 대상에서 제외합니다. 내부 그룹 근거가 없는 판매중 listing도 그룹을 추측하지 않고 행 단위로 자동 제외하며, 확정 그룹 행만 승인 범위에 들어갑니다. 실제 Shopling 가격 쓰기는 승인 이후 별도 단계입니다.
+              상품등급은 사용하지 않습니다. 확정 실제원가 × 주문당 수량 × 2에 도매1~도매4·소매1~소매2 내부 가격그룹 배수를 적용합니다. 신규 SEO 상품은 Shopling 상품그룹을 계속 미지정으로 두고 OPS 내부 가격그룹만 사용합니다. Shopling sale_status도 실시간 재조회해 현재 판매중이 아닌 구형 listing은 가격조정 대상에서 제외합니다. 내부 그룹 근거가 없는 판매중 listing도 그룹을 추측하지 않고 행 단위로 자동 제외하며, 확정 그룹 행만 승인 범위에 들어갑니다. 승인 후 인상 대상은 퍼센트 상한이나 단계 인상 없이 확정원가 기준 최종 목표가로 한 번에 이동하며, 해당 상품그룹에 연결된 쇼핑몰만 함께 적용합니다.
             </p>
           </div>
           <Link
@@ -96,42 +113,69 @@ export default async function InternalChinaCostPriceReviewPage() {
 
           <section
             className={`rounded-2xl border p-5 shadow-sm ${
-              approval
-                ? "border-emerald-200 bg-emerald-50"
-                : proposal.state === "AWAITING_APPROVAL"
-                  ? "border-blue-200 bg-blue-50"
-                  : proposal.state === "BLOCKED"
-                    ? "border-amber-200 bg-amber-50"
-                    : "border-slate-200 bg-slate-50"
+              execution
+                ? "border-rose-200 bg-rose-50"
+                : approval
+                  ? "border-emerald-200 bg-emerald-50"
+                  : proposal.state === "AWAITING_APPROVAL"
+                    ? "border-blue-200 bg-blue-50"
+                    : proposal.state === "BLOCKED"
+                      ? "border-amber-200 bg-amber-50"
+                      : "border-slate-200 bg-slate-50"
             }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <span className="text-xs font-bold text-slate-500">PRICE REVIEW STATE</span>
                 <h2 className="mt-1 text-xl font-black text-slate-950">
-                  {approval
-                    ? "확정 그룹 가격조정안 승인 완료"
-                    : proposal.state === "AWAITING_APPROVAL"
-                      ? "확정 그룹 가격조정안 승인 대기"
-                      : proposal.state === "NO_CHANGE"
-                        ? "확정 그룹 가격변경 없음"
-                        : "관리 가능한 가격행 없음 · 검토 차단"}
+                  {execution
+                    ? "확정원가 목표가 Shopling 적용 작업 전송 완료"
+                    : approval
+                      ? "확정 그룹 가격조정안 승인 완료 · 적용 대기"
+                      : proposal.state === "AWAITING_APPROVAL"
+                        ? "확정 그룹 가격조정안 승인 대기"
+                        : proposal.state === "NO_CHANGE"
+                          ? "확정 그룹 가격변경 없음"
+                          : "관리 가능한 가격행 없음 · 검토 차단"}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-700">
-                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 판매중 그룹 미확정 자동제외 {number.format(proposal.unresolvedGroupCount)}개 · 판매중지 제외 {number.format(proposal.inactiveListingCount)}개 · Shopling 실조회 누락 {number.format(proposal.liveListingMissingCount)}개 · 실제 Shopling 가격 write 0건
+                  규칙 {proposal.ruleVersion} · 가격변경 대상 {number.format(proposal.changedRowCount)}개 옵션행 · 판매중 그룹 미확정 자동제외 {number.format(proposal.unresolvedGroupCount)}개 · 판매중지 제외 {number.format(proposal.inactiveListingCount)}개 · Shopling 실조회 누락 {number.format(proposal.liveListingMissingCount)}개
+                </p>
+                <p className="mt-2 text-xs font-bold text-rose-800">
+                  실행 정책 {INTERNAL_CHINA_DIRECT_TARGET_EXECUTION_POLICY} · 인상률 상한 없음 · 단계 인상 없음 · 확정원가 기준 최종 목표가로 직접 이동
                 </p>
                 {proposal.unresolvedGroupCount > 0 ? (
                   <p className="mt-2 text-xs font-bold text-amber-800">
-                    미확정 GOODSKEY는 승인·향후 가격 write 범위에 들어가지 않습니다. 확정 그룹 + 판매중 + 차단사유 없음 조건을 모두 만족하는 가격변경 행만 승인 대상으로 계산합니다.
+                    미확정 GOODSKEY는 승인·가격 write 범위에 들어가지 않습니다. 확정 그룹 + 판매중 + 차단사유 없음 조건을 모두 만족하는 가격변경 행만 실행 대상으로 계산합니다.
                   </p>
                 ) : null}
               </div>
-              {approval ? (
-                <div className="rounded-xl bg-white px-4 py-3 text-right text-xs text-emerald-800">
-                  <strong className="block">승인 기록 완료</strong>
-                  <span className="mt-1 block">{new Date(approval.approvedAt).toLocaleString("ko-KR")}</span>
-                  <span className="mt-1 block">승인 {number.format(approval.approvedChangedRowCount)}행 · 제외 {number.format(approval.excludedBlockedRowCount ?? proposal.blockedCount)}행</span>
-                  <span className="mt-1 block font-bold">SHOPLING WRITE OFF</span>
+              {execution ? (
+                <div className="rounded-xl bg-white px-4 py-3 text-right text-xs text-rose-800">
+                  <strong className="block">Shopling 실행기 전송 완료</strong>
+                  <span className="mt-1 block">{new Date(execution.dispatchedAt).toLocaleString("ko-KR")}</span>
+                  <span className="mt-1 block">{number.format(execution.goodsKeyCount)} GOODSKEY · {number.format(execution.batchCount)}개 기술 배치</span>
+                  <span className="mt-1 block">최대 인상폭 +{(execution.maxIncreaseRate * 100).toFixed(1)}%</span>
+                  <span className="mt-1 block font-bold">각 상품은 최종 목표가로 직접 전송 · 실행 결과 확인 대기</span>
+                </div>
+              ) : approval && executionPlan ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-white px-4 py-3 text-right text-xs text-emerald-800">
+                    <strong className="block">승인 기록 완료</strong>
+                    <span className="mt-1 block">{new Date(approval.approvedAt).toLocaleString("ko-KR")}</span>
+                    <span className="mt-1 block">승인 {number.format(approval.approvedChangedRowCount)}행 · 제외 {number.format(approval.excludedBlockedRowCount ?? proposal.blockedCount)}행</span>
+                  </div>
+                  <InternalChinaGroupCostPriceExecutionButton
+                    proposalFingerprint={proposal.fingerprint}
+                    changedOptionRowCount={executionPlan.changedOptionRowCount}
+                    goodsKeyCount={executionPlan.goodsKeyCount}
+                    maxIncreaseRate={executionPlan.maxIncreaseRate}
+                  />
+                </div>
+              ) : approval ? (
+                <div className="rounded-xl bg-white px-4 py-3 text-right text-xs text-amber-800">
+                  <strong className="block">승인 기록은 있으나 실행 계획 차단</strong>
+                  <span className="mt-1 block">인상 대상·상품그룹·연결 쇼핑몰 정합성을 다시 확인하세요.</span>
                 </div>
               ) : proposal.state === "AWAITING_APPROVAL" ? (
                 <InternalChinaGroupCostPriceApprovalButton
