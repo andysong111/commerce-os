@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = ["manifest.json", "background.js", "content-a21.js", "popup.html", "popup.js", "README.txt"] as const;
 
@@ -28,13 +28,10 @@ export async function GET() {
       const manifest = JSON.parse(source) as { manifest_version?: number; version?: string; permissions?: string[] };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs")) {
+      if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting")) {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
     }
-    // Chrome's "Load unpacked" expects manifest.json directly inside the
-    // selected folder, so keep extension files at the ZIP root rather than
-    // nesting them under another directory.
     entries[fileName] = strToU8(source);
   }
   const zip = zipSync(entries, { level: 9 });
