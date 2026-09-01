@@ -88,24 +88,31 @@ test("recent closed monthly landed costs stay visible after the calendar month c
   assert.ok(historyPanel.includes("기존 내부 원가배수 저장값은 변경하지 않고"));
 });
 
-test("landed-cost close shows the monthly orderable budget, unused amount and frozen revenue basis", () => {
+test("landed-cost close shows total monthly spend budget and remaining cash against actual outflow", () => {
   assert.ok(historyPanel.includes("aggregateByCycleMonth"));
   assert.ok(historyPanel.includes("previousCalendarMonth"));
   assert.ok(historyPanel.includes("loadCalendarMonthNormalRevenue"));
-  assert.ok(historyPanel.includes("DEFAULT_PURCHASE_COST_MULTIPLIER"));
-  assert.ok(historyPanel.includes("calculateProductOrderBudget"));
-  assert.ok(historyPanel.includes("월 상품주문 가능액"));
-  assert.ok(historyPanel.includes("미사용 상품주문 예산"));
-  assert.ok(historyPanel.includes("상품대금 · 예산 사용액"));
+  assert.ok(historyPanel.includes("totalSpendingBudgetKrw"));
+  assert.ok(historyPanel.includes("remainingAfterSpendKrw"));
+  assert.ok(historyPanel.includes("budgetMonthRevenueKrw / 2"));
+  assert.ok(historyPanel.includes("월 전체 지출가능금액"));
+  assert.ok(historyPanel.includes("사용 후 남은금액"));
+  assert.ok(historyPanel.includes("실제 총지출"));
   assert.ok(historyPanel.includes("예산 기준월"));
   assert.ok(historyPanel.includes("기준 정상매출"));
-  assert.ok(historyPanel.includes("예산 사용률"));
+  assert.ok(historyPanel.includes("지출 사용률"));
   assert.ok(
     historyPanel.includes(
-      "월 상품주문 가능액 = 직전 달력월 정상매출 ÷ 2 ÷ 내부 주문비용 배수",
+      "월 전체 지출가능금액 = 직전 달력월 정상매출 ÷ 2",
     ),
   );
-  assert.ok(historyPanel.includes("미사용 상품주문 예산에서 다시 차감하지 않습니다"));
+  assert.ok(
+    historyPanel.includes(
+      "사용 후 남은금액 = 전체 지출가능금액 - 실제 총지출",
+    ),
+  );
+  assert.equal(historyPanel.includes("월 상품주문 가능액"), false);
+  assert.equal(historyPanel.includes("미사용 상품주문 예산"), false);
 });
 
 test("China order manager fails fast instead of exhausting the Vercel function timeout", () => {
