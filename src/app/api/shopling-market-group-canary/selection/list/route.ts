@@ -10,6 +10,7 @@ const SUCCESS_MARKET = new Set(["sent", "already_registered"]);
 const BUSY_STATUS = new Set(["claimed"]);
 const BUSY_MARKET = new Set(["submit_armed"]);
 const CONFIRM_MARKET = new Set(["confirm_needed"]);
+const LEGACY_UNKNOWN = new Set(["legacy_ignored"]);
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -108,6 +109,7 @@ export async function GET(request: Request) {
     let confirmNeededCount = 0;
     let busyCount = 0;
     let pendingCount = 0;
+    let registrationUnknownCount = 0;
 
     for (const row of successfulRows) {
       const ledger = ledgerByGoodsKey.get(row.goodsKey);
@@ -119,6 +121,8 @@ export async function GET(request: Request) {
         confirmNeededCount += 1;
       } else if (BUSY_STATUS.has(status) || BUSY_MARKET.has(marketStatus)) {
         busyCount += 1;
+      } else if (LEGACY_UNKNOWN.has(status) || LEGACY_UNKNOWN.has(marketStatus)) {
+        registrationUnknownCount += 1;
       } else {
         pendingCount += 1;
       }
@@ -141,6 +145,7 @@ export async function GET(request: Request) {
       uploadTotalCount: uploadRows.length,
       marketDoneCount,
       marketPendingCount: pendingCount,
+      registrationUnknownCount,
       confirmNeededCount,
       busyCount,
       selectable,
