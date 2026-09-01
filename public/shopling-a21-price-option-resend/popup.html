@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shopling A21 수정전송</title>
+<style>
+*{box-sizing:border-box} body{width:390px;margin:0;padding:16px;font:13px/1.45 Arial,sans-serif;color:#0f172a;background:#f8fafc}h1{font-size:16px;margin:0 0 4px}p{margin:0;color:#64748b}.card{margin-top:12px;padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric{padding:9px;border-radius:9px;background:#f1f5f9}.metric b{display:block;font-size:16px;margin-top:2px}.ok{color:#047857}.bad{color:#b91c1c}.warn{color:#b45309}button{width:100%;margin-top:10px;border:0;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer}.primary{background:#0f172a;color:#fff}.stop{background:#fee2e2;color:#991b1b}.muted{background:#e2e8f0;color:#334155}button:disabled{opacity:.45;cursor:not-allowed}#jobs{max-height:230px;overflow:auto;margin-top:8px}.job{padding:8px 0;border-top:1px solid #f1f5f9}.job:first-child{border-top:0}.job strong{font-size:12px}.job small{display:block;color:#64748b;margin-top:2px}.pill{display:inline-block;border-radius:999px;padding:2px 6px;font-size:10px;font-weight:700;background:#e2e8f0}.pill.SUCCEEDED{background:#d1fae5;color:#065f46}.pill.FAILED{background:#fee2e2;color:#991b1b}.pill.RUNNING{background:#dbeafe;color:#1d4ed8}.pill.QUEUED{background:#fef3c7;color:#92400e}</style>
+</head>
+<body>
+<h1>Shopling A21 가격·옵션 수정전송</h1>
+<p>Commerce OS 검증완료 대상만 가져와 판매가/옵션을 분리 전송합니다.</p>
+<div class="card" id="planCard">대상 확인 중...</div>
+<div class="card">
+  <div id="runState">실행 대기</div>
+  <div id="jobs"></div>
+  <button id="start" class="primary" disabled>A21 병렬 수정전송 시작</button>
+  <button id="stop" class="stop" style="display:none">안전 중지</button>
+  <button id="refresh" class="muted">상태 새로고침</button>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>
