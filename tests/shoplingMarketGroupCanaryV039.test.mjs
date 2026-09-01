@@ -10,7 +10,7 @@ test("selection list is sourced from Commerce OS SEO bulk Shopling upload jobs, 
   const source = await readFile(listRoute, "utf8");
   assert.match(source, /product_launch_upload_jobs/);
   assert.match(source, /seo-bulk-cloud/);
-  assert.match(source, /latestByLaunch/);
+  assert.match(source, /latestBatchByLaunch/);
   assert.match(source, /uploadSuccessCount/);
   assert.match(source, /marketDoneCount/);
   assert.match(source, /selectable/);
