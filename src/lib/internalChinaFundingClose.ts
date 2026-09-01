@@ -2,7 +2,11 @@ import { previousCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 import { loadCalendarMonthNormalRevenue } from "@/lib/shopling/calendarMonthRevenue";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
+export const INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE =
+  "INTERNAL_CHINA_MONTHLY_FUNDING_CLOSE";
+
 const FORWARDER_OPERATION_TYPE = "INTERNAL_CHINA_FORWARDER_COST_CLOSE";
+const SOURCE = "ops-center-internal-china-funding-close";
 const DRAFT_ID = /^fast-purchase-draft:[a-f0-9]{20}$/;
 const MAX_KRW = 1_000_000_000;
 const MAX_CURRENCY_BALANCE = 1_000_000_000;
@@ -17,6 +21,7 @@ export type InternalChinaFundingCloseInput = {
 };
 
 export type InternalChinaFundingCloseSummary = {
+  draftId: string;
   cycleMonth: string;
   budgetMonth: string;
   budgetMonthRevenueKrw: number;
@@ -33,6 +38,8 @@ export type InternalChinaFundingCloseSummary = {
 
 type StoredRow = {
   result_snapshot?: unknown;
+  started_at?: unknown;
+  updated_at?: unknown;
 };
 
 function text(value: unknown) {
@@ -92,8 +99,16 @@ function validCurrencyBalance(value: unknown) {
   return amount;
 }
 
-function sourceEventId(draftId: string) {
+function forwarderSourceEventId(draftId: string) {
   return `internal-china-forwarder-cost:${draftId}`;
+}
+
+function fundingSourceEventId(draftId: string) {
+  return `internal-china-monthly-funding-close:${draftId}`;
+}
+
+function correlationId(draftId: string) {
+  return `internal-china-purchase:${draftId}`;
 }
 
 function supabaseConnection() {
@@ -109,11 +124,13 @@ export function parseInternalChinaFundingClose(
   value: unknown,
 ): InternalChinaFundingCloseSummary | null {
   const row = object(value);
+  const draftId = text(row.draftId);
   const cycleMonth = text(row.cycleMonth);
   const budgetMonth = text(row.budgetMonth);
   const closedAt = text(row.closedAt);
   const totalSpendingBudgetKrw = integer(row.totalSpendingBudgetKrw);
   if (
+    !DRAFT_ID.test(draftId) ||
     !/^\d{4}-\d{2}$/.test(cycleMonth) ||
     !/^\d{4}-\d{2}$/.test(budgetMonth) ||
     !closedAt ||
@@ -122,6 +139,7 @@ export function parseInternalChinaFundingClose(
     return null;
   }
   return {
+    draftId,
     cycleMonth,
     budgetMonth,
     budgetMonthRevenueKrw: integer(row.budgetMonthRevenueKrw),
@@ -140,7 +158,7 @@ export function parseInternalChinaFundingClose(
 async function readForwarderClose(draftId: string) {
   const { baseUrl, secret } = supabaseConnection();
   const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${FORWARDER_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(sourceEventId(draftId))}&select=result_snapshot&limit=1`,
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${FORWARDER_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(forwarderSourceEventId(draftId))}&select=result_snapshot&limit=1`,
     {
       headers: createSupabaseAdminHeaders(secret),
       cache: "no-store",
@@ -158,25 +176,41 @@ async function readForwarderClose(draftId: string) {
   return snapshot;
 }
 
-async function patchForwarderClose(
-  draftId: string,
-  snapshot: Record<string, unknown>,
+async function storeFundingClose(
   fundingClose: InternalChinaFundingCloseSummary,
 ) {
   const { baseUrl, secret } = supabaseConnection();
-  const now = new Date().toISOString();
+  const now = fundingClose.closedAt;
   const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${FORWARDER_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(sourceEventId(draftId))}`,
+    `${baseUrl}/rest/v1/commerce_operation_runs?on_conflict=source_event_id&select=source_event_id,result_snapshot,updated_at`,
     {
-      method: "PATCH",
+      method: "POST",
       headers: {
         ...createSupabaseAdminHeaders(secret),
-        Prefer: "return=minimal",
+        Prefer: "resolution=merge-duplicates,return=representation",
       },
-      body: JSON.stringify({
-        result_snapshot: { ...snapshot, fundingClose },
-        updated_at: now,
-      }),
+      body: JSON.stringify([
+        {
+          operation_type: INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE,
+          status: "SUCCEEDED",
+          source: SOURCE,
+          source_event_id: fundingSourceEventId(fundingClose.draftId),
+          correlation_id: correlationId(fundingClose.draftId),
+          actor_type: "OPS_OPERATOR",
+          input_snapshot: {
+            draftId: fundingClose.draftId,
+            cycleMonth: fundingClose.cycleMonth,
+            worldFirstTransferKrw: fundingClose.worldFirstTransferKrw,
+            worldFirstEndingUsd: fundingClose.worldFirstEndingUsd,
+            worldFirstEndingCnh: fundingClose.worldFirstEndingCnh,
+            koreaAccountSpentKrw: fundingClose.koreaAccountSpentKrw,
+          },
+          result_snapshot: fundingClose,
+          started_at: now,
+          finished_at: now,
+          updated_at: now,
+        },
+      ]),
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     },
@@ -187,6 +221,26 @@ async function patchForwarderClose(
       `CHINA_FUNDING_CLOSE_STORE_FAILED:${response.status}:${body.slice(0, 300)}`,
     );
   }
+}
+
+export async function loadInternalChinaFundingClose(
+  draftIdInput: unknown,
+): Promise<InternalChinaFundingCloseSummary | null> {
+  const draftId = validDraftId(draftIdInput);
+  const { baseUrl, secret } = supabaseConnection();
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${INTERNAL_CHINA_FUNDING_CLOSE_OPERATION_TYPE}&source_event_id=eq.${encodeURIComponent(fundingSourceEventId(draftId))}&select=result_snapshot,started_at,updated_at&limit=1`,
+    {
+      headers: createSupabaseAdminHeaders(secret),
+      cache: "no-store",
+      signal: AbortSignal.timeout(3_000),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`CHINA_FUNDING_CLOSE_READ_FAILED:${response.status}`);
+  }
+  const rows = (await response.json().catch(() => [])) as StoredRow[];
+  return parseInternalChinaFundingClose(rows[0]?.result_snapshot);
 }
 
 export async function recordInternalChinaFundingClose(
@@ -232,6 +286,7 @@ export async function recordInternalChinaFundingClose(
     koreaAccountAvailableKrw - koreaAccountSpentKrw;
   const now = new Date().toISOString();
   const fundingClose: InternalChinaFundingCloseSummary = {
+    draftId,
     cycleMonth,
     budgetMonth,
     budgetMonthRevenueKrw,
@@ -246,6 +301,6 @@ export async function recordInternalChinaFundingClose(
     closedAt: now,
   };
 
-  await patchForwarderClose(draftId, snapshot, fundingClose);
+  await storeFundingClose(fundingClose);
   return fundingClose;
 }
