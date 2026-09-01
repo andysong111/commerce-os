@@ -2,15 +2,33 @@ import { FastPurchaseDraftActions } from "@/components/fast-purchase-mvp/FastPur
 import { FastPurchaseTriageWorkspace } from "@/components/fast-purchase-mvp/FastPurchaseTriageWorkspace";
 import { PageHeader } from "@/components/PageHeader";
 import { loadFastPurchaseMvpResilient } from "@/lib/fastPurchaseMvpResilient";
+import {
+  loadInternalChinaFundingCloseByCycleMonth,
+  type InternalChinaFundingCloseSummary,
+} from "@/lib/internalChinaFundingClose";
+import {
+  koreanMonthLabel,
+  previousCalendarMonth,
+  seoulCalendarMonth,
+} from "@/lib/monthlyPurchasePolicy";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 180;
 
 const number = new Intl.NumberFormat("ko-KR");
+const foreignBalance = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 export default async function FastPurchaseMvpPage() {
-  const report = await loadFastPurchaseMvpResilient();
+  const currentCycleMonth = seoulCalendarMonth(new Date());
+  const previousCycleMonth = previousCalendarMonth(currentCycleMonth);
+  const [report, previousFundingClose] = await Promise.all([
+    loadFastPurchaseMvpResilient(),
+    loadInternalChinaFundingCloseByCycleMonth(previousCycleMonth).catch(() => null),
+  ]);
   const fallback = report.dataMode === "LAST_KNOWN_MANUAL_FALLBACK";
 
   return (
@@ -19,6 +37,12 @@ export default async function FastPurchaseMvpPage() {
         eyebrow="COMMERCE OS · FAST PURCHASE MVP V2.3"
         title="빠른 발주안 · MVP"
         description="완벽한 초기재고를 기다리지 않습니다. 시스템판정은 그대로 사용하고, 수동검토 상품은 창고 전수조사 없이 충분·부족·품절 정도만 빠르게 표시해 오늘 주문 예정수량을 직접 정할 수 있게 합니다. 검토가 끝나면 내부 Draft로 고정해 중복발주를 막습니다."
+      />
+
+      <PreviousFundingCloseContext
+        currentCycleMonth={currentCycleMonth}
+        previousCycleMonth={previousCycleMonth}
+        summary={previousFundingClose}
       />
 
       {fallback ? (
@@ -86,6 +110,115 @@ export default async function FastPurchaseMvpPage() {
 
       <p className="break-all text-xs text-slate-400">Fingerprint · {report.fingerprint}</p>
     </div>
+  );
+}
+
+function PreviousFundingCloseContext({
+  currentCycleMonth,
+  previousCycleMonth,
+  summary,
+}: {
+  currentCycleMonth: string;
+  previousCycleMonth: string;
+  summary: InternalChinaFundingCloseSummary | null;
+}) {
+  if (!summary) {
+    return (
+      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <span className="text-xs font-black tracking-[0.12em] text-amber-700">
+              PREVIOUS PURCHASE FUNDING CLOSE
+            </span>
+            <h2 className="mt-1 text-lg font-black text-amber-950">
+              직전 발주 사이클 자금 마감 미확인 · {koreanMonthLabel(previousCycleMonth)}
+            </h2>
+          </div>
+          <strong className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs text-amber-900">
+            발주예산 계산은 계속 가능
+          </strong>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-amber-950">
+          직전 월 자금 마감 원장을 찾지 못했습니다. {koreanMonthLabel(currentCycleMonth)} 발주예산은 기존 정책식으로 계산하며, 이전 월 잔여자금은 자동으로 차감하거나 더하지 않습니다.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <span className="text-xs font-black tracking-[0.12em] text-emerald-700">
+            PREVIOUS PURCHASE FUNDING CLOSE
+          </span>
+          <h2 className="mt-1 text-lg font-black text-emerald-950">
+            직전 발주 사이클 자금 마감 · {koreanMonthLabel(summary.cycleMonth)}
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-emerald-900">
+            지난 입고·원가·자금 마감 결과를 다음 발주 작업대에 조회정보로 연결했습니다.
+          </p>
+        </div>
+        <strong className="rounded-full border border-emerald-300 bg-white px-3 py-1 text-xs text-emerald-900">
+          자금 마감 연결 완료
+        </strong>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <FundingMetric
+          label="직전 전체 지출가능금액"
+          value={`${number.format(summary.totalSpendingBudgetKrw)}원`}
+        />
+        <FundingMetric
+          label="WorldFirst 배정"
+          value={`${number.format(summary.worldFirstTransferKrw)}원`}
+        />
+        <FundingMetric
+          label="WorldFirst 기말잔액"
+          value={`USD ${foreignBalance.format(summary.worldFirstEndingUsd)} · CNH ${foreignBalance.format(summary.worldFirstEndingCnh)}`}
+        />
+        <FundingMetric
+          label="한국계좌 비상금 적립"
+          value={`${number.format(summary.emergencyReserveTransferKrw)}원`}
+          emphasized
+        />
+        <FundingMetric
+          label="자금 마감시각"
+          value={new Date(summary.closedAt).toLocaleString("ko-KR")}
+        />
+      </div>
+
+      <p className="mt-3 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-xs font-bold leading-5 text-emerald-950">
+        이월 현금은 현재 발주예산에는 자동 가감하지 않습니다. {koreanMonthLabel(currentCycleMonth)} 발주예산은 기존 월 발주정책과 1.45 주문비용 배수를 그대로 사용하고, WorldFirst 기말잔액과 비상금은 운영자가 자금상태를 확인하는 참고 원장으로만 연결합니다.
+      </p>
+    </section>
+  );
+}
+
+function FundingMetric({
+  label,
+  value,
+  emphasized = false,
+}: {
+  label: string;
+  value: string;
+  emphasized?: boolean;
+}) {
+  return (
+    <article
+      className={`rounded-xl border bg-white p-3 ${
+        emphasized ? "border-emerald-400" : "border-emerald-200"
+      }`}
+    >
+      <span className="block text-[11px] font-bold text-slate-500">{label}</span>
+      <strong
+        className={`mt-1 block text-sm font-black ${
+          emphasized ? "text-emerald-800" : "text-slate-950"
+        }`}
+      >
+        {value}
+      </strong>
+    </article>
   );
 }
 
