@@ -179,7 +179,7 @@ const COORDINATOR = String.raw`async function selectedWaveStates(queue) {
         const opened = await sendMessage({ type: OPEN_WORKERS_MESSAGE, runId: queue.batchRunId, tasks });
         if (!opened?.ok) {
           const states = await Promise.all(tasks.map((task) => getWorkerState(queue.batchRunId, task.goodsKey)));
-          for (const state of states.filter(Boolean)) await patchWorkerState(state, { status: "failed", stage: "worker_open_failed", message: `전체병렬 A18 작업창 생성 실패: ${text(opened?.message || opened?.error)}` });
+          for (const state of states.filter(Boolean)) await patchWorkerState(state, { status: "failed", stage: "worker_open_failed", message: "전체병렬 A18 작업창 생성 실패: " + text(opened?.message || opened?.error) });
         }
       }
 
@@ -210,34 +210,10 @@ function rewriteContent(source: string) {
     .replace('const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0324";', 'const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0325";')
     .replace('const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0324";', 'const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0325";');
   rewritten = replaceRequired(rewritten, '  const UNREGISTERED_RESULT_TIMEOUT_MS = 10000;', '  const UNREGISTERED_RESULT_TIMEOUT_MS = 10000;\n  const MAX_PARALLEL_PRODUCTS = 3;', 'v0326_parallel_product_cap_missing');
-  rewritten = replaceRequired(
-    rewritten,
-    '    if (!all[SELECTION_QUEUE_KEY] && all[LEGACY_SELECTION_QUEUE_KEY]) writes[SELECTION_QUEUE_KEY] = { ...all[LEGACY_SELECTION_QUEUE_KEY], version: VERSION };',
-    '    if (!all[SELECTION_QUEUE_KEY] && all[LEGACY_SELECTION_QUEUE_KEY]) { const legacyQueue = all[LEGACY_SELECTION_QUEUE_KEY]; writes[SELECTION_QUEUE_KEY] = legacyQueue?.status === "running" ? { ...legacyQueue, version: VERSION, status: "superseded_by_v0326", finishedAt: Date.now(), updatedAt: Date.now() } : { ...legacyQueue, version: VERSION }; }',
-    'v0326_legacy_queue_stop_missing',
-  );
-  rewritten = replaceRequired(
-    rewritten,
-    [
-      '    await saveSelectionQueue({',
-      '      version: VERSION,',
-      '      status: "running",',
-      '      jobIds,',
-      '      cursor: 0,',
-      '      activeRunId: "",',
-      '      activeJobId: "",',
-      '      activeModelNumber: "",',
-      '      activeTasks: [],',
-      '      attemptedGoodsKeys: [],',
-      '      results: [],',
-      '      waves: [],',
-      '      startedAt: now,',
-      '      updatedAt: now,',
-      '    });',
-    ].join('\n'),
-    '    await saveSelectionQueue({ version: VERSION, status: "running", jobIds, batchRunId: newRunId(), launchedJobIds: [], jobTasks: {}, claimAttempts: {}, activeTasks: [], results: [], waves: [], startedAt: now, updatedAt: now });',
-    'v0326_intent_queue_shape_missing',
-  );
+  rewritten = replaceRequired(rewritten, '    if (!all[SELECTION_QUEUE_KEY] && all[LEGACY_SELECTION_QUEUE_KEY]) writes[SELECTION_QUEUE_KEY] = { ...all[LEGACY_SELECTION_QUEUE_KEY], version: VERSION };', '    if (!all[SELECTION_QUEUE_KEY] && all[LEGACY_SELECTION_QUEUE_KEY]) { const legacyQueue = all[LEGACY_SELECTION_QUEUE_KEY]; writes[SELECTION_QUEUE_KEY] = legacyQueue?.status === "running" ? { ...legacyQueue, version: VERSION, status: "superseded_by_v0326", finishedAt: Date.now(), updatedAt: Date.now() } : { ...legacyQueue, version: VERSION }; }', 'v0326_legacy_queue_stop_missing');
+  rewritten = replaceRequired(rewritten, [
+      '    await saveSelectionQueue({','      version: VERSION,','      status: "running",','      jobIds,','      cursor: 0,','      activeRunId: "",','      activeJobId: "",','      activeModelNumber: "",','      activeTasks: [],','      attemptedGoodsKeys: [],','      results: [],','      waves: [],','      startedAt: now,','      updatedAt: now,','    });',
+    ].join('\n'), '    await saveSelectionQueue({ version: VERSION, status: "running", jobIds, batchRunId: newRunId(), launchedJobIds: [], jobTasks: {}, claimAttempts: {}, activeTasks: [], results: [], waves: [], startedAt: now, updatedAt: now });', 'v0326_intent_queue_shape_missing');
   rewritten = replaceSection(rewritten, '  async function selectedWaveStates(queue) {', '  async function startSelectedQueue(rawJobIds) {', '  ' + COORDINATOR, 'v0326_coordinator_section_missing');
   rewritten = replaceSection(rewritten, '  async function startSelectedQueue(rawJobIds) {', '  function mount() {', '  ' + START_QUEUE, 'v0326_start_queue_section_missing');
   assertScript('content-v0326', rewritten);
@@ -248,12 +224,7 @@ function rewritePopup(source: string) {
   let rewritten = rewriteRuntime(source)
     .replace('const LEGACY_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0324";', 'const LEGACY_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0325";')
     .replace('const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0324";', 'const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0325";');
-  rewritten = replaceRequired(
-    rewritten,
-    '    const total = Array.isArray(queue.jobIds) ? queue.jobIds.length : 0;\n    const current = Math.min(Number(queue.cursor || 0) + 1, total || 1);\n    const active = text(queue.activeModelNumber);\n    statusNode.textContent = "실행 중 · 상품 " + current + "/" + total + (active ? " · " + active : "") + " · 창을 닫아도 계속 처리됩니다.";',
-    '    const total = Array.isArray(queue.jobIds) ? queue.jobIds.length : 0;\n    const results = Array.isArray(queue.results) ? queue.results : [];\n    const activeJobs = (Array.isArray(queue.launchedJobIds) ? queue.launchedJobIds : []).filter(function (jobId) { return !results.some(function (row) { return row && row.jobId === jobId; }); }).length;\n    statusNode.textContent = "전체병렬 실행 중 · 완료 " + results.length + "/" + total + " · 동시상품 " + activeJobs + " · 상품당 최대 6채널 동시";',
-    'v0326_popup_parallel_status_missing',
-  );
+  rewritten = replaceRequired(rewritten, '    const total = Array.isArray(queue.jobIds) ? queue.jobIds.length : 0;\n    const current = Math.min(Number(queue.cursor || 0) + 1, total || 1);\n    const active = text(queue.activeModelNumber);\n    statusNode.textContent = "실행 중 · 상품 " + current + "/" + total + (active ? " · " + active : "") + " · 창을 닫아도 계속 처리됩니다.";', '    const total = Array.isArray(queue.jobIds) ? queue.jobIds.length : 0;\n    const results = Array.isArray(queue.results) ? queue.results : [];\n    const activeJobs = (Array.isArray(queue.launchedJobIds) ? queue.launchedJobIds : []).filter(function (jobId) { return !results.some(function (row) { return row && row.jobId === jobId; }); }).length;\n    statusNode.textContent = "전체병렬 실행 중 · 완료 " + results.length + "/" + total + " · 동시상품 " + activeJobs + " · 상품당 최대 6채널 동시";', 'v0326_popup_parallel_status_missing');
   assertScript('popup-v0326', rewritten); return rewritten;
 }
 
