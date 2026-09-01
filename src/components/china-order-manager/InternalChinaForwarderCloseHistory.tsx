@@ -1,4 +1,9 @@
+import { InternalChinaFundingClosePanel } from "@/components/china-order-manager/InternalChinaFundingClosePanel";
 import type { InternalChinaForwarderCostSummary } from "@/lib/internalChinaForwarderCost";
+import {
+  loadInternalChinaFundingClose,
+  type InternalChinaFundingCloseSummary,
+} from "@/lib/internalChinaFundingClose";
 import {
   koreanMonthLabel,
   previousCalendarMonth,
@@ -130,12 +135,34 @@ export async function InternalChinaForwarderCloseHistory({
 }) {
   if (!summaries.length) return null;
   const monthlyCloses = aggregateByCycleMonth(summaries);
-  const budgets = await Promise.all(monthlyCloses.map(loadMonthlyBudget));
+  const [budgets, fundingPairs] = await Promise.all([
+    Promise.all(monthlyCloses.map(loadMonthlyBudget)),
+    Promise.all(
+      summaries.map(async (summary) => ({
+        draftId: summary.draftId,
+        cycleMonth: summary.cycleMonth,
+        fundingClose: await loadInternalChinaFundingClose(summary.draftId).catch(
+          () => null,
+        ),
+      })),
+    ),
+  ]);
   const budgetByMonth = new Map(budgets.map((budget) => [budget.cycleMonth, budget]));
+  const fundingByCycleMonth = new Map<string, InternalChinaFundingCloseSummary>();
+  for (const pair of fundingPairs) {
+    if (pair.fundingClose) fundingByCycleMonth.set(pair.cycleMonth, pair.fundingClose);
+  }
   const latest = monthlyCloses[0];
   const latestBudget = budgetByMonth.get(latest.cycleMonth);
+  const latestSummary = summaries.find(
+    (summary) => summary.cycleMonth === latest.cycleMonth,
+  );
+  const latestFundingClose = fundingByCycleMonth.get(latest.cycleMonth) ?? null;
   const purchase = purchaseIncludingChinaFreight(latest);
   const multiplier = inclusiveMultiplier(latest);
+  const fundingHistory = monthlyCloses
+    .map((close) => fundingByCycleMonth.get(close.cycleMonth) ?? null)
+    .filter((row): row is InternalChinaFundingCloseSummary => Boolean(row));
 
   return (
     <section className="rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white p-5 shadow-sm">
@@ -199,6 +226,75 @@ export async function InternalChinaForwarderCloseHistory({
       <p className="mt-3 rounded-lg border border-indigo-100 bg-white px-3 py-2 text-xs font-bold leading-5 text-indigo-950">
         월 전체 지출가능금액 = 직전 달력월 정상매출 ÷ 2. 실제 총지출 = 상품대금 + 중국내운임 + 실제 부대비용이며, 사용 후 남은금액 = 전체 지출가능금액 - 실제 총지출입니다. 내부 1.45 주문비용 배수를 이용한 상품대금 배분은 발주안 계산에 그대로 유지하고, 이 마감 원가 카드에서는 실제 현금지출 한도를 기준으로 보여줍니다. 표시 배수 = (상품대금 + 중국내운임 + 실제 부대비용) ÷ (상품대금 + 중국내운임). 기존 내부 원가배수 저장값은 변경하지 않고 조회용으로 분리 표시합니다.
       </p>
+
+      {latestSummary && latestBudget?.available && (latestSummary.actualCostKrw ?? 0) > 0 ? (
+        <InternalChinaFundingClosePanel
+          draftId={latestSummary.draftId}
+          cycleMonth={latestSummary.cycleMonth}
+          totalSpendingBudgetKrw={latestBudget.totalSpendingBudgetKrw}
+          actualForwarderCostKrw={latestSummary.actualCostKrw ?? 0}
+          stored={latestFundingClose}
+        />
+      ) : null}
+
+      {fundingHistory.length ? (
+        <div className="mt-4 overflow-x-auto rounded-xl border border-emerald-200 bg-white">
+          <div className="border-b border-emerald-100 px-4 py-3">
+            <h3 className="text-sm font-black text-emerald-950">월 자금 마감 이력</h3>
+            <p className="mt-1 text-[11px] text-slate-500">
+              WorldFirst 송금은 자금이동으로, 기말잔고는 원통화로, 한국계좌 잔액은 비상금 적립으로 기록합니다.
+            </p>
+          </div>
+          <table className="min-w-[1180px] text-left text-xs">
+            <thead className="bg-emerald-50 font-bold text-slate-600">
+              <tr>
+                <th className="px-3 py-3">발주월</th>
+                <th className="px-3 py-3 text-right">전체 지출가능</th>
+                <th className="px-3 py-3 text-right">WorldFirst 송금</th>
+                <th className="px-3 py-3 text-right">WF 기말 USD</th>
+                <th className="px-3 py-3 text-right">WF 기말 CNH</th>
+                <th className="px-3 py-3 text-right">한국계좌 배정</th>
+                <th className="px-3 py-3 text-right">한국계좌 지출</th>
+                <th className="px-3 py-3 text-right">비상금 적립</th>
+                <th className="px-3 py-3">마감시각</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {fundingHistory.map((row) => (
+                <tr key={row.draftId}>
+                  <td className="px-3 py-3 font-black text-slate-950">
+                    {koreanMonthLabel(row.cycleMonth)}
+                  </td>
+                  <td className="px-3 py-3 text-right font-bold">
+                    {number.format(row.totalSpendingBudgetKrw)}원
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {number.format(row.worldFirstTransferKrw)}원
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {row.worldFirstEndingUsd.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {row.worldFirstEndingCnh.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {number.format(row.koreaAccountAvailableKrw)}원
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    {number.format(row.koreaAccountSpentKrw)}원
+                  </td>
+                  <td className="px-3 py-3 text-right font-black text-emerald-700">
+                    {number.format(row.emergencyReserveTransferKrw)}원
+                  </td>
+                  <td className="px-3 py-3 text-slate-500">
+                    {new Date(row.closedAt).toLocaleString("ko-KR")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="min-w-[1640px] text-left text-xs">
