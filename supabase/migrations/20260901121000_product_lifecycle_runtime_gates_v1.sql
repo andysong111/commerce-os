@@ -32,6 +32,6 @@ comment on table public.product_lifecycle_runtime_config is
 comment on column public.product_lifecycle_runtime_config.shopling_non_destructive_live is
   'Allows only field-tested Shopling SELLING(B) <-> SOLD_OUT(C) reconciliation.';
 comment on column public.product_lifecycle_runtime_config.purchase_stop_live is
-  'Allows lifecycle STOP policy to zero purchase recommendations through product_lifecycle_states.shadow_mode=false.';
+  'Allows lifecycle STOP policy to zero purchase recommendations without changing lifecycle state shadow_mode.';
 comment on column public.product_lifecycle_runtime_config.delete_live is
   'Reserved destructive gate. Runtime reconciliation does not execute DELETE even when true.';
