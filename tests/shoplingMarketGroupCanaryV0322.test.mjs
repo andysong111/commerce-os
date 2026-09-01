@@ -13,8 +13,9 @@ test("v0.3.22 treats any Shopling success as channel success", async () => {
     "shopling_submit_any_success_parallel_worker_v0322",
     "성공이 1건 이상이면",
     "성공이 0건이고 실패만",
+    "outcome = 'sent'",
+    "outcome = 'confirm_needed'",
   ]) {
     assert.equal(source.includes(needle), true, `missing ${needle}`);
   }
-  assert.equal(source.includes("if (nonIgnoredFailure || (!hasSuccess && anyFailure))"), false);
 });
