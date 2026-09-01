@@ -1,9 +1,13 @@
 import type { ReactNode } from "react";
+import { InternalChinaForwarderCloseHistory } from "@/components/china-order-manager/InternalChinaForwarderCloseHistory";
 import { InternalChinaForwarderCostFallback } from "@/components/china-order-manager/InternalChinaForwarderCostFallback";
 import { InternalChinaReceiptPanel } from "@/components/china-order-manager/InternalChinaReceiptPanel";
 import { loadFastPurchaseInternalDrafts } from "@/lib/fastPurchaseInternalDraft";
 import { loadInternalChinaForwarderCostSummary } from "@/lib/internalChinaForwarderCost";
-import { loadStoredInternalChinaForwarderClose } from "@/lib/internalChinaForwarderStoredClose";
+import {
+  loadRecentStoredInternalChinaForwarderCloses,
+  loadStoredInternalChinaForwarderClose,
+} from "@/lib/internalChinaForwarderStoredClose";
 import {
   koreanMonthLabel,
   seoulCalendarMonth,
@@ -18,6 +22,7 @@ const RECEIPT_LEDGER_TIMEBOX_MS = 4_500;
 const DISPLAY_METADATA_TIMEBOX_MS = 2_500;
 const FORWARDER_CLOSE_TIMEBOX_MS = 2_000;
 const FORWARDER_SUMMARY_TIMEBOX_MS = 4_500;
+const FORWARDER_HISTORY_TIMEBOX_MS = 3_000;
 
 async function timebox<T>(
   task: Promise<T>,
@@ -89,7 +94,14 @@ export default async function ChinaOrderManagerLayout({
   children: ReactNode;
 }) {
   const currentCycleMonth = seoulCalendarMonth(new Date());
-  const internalDraftState = await loadInternalDraftsForReceiptClose();
+  const [internalDraftState, recentForwarderCloses] = await Promise.all([
+    loadInternalDraftsForReceiptClose(),
+    timebox(
+      loadRecentStoredInternalChinaForwarderCloses(6).catch(() => []),
+      FORWARDER_HISTORY_TIMEBOX_MS,
+      [],
+    ),
+  ]);
   const currentCycleDrafts = internalDraftState.drafts.filter(
     (draft) =>
       draft.cycleMonth === currentCycleMonth && draft.orderedQuantity > 0,
@@ -205,6 +217,8 @@ export default async function ChinaOrderManagerLayout({
           발주원장 실시간 조회 지연 · {internalDraftState.error}
         </section>
       ) : null}
+
+      <InternalChinaForwarderCloseHistory summaries={recentForwarderCloses} />
 
       {currentCycleDrafts.map((draft) => {
         const forwarderRow = forwarderCostRows.find(
