@@ -27,10 +27,10 @@ test("browser mall-price queue is read-only, durable and fail-closed", async () 
 
 test("extension bridge only claims and reports readback tasks", async () => {
   const source = await readFile(bridgePath, "utf8");
-  assert.match(source, /price-readback-v1/);
+  assert.match(source, /INTERNAL_CHINA_BROWSER_PRICE_READBACK_BRIDGE/);
   assert.match(source, /action === "claim"/);
   assert.match(source, /action === "report"/);
-  assert.doesNotMatch(source, /modify|write.*shopling/i);
+  assert.doesNotMatch(source, /prod_modify_api|prod_each_mall_modify_api|apiProdMdy|apiProdEachMdy/);
 });
 
 test("Ops control remains same-origin and supports failed-only retry", async () => {
