@@ -38,6 +38,11 @@ function validRunId(runId: string) {
   return /^canary-group-v0(?:21|30)-[A-Za-z0-9._:-]{12,140}$/.test(runId);
 }
 
+function visibleGoodsKeys(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return [...new Set(value.map(text).filter((key) => /^\d{5,9}$/.test(key)))].slice(0, 25);
+}
+
 function profileSearchCode(productGroupKey: string) {
   const values: Record<string, { searchCode: string; profile: string }> = {
     wholesale1: { searchCode: "DM1", profile: "도매1" },
@@ -78,15 +83,20 @@ function sortTasks<T extends { productGroupKey: string; goodsKey: string }>(rows
   });
 }
 
-function identityKey(ownerId: string, launchItemId: string) {
-  return `${ownerId}::${launchItemId}`;
-}
-
 export async function POST(request: Request) {
   const payload = record(await request.json().catch(() => null));
   if (text(payload.bridge) !== BRIDGE) return json({ ok: false, error: "unsupported_group_canary_bridge" }, 400);
   const runId = text(payload.runId);
   if (!validRunId(runId)) return json({ ok: false, error: "invalid_group_canary_run_id" }, 400);
+
+  const requestedVisibleGoodsKeys = visibleGoodsKeys(payload.visibleGoodsKeys);
+  if (!requestedVisibleGoodsKeys.length) {
+    return json({
+      ok: false,
+      error: "group_canary_visible_goods_keys_required",
+      message: "현재 A18 화면의 상품번호를 식별하지 못해 과거 대기상품을 임의 처리하지 않습니다.",
+    }, 409);
+  }
 
   const supabase = await createSupabaseAdminClient();
   if (!supabase) return json({ ok: false, error: "supabase_admin_unavailable" }, 503);
@@ -106,56 +116,50 @@ export async function POST(request: Request) {
     if (tasks.length !== recovered.data.length || identities.size !== 1 || tasks.length > 6) {
       return json({ ok: false, error: "group_canary_recovery_payload_invalid" }, 503);
     }
-    return json({ ok: true, bridge: BRIDGE, runId, tasks: sortTasks(tasks), recovered: true });
+    return json({ ok: true, bridge: BRIDGE, runId, tasks: sortTasks(tasks), recovered: true, anchoredToVisibleA18: true });
   }
 
-  const candidates = await supabase
+  const visibleCandidates = await supabase
     .from("shopling_market_pipeline_ledger")
     .select(SELECT_COLUMNS)
+    .in("goods_key", requestedVisibleGoodsKeys)
     .eq("status", "queued")
     .eq("market_status", "pending")
-    .order("registry_registered_at", { ascending: true })
-    .order("launch_item_id", { ascending: true })
-    .limit(120);
-  if (candidates.error) return json({ ok: false, error: "group_canary_candidate_failed", message: candidates.error.message }, 503);
-  const rows = Array.isArray(candidates.data) ? candidates.data : [];
-  if (!rows.length) return json({ ok: true, bridge: BRIDGE, runId, tasks: [], empty: true });
-
-  const queuedIdentities = new Set(
-    rows.map((raw) => {
-      const row = record(raw);
-      return identityKey(text(row.owner_id), text(row.launch_item_id));
-    }).filter((value) => !value.startsWith("::") && !value.endsWith("::")),
-  );
-
-  const recentSent = await supabase
-    .from("shopling_market_pipeline_ledger")
-    .select("owner_id,launch_item_id,completed_at,updated_at")
-    .eq("status", "sent")
-    .eq("market_status", "sent")
-    .order("completed_at", { ascending: false })
-    .order("updated_at", { ascending: false })
-    .limit(50);
-  if (recentSent.error) {
-    return json({ ok: false, error: "group_canary_recent_sent_lookup_failed", message: recentSent.error.message }, 503);
+    .limit(25);
+  if (visibleCandidates.error) {
+    return json({ ok: false, error: "group_canary_visible_candidate_failed", message: visibleCandidates.error.message }, 503);
   }
 
-  const recentPartial = (Array.isArray(recentSent.data) ? recentSent.data : [])
-    .map(record)
-    .find((row) => queuedIdentities.has(identityKey(text(row.owner_id), text(row.launch_item_id))));
+  const visibleRows = Array.isArray(visibleCandidates.data) ? visibleCandidates.data.map(record) : [];
+  if (!visibleRows.length) {
+    return json({
+      ok: true,
+      bridge: BRIDGE,
+      runId,
+      tasks: [],
+      empty: true,
+      anchoredToVisibleA18: true,
+      message: "현재 A18 화면에서 Commerce OS 대기열과 일치하는 미전송 상품이 없습니다.",
+    });
+  }
 
-  const first = recentPartial
-    ? rows.find((raw) => {
-        const row = record(raw);
-        return text(row.owner_id) === text(recentPartial.owner_id)
-          && text(row.launch_item_id) === text(recentPartial.launch_item_id);
-      }) || rows[0]
-    : rows[0];
+  const firstVisible = requestedVisibleGoodsKeys
+    .map((goodsKey) => visibleRows.find((row) => text(row.goods_key) === goodsKey))
+    .find(Boolean);
+  if (!firstVisible) {
+    return json({ ok: false, error: "group_canary_visible_identity_missing" }, 409);
+  }
 
-  const firstRecord = record(first);
-  const ownerId = text(firstRecord.owner_id);
-  const launchItemId = text(firstRecord.launch_item_id);
-  if (!ownerId || !launchItemId) return json({ ok: false, error: "group_canary_candidate_identity_missing" }, 503);
+  const ownerId = text(firstVisible.owner_id);
+  const launchItemId = text(firstVisible.launch_item_id);
+  if (!ownerId || !launchItemId) {
+    return json({ ok: false, error: "group_canary_visible_identity_invalid" }, 503);
+  }
+
+  const identityRows = visibleRows.filter(
+    (row) => text(row.owner_id) === ownerId && text(row.launch_item_id) === launchItemId,
+  );
+  if (!identityRows.length) return json({ ok: false, error: "group_canary_visible_identity_empty" }, 409);
 
   const claimedAt = new Date().toISOString();
   const claimed = await supabase
@@ -175,7 +179,7 @@ export async function POST(request: Request) {
 
   const claimedRows = Array.isArray(claimed.data) ? claimed.data : [];
   if (!claimedRows.length) {
-    return json({ ok: false, error: "group_canary_claim_race", message: "대상 상품의 대기열이 동시에 변경되어 아무 것도 전송하지 않았습니다." }, 409);
+    return json({ ok: false, error: "group_canary_claim_race", message: "현재 A18 대상의 대기열이 동시에 변경되어 아무 것도 전송하지 않았습니다." }, 409);
   }
   const tasks = claimedRows.map(taskFromRow).filter(Boolean) as NonNullable<ReturnType<typeof taskFromRow>>[];
   const identities = new Set(tasks.map((task) => task.launchItemId));
@@ -183,7 +187,7 @@ export async function POST(request: Request) {
     return json({
       ok: false,
       error: "group_canary_claim_payload_invalid",
-      message: "1개 상품 범위를 벗어난 claim 결과라 자동 송신하지 않습니다.",
+      message: "현재 A18에서 식별한 1개 상품 범위를 벗어난 claim 결과라 자동 송신하지 않습니다.",
       claimedRowCount: claimedRows.length,
       validTaskCount: tasks.length,
     }, 503);
@@ -196,7 +200,9 @@ export async function POST(request: Request) {
     tasks: sortTasks(tasks),
     taskCount: tasks.length,
     launchItemId,
-    resumedPartialProduct: Boolean(recentPartial),
+    visibleMatchCount: identityRows.length,
+    visibleGoodsKeys: requestedVisibleGoodsKeys,
+    anchoredToVisibleA18: true,
     recovered: false,
   });
 }
