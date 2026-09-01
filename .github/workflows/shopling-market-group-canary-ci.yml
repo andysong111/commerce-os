@@ -8,12 +8,14 @@ on:
       - "public/shopling-market-group-canary/**"
       - "src/app/api/shopling-market-group-canary/**"
       - "tests/shoplingMarketGroupCanary.test.mjs"
+      - "tests/shoplingMarketGroupCanaryV038.test.mjs"
       - ".github/workflows/shopling-market-group-canary-ci.yml"
   pull_request:
     paths:
       - "public/shopling-market-group-canary/**"
       - "src/app/api/shopling-market-group-canary/**"
       - "tests/shoplingMarketGroupCanary.test.mjs"
+      - "tests/shoplingMarketGroupCanaryV038.test.mjs"
       - ".github/workflows/shopling-market-group-canary-ci.yml"
   workflow_dispatch:
 
@@ -36,7 +38,7 @@ jobs:
           node --check public/shopling-market-group-canary/background-root.mjs &&
           node --check public/shopling-market-group-canary/content-group-canary.mjs
       - name: Test group canary safety contract
-        run: node --test tests/shoplingMarketGroupCanary.test.mjs
+        run: node --test tests/shoplingMarketGroupCanary.test.mjs tests/shoplingMarketGroupCanaryV038.test.mjs
       - name: Build
         run: npm run build
         env:
