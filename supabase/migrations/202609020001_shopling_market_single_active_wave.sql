@@ -1,6 +1,7 @@
 create or replace function public.enforce_shopling_market_single_active_wave()
 returns trigger
 language plpgsql
+set search_path = public, pg_temp
 as $$
 begin
   if new.status = 'claimed'
