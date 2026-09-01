@@ -1,3 +1,4 @@
+import { ensureInternalChinaBrowserMallPriceReadback } from "@/lib/internalChinaBrowserMallPriceReadback";
 import { dispatchInternalChinaDirectTargetExecution } from "@/lib/internalChinaGroupCostPriceExecution";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
@@ -18,16 +19,32 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const result = await dispatchInternalChinaDirectTargetExecution(
-      await request.json().catch(() => ({})),
-    );
+    const payload = await request.json().catch(() => ({}));
+    const result = await dispatchInternalChinaDirectTargetExecution(payload);
+    let browserReadbackQueued = false;
+    let browserReadbackError = "";
+    try {
+      await ensureInternalChinaBrowserMallPriceReadback({
+        proposalFingerprint: result.receipt.proposalFingerprint,
+        delayMs: 2 * 60_000,
+      });
+      browserReadbackQueued = true;
+    } catch (error) {
+      browserReadbackError = error instanceof Error ? error.message : String(error || "browser readback queue failed");
+    }
     return Response.json(
       {
         ok: true,
         ...result,
+        browserReadbackQueued,
+        browserReadbackError: browserReadbackError || null,
         message: result.duplicate
-          ? "동일 가격조정안은 이미 Shopling 적용 작업으로 전송되어 중복 실행하지 않았습니다."
-          : `확정원가 기준 목표가를 퍼센트 상한 없이 한 번에 적용하는 작업 ${result.receipt.batchCount.toLocaleString("ko-KR")}개 배치를 Shopling 실행기로 전송했습니다.`,
+          ? browserReadbackQueued
+            ? "동일 가격조정안은 이미 Shopling 적용 작업으로 전송되어 중복 실행하지 않았습니다. 쇼핑몰별 브라우저 재조회 검증 대기열도 준비되어 있습니다."
+            : "동일 가격조정안은 이미 Shopling 적용 작업으로 전송되어 중복 실행하지 않았습니다."
+          : browserReadbackQueued
+            ? `확정원가 기준 목표가 ${result.receipt.batchCount.toLocaleString("ko-KR")}개 배치를 Shopling 실행기로 전송했습니다. 반영 대기 후 쇼핑몰별 브라우저 재조회 검증도 자동 시작됩니다.`
+            : `확정원가 기준 목표가를 퍼센트 상한 없이 한 번에 적용하는 작업 ${result.receipt.batchCount.toLocaleString("ko-KR")}개 배치를 Shopling 실행기로 전송했습니다.`,
       },
       { headers: { "cache-control": "no-store" } },
     );
