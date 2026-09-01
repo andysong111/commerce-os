@@ -20,6 +20,16 @@ function batchLimit(value: unknown) {
   return Math.max(1, Math.min(MAX_SHOPLING_LIVE_BATCH_LIMIT, parsed));
 }
 
+function closedConfig(): ProductLifecycleRuntimeConfig {
+  return {
+    shoplingNonDestructiveLive: false,
+    purchaseStopLive: false,
+    deleteLive: false,
+    shoplingLiveBatchLimit: DEFAULT_SHOPLING_LIVE_BATCH_LIMIT,
+    source: "default_shadow",
+  };
+}
+
 export async function loadProductLifecycleRuntimeConfig(
   admin: AdminClient,
 ): Promise<ProductLifecycleRuntimeConfig> {
@@ -29,21 +39,26 @@ export async function loadProductLifecycleRuntimeConfig(
     .eq("config_key", "default")
     .limit(1);
 
-  if (!result.error && Array.isArray(result.data) && result.data[0]) {
-    const row = result.data[0] as Record<string, unknown>;
-    return {
-      shoplingNonDestructiveLive: row.shopling_non_destructive_live === true,
-      purchaseStopLive: row.purchase_stop_live === true,
-      deleteLive: row.delete_live === true,
-      shoplingLiveBatchLimit: batchLimit(row.shopling_live_batch_limit),
-      source: "database",
-    };
+  if (!result.error) {
+    if (Array.isArray(result.data) && result.data[0]) {
+      const row = result.data[0] as Record<string, unknown>;
+      return {
+        shoplingNonDestructiveLive: row.shopling_non_destructive_live === true,
+        purchaseStopLive: row.purchase_stop_live === true,
+        deleteLive: row.delete_live === true,
+        shoplingLiveBatchLimit: batchLimit(row.shopling_live_batch_limit),
+        source: "database",
+      };
+    }
+    // Existing config table without its singleton row must never inherit a legacy live env.
+    return closedConfig();
   }
 
-  if (result.error && result.error.code !== "42P01") {
+  if (result.error.code !== "42P01") {
     throw new Error(`PRODUCT_LIFECYCLE_RUNTIME_CONFIG_FAILED:${result.error.message}`);
   }
 
+  // Transitional compatibility only while the runtime-config migration has not been applied yet.
   if (process.env.PRODUCT_LIFECYCLE_ENFORCEMENT_MODE?.trim().toLowerCase() === "live") {
     return {
       shoplingNonDestructiveLive: true,
@@ -54,11 +69,5 @@ export async function loadProductLifecycleRuntimeConfig(
     };
   }
 
-  return {
-    shoplingNonDestructiveLive: false,
-    purchaseStopLive: false,
-    deleteLive: false,
-    shoplingLiveBatchLimit: DEFAULT_SHOPLING_LIVE_BATCH_LIMIT,
-    source: "default_shadow",
-  };
+  return closedConfig();
 }
