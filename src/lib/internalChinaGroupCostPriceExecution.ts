@@ -343,7 +343,7 @@ async function reserveBatch(input: {
           goodsKeyCount: input.goodsKeyCount,
           mallTargetCount: input.mallTargetCount,
         },
-        result_snapshot: null,
+        result_snapshot: {},
         error_message: null,
         started_at: now,
         finished_at: null,
