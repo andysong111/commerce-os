@@ -5,6 +5,7 @@ on:
     paths:
       - "src/lib/productLifecyclePolicy.ts"
       - "src/lib/productLifecycleEngine.ts"
+      - "src/lib/productLifecycleRuntimeConfig.ts"
       - "src/lib/productLifecycleLiveReconcile.ts"
       - "src/lib/productLifecyclePurchaseOverlay.ts"
       - "src/lib/integrations/productDecisionAgent.ts"
@@ -46,6 +47,7 @@ jobs:
           npx eslint
           src/lib/productLifecyclePolicy.ts
           src/lib/productLifecycleEngine.ts
+          src/lib/productLifecycleRuntimeConfig.ts
           src/lib/productLifecycleLiveReconcile.ts
           src/lib/productLifecyclePurchaseOverlay.ts
           src/lib/integrations/productDecisionAgent.ts
