@@ -3,10 +3,6 @@ import {
   koreanMonthLabel,
   previousCalendarMonth,
 } from "@/lib/monthlyPurchasePolicy";
-import {
-  DEFAULT_PURCHASE_COST_MULTIPLIER,
-  calculateProductOrderBudget,
-} from "@/lib/productDecisionEngine/portfolio";
 import { loadCalendarMonthNormalRevenue } from "@/lib/shopling/calendarMonthRevenue";
 
 const number = new Intl.NumberFormat("ko-KR");
@@ -24,10 +20,9 @@ type MonthlyBudget = {
   cycleMonth: string;
   budgetMonth: string;
   budgetMonthRevenueKrw: number;
-  grossPurchaseCostLimitKrw: number;
-  productOrderBudgetKrw: number;
-  unusedProductOrderBudgetKrw: number;
-  productOrderBudgetOverKrw: number;
+  totalSpendingBudgetKrw: number;
+  remainingAfterSpendKrw: number;
+  budgetOverKrw: number;
   utilizationPercent: number;
   available: boolean;
 };
@@ -93,46 +88,35 @@ async function loadMonthlyBudget(close: MonthlyClose): Promise<MonthlyBudget> {
   try {
     const revenue = await loadCalendarMonthNormalRevenue(budgetMonth);
     const budgetMonthRevenueKrw = money(revenue.revenueKrw);
-    const grossPurchaseCostLimitKrw = money(budgetMonthRevenueKrw / 2);
-    const productOrderBudgetKrw = money(
-      calculateProductOrderBudget(
-        grossPurchaseCostLimitKrw,
-        DEFAULT_PURCHASE_COST_MULTIPLIER,
-      ),
-    );
-    const unusedProductOrderBudgetKrw = Math.max(
+    const totalSpendingBudgetKrw = money(budgetMonthRevenueKrw / 2);
+    const spentKrw = totalOutflow(close);
+    const remainingAfterSpendKrw = Math.max(
       0,
-      productOrderBudgetKrw - close.productPurchaseCostKrw,
+      totalSpendingBudgetKrw - spentKrw,
     );
-    const productOrderBudgetOverKrw = Math.max(
-      0,
-      close.productPurchaseCostKrw - productOrderBudgetKrw,
-    );
+    const budgetOverKrw = Math.max(0, spentKrw - totalSpendingBudgetKrw);
     const utilizationPercent =
-      productOrderBudgetKrw > 0
-        ? Math.round((close.productPurchaseCostKrw / productOrderBudgetKrw) * 10_000) /
-          100
+      totalSpendingBudgetKrw > 0
+        ? Math.round((spentKrw / totalSpendingBudgetKrw) * 10_000) / 100
         : 0;
     return {
       cycleMonth: close.cycleMonth,
       budgetMonth,
       budgetMonthRevenueKrw,
-      grossPurchaseCostLimitKrw,
-      productOrderBudgetKrw,
-      unusedProductOrderBudgetKrw,
-      productOrderBudgetOverKrw,
+      totalSpendingBudgetKrw,
+      remainingAfterSpendKrw,
+      budgetOverKrw,
       utilizationPercent,
-      available: budgetMonthRevenueKrw > 0 && productOrderBudgetKrw > 0,
+      available: budgetMonthRevenueKrw > 0 && totalSpendingBudgetKrw > 0,
     };
   } catch {
     return {
       cycleMonth: close.cycleMonth,
       budgetMonth,
       budgetMonthRevenueKrw: 0,
-      grossPurchaseCostLimitKrw: 0,
-      productOrderBudgetKrw: 0,
-      unusedProductOrderBudgetKrw: 0,
-      productOrderBudgetOverKrw: 0,
+      totalSpendingBudgetKrw: 0,
+      remainingAfterSpendKrw: 0,
+      budgetOverKrw: 0,
       utilizationPercent: 0,
       available: false,
     };
@@ -164,7 +148,7 @@ export async function InternalChinaForwarderCloseHistory({
             최근 마감 원가 · {koreanMonthLabel(latest.cycleMonth)}
           </h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            월별 상품주문 가능액·실제 사용액·미사용 예산과 상품대금·중국내운임·실제 부대비용·총지출을 함께 확인합니다.
+            월별 전체 지출가능금액·실제 총지출·사용 후 남은금액과 상품대금·중국내운임·실제 부대비용을 함께 확인합니다.
           </p>
         </div>
         <span className="rounded-full border border-indigo-200 bg-white px-3 py-1 text-xs font-black text-indigo-800">
@@ -175,21 +159,23 @@ export async function InternalChinaForwarderCloseHistory({
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-8">
-        <Metric label="상품대금 · 예산 사용액" value={`${number.format(latest.productPurchaseCostKrw)}원`} />
+        <Metric label="상품대금" value={`${number.format(latest.productPurchaseCostKrw)}원`} />
         <Metric
-          label="월 상품주문 가능액"
+          label="월 전체 지출가능금액"
           value={
             latestBudget?.available
-              ? `${number.format(latestBudget.productOrderBudgetKrw)}원`
+              ? `${number.format(latestBudget.totalSpendingBudgetKrw)}원`
               : "조회 대기"
           }
           emphasized
         />
         <Metric
-          label="미사용 상품주문 예산"
+          label="사용 후 남은금액"
           value={
             latestBudget?.available
-              ? `${number.format(latestBudget.unusedProductOrderBudgetKrw)}원`
+              ? latestBudget.budgetOverKrw > 0
+                ? `초과 ${number.format(latestBudget.budgetOverKrw)}원`
+                : `${number.format(latestBudget.remainingAfterSpendKrw)}원`
               : "조회 대기"
           }
           emphasized
@@ -211,7 +197,7 @@ export async function InternalChinaForwarderCloseHistory({
       </div>
 
       <p className="mt-3 rounded-lg border border-indigo-100 bg-white px-3 py-2 text-xs font-bold leading-5 text-indigo-950">
-        월 상품주문 가능액 = 직전 달력월 정상매출 ÷ 2 ÷ 내부 주문비용 배수 {DEFAULT_PURCHASE_COST_MULTIPLIER.toFixed(2)}. 상품대금이 실제 예산 사용액이며, 중국내운임·배송대행 등 물류비는 1.45 배수 안에 별도로 확보하므로 미사용 상품주문 예산에서 다시 차감하지 않습니다. 표시 배수 = (상품대금 + 중국내운임 + 실제 부대비용) ÷ (상품대금 + 중국내운임). 기존 내부 원가배수 저장값은 변경하지 않고 조회용으로 분리 표시합니다.
+        월 전체 지출가능금액 = 직전 달력월 정상매출 ÷ 2. 실제 총지출 = 상품대금 + 중국내운임 + 실제 부대비용이며, 사용 후 남은금액 = 전체 지출가능금액 - 실제 총지출입니다. 내부 1.45 주문비용 배수를 이용한 상품대금 배분은 발주안 계산에 그대로 유지하고, 이 마감 원가 카드에서는 실제 현금지출 한도를 기준으로 보여줍니다. 표시 배수 = (상품대금 + 중국내운임 + 실제 부대비용) ÷ (상품대금 + 중국내운임). 기존 내부 원가배수 저장값은 변경하지 않고 조회용으로 분리 표시합니다.
       </p>
 
       <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -221,14 +207,14 @@ export async function InternalChinaForwarderCloseHistory({
               <th className="px-3 py-3">발주월</th>
               <th className="px-3 py-3">예산 기준월</th>
               <th className="px-3 py-3 text-right">기준 정상매출</th>
-              <th className="px-3 py-3 text-right">상품주문 가능액</th>
-              <th className="px-3 py-3 text-right">상품대금 · 사용액</th>
-              <th className="px-3 py-3 text-right">미사용 예산</th>
-              <th className="px-3 py-3 text-right">예산 사용률</th>
+              <th className="px-3 py-3 text-right">전체 지출가능금액</th>
+              <th className="px-3 py-3 text-right">실제 총지출</th>
+              <th className="px-3 py-3 text-right">사용 후 남은금액</th>
+              <th className="px-3 py-3 text-right">지출 사용률</th>
+              <th className="px-3 py-3 text-right">상품대금</th>
               <th className="px-3 py-3 text-right">중국내운임</th>
               <th className="px-3 py-3 text-right">운임포함 매입금액</th>
               <th className="px-3 py-3 text-right">실제 부대비용</th>
-              <th className="px-3 py-3 text-right">총지출</th>
               <th className="px-3 py-3 text-right">운임포함 배수</th>
               <th className="px-3 py-3">마감시각</th>
             </tr>
@@ -250,23 +236,25 @@ export async function InternalChinaForwarderCloseHistory({
                     {budget?.available ? `${number.format(budget.budgetMonthRevenueKrw)}원` : "-"}
                   </td>
                   <td className="px-3 py-3 text-right font-black text-indigo-700">
-                    {budget?.available ? `${number.format(budget.productOrderBudgetKrw)}원` : "-"}
+                    {budget?.available ? `${number.format(budget.totalSpendingBudgetKrw)}원` : "-"}
                   </td>
-                  <td className="px-3 py-3 text-right font-bold">{number.format(summary.productPurchaseCostKrw)}원</td>
+                  <td className="px-3 py-3 text-right font-bold">
+                    {number.format(totalOutflow(summary))}원
+                  </td>
                   <td className="px-3 py-3 text-right font-black text-emerald-700">
-                    {budget?.available ? `${number.format(budget.unusedProductOrderBudgetKrw)}원` : "-"}
-                  </td>
-                  <td className="px-3 py-3 text-right">
                     {budget?.available
-                      ? budget.productOrderBudgetOverKrw > 0
-                        ? `초과 ${number.format(budget.productOrderBudgetOverKrw)}원`
-                        : `${budget.utilizationPercent.toFixed(1)}%`
+                      ? budget.budgetOverKrw > 0
+                        ? `초과 ${number.format(budget.budgetOverKrw)}원`
+                        : `${number.format(budget.remainingAfterSpendKrw)}원`
                       : "-"}
                   </td>
+                  <td className="px-3 py-3 text-right">
+                    {budget?.available ? `${budget.utilizationPercent.toFixed(1)}%` : "-"}
+                  </td>
+                  <td className="px-3 py-3 text-right">{number.format(summary.productPurchaseCostKrw)}원</td>
                   <td className="px-3 py-3 text-right">{number.format(summary.domesticChinaFreightKrw)}원</td>
                   <td className="px-3 py-3 text-right font-bold">{number.format(rowPurchase)}원</td>
                   <td className="px-3 py-3 text-right">{number.format(summary.actualCostKrw)}원</td>
-                  <td className="px-3 py-3 text-right font-bold">{number.format(totalOutflow(summary))}원</td>
                   <td className="px-3 py-3 text-right font-black text-indigo-700">
                     {rowMultiplier === null ? "-" : rowMultiplier.toFixed(4)}
                   </td>
