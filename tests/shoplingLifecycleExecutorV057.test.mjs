@@ -6,6 +6,10 @@ const executorPath = new URL(
   "../public/shopling-account-title-bridge/content-shopling-lifecycle-executor.js",
   import.meta.url,
 );
+const currentStatusGuardPath = new URL(
+  "../public/shopling-account-title-bridge/content-shopling-lifecycle-current-status-v062.js",
+  import.meta.url,
+);
 const mainExecPath = new URL(
   "../public/shopling-account-title-bridge/background-shopling-lifecycle-main-exec.js",
   import.meta.url,
@@ -37,6 +41,23 @@ test("lifecycle executor parses and targets the diagnosed Shopling product-list 
   assert.match(source, /context\.desiredState === "SELLING" \? "B"/);
   assert.match(source, /context\.desiredState === "SOLD_OUT" \? "C"/);
   assert.match(source, /: "Z"/);
+});
+
+test("lifecycle current-status guard narrows the first search to the read-only B or C snapshot", async () => {
+  const source = await readFile(currentStatusGuardPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /commerce_os_lifecycle_current/);
+  assert.match(source, /\^\[BC\]\$/);
+  assert.match(source, /STAGE_SEARCHED = "search-submitted"/);
+  assert.match(source, /STAGE_VERIFY = "verify-submitted"/);
+  assert.match(source, /stage === STAGE_SEARCHED/);
+  assert.match(source, /return query\.currentSaleStatus/);
+  assert.match(source, /stage === STAGE_VERIFY/);
+  assert.match(source, /desiredStatus\(query\.desiredState\)/);
+  assert.match(source, /select\[name="sale_status"\]/);
+  assert.match(source, /document\.addEventListener\("click"/);
+  assert.match(source, /document\.addEventListener\("submit"/);
+  assert.doesNotMatch(source, /status_chg|del_submit/);
 });
 
 test("lifecycle executor mutates only one exact goods-key row and verifies again before success", async () => {
@@ -97,6 +118,18 @@ test("background root loads the direct MAIN-world lifecycle executor and keeps a
   assert.doesNotMatch(source, /commerce-os-shopling-lifecycle-executor"/);
 });
 
+test("background executor re-reads current sale status before opening the browser and keeps fallback fail-closed", async () => {
+  const source = await readFile(backgroundPath, "utf8");
+  assert.doesNotThrow(() => new Function(source));
+  assert.match(source, /SHOPLING_LIFECYCLE_STATUS_PROBE_ENDPOINT/);
+  assert.match(source, /shopling-lifecycle-status-probe/);
+  assert.match(source, /lifecycleReadCurrentSaleStatus/);
+  assert.match(source, /state \|\| ""\)\.trim\(\) !== "READY"/);
+  assert.match(source, /\^\[BC\]\$/);
+  assert.match(source, /commerce_os_lifecycle_current/);
+  assert.match(source, /lifecycleExecutorUrl\(task, claimed\.runId, claimed\.deleteExecutionEnabled, currentSaleStatus\)/);
+});
+
 test("background executor is serialized, yields to existing Shopling workers, and times out fail-closed", async () => {
   const source = await readFile(backgroundPath, "utf8");
   assert.doesNotThrow(() => new Function(source));
@@ -124,19 +157,19 @@ test("server bridge claims only non-shadow pending work and never releases DELET
   assert.match(source, /deleteExecutionEnabled: allowDelete/);
 });
 
-test("download package upgrades baseline manifest to v0.6.1 with scripting permission and recurring keeper", async () => {
+test("download package upgrades baseline manifest to v0.6.2 with current-status guard, scripting and recurring keeper", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "0\.6\.1"/);
+  assert.match(source, /manifest\.version = "0\.6\.2"/);
   assert.match(source, /"alarms", "scripting"/);
   assert.match(source, /background-shopling-lifecycle-main-exec\.js/);
   assert.match(
     source,
-    /js: \["content-shopling-lifecycle-executor\.js"\],[\s\S]{0,120}all_frames: false/,
+    /js: \[[\s\S]{0,120}"content-shopling-lifecycle-current-status-v062\.js"[\s\S]{0,120}"content-shopling-lifecycle-executor\.js"[\s\S]{0,120}\],[\s\S]{0,120}all_frames: false/,
   );
   assert.doesNotMatch(source, /world: "MAIN"/);
   assert.match(source, /recurring keeper/);
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.6\.1\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.6\.1/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v0\.6\.2\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v0\.6\.2/);
 });
 
 test("download package rewrites legacy event invokeMutation into background scripting message transport", async () => {
