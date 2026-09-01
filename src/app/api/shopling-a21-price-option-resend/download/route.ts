@@ -5,9 +5,9 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 const ROOT = "shopling-a21-price-option-resend";
-const FILES = ["manifest.json", "background.js", "content-a21.js", "popup.html", "popup.js", "README.txt"] as const;
+const FILES = ["manifest.json", "background-v012.js", "content-a21.js", "popup.html", "popup.js", "README.txt"] as const;
 
 function assertJavaScript(name: string, source: string) {
   try {
@@ -25,9 +25,10 @@ export async function GET() {
     const source = await readFile(path.join(publicRoot, fileName), "utf8");
     if (fileName.endsWith(".js")) assertJavaScript(fileName, source);
     if (fileName === "manifest.json") {
-      const manifest = JSON.parse(source) as { manifest_version?: number; version?: string; permissions?: string[] };
+      const manifest = JSON.parse(source) as { manifest_version?: number; version?: string; permissions?: string[]; background?: { service_worker?: string } };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
+      if (manifest.background?.service_worker !== "background-v012.js") throw new Error("shopling_a21_resend_background_version_mismatch");
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting")) {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
