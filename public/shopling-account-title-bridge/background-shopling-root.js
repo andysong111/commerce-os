@@ -7,6 +7,7 @@ importScripts(
   "background-shopling-pipeline.js",
   "background-shopling-lifecycle.js",
   "background-shopling-lifecycle-main-exec.js",
+  "background-shopling-price-readback.js",
 );
 
 // The lifecycle worker historically reused its recurring alarm name for a
