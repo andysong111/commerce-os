@@ -153,6 +153,25 @@ export const shoplingCategoryReviewQueueModule: CommerceModule = {
   safetyBadge: "승인 후 진행관리 반영",
 };
 
+export const internalChinaCostPriceReviewModule: CommerceModule = {
+  id: "internal-china-cost-price-review",
+  title: "확정원가 · 상품그룹 가격조정",
+  navigationLabel: "확정원가 가격조정",
+  description:
+    "확정 실제원가를 기준으로 도매1~도매4·소매1~소매2 상품그룹 목표가와 연결 쇼핑몰별 가격정책을 함께 검토하고 승인·적용합니다.",
+  status: "available",
+  route: "/china-order-manager/price-review",
+  category: "가격·수익 관리",
+  inputType: "확정 실제원가, 주문당 수량, OPS 내부 가격그룹, Shopling 현재가·판매상태",
+  outputType: "상품그룹 기준가, 연결 쇼핑몰별 목표가, 승인·Shopling 적용 상태",
+  historySupport: true,
+  externalProject: false,
+  note: "가격조정안 승인은 정책·대상 확정 단계입니다. 실제 Shopling 가격 쓰기는 승인 후 나타나는 적용 버튼에서 별도로 실행합니다.",
+  helperNote: "확정원가 → 그룹·쇼핑몰 목표가",
+  actionLabel: "가격조정 검토 열기",
+  safetyBadge: "승인 후 별도 적용",
+};
+
 const renamedModuleRegistry: readonly CommerceModule[] = moduleRegistry.map((module) => {
   if (module.id === "china-order-cost") {
     return {
@@ -182,6 +201,7 @@ export const extendedModuleRegistry: readonly CommerceModule[] = [
   commerceOperationsModule,
   ...renamedModuleRegistry,
   shoplingCategoryReviewQueueModule,
+  internalChinaCostPriceReviewModule,
   productMasterShoplingDiagnosticModule,
   productLifecycleSlotModule,
   productDecisionAgentModule,
