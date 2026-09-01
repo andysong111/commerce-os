@@ -101,6 +101,7 @@ jobs:
           src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx
           src/components/china-order-manager/InternalChinaPurchaseBudgetAudit.tsx
           src/components/china-order-manager/InternalChinaReceiptPanel.tsx
+          src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx
           src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx
           src/components/china-order-manager/InternalChinaCostPriceApprovalButton.tsx
           src/components/china-order-manager/InternalChinaGroupCostPriceApprovalButton.tsx
