@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../public/shopling-a21-price-option-resend/", import.meta.url);
-const [manifestText, background, content, popup, planRoute, downloadRoute] = await Promise.all([
+const [manifestText, backgroundBase, backgroundWrapper, backgroundOverlay, content, contentOverlay, popup, planRoute, downloadRoute] = await Promise.all([
   readFile(new URL("manifest.json", root), "utf8"),
   readFile(new URL("background-v012.js", root), "utf8"),
+  readFile(new URL("background-v013.js", root), "utf8"),
+  readFile(new URL("background-v013-overlay.js", root), "utf8"),
   readFile(new URL("content-a21.js", root), "utf8"),
+  readFile(new URL("content-a21-v013.js", root), "utf8"),
   readFile(new URL("popup.js", root), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/plan/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/download/route.ts", import.meta.url), "utf8"),
@@ -15,15 +18,17 @@ const [manifestText, background, content, popup, planRoute, downloadRoute] = awa
 test("A21 resend extension is fail-closed and keeps price/option separate", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.2");
-  assert.equal(manifest.background.service_worker, "background-v012.js");
+  assert.equal(manifest.version, "0.1.3");
+  assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(manifest.permissions.includes("windows"));
   assert.ok(manifest.permissions.includes("tabs"));
   assert.ok(manifest.permissions.includes("scripting"));
-  assert.match(background, /MAX_CONCURRENT = 4/);
-  assert.match(background, /MAX_SEARCH_CODES = 200/);
-  assert.match(background, /A21_SPLIT_REQUIRED/);
-  assert.match(background, /A21_POPUP_RESULT_ASSIGNMENT/);
+  assert.match(backgroundBase, /MAX_CONCURRENT = 4/);
+  assert.match(backgroundBase, /MAX_SEARCH_CODES = 200/);
+  assert.match(backgroundBase, /A21_SPLIT_REQUIRED/);
+  assert.match(backgroundBase, /A21_POPUP_RESULT_ASSIGNMENT/);
+  assert.match(backgroundWrapper, /background-v012\.js/);
+  assert.match(backgroundWrapper, /background-v013-overlay\.js/);
   assert.match(content, /MAX_VISIBLE_RESULTS = 500/);
   assert.match(content, /쇼핑몰별판매가/);
   assert.match(content, /configurePricePopup/);
@@ -33,20 +38,32 @@ test("A21 resend extension is fail-closed and keeps price/option separate", () =
   assert.match(popup, /Shopling 가격 재조회 VERIFIED/);
 });
 
+test("A21 v0.1.3 binds only the popup opened by the exact worker and supports legacy image submit buttons", () => {
+  assert.match(contentOverlay, /commerce-os-a21-v013:/);
+  assert.match(contentOverlay, /window\.opener\?\.name/);
+  assert.match(contentOverlay, /A21_POPUP_READY_V013/);
+  assert.match(backgroundOverlay, /popupAutoV013/);
+  assert.match(backgroundOverlay, /popupAssignmentBusy = true/);
+  assert.match(contentOverlay, /input\[type=\\"image\\"\]/);
+  assert.match(contentOverlay, /element\.alt/);
+  assert.match(contentOverlay, /\[onclick\]/);
+  assert.match(contentOverlay, /A21_SUBMIT_BUTTON_NOT_FOUND_V013/);
+  assert.match(contentOverlay, /button\.click\(\)/);
+});
+
 test("A21 resend can start from A18 and does not fail while a Shopling popup is still about:blank", () => {
   assert.match(popup, /A18 빈 화면에서도 실행할 수 있습니다/);
   assert.doesNotMatch(popup, /A21_IDENTIFY/);
-  assert.match(background, /Shopling 로그인 탭\(A18 빈 화면 포함\)/);
-  assert.match(background, /clickA21Menu/);
-  assert.match(background, /waitForA21ListFrame/);
-  assert.match(background, /chrome\.scripting\.executeScript/);
-  assert.match(background, /injectContentIfMissing/);
-  assert.match(background, /frameIds: \[frameId\]/);
-  assert.match(background, /about:blank/);
-  assert.match(background, /transientFrameError/);
-  assert.match(background, /waitForPopupFrame/);
-  assert.match(background, /discoverPopupForJob/);
-  assert.match(background, /POPUP_DISCOVERY_TIMEOUT/);
+  assert.match(backgroundBase, /Shopling 로그인 탭\(A18 빈 화면 포함\)/);
+  assert.match(backgroundBase, /clickA21Menu/);
+  assert.match(backgroundBase, /waitForA21ListFrame/);
+  assert.match(backgroundBase, /chrome\.scripting\.executeScript/);
+  assert.match(backgroundBase, /injectContentIfMissing/);
+  assert.match(backgroundBase, /frameIds: \[frameId\]/);
+  assert.match(backgroundBase, /about:blank/);
+  assert.match(backgroundBase, /transientFrameError/);
+  assert.match(backgroundBase, /waitForPopupFrame/);
+  assert.match(backgroundBase, /discoverPopupForJob/);
 });
 
 test("A21 resend plan is only released after full Shopling readback verification", () => {
@@ -63,8 +80,9 @@ test("A21 resend plan is only released after full Shopling readback verification
   assert.match(planRoute, /sourcePrice: "SHOPPING_MALL_SPECIFIC_SELL_PRICE"/);
   assert.match(planRoute, /priceMode: "PRICE_ONLY"/);
   assert.match(planRoute, /optionMode: "OPTION_ONLY"/);
-  assert.match(downloadRoute, /const VERSION = "0\.1\.2"/);
-  assert.match(downloadRoute, /background-v012\.js/);
+  assert.match(downloadRoute, /const VERSION = "0\.1\.3"/);
+  assert.match(downloadRoute, /background-v013\.js/);
+  assert.match(downloadRoute, /content-a21-v013\.js/);
   assert.match(downloadRoute, /entries\[fileName\]/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
