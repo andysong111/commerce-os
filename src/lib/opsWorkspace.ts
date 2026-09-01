@@ -91,13 +91,26 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
     iconLabel: "가",
     description: "판매가 정책, 인상·인하, 마진 방어와 채널 반영 작업을 실행합니다.",
     moduleIds: [
+      "internal-china-cost-price-review",
       "shopling-price-adjustment-runner",
       "shopling-price-modify-runner",
       "price-adjustment-engine",
       "inventory-price",
       "shopling-api-automation",
     ],
-    searchTerms: ["판매", "가격", "판매가", "인상", "인하", "마진", "정책", "채널"],
+    searchTerms: [
+      "판매",
+      "가격",
+      "판매가",
+      "인상",
+      "인하",
+      "마진",
+      "정책",
+      "채널",
+      "확정원가",
+      "상품그룹",
+      "쇼핑몰별 목표가",
+    ],
   },
   {
     id: "system-check",
@@ -130,6 +143,7 @@ export const OPS_WORKSPACE_GROUPS: readonly OpsWorkspaceGroup[] = [
 
 export const DEFAULT_FAVORITE_MODULE_IDS = [
   "china-order-cost",
+  "internal-china-cost-price-review",
   "product-launch-tracker",
   "detail-page-studio",
   "detail-page-studio-test",
@@ -147,11 +161,12 @@ const COMMAND_INTENTS: readonly (OpsCommandIntent & { patterns: readonly RegExp[
     label: "가격 작업",
     reason: "판매가·마진·인상·인하 관련 표현을 인식했습니다.",
     moduleIds: [
+      "internal-china-cost-price-review",
       "shopling-price-adjustment-runner",
       "shopling-price-modify-runner",
       "price-adjustment-engine",
     ],
-    patterns: [/가격/, /판매가/, /인상/, /인하/, /마진/, /가격정책/],
+    patterns: [/가격/, /판매가/, /인상/, /인하/, /마진/, /가격정책/, /확정원가/, /상품그룹/],
   },
   {
     label: "AI 카테고리 검토",
