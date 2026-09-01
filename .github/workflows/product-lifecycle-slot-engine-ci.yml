@@ -5,6 +5,8 @@ on:
     paths:
       - "src/lib/productLifecyclePolicy.ts"
       - "src/lib/productLifecycleEngine.ts"
+      - "src/lib/productLifecycleRuntimeConfig.ts"
+      - "src/lib/productLifecycleLiveReconcile.ts"
       - "src/lib/productLifecyclePurchaseOverlay.ts"
       - "src/lib/integrations/productDecisionAgent.ts"
       - "src/lib/extendedModuleRegistry.ts"
@@ -14,9 +16,11 @@ on:
       - "src/app/api/cron/product-lifecycle-refresh/**"
       - "src/app/api/shopling-lifecycle-bridge/**"
       - "tests/productLifecyclePolicy.test.mjs"
+      - "tests/productLifecycleLiveReconcile.test.mjs"
       - "tests/productLifecycleDispatcherRegistration.test.mjs"
       - "tests/priceAdjustmentEngineIntegration.test.mjs"
       - "supabase/migrations/202608310001_product_lifecycle_slot_engine_v1.sql"
+      - "supabase/migrations/20260901121000_product_lifecycle_runtime_gates_v1.sql"
       - ".github/workflows/product-lifecycle-slot-engine-ci.yml"
   workflow_dispatch:
 
@@ -43,6 +47,8 @@ jobs:
           npx eslint
           src/lib/productLifecyclePolicy.ts
           src/lib/productLifecycleEngine.ts
+          src/lib/productLifecycleRuntimeConfig.ts
+          src/lib/productLifecycleLiveReconcile.ts
           src/lib/productLifecyclePurchaseOverlay.ts
           src/lib/integrations/productDecisionAgent.ts
           src/lib/extendedModuleRegistry.ts
@@ -52,14 +58,17 @@ jobs:
           src/app/api/cron/product-lifecycle-refresh/route.ts
           src/app/api/shopling-lifecycle-bridge/route.ts
           tests/productLifecyclePolicy.test.mjs
+          tests/productLifecycleLiveReconcile.test.mjs
           tests/productLifecycleDispatcherRegistration.test.mjs
           tests/priceAdjustmentEngineIntegration.test.mjs
-      - name: Run lifecycle regressions
-        run: >-
-          node --experimental-strip-types --test
-          tests/productLifecyclePolicy.test.mjs
-          tests/productLifecycleDispatcherRegistration.test.mjs
-          tests/priceAdjustmentEngineIntegration.test.mjs
+      - name: Test lifecycle policy
+        run: node --experimental-strip-types --test tests/productLifecyclePolicy.test.mjs
+      - name: Test lifecycle live reconciliation
+        run: node --experimental-strip-types --test tests/productLifecycleLiveReconcile.test.mjs
+      - name: Test lifecycle dispatcher registration
+        run: node --experimental-strip-types --test tests/productLifecycleDispatcherRegistration.test.mjs
+      - name: Test legacy grade control isolation
+        run: node --experimental-strip-types --test tests/priceAdjustmentEngineIntegration.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:

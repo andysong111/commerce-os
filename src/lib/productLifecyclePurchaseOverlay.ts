@@ -1,4 +1,5 @@
 import type { ProductDecisionSnapshot } from "@/lib/productDecisionSnapshot";
+import { loadProductLifecycleRuntimeConfig } from "@/lib/productLifecycleRuntimeConfig";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export type ProductLifecyclePurchaseOverlaySummary = {
@@ -14,7 +15,6 @@ type LifecyclePurchaseRow = {
   barcode?: unknown;
   lifecycle_state?: unknown;
   purchase_policy?: unknown;
-  shadow_mode?: unknown;
   reason_codes?: unknown;
 };
 
@@ -56,7 +56,7 @@ export async function applyProductLifecyclePurchaseOverlay(
 
   const result = await admin
     .from("product_lifecycle_states")
-    .select("barcode,lifecycle_state,purchase_policy,shadow_mode,reason_codes")
+    .select("barcode,lifecycle_state,purchase_policy,reason_codes")
     .limit(10_000);
   if (result.error) {
     if (result.error.code === "42P01") {
@@ -75,6 +75,8 @@ export async function applyProductLifecyclePurchaseOverlay(
     throw new Error(`PRODUCT_LIFECYCLE_PURCHASE_OVERLAY_FAILED:${result.error.message}`);
   }
 
+  const runtimeConfig = await loadProductLifecycleRuntimeConfig(admin);
+  const purchaseStopLive = runtimeConfig.purchaseStopLive;
   const rows = (Array.isArray(result.data) ? result.data : []) as LifecyclePurchaseRow[];
   const byBarcode = new Map(
     rows
@@ -93,7 +95,7 @@ export async function applyProductLifecyclePurchaseOverlay(
     matchedCount += 1;
     const lifecycleState = text(lifecycle.lifecycle_state);
     const purchasePolicy = text(lifecycle.purchase_policy);
-    const shadowMode = lifecycle.shadow_mode !== false;
+    const shadowMode = !purchaseStopLive;
     const reasonCodes = reasons(lifecycle.reason_codes);
     const currentRecommendedQty = nonnegative(product.recommendedQty);
     const currentExpectedCost = nonnegative(product.expectedCost);
@@ -101,8 +103,8 @@ export async function applyProductLifecyclePurchaseOverlay(
     if (purchasePolicy === "STOP") stopPolicyCount += 1;
 
     const shouldStop = purchasePolicy === "STOP" && currentRecommendedQty > 0;
-    if (shouldStop && shadowMode) simulatedStopCount += 1;
-    if (shouldStop && !shadowMode) appliedStopCount += 1;
+    if (shouldStop && !purchaseStopLive) simulatedStopCount += 1;
+    if (shouldStop && purchaseStopLive) appliedStopCount += 1;
 
     return {
       ...product,
@@ -111,8 +113,8 @@ export async function applyProductLifecyclePurchaseOverlay(
       lifecycleShadowMode: shadowMode,
       lifecycleReasonCodes: reasonCodes,
       lifecycleOriginalRecommendedQty: currentRecommendedQty,
-      recommendedQty: shouldStop && !shadowMode ? 0 : currentRecommendedQty,
-      expectedCost: shouldStop && !shadowMode ? 0 : currentExpectedCost,
+      recommendedQty: shouldStop && purchaseStopLive ? 0 : currentRecommendedQty,
+      expectedCost: shouldStop && purchaseStopLive ? 0 : currentExpectedCost,
     };
   });
 
