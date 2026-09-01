@@ -12,6 +12,7 @@ const PRICE_APPROVAL_OPERATION_TYPE =
 const PRICE_READBACK_OPERATION_TYPE =
   "INTERNAL_CHINA_GROUP_COST_PRICE_BROWSER_READBACK";
 const PRICE_READ_TIMEOUT_MS = 3_000;
+const PRICE_HISTORY_LIMIT = 64;
 
 type StageState = "COMPLETE" | "NEEDS_CHECK" | "NOT_AVAILABLE";
 
@@ -85,10 +86,24 @@ function supabaseConnection() {
   return { baseUrl, secret };
 }
 
-async function loadPriceApprovalFingerprint(cycleMonth: string) {
+function approvalMatchesCycle(
+  snapshot: Record<string, unknown>,
+  cycleMonth: string,
+  draftIds: Set<string>,
+) {
+  if (text(snapshot.cycleMonth) === cycleMonth) return true;
+  const proposalSourceEventId = text(snapshot.proposalSourceEventId);
+  if (!proposalSourceEventId) return false;
+  return [...draftIds].some((draftId) => proposalSourceEventId.endsWith(draftId));
+}
+
+async function loadPriceApprovalFingerprint(
+  cycleMonth: string,
+  draftIds: string[],
+) {
   const { baseUrl, secret } = supabaseConnection();
   const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${PRICE_APPROVAL_OPERATION_TYPE}&status=eq.SUCCEEDED&select=result_snapshot,started_at&order=started_at.desc&limit=24`,
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${PRICE_APPROVAL_OPERATION_TYPE}&status=eq.SUCCEEDED&select=result_snapshot,started_at&order=started_at.desc&limit=${PRICE_HISTORY_LIMIT}`,
     {
       headers: createSupabaseAdminHeaders(secret),
       cache: "no-store",
@@ -99,9 +114,10 @@ async function loadPriceApprovalFingerprint(cycleMonth: string) {
     throw new Error(`CHINA_PURCHASE_CYCLE_PRICE_APPROVAL_READ_FAILED:${response.status}`);
   }
   const rows = (await response.json().catch(() => [])) as StoredOperationRow[];
+  const draftIdSet = new Set(draftIds.map(text).filter(Boolean));
   for (const row of rows) {
     const snapshot = object(row.result_snapshot);
-    if (text(snapshot.cycleMonth) !== cycleMonth) continue;
+    if (!approvalMatchesCycle(snapshot, cycleMonth, draftIdSet)) continue;
     const fingerprint = text(snapshot.proposalFingerprint);
     if (/^sha256:[a-f0-9]{64}$/.test(fingerprint)) return fingerprint;
   }
@@ -123,43 +139,28 @@ function emptyPriceVerification(state: StageState): PriceVerificationSummary {
   };
 }
 
-async function loadPriceVerification(
-  cycleMonth: string,
-): Promise<PriceVerificationSummary> {
-  const fingerprint = await loadPriceApprovalFingerprint(cycleMonth);
-  if (!fingerprint) return emptyPriceVerification("NOT_AVAILABLE");
-
-  const { baseUrl, secret } = supabaseConnection();
-  const sourceEventId =
-    `internal-china-group-cost-price-browser-readback:${fingerprint}:aggregate`;
-  const response = await fetch(
-    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${PRICE_READBACK_OPERATION_TYPE}&status=eq.SUCCEEDED&source_event_id=eq.${encodeURIComponent(sourceEventId)}&select=result_snapshot,started_at&order=started_at.desc&limit=1`,
-    {
-      headers: createSupabaseAdminHeaders(secret),
-      cache: "no-store",
-      signal: AbortSignal.timeout(PRICE_READ_TIMEOUT_MS),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`CHINA_PURCHASE_CYCLE_PRICE_READBACK_FAILED:${response.status}`);
-  }
-  const rows = (await response.json().catch(() => [])) as StoredOperationRow[];
-  const snapshot = object(rows[0]?.result_snapshot);
-  if (!Object.keys(snapshot).length) {
-    return { ...emptyPriceVerification("NEEDS_CHECK"), fingerprint };
-  }
-
-  const sourcePlanFingerprint = text(snapshot.sourcePlanFingerprint);
+function parsePriceVerificationSnapshot(
+  fingerprint: string,
+  snapshot: Record<string, unknown>,
+): PriceVerificationSummary {
+  const snapshotFingerprint =
+    text(snapshot.proposalFingerprint) || text(snapshot.sourcePlanFingerprint);
   const goodsKeyCount = integer(snapshot.goodsKeyCount);
   const verifiedGoodsKeyCount = integer(snapshot.verifiedGoodsKeyCount);
-  const totalMallTargetCount = integer(snapshot.totalMallTargetCount);
-  const matchedMallPriceCount = integer(snapshot.matchedMallPriceCount);
-  const mismatchMallPriceCount = integer(snapshot.mismatchMallPriceCount);
-  const missingMallPriceCount = integer(snapshot.missingMallPriceCount);
-  const errorGoodsKeyCount = integer(snapshot.errorGoodsKeyCount);
-  const completed = boolean(snapshot.completed);
+  const totalMallTargetCount =
+    integer(snapshot.mallCheckCount) || integer(snapshot.totalMallTargetCount);
+  const matchedMallPriceCount =
+    integer(snapshot.mallMatchCount) || integer(snapshot.matchedMallPriceCount);
+  const mismatchMallPriceCount =
+    integer(snapshot.mallMismatchCount) || integer(snapshot.mismatchMallPriceCount);
+  const missingMallPriceCount =
+    integer(snapshot.mallMissingCount) || integer(snapshot.missingMallPriceCount);
+  const errorGoodsKeyCount =
+    integer(snapshot.failedGoodsKeyCount) || integer(snapshot.errorGoodsKeyCount);
+  const completed =
+    text(snapshot.state) === "VERIFIED" || boolean(snapshot.completed);
   const exactMatch =
-    sourcePlanFingerprint === fingerprint &&
+    snapshotFingerprint === fingerprint &&
     completed &&
     goodsKeyCount > 0 &&
     verifiedGoodsKeyCount === goodsKeyCount &&
@@ -183,6 +184,36 @@ async function loadPriceVerification(
   };
 }
 
+async function loadPriceVerification(
+  cycleMonth: string,
+  draftIds: string[],
+): Promise<PriceVerificationSummary> {
+  const fingerprint = await loadPriceApprovalFingerprint(cycleMonth, draftIds);
+  if (!fingerprint) return emptyPriceVerification("NOT_AVAILABLE");
+
+  const { baseUrl, secret } = supabaseConnection();
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${PRICE_READBACK_OPERATION_TYPE}&status=eq.SUCCEEDED&select=result_snapshot,started_at&order=started_at.desc&limit=${PRICE_HISTORY_LIMIT}`,
+    {
+      headers: createSupabaseAdminHeaders(secret),
+      cache: "no-store",
+      signal: AbortSignal.timeout(PRICE_READ_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`CHINA_PURCHASE_CYCLE_PRICE_READBACK_FAILED:${response.status}`);
+  }
+  const rows = (await response.json().catch(() => [])) as StoredOperationRow[];
+  for (const row of rows) {
+    const snapshot = object(row.result_snapshot);
+    const snapshotFingerprint =
+      text(snapshot.proposalFingerprint) || text(snapshot.sourcePlanFingerprint);
+    if (snapshotFingerprint !== fingerprint) continue;
+    return parsePriceVerificationSnapshot(fingerprint, snapshot);
+  }
+  return { ...emptyPriceVerification("NEEDS_CHECK"), fingerprint };
+}
+
 export async function loadInternalChinaPurchaseCycleHandoff(
   currentCycleMonthInput: unknown,
 ): Promise<InternalChinaPurchaseCycleHandoff> {
@@ -190,7 +221,7 @@ export async function loadInternalChinaPurchaseCycleHandoff(
   const previousCycleMonth = previousCalendarMonth(currentCycleMonth);
   const warnings: string[] = [];
 
-  const [draftState, fundingClose, priceVerification] = await Promise.all([
+  const [draftState, fundingClose] = await Promise.all([
     loadFastPurchaseInternalDrafts().catch((error) => ({
       drafts: [],
       error:
@@ -204,14 +235,6 @@ export async function loadInternalChinaPurchaseCycleHandoff(
       );
       return null;
     }),
-    loadPriceVerification(previousCycleMonth).catch((error) => {
-      warnings.push(
-        error instanceof Error
-          ? `직전 가격검증 조회: ${error.message}`
-          : "직전 가격검증을 조회하지 못했습니다.",
-      );
-      return emptyPriceVerification("NOT_AVAILABLE");
-    }),
   ]);
 
   if (draftState.error) warnings.push(`직전 발주원장 조회: ${draftState.error}`);
@@ -219,6 +242,7 @@ export async function loadInternalChinaPurchaseCycleHandoff(
     (draft) =>
       draft.cycleMonth === previousCycleMonth && draft.orderedQuantity > 0,
   );
+  const previousDraftIds = previousDrafts.map((draft) => draft.draftId);
   const orderedQuantity = previousDrafts.reduce(
     (sum, draft) => sum + draft.orderedQuantity,
     0,
@@ -239,18 +263,29 @@ export async function loadInternalChinaPurchaseCycleHandoff(
         ? "COMPLETE"
         : "NEEDS_CHECK";
 
-  const landedCostCloses = await Promise.all(
-    previousDrafts.map((draft) =>
-      loadStoredInternalChinaForwarderClose(draft.draftId).catch((error) => {
-        warnings.push(
-          error instanceof Error
-            ? `${draft.draftId} 확정원가 조회: ${error.message}`
-            : `${draft.draftId} 확정원가를 조회하지 못했습니다.`,
-        );
-        return null;
-      }),
+  const [landedCostCloses, priceVerification] = await Promise.all([
+    Promise.all(
+      previousDrafts.map((draft) =>
+        loadStoredInternalChinaForwarderClose(draft.draftId).catch((error) => {
+          warnings.push(
+            error instanceof Error
+              ? `${draft.draftId} 확정원가 조회: ${error.message}`
+              : `${draft.draftId} 확정원가를 조회하지 못했습니다.`,
+          );
+          return null;
+        }),
+      ),
     ),
-  );
+    loadPriceVerification(previousCycleMonth, previousDraftIds).catch((error) => {
+      warnings.push(
+        error instanceof Error
+          ? `직전 가격검증 조회: ${error.message}`
+          : "직전 가격검증을 조회하지 못했습니다.",
+      );
+      return emptyPriceVerification("NOT_AVAILABLE");
+    }),
+  ]);
+
   const landedCostState: StageState =
     previousDrafts.length === 0
       ? "NOT_AVAILABLE"
