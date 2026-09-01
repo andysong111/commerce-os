@@ -49,8 +49,8 @@ function rewriteContent(source: string) {
   rewritten = replaceOnce(
     rewritten,
     `      const context = await workerContext();\n      if (context.worker || window.top !== window || !isProductListUi()) return;\n      await activateSelectionIntent();\n      let queue = await getSelectionQueue();`,
-    `      const context = await workerContext();\n      if (context.worker || window.top !== window) return;\n      if (!isProductListUi()) {\n        if (isAdminShell()) await navigateControlToA18ForIntent();\n        return;\n      }\n      await activateSelectionIntent();\n      let queue = await getSelectionQueue();`,
-    "v0313_content_dashboard_to_a18_anchor_missing",
+    `      const context = await workerContext();\n      if (context.worker) return;\n      if (!isProductListUi()) {\n        if (window.top === window && isAdminShell()) await navigateControlToA18ForIntent();\n        return;\n      }\n      await activateSelectionIntent();\n      let queue = await getSelectionQueue();`,
+    "v0313_content_a18_frame_coordinator_anchor_missing",
   );
 
   assertScript("content-v0313", rewritten);
@@ -83,7 +83,7 @@ export async function GET() {
   };
   if (manifest.version !== "0.3.12") throw new Error("shopling_market_sender_v0313_source_version_mismatch");
   manifest.version = VERSION;
-  manifest.description = "Commerce OS SEO 대량등록 Shopling 업로드 선택을 현재 A18 화면을 새로고침하지 않고 직접 실행기에 주입하며, 대시보드 상태면 A18로 자동 진입하는 내부 운영 버전입니다.";
+  manifest.description = "Commerce OS SEO 대량등록 Shopling 업로드 선택을 현재 A18 화면/프레임을 새로고침하지 않고 직접 실행기에 주입하며, A18 프레임에서 자동 실행하는 내부 운영 버전입니다.";
   manifest.permissions = [...new Set([...(manifest.permissions || []), "scripting"])];
   entries["manifest.json"] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -100,23 +100,24 @@ export async function GET() {
   entries["popup.html"] = strToU8(popupHtml);
   entries["VERSION.txt"] = strToU8(`Commerce OS Shopling Market Sender v${VERSION}\n`);
   entries["README.txt"] = strToU8(
-    `v${VERSION} NO-RELOAD A18 INJECTOR\n` +
-    `- A18 화면에서 실행 버튼을 눌러도 해당 탭을 새로고침하지 않습니다. Shopling이 새로고침 시 메인 대시보드로 돌아가는 동작을 회피합니다.\n` +
+    `v${VERSION} NO-RELOAD A18 FRAME INJECTOR\n` +
+    `- Shopling은 A18이 내부 프레임으로 열려 있어 브라우저 탭 새로고침 시 메인 화면으로 돌아갑니다. 실행 시 탭을 새로고침하지 않습니다.\n` +
     `- 선택 작업은 먼저 Chrome storage의 durable intent로 저장합니다.\n` +
-    `- scripting 권한으로 현재 Shopling 탭에 최신 content 실행기를 직접 주입합니다.\n` +
-    `- 이미 최신 실행기가 주입되어 있으면 version sentinel로 중복 타이머/중복 실행을 막습니다.\n` +
-    `- 현재 화면이 메인 대시보드라면 pending intent를 보존한 채 [18] 쇼핑몰상품등록으로 자동 진입한 후 실행합니다.\n` +
-    `- 대상 상품은 계속 Commerce OS SEO 대량등록 Shopling 업로드 기록 기준이며 화면에 보이는 행과 무관합니다.\n` +
+    `- scripting 권한으로 현재 Shopling 탭의 모든 Shopling 프레임에 최신 content 실행기를 직접 주입합니다.\n` +
+    `- 실제 A18 상품등록 프레임이 pending intent를 소비해 실행 대기열을 시작합니다. top frame일 필요가 없습니다.\n` +
+    `- 이미 최신 실행기가 주입된 프레임은 version sentinel로 중복 타이머/중복 실행을 막습니다.\n` +
+    `- 대상 상품은 Commerce OS SEO 대량등록 Shopling 업로드 기록 기준이며 화면에 보이는 행과 무관합니다.\n` +
     `- 상품은 순차 처리, 상품 내부 채널은 3+3 병렬을 유지합니다.\n\n` +
     strFromU8(entries["README.txt"]),
   );
 
   if (!manifest.permissions.includes("scripting")) throw new Error("v0313_scripting_permission_missing");
   if (!popup.includes("chrome.scripting.executeScript")) throw new Error("v0313_popup_direct_injection_missing");
+  if (!popup.includes('target: { tabId: tab.id, allFrames: true }')) throw new Error("v0313_popup_all_frames_injection_missing");
   if (!popup.includes('files: ["content-group-canary.mjs"]')) throw new Error("v0313_popup_content_file_missing");
   if (!content.includes("__commerceOsShoplingMarketSenderV0313")) throw new Error("v0313_content_idempotent_guard_missing");
+  if (!content.includes("if (context.worker) return")) throw new Error("v0313_a18_frame_coordinator_guard_missing");
   if (!content.includes("navigateControlToA18ForIntent")) throw new Error("v0313_control_a18_navigation_missing");
-  if (!content.includes("navigationRequestedAt")) throw new Error("v0313_control_a18_navigation_debounce_missing");
   if (content.includes("document.documentElement.appendChild(box)")) throw new Error("v0313_shopling_dom_panel_present");
 
   const archive = zipSync(entries, { level: 0 });
