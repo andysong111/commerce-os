@@ -29,8 +29,15 @@ function rewriteBackground(source: string) {
     `    if (!/shopling\\.co\\.kr$/i.test(parsed.hostname)) return false;`,
     `    if (!/(?:shopling|cassnet)\\.co\\.kr$/i.test(parsed.hostname)) return false;`,
   );
+  rewritten = rewritten.replace(
+    `const LEGACY_WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV0317";`,
+    `const LEGACY_WORKER_META_KEY = "commerceOsShoplingParallelWorkerMetaV0318";`,
+  );
   if (!rewritten.includes("(?:shopling|cassnet)\\.co\\.kr")) {
     throw new Error("v0319_background_cassnet_result_host_missing");
+  }
+  if (!rewritten.includes("ParallelWorkerMetaV0318")) {
+    throw new Error("v0319_background_v0318_legacy_meta_missing");
   }
   assertScript("background-v0319", rewritten);
   return rewritten;
@@ -46,8 +53,21 @@ function rewriteContent(source: string) {
     `    if (!/shopling\\.co\\.kr$/i.test(hostname)) return;`,
     `    if (!/(?:shopling|cassnet)\\.co\\.kr$/i.test(hostname)) return;`,
   );
+  rewritten = rewritten
+    .replace(`const LEGACY_RUN_STATE_KEY = "commerceOsShoplingParallelRunV0317";`, `const LEGACY_RUN_STATE_KEY = "commerceOsShoplingParallelRunV0318";`)
+    .replace(`const LEGACY_WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV0317";`, `const LEGACY_WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV0318";`)
+    .replace(`const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0317";`, `const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0318";`)
+    .replace(`const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0317";`, `const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0318";`);
   if (!rewritten.includes("(?:shopling|cassnet)\\.co\\.kr")) {
     throw new Error("v0319_content_cassnet_result_host_missing");
+  }
+  for (const needle of [
+    "ParallelRunV0318",
+    "ParallelWorkerV0318",
+    "MarketSelectionQueueV0318",
+    "MarketSelectionIntentV0318",
+  ]) {
+    if (!rewritten.includes(needle)) throw new Error(`v0319_content_legacy_state_missing_${needle}`);
   }
   assertScript("content-v0319", rewritten);
   return rewritten;
@@ -86,6 +106,7 @@ export async function GET() {
     `- 실제 Shopling 결과창은 일부 쇼핑몰 결과를 buss.cassnet.co.kr 같은 cross-origin frame으로 표시합니다.\n` +
     `- cassnet.co.kr을 host_permissions/content_scripts에 추가해 해당 frame의 goods_key와 성공/실패를 직접 수집합니다.\n` +
     `- 1차 3채널 결과가 원장에 확정되지 않아 2차 3채널이 멈추는 현상을 제거합니다.\n` +
+    `- v0.3.18의 실행 queue/worker/meta를 v0.3.19로 이관해 업데이트 중인 작업을 최대한 이어받습니다.\n` +
     `- 관리자 A18 원본 탭은 1개면 충분하며 별도 관리자 화면을 2개 띄울 필요가 없습니다.\n\n` +
     previousReadme,
   );
