@@ -43,6 +43,7 @@ jobs:
           node --check public/shopling-account-title-bridge/content-shopling-product-list-batch.js &&
           node --check public/shopling-account-title-bridge/content-shopling-product-list-registry-bridge.js &&
           node --check public/shopling-account-title-bridge/content-shopling-lifecycle-diagnostic.js &&
+          node --check public/shopling-account-title-bridge/content-shopling-lifecycle-current-status-v062.js &&
           node --check public/shopling-account-title-bridge/content-shopling-lifecycle-executor.js &&
           node --check public/shopling-account-title-bridge/content-shopling-lifecycle-main.js &&
           node --check public/shopling-account-title-bridge/content-shopling-pipeline.js &&

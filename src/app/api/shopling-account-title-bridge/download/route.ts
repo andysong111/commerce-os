@@ -19,6 +19,7 @@ const FILES = [
   "content-shopling-product-list-batch.js",
   "content-shopling-product-list-registry-bridge.js",
   "content-shopling-lifecycle-diagnostic.js",
+  "content-shopling-lifecycle-current-status-v062.js",
   "content-shopling-lifecycle-executor.js",
   "content-shopling-pipeline.js",
   "content-shopling-pipeline-frame-bridge.js",
@@ -162,25 +163,28 @@ function rewriteLifecycleExecutor(source: string) {
   return rewritten;
 }
 
-function buildV061Manifest(source: Record<string, unknown>) {
+function buildV062Manifest(source: Record<string, unknown>) {
   const manifest = structuredClone(source) as Record<string, unknown> & {
     permissions?: string[];
     content_scripts?: Array<Record<string, unknown> & { js?: string[] }>;
   };
-  manifest.version = "0.6.1";
-  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지하고, 상품 생애주기 판매상태 자동화는 background chrome.scripting으로 Shopling MAIN world를 직접 실행하며 독립 recurring keeper로 polling을 지속합니다. 삭제는 서버 Canary 승인 전에는 실행하지 않습니다.";
+  manifest.version = "0.6.2";
+  manifest.description = "상품번호+자사상품코드 동시 정확일치 마켓 전송을 유지합니다. 상품 생애주기 자동화는 현재 Shopling 판매상태를 읽어 첫 브라우저 조회를 같은 상태로 좁히고, 변경 후 목표 상태를 다시 검증합니다. 독립 recurring keeper와 삭제 서버 Canary gate를 유지합니다.";
   manifest.permissions = [...new Set([...(manifest.permissions ?? []), "alarms", "scripting"])];
 
   const scripts = manifest.content_scripts ?? [];
   const productScriptIndex = scripts.findIndex((entry) =>
     Array.isArray(entry.matches) && entry.matches.includes("https://a.shopling.co.kr/prod/*") && !entry.world,
   );
-  if (productScriptIndex < 0) throw new Error("shopling_v061_product_content_script_missing");
+  if (productScriptIndex < 0) throw new Error("shopling_v062_product_content_script_missing");
 
   scripts.splice(productScriptIndex + 1, 0,
     {
       matches: ["https://a.shopling.co.kr/prod/*"],
-      js: ["content-shopling-lifecycle-executor.js"],
+      js: [
+        "content-shopling-lifecycle-current-status-v062.js",
+        "content-shopling-lifecycle-executor.js",
+      ],
       all_frames: false,
       run_at: "document_idle",
     },
@@ -196,7 +200,7 @@ export async function GET() {
   for (const fileName of FILES) {
     if (fileName === "manifest.json") {
       const sourceManifest = JSON.parse(await readFile(path.join(root, fileName), "utf8")) as Record<string, unknown>;
-      const manifest = buildV061Manifest(sourceManifest);
+      const manifest = buildV062Manifest(sourceManifest);
       entries[fileName] = strToU8(`${JSON.stringify(manifest, null, 2)}\n`);
       continue;
     }
@@ -217,13 +221,13 @@ export async function GET() {
     entries[fileName] = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   }
 
-  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.6.1\n");
+  entries["VERSION.txt"] = strToU8("Commerce OS Shopling Account Title Bridge v0.6.2\n");
   const archive = zipSync(entries, { level: 6 });
   return new Response(Buffer.from(archive), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.6.1.zip",
+      "Content-Disposition": "attachment; filename=commerce-os-shopling-account-title-bridge-v0.6.2.zip",
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
     },

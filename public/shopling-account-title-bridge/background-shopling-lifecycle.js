@@ -6,6 +6,7 @@ const SHOPLING_LIFECYCLE_REPORT_MESSAGE = "commerce-os-shopling-lifecycle-report
 const SHOPLING_LIFECYCLE_EXECUTION_RESULT_MESSAGE = "commerce-os-shopling-lifecycle-execution-result";
 const SHOPLING_LIFECYCLE_DIAGNOSTIC_ENDPOINT = "https://commerce-os-ops-center.vercel.app/api/shopling-lifecycle-diagnostic";
 const SHOPLING_LIFECYCLE_BRIDGE_ENDPOINT = "https://commerce-os-ops-center.vercel.app/api/shopling-lifecycle-bridge";
+const SHOPLING_LIFECYCLE_STATUS_PROBE_ENDPOINT = "https://commerce-os-ops-center.vercel.app/api/shopling-lifecycle-status-probe";
 const SHOPLING_LIFECYCLE_DIAGNOSTIC_BRIDGE = "lifecycle-dom-v0.5.5";
 const SHOPLING_LIFECYCLE_QUEUE_BRIDGE = "lifecycle-v1";
 const SHOPLING_LIFECYCLE_EXECUTOR_ALARM = "commerce-os-shopling-lifecycle-executor";
@@ -79,13 +80,31 @@ async function lifecycleOtherShoplingWorkerBusy() {
   }
 }
 
-function lifecycleExecutorUrl(task, runId, deleteExecutionEnabled) {
+async function lifecycleReadCurrentSaleStatus(goodsKey) {
+  if (!/^\d{5,9}$/.test(String(goodsKey || "").trim())) return "";
+  const response = await postShoplingLifecycle(
+    SHOPLING_LIFECYCLE_STATUS_PROBE_ENDPOINT,
+    { goodsKeys: [String(goodsKey).trim()] },
+    15000,
+  );
+  if (response?.ok !== true) return "";
+  const statuses = Array.isArray(response.statuses) ? response.statuses : [];
+  const snapshot = statuses.find((row) => String(row?.goodsKey || "").trim() === String(goodsKey).trim());
+  if (String(snapshot?.state || "").trim() !== "READY") return "";
+  const current = String(snapshot?.currentSaleStatus || "").trim();
+  return /^[BC]$/.test(current) ? current : "";
+}
+
+function lifecycleExecutorUrl(task, runId, deleteExecutionEnabled, currentSaleStatus = "") {
   const url = new URL(SHOPLING_LIFECYCLE_PRODUCT_LIST_URL);
   url.searchParams.set("commerce_os_lifecycle", "1");
   url.searchParams.set("commerce_os_lifecycle_run", runId);
   url.searchParams.set("commerce_os_lifecycle_task", String(task.id || ""));
   url.searchParams.set("commerce_os_lifecycle_goods", String(task.goods_key || ""));
   url.searchParams.set("commerce_os_lifecycle_state", String(task.desired_state || ""));
+  if (/^[BC]$/.test(String(currentSaleStatus || ""))) {
+    url.searchParams.set("commerce_os_lifecycle_current", String(currentSaleStatus));
+  }
   if (task.desired_state === "DELETE" && deleteExecutionEnabled === true) {
     url.searchParams.set("commerce_os_lifecycle_delete_canary", "1");
   }
@@ -124,7 +143,7 @@ async function lifecycleFinishExecutorRun(run, outcome, message) {
   try {
     await chrome.alarms.create(SHOPLING_LIFECYCLE_EXECUTOR_ALARM, { when: Date.now() + 5000 });
   } catch {
-    // The recurring alarm will retry later.
+    // The independent recurring keeper will retry later.
   }
 }
 
@@ -185,10 +204,14 @@ async function lifecycleProcessExecutorQueue() {
     return;
   }
 
+  const currentSaleStatus = desiredState === "SELLING" || desiredState === "SOLD_OUT"
+    ? await lifecycleReadCurrentSaleStatus(goodsKey)
+    : "";
+
   let tab;
   try {
     tab = await chrome.tabs.create({
-      url: lifecycleExecutorUrl(task, claimed.runId, claimed.deleteExecutionEnabled),
+      url: lifecycleExecutorUrl(task, claimed.runId, claimed.deleteExecutionEnabled, currentSaleStatus),
       active: false,
     });
   } catch (error) {
@@ -206,6 +229,7 @@ async function lifecycleProcessExecutorQueue() {
     taskId,
     goodsKey,
     desiredState,
+    currentSaleStatus,
     tabId: tab?.id ?? null,
     startedAt: new Date().toISOString(),
   });

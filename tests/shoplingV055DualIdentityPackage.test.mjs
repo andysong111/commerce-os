@@ -6,7 +6,7 @@ const downloadRoutePath = new URL("../src/app/api/shopling-account-title-bridge/
 
 test("Shopling v0.5.6+ downloadable package requires goods key plus self-code exact identity", async () => {
   const source = await readFile(downloadRoutePath, "utf8");
-  assert.match(source, /manifest\.version = "(?:0\.5\.[6789]|0\.6\.[01])"/);
+  assert.match(source, /manifest\.version = "(?:0\.5\.[6789]|0\.6\.[012])"/);
   assert.match(source, /rowMatchesExactIdentity/);
   assert.match(source, /context\?\.goodsKey/);
   assert.match(source, /goodsKeyPattern/);
@@ -29,6 +29,6 @@ test("Shopling v0.5.6+ package carries the field-verified category mapping contr
   const source = await readFile(downloadRoutePath, "utf8");
   assert.match(source, /매핑된 카테고리로 전송/);
   assert.match(source, /무시하고\.\*쇼핑몰기본정보\.\*카테고리로/);
-  assert.match(source, /commerce-os-shopling-account-title-bridge-v(?:0\.5\.[6789]|0\.6\.[01])\.zip/);
-  assert.match(source, /Commerce OS Shopling Account Title Bridge v(?:0\.5\.[6789]|0\.6\.[01])/);
+  assert.match(source, /commerce-os-shopling-account-title-bridge-v(?:0\.5\.[6789]|0\.6\.[012])\.zip/);
+  assert.match(source, /Commerce OS Shopling Account Title Bridge v(?:0\.5\.[6789]|0\.6\.[012])/);
 });
