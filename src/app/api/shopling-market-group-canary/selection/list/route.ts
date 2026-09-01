@@ -44,23 +44,41 @@ function isSeoBulkJob(job: Record<string, unknown>) {
   return text(seoFinal.source).startsWith("seo-bulk-cloud");
 }
 
+function isoParam(value: string | null) {
+  const raw = text(value);
+  if (!raw) return "";
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   if (text(url.searchParams.get("bridge")) !== BRIDGE) {
     return Response.json({ ok: false, error: "unsupported_shopling_market_selection_bridge" }, { status: 400 });
   }
 
+  const rawFrom = text(url.searchParams.get("from"));
+  const rawTo = text(url.searchParams.get("to"));
+  const fromIso = isoParam(rawFrom);
+  const toIso = isoParam(rawTo);
+  if ((rawFrom && !fromIso) || (rawTo && !toIso) || (fromIso && toIso && fromIso >= toIso)) {
+    return Response.json({ ok: false, error: "invalid_shopling_upload_date_range" }, { status: 400 });
+  }
+  const dateFiltered = Boolean(fromIso || toIso);
+
   const supabase = await createSupabaseAdminClient();
   if (!supabase) {
     return Response.json({ ok: false, error: "supabase_admin_unavailable" }, { status: 503 });
   }
 
-  const jobsResult = await supabase
+  let jobsQuery = supabase
     .from(JOB_TABLE)
     .select("id,owner_id,launch_item_id,status,payload,result,created_at,completed_at")
     .in("status", ["success", "partial_failure"])
-    .order("completed_at", { ascending: false })
-    .limit(50);
+    .order("completed_at", { ascending: false });
+  if (fromIso) jobsQuery = jobsQuery.gte("completed_at", fromIso);
+  if (toIso) jobsQuery = jobsQuery.lt("completed_at", toIso);
+  const jobsResult = await jobsQuery.limit(dateFiltered ? 240 : 120);
   if (jobsResult.error) {
     return Response.json(
       { ok: false, error: "shopling_market_selection_jobs_failed", message: jobsResult.error.message },
@@ -68,17 +86,38 @@ export async function GET(request: Request) {
     );
   }
 
-  const latestByLaunch = new Map<string, Record<string, unknown>>();
-  for (const raw of Array.isArray(jobsResult.data) ? jobsResult.data : []) {
-    const job = record(raw);
-    if (!isSeoBulkJob(job)) continue;
-    const launchItemId = text(job.launch_item_id);
-    if (!launchItemId || latestByLaunch.has(launchItemId)) continue;
-    latestByLaunch.set(launchItemId, job);
-    if (latestByLaunch.size >= 20) break;
+  const jobs = (Array.isArray(jobsResult.data) ? jobsResult.data : [])
+    .map(record)
+    .filter(isSeoBulkJob)
+    .slice(0, dateFiltered ? 100 : 50);
+
+  const launchItemIds = [...new Set(jobs.map((job) => text(job.launch_item_id)).filter(Boolean))];
+  const latestBatchByLaunch = new Map<string, string>();
+  if (launchItemIds.length > 0) {
+    const latestResult = await supabase
+      .from(JOB_TABLE)
+      .select("id,launch_item_id,status,payload,completed_at,created_at")
+      .in("launch_item_id", launchItemIds)
+      .in("status", ["success", "partial_failure"])
+      .order("completed_at", { ascending: false })
+      .limit(Math.min(500, Math.max(80, launchItemIds.length * 8)));
+    if (latestResult.error) {
+      return Response.json(
+        { ok: false, error: "shopling_market_selection_latest_batch_failed", message: latestResult.error.message },
+        { status: 503 },
+      );
+    }
+    for (const raw of Array.isArray(latestResult.data) ? latestResult.data : []) {
+      const job = record(raw);
+      if (!isSeoBulkJob(job)) continue;
+      const launchItemId = text(job.launch_item_id);
+      const jobId = text(job.id);
+      if (launchItemId && jobId && !latestBatchByLaunch.has(launchItemId)) {
+        latestBatchByLaunch.set(launchItemId, jobId);
+      }
+    }
   }
 
-  const jobs = [...latestByLaunch.values()];
   const allGoodsKeys = [...new Set(jobs.flatMap((job) => resultRows(job).map((row) => row.goodsKey)))];
   const ledgerByGoodsKey = new Map<string, Record<string, unknown>>();
   if (allGoodsKeys.length > 0) {
@@ -86,7 +125,7 @@ export async function GET(request: Request) {
       .from(LEDGER_TABLE)
       .select("goods_key,status,market_status,reason_code,message,submit_armed_at")
       .in("goods_key", allGoodsKeys)
-      .limit(150);
+      .limit(Math.min(700, Math.max(150, allGoodsKeys.length + 20)));
     if (ledgerResult.error) {
       return Response.json(
         { ok: false, error: "shopling_market_selection_ledger_failed", message: ledgerResult.error.message },
@@ -128,15 +167,25 @@ export async function GET(request: Request) {
       }
     }
 
+    const jobId = text(job.id);
+    const launchItemId = text(job.launch_item_id);
+    const isLatestBatch = latestBatchByLaunch.get(launchItemId) === jobId;
     const uploadSuccessCount = successfulRows.length;
     const uploadReady = text(job.status) === "success" && uploadSuccessCount === 6;
-    const selectable = uploadReady && busyCount === 0 && confirmNeededCount === 0 && marketDoneCount < 6;
+    const selectable = isLatestBatch
+      && uploadReady
+      && busyCount === 0
+      && confirmNeededCount === 0
+      && marketDoneCount < 6;
     const modelNumber = text(payload.modelNumber) || text(seoFinal.modelNumber);
     const modelName = text(payload.modelName) || text(seoFinal.productName) || modelNumber;
 
     return {
-      jobId: text(job.id),
-      launchItemId: text(job.launch_item_id),
+      jobId,
+      batchIdShort: jobId.slice(0, 8),
+      launchItemId,
+      isLatestBatch,
+      batchState: isLatestBatch ? "latest" : "superseded",
       modelNumber,
       modelName,
       completedAt: text(job.completed_at || job.created_at),
@@ -157,6 +206,7 @@ export async function GET(request: Request) {
     {
       ok: true,
       bridge: BRIDGE,
+      filter: { from: fromIso, to: toIso },
       items,
       count: items.length,
       selectableCount: items.filter((item) => item.selectable).length,
