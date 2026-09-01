@@ -1,20 +1,16 @@
 import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import {
+  loadProductLifecycleRuntimeConfig,
+  type ProductLifecycleRuntimeConfig,
+} from "@/lib/productLifecycleRuntimeConfig";
 import { loadShoplingLifecycleStatusSnapshot } from "@/lib/shopling/shoplingLifecycleStatus";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const CONFIG_TABLE = "product_lifecycle_runtime_config";
 const STATE_TABLE = "product_lifecycle_states";
 const QUEUE_TABLE = "shopling_lifecycle_action_queue";
 const OPERATION_TYPE = "PRODUCT_LIFECYCLE_LIVE_RECONCILE";
 const SOURCE = "ops-center-product-lifecycle-live-reconcile";
 const MAX_PRODUCTS = 10_000;
-
-type RuntimeConfig = {
-  shoplingNonDestructiveLive: boolean;
-  purchaseStopLive: boolean;
-  deleteLive: boolean;
-  source: "database" | "legacy_env" | "default_shadow";
-};
 
 type LifecycleStateRow = {
   sku_id?: unknown;
@@ -64,65 +60,19 @@ function currentHourKey(now: string) {
   return now.slice(0, 13).replace(/[:T]/g, "-");
 }
 
-async function loadRuntimeConfig(admin: AdminClient): Promise<RuntimeConfig> {
-  const result = await admin
-    .from(CONFIG_TABLE)
-    .select("config_key,shopling_non_destructive_live,purchase_stop_live,delete_live")
-    .eq("config_key", "default")
-    .limit(1);
-
-  if (!result.error && Array.isArray(result.data) && result.data[0]) {
-    const row = result.data[0] as Record<string, unknown>;
-    return {
-      shoplingNonDestructiveLive: row.shopling_non_destructive_live === true,
-      purchaseStopLive: row.purchase_stop_live === true,
-      deleteLive: row.delete_live === true,
-      source: "database",
-    };
-  }
-
-  if (result.error && result.error.code !== "42P01") {
-    throw new Error(`PRODUCT_LIFECYCLE_RUNTIME_CONFIG_FAILED:${result.error.message}`);
-  }
-
-  if (process.env.PRODUCT_LIFECYCLE_ENFORCEMENT_MODE?.trim().toLowerCase() === "live") {
-    return {
-      shoplingNonDestructiveLive: true,
-      purchaseStopLive: true,
-      deleteLive: false,
-      source: "legacy_env",
-    };
-  }
-
-  return {
-    shoplingNonDestructiveLive: false,
-    purchaseStopLive: false,
-    deleteLive: false,
-    source: "default_shadow",
-  };
-}
-
-async function syncPurchaseShadowMode(admin: AdminClient, purchaseStopLive: boolean, now: string) {
-  const result = await admin
-    .from(STATE_TABLE)
-    .update({ shadow_mode: !purchaseStopLive, updated_at: now })
-    .eq("shadow_mode", purchaseStopLive);
-  if (result.error) {
-    throw new Error(`PRODUCT_LIFECYCLE_PURCHASE_GATE_SYNC_FAILED:${result.error.message}`);
-  }
-}
-
 export type ProductLifecycleLiveReconcileSummary = {
   generatedAt: string;
-  config: RuntimeConfig;
+  config: ProductLifecycleRuntimeConfig;
   purchaseGateApplied: boolean;
+  shoplingWriteGateEnabled: boolean;
   productCount: number;
   listingCount: number;
   observedReadyCount: number;
   alreadyAlignedCount: number;
+  wouldQueueMismatchCount: number;
   queuedMismatchCount: number;
   unresolvedCount: number;
-  activeQueueSkippedCount: number;
+  blockedQueueSkippedCount: number;
   deleteQueuedCount: 0;
 };
 
@@ -135,29 +85,8 @@ export async function runProductLifecycleLiveReconcile(
   const admin = await createSupabaseAdminClient();
   if (!admin) throw new Error("SUPABASE_ADMIN_NOT_CONFIGURED");
 
-  const config = await loadRuntimeConfig(admin);
-  await syncPurchaseShadowMode(admin, config.purchaseStopLive, generatedAt);
-
-  const emptySummary: ProductLifecycleLiveReconcileSummary = {
-    generatedAt,
-    config,
-    purchaseGateApplied: config.purchaseStopLive,
-    productCount: 0,
-    listingCount: 0,
-    observedReadyCount: 0,
-    alreadyAlignedCount: 0,
-    queuedMismatchCount: 0,
-    unresolvedCount: 0,
-    activeQueueSkippedCount: 0,
-    deleteQueuedCount: 0,
-  };
-
-  if (!config.shoplingNonDestructiveLive) {
-    await storeOperation(admin, emptySummary);
-    return emptySummary;
-  }
-
-  const [planning, statesResult, activeQueueResult] = await Promise.all([
+  const config = await loadProductLifecycleRuntimeConfig(admin);
+  const [planning, statesResult, blockingQueueResult] = await Promise.all([
     loadProductPlanningSnapshot(),
     admin
       .from(STATE_TABLE)
@@ -167,7 +96,7 @@ export async function runProductLifecycleLiveReconcile(
       .from(QUEUE_TABLE)
       .select("goods_key,desired_state,status")
       .eq("shadow_mode", false)
-      .in("status", ["pending", "claimed"])
+      .in("status", ["pending", "claimed", "failed", "confirm_needed"])
       .limit(MAX_PRODUCTS),
   ]);
 
@@ -175,14 +104,14 @@ export async function runProductLifecycleLiveReconcile(
     throw new Error(`PRODUCT_LIFECYCLE_RECONCILE_PRODUCT_LIMIT_EXCEEDED:${planning.products.length}`);
   }
   if (statesResult.error) throw new Error(`PRODUCT_LIFECYCLE_RECONCILE_STATE_READ_FAILED:${statesResult.error.message}`);
-  if (activeQueueResult.error) throw new Error(`PRODUCT_LIFECYCLE_RECONCILE_QUEUE_READ_FAILED:${activeQueueResult.error.message}`);
+  if (blockingQueueResult.error) throw new Error(`PRODUCT_LIFECYCLE_RECONCILE_QUEUE_READ_FAILED:${blockingQueueResult.error.message}`);
 
   const stateRows = (Array.isArray(statesResult.data) ? statesResult.data : []) as LifecycleStateRow[];
   const statesBySku = new Map(stateRows.map((row) => [text(row.sku_id), row] as const));
-  const activeQueueKeys = new Set(
-    (Array.isArray(activeQueueResult.data) ? activeQueueResult.data : [])
-      .map((row) => `${text(row.goods_key)}:${text(row.desired_state).toUpperCase()}`)
-      .filter(Boolean),
+  const blockingGoodsKeys = new Set(
+    (Array.isArray(blockingQueueResult.data) ? blockingQueueResult.data : [])
+      .map((row) => text(row.goods_key))
+      .filter((value) => /^\d{5,9}$/.test(value)),
   );
 
   const eligibleProducts = planning.products
@@ -194,12 +123,12 @@ export async function runProductLifecycleLiveReconcile(
   const allGoodsKeys = [...new Set(eligibleProducts.flatMap(({ product }) => listingGoodsKeys(product)))];
   const snapshot = await loadShoplingLifecycleStatusSnapshot(allGoodsKeys);
   const observedByGoodsKey = new Map(snapshot.statuses.map((row) => [row.goodsKey, row] as const));
-  const queueRows: Array<Record<string, unknown>> = [];
+  const mismatchRows: Array<Record<string, unknown>> = [];
 
   let observedReadyCount = 0;
   let alreadyAlignedCount = 0;
   let unresolvedCount = 0;
-  let activeQueueSkippedCount = 0;
+  let blockedQueueSkippedCount = 0;
 
   for (const { product, state } of eligibleProducts) {
     if (!state) continue;
@@ -208,9 +137,8 @@ export async function runProductLifecycleLiveReconcile(
     if (!desiredCode || !["SELLING", "SOLD_OUT"].includes(desiredState)) continue;
 
     for (const goodsKey of listingGoodsKeys(product)) {
-      const activeKey = `${goodsKey}:${desiredState}`;
-      if (activeQueueKeys.has(activeKey)) {
-        activeQueueSkippedCount += 1;
+      if (blockingGoodsKeys.has(goodsKey)) {
+        blockedQueueSkippedCount += 1;
         continue;
       }
 
@@ -234,7 +162,7 @@ export async function runProductLifecycleLiveReconcile(
       }
 
       const stateEvidence = object(state.evidence);
-      queueRows.push({
+      mismatchRows.push({
         dedupe_key: [
           "live-reconcile",
           text(state.sku_id),
@@ -266,26 +194,30 @@ export async function runProductLifecycleLiveReconcile(
     }
   }
 
-  if (queueRows.length) {
+  let queuedMismatchCount = 0;
+  if (config.shoplingNonDestructiveLive && mismatchRows.length) {
     const queued = await admin
       .from(QUEUE_TABLE)
-      .upsert(queueRows, { onConflict: "dedupe_key", ignoreDuplicates: true });
+      .upsert(mismatchRows, { onConflict: "dedupe_key", ignoreDuplicates: true });
     if (queued.error) {
       throw new Error(`PRODUCT_LIFECYCLE_RECONCILE_QUEUE_FAILED:${queued.error.message}`);
     }
+    queuedMismatchCount = mismatchRows.length;
   }
 
   const summary: ProductLifecycleLiveReconcileSummary = {
     generatedAt,
     config,
     purchaseGateApplied: config.purchaseStopLive,
+    shoplingWriteGateEnabled: config.shoplingNonDestructiveLive,
     productCount: eligibleProducts.length,
     listingCount: allGoodsKeys.length,
     observedReadyCount,
     alreadyAlignedCount,
-    queuedMismatchCount: queueRows.length,
+    wouldQueueMismatchCount: mismatchRows.length,
+    queuedMismatchCount,
     unresolvedCount,
-    activeQueueSkippedCount,
+    blockedQueueSkippedCount,
     deleteQueuedCount: 0,
   };
   await storeOperation(admin, summary);
