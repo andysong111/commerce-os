@@ -1,4 +1,5 @@
 import { runProductLifecycleRefresh } from "@/lib/productLifecycleEngine";
+import { runProductLifecycleLiveReconcile } from "@/lib/productLifecycleLiveReconcile";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,16 +21,18 @@ export async function GET(request: Request) {
 
   try {
     const summary = await runProductLifecycleRefresh();
+    const liveReconcile = await runProductLifecycleLiveReconcile(summary.generatedAt);
     return Response.json(
       {
         ok: true,
         ...summary,
+        liveReconcile,
         gradeSystemUsed: false,
         shoplingDirectWrites: false,
         message:
-          summary.mode === "shadow"
-            ? "상품 생애주기·슬롯 판단과 Shopling 작업 큐를 그림자 생성했습니다. 실제 판매중/품절/삭제와 발주 차단은 아직 실행하지 않습니다."
-            : "상품 생애주기 정책을 운영 모드로 계산했습니다. Shopling 작업은 브라우저 실행 큐가 처리합니다.",
+          liveReconcile.config.shoplingNonDestructiveLive || liveReconcile.config.purchaseStopLive
+            ? `상품 생애주기 판단 후 운영 reconciliation을 적용했습니다. Shopling B↔C 불일치 ${liveReconcile.queuedMismatchCount}건을 브라우저 큐에 넣었고, DELETE는 계속 잠금입니다.`
+            : "상품 생애주기·슬롯 판단과 Shopling 작업 큐를 그림자 생성했습니다. 실제 판매중/품절/삭제와 발주 차단은 아직 실행하지 않습니다.",
       },
       { headers: { "cache-control": "no-store" } },
     );
