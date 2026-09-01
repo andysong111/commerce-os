@@ -19,6 +19,31 @@ test("runtime reconcile is fail-closed and limits Shopling live mutation to reve
   assert.doesNotMatch(source, /desired_state:\s*"DELETE"/);
 });
 
+test("runtime reconcile deduplicates by goods key and blocks conflicting or non-reversible references", async () => {
+  const source = await readFile(reconcilePath, "utf8");
+  assert.match(source, /const referencesByGoodsKey = new Map<string, LifecycleListingReference\[]>\(\)/);
+  assert.match(source, /for \(const goodsKey of allGoodsKeys\)/);
+  assert.match(source, /references\.length > 1\) duplicateReferenceGoodsKeyCount \+= 1/);
+  assert.match(source, /references\.some\(\(reference\) => reference\.requiresReview\)/);
+  assert.match(source, /desiredStates\.length !== 1 \|\| reversibleDesiredStates\.length !== 1/);
+  assert.match(source, /TARGET_CONFLICT_OR_NON_REVERSIBLE/);
+  assert.match(source, /targetConflictCount \+= 1/);
+  assert.match(source, /\["live-reconcile", goodsKey, current, desiredState, currentHourKey\(generatedAt\)\]/);
+  assert.doesNotMatch(source, /\["live-reconcile", text\(state\.sku_id\), goodsKey/);
+});
+
+test("runtime reconcile audits unique-listing identity and concrete mismatch samples before live activation", async () => {
+  const source = await readFile(reconcilePath, "utf8");
+  assert.match(source, /listingReferenceCount/);
+  assert.match(source, /listingCount: allGoodsKeys\.length/);
+  assert.match(source, /duplicateReferenceGoodsKeyCount/);
+  assert.match(source, /mismatchSample/);
+  assert.match(source, /unresolvedSample/);
+  assert.match(source, /referenceSkuIds/);
+  assert.match(source, /referenceCount: references\.length/);
+  assert.match(source, /AUDIT_SAMPLE_LIMIT = 50/);
+});
+
 test("runtime reconcile remains observable with writes off and queues only behind explicit Shopling gate", async () => {
   const source = await readFile(reconcilePath, "utf8");
   assert.match(source, /loadShoplingLifecycleStatusSnapshot/);
