@@ -7,6 +7,7 @@ import { createSupabaseAdminHeaders } from "./supabase/admin";
 const OPERATION_TYPE = "INTERNAL_CHINA_FORWARDER_COST_CLOSE";
 const DRAFT_ID = /^fast-purchase-draft:[a-f0-9]{20}$/;
 const READ_TIMEOUT_MS = 1_800;
+const RECENT_READ_TIMEOUT_MS = 2_500;
 
 type StoredCostRow = {
   result_snapshot?: unknown;
@@ -104,6 +105,12 @@ export function parseStoredInternalChinaForwarderClose(
   };
 }
 
+function parseStoredRow(row: StoredCostRow) {
+  const draftId = text(object(row.result_snapshot).draftId);
+  if (!DRAFT_ID.test(draftId)) return null;
+  return parseStoredInternalChinaForwarderClose(draftId, row);
+}
+
 export async function loadStoredInternalChinaForwarderClose(
   draftIdInput: unknown,
 ): Promise<InternalChinaForwarderCostSummary | null> {
@@ -126,4 +133,30 @@ export async function loadStoredInternalChinaForwarderClose(
   }
   const rows = (await response.json().catch(() => [])) as StoredCostRow[];
   return parseStoredInternalChinaForwarderClose(draftId, rows[0]);
+}
+
+export async function loadRecentStoredInternalChinaForwarderCloses(
+  limitInput: unknown = 6,
+): Promise<InternalChinaForwarderCostSummary[]> {
+  const parsedLimit = Math.round(Number(limitInput));
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(12, Math.max(1, parsedLimit))
+    : 6;
+  const { baseUrl, secret } = supabaseConnection();
+  const response = await fetch(
+    `${baseUrl}/rest/v1/commerce_operation_runs?operation_type=eq.${OPERATION_TYPE}&select=result_snapshot,started_at,updated_at&order=started_at.desc&limit=${limit}`,
+    {
+      headers: createSupabaseAdminHeaders(secret),
+      cache: "no-store",
+      signal: AbortSignal.timeout(RECENT_READ_TIMEOUT_MS),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`CHINA_FORWARDER_RECENT_CLOSE_READ_FAILED:${response.status}`);
+  }
+  const rows = (await response.json().catch(() => [])) as StoredCostRow[];
+  return rows
+    .map(parseStoredRow)
+    .filter((summary): summary is InternalChinaForwarderCostSummary => Boolean(summary))
+    .sort((a, b) => String(b.closedAt ?? "").localeCompare(String(a.closedAt ?? "")));
 }
