@@ -32,7 +32,10 @@ export async function GET() {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
     }
-    entries[`${ROOT}/${fileName}`] = strToU8(source);
+    // Chrome's "Load unpacked" expects manifest.json directly inside the
+    // selected folder, so keep extension files at the ZIP root rather than
+    // nesting them under another directory.
+    entries[fileName] = strToU8(source);
   }
   const zip = zipSync(entries, { level: 9 });
   return new Response(zip, {
