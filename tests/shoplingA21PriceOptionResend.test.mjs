@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 const root = new URL("../public/shopling-a21-price-option-resend/", import.meta.url);
 const [manifestText, background, content, popup, planRoute, downloadRoute] = await Promise.all([
   readFile(new URL("manifest.json", root), "utf8"),
-  readFile(new URL("background.js", root), "utf8"),
+  readFile(new URL("background-v012.js", root), "utf8"),
   readFile(new URL("content-a21.js", root), "utf8"),
   readFile(new URL("popup.js", root), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/plan/route.ts", import.meta.url), "utf8"),
@@ -15,7 +15,8 @@ const [manifestText, background, content, popup, planRoute, downloadRoute] = awa
 test("A21 resend extension is fail-closed and keeps price/option separate", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.1");
+  assert.equal(manifest.version, "0.1.2");
+  assert.equal(manifest.background.service_worker, "background-v012.js");
   assert.ok(manifest.permissions.includes("windows"));
   assert.ok(manifest.permissions.includes("tabs"));
   assert.ok(manifest.permissions.includes("scripting"));
@@ -32,16 +33,20 @@ test("A21 resend extension is fail-closed and keeps price/option separate", () =
   assert.match(popup, /Shopling 가격 재조회 VERIFIED/);
 });
 
-test("A21 resend can start from an A18 blank Shopling tab and recover missing content scripts", () => {
+test("A21 resend can start from A18 and does not fail while a Shopling popup is still about:blank", () => {
   assert.match(popup, /A18 빈 화면에서도 실행할 수 있습니다/);
   assert.doesNotMatch(popup, /A21_IDENTIFY/);
   assert.match(background, /Shopling 로그인 탭\(A18 빈 화면 포함\)/);
   assert.match(background, /clickA21Menu/);
-  assert.match(background, /쇼핑몰상품수정/);
   assert.match(background, /waitForA21ListFrame/);
   assert.match(background, /chrome\.scripting\.executeScript/);
   assert.match(background, /injectContentIfMissing/);
   assert.match(background, /frameIds: \[frameId\]/);
+  assert.match(background, /about:blank/);
+  assert.match(background, /transientFrameError/);
+  assert.match(background, /waitForPopupFrame/);
+  assert.match(background, /discoverPopupForJob/);
+  assert.match(background, /POPUP_DISCOVERY_TIMEOUT/);
 });
 
 test("A21 resend plan is only released after full Shopling readback verification", () => {
@@ -58,7 +63,8 @@ test("A21 resend plan is only released after full Shopling readback verification
   assert.match(planRoute, /sourcePrice: "SHOPPING_MALL_SPECIFIC_SELL_PRICE"/);
   assert.match(planRoute, /priceMode: "PRICE_ONLY"/);
   assert.match(planRoute, /optionMode: "OPTION_ONLY"/);
-  assert.match(downloadRoute, /const VERSION = "0\.1\.1"/);
+  assert.match(downloadRoute, /const VERSION = "0\.1\.2"/);
+  assert.match(downloadRoute, /background-v012\.js/);
   assert.match(downloadRoute, /entries\[fileName\]/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
