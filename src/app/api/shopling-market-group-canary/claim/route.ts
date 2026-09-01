@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 const BRIDGE = "group-canary-v0.2.1";
 const SELECT_COLUMNS = "owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at";
+const REGISTRY_SELECT_COLUMNS = "owner_id,goods_key,launch_item_id,model_number,product_group_key,product_group_label,ptn_goods_cd,search_prefix,registered_at,shopling_status";
 const ORDER: Record<string, number> = {
   wholesale1: 1,
   wholesale2: 2,
@@ -76,6 +77,34 @@ function taskFromRow(raw: unknown) {
   };
 }
 
+function ledgerSeedFromRegistryRow(raw: unknown, now: string) {
+  const row = record(raw);
+  const ownerId = text(row.owner_id);
+  const goodsKey = text(row.goods_key);
+  const launchItemId = text(row.launch_item_id);
+  const productGroupKey = text(row.product_group_key);
+  const mapping = profileSearchCode(productGroupKey);
+  const ptnGoodsCd = text(row.ptn_goods_cd);
+  if (!ownerId || !/^\d{5,9}$/.test(goodsKey) || !launchItemId || !mapping || !ptnGoodsCd) return null;
+  if (!ptnGoodsCd.toUpperCase().startsWith(`${mapping.searchCode}_`)) return null;
+  return {
+    owner_id: ownerId,
+    goods_key: goodsKey,
+    launch_item_id: launchItemId,
+    model_number: text(row.model_number),
+    product_group_key: productGroupKey,
+    profile: mapping.profile,
+    ptn_goods_cd: ptnGoodsCd,
+    search_prefix: text(row.search_prefix),
+    registry_registered_at: text(row.registered_at) || null,
+    status: "queued",
+    title_status: "pending",
+    market_status: "pending",
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 function sortTasks<T extends { productGroupKey: string; goodsKey: string }>(rows: T[]) {
   return [...rows].sort((a, b) => {
     const groupDelta = (ORDER[a.productGroupKey] ?? 99) - (ORDER[b.productGroupKey] ?? 99);
@@ -119,6 +148,40 @@ export async function POST(request: Request) {
     return json({ ok: true, bridge: BRIDGE, runId, tasks: sortTasks(tasks), recovered: true, anchoredToVisibleA18: true });
   }
 
+  // The product-group registry is the live source of truth for newly uploaded Shopling goods.
+  // The durable market ledger can lag behind a fresh re-registration, so hydrate only the goods
+  // that are actually visible in the operator's current A18 page before selecting a task.
+  const registryVisible = await supabase
+    .from("shopling_product_group_registry")
+    .select(REGISTRY_SELECT_COLUMNS)
+    .in("goods_key", requestedVisibleGoodsKeys)
+    .eq("shopling_status", "success")
+    .limit(25);
+  if (registryVisible.error) {
+    return json({ ok: false, error: "group_canary_visible_registry_failed", message: registryVisible.error.message }, 503);
+  }
+
+  const registryRows = Array.isArray(registryVisible.data) ? registryVisible.data : [];
+  const seedNow = new Date().toISOString();
+  const ledgerSeeds = registryRows
+    .map((row) => ledgerSeedFromRegistryRow(row, seedNow))
+    .filter(Boolean) as NonNullable<ReturnType<typeof ledgerSeedFromRegistryRow>>[];
+  if (registryRows.length > 0 && ledgerSeeds.length !== registryRows.length) {
+    return json({
+      ok: false,
+      error: "group_canary_visible_registry_payload_invalid",
+      message: "현재 A18 상품과 Shopling 레지스트리의 채널 식별자가 일치하지 않아 자동 송신하지 않습니다.",
+    }, 503);
+  }
+  if (ledgerSeeds.length > 0) {
+    const hydrated = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .upsert(ledgerSeeds, { onConflict: "owner_id,goods_key", ignoreDuplicates: true });
+    if (hydrated.error) {
+      return json({ ok: false, error: "group_canary_visible_ledger_hydration_failed", message: hydrated.error.message }, 503);
+    }
+  }
+
   const visibleCandidates = await supabase
     .from("shopling_market_pipeline_ledger")
     .select(SELECT_COLUMNS)
@@ -139,6 +202,7 @@ export async function POST(request: Request) {
       tasks: [],
       empty: true,
       anchoredToVisibleA18: true,
+      hydratedVisibleCount: ledgerSeeds.length,
       message: "현재 A18 화면에서 Commerce OS 대기열과 일치하는 미전송 상품이 없습니다.",
     });
   }
@@ -160,6 +224,7 @@ export async function POST(request: Request) {
     (row) => text(row.owner_id) === ownerId && text(row.launch_item_id) === launchItemId,
   );
   if (!identityRows.length) return json({ ok: false, error: "group_canary_visible_identity_empty" }, 409);
+  const identityVisibleGoodsKeys = identityRows.map((row) => text(row.goods_key)).filter((key) => /^\d{5,9}$/.test(key));
 
   const claimedAt = new Date().toISOString();
   const claimed = await supabase
@@ -172,6 +237,7 @@ export async function POST(request: Request) {
     })
     .eq("owner_id", ownerId)
     .eq("launch_item_id", launchItemId)
+    .in("goods_key", identityVisibleGoodsKeys)
     .eq("status", "queued")
     .eq("market_status", "pending")
     .select(SELECT_COLUMNS);
@@ -193,6 +259,45 @@ export async function POST(request: Request) {
     }, 503);
   }
 
+  // If A18 exposes the complete six-channel identity, retire older unsent ledger generations for
+  // the same launch item. Sent/armed/confirm-needed history is never touched.
+  const claimedGroups = new Set(tasks.map((task) => task.productGroupKey));
+  if (tasks.length === 6 && claimedGroups.size === 6) {
+    const staleRows = await supabase
+      .from("shopling_market_pipeline_ledger")
+      .select("goods_key")
+      .eq("owner_id", ownerId)
+      .eq("launch_item_id", launchItemId)
+      .eq("status", "queued")
+      .eq("market_status", "pending")
+      .limit(50);
+    if (!staleRows.error) {
+      const currentSet = new Set(identityVisibleGoodsKeys);
+      const staleGoodsKeys = (Array.isArray(staleRows.data) ? staleRows.data : [])
+        .map((row) => text(record(row).goods_key))
+        .filter((goodsKey) => /^\d{5,9}$/.test(goodsKey) && !currentSet.has(goodsKey));
+      if (staleGoodsKeys.length > 0) {
+        const retiredAt = new Date().toISOString();
+        await supabase
+          .from("shopling_market_pipeline_ledger")
+          .update({
+            status: "legacy_ignored",
+            title_status: "legacy_ignored",
+            market_status: "legacy_ignored",
+            reason_code: "superseded_by_visible_a18_registry",
+            message: "동일 상품의 최신 A18 Shopling goods_key 세대가 확인되어 이전 미전송 세대를 자동 제외했습니다.",
+            completed_at: retiredAt,
+            updated_at: retiredAt,
+          })
+          .eq("owner_id", ownerId)
+          .eq("launch_item_id", launchItemId)
+          .in("goods_key", staleGoodsKeys)
+          .eq("status", "queued")
+          .eq("market_status", "pending");
+      }
+    }
+  }
+
   return json({
     ok: true,
     bridge: BRIDGE,
@@ -202,6 +307,7 @@ export async function POST(request: Request) {
     launchItemId,
     visibleMatchCount: identityRows.length,
     visibleGoodsKeys: requestedVisibleGoodsKeys,
+    hydratedVisibleCount: ledgerSeeds.length,
     anchoredToVisibleA18: true,
     recovered: false,
   });
