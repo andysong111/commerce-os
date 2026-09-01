@@ -37,6 +37,11 @@ function validRunId(runId: string) {
   return /^canary-group-v030-[A-Za-z0-9._:-]{12,150}$/.test(runId);
 }
 
+function goodsKeys(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return [...new Set(value.map(text).filter((key) => /^\d{5,9}$/.test(key)))].slice(0, 6);
+}
+
 function isSeoBulkJob(job: Record<string, unknown>) {
   return text(record(record(job.payload).seoFinal).source).startsWith("seo-bulk-cloud");
 }
@@ -128,7 +133,10 @@ function taskFromLedger(raw: unknown) {
   };
 }
 
-async function latestSeoBulkJobForLaunch(supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>, launchItemId: string) {
+async function latestSeoBulkJobForLaunch(
+  supabase: NonNullable<Awaited<ReturnType<typeof createSupabaseAdminClient>>>,
+  launchItemId: string,
+) {
   const latest = await supabase
     .from(JOB_TABLE)
     .select("id,launch_item_id,status,payload,result,completed_at,created_at")
@@ -148,6 +156,7 @@ export async function POST(request: Request) {
   }
   const runId = text(payload.runId);
   const jobId = text(payload.jobId);
+  const excludeGoodsKeys = new Set(goodsKeys(payload.excludeGoodsKeys));
   const maxTasksRaw = Number(payload.maxTasks ?? 3);
   const maxTasks = Math.max(1, Math.min(Number.isFinite(maxTasksRaw) ? Math.floor(maxTasksRaw) : 3, 3));
   if (!validRunId(runId)) return Response.json({ ok: false, error: "invalid_group_canary_run_id" }, { status: 400 });
@@ -170,7 +179,10 @@ export async function POST(request: Request) {
   const job = record(jobResult.data);
   if (!isSeoBulkJob(job)) return Response.json({ ok: false, error: "shopling_selected_job_not_seo_bulk" }, { status: 409 });
   if (text(job.status) !== "success") {
-    return Response.json({ ok: false, error: "shopling_selected_job_not_full_success", message: "샵플링 6채널 업로드가 완전 성공한 건만 마켓 자동등록할 수 있습니다." }, { status: 409 });
+    return Response.json(
+      { ok: false, error: "shopling_selected_job_not_full_success", message: "샵플링 6채널 업로드가 완전 성공한 건만 마켓 자동등록할 수 있습니다." },
+      { status: 409 },
+    );
   }
 
   const tasksFromJob = sortTasks(taskRows(job));
@@ -182,12 +194,15 @@ export async function POST(request: Request) {
   const latest = await latestSeoBulkJobForLaunch(supabase, text(job.launch_item_id));
   if (latest.error) return Response.json({ ok: false, error: "shopling_selected_latest_job_lookup_failed", message: latest.error }, { status: 503 });
   if (latest.jobId !== jobId) {
-    return Response.json({ ok: false, error: "shopling_selected_job_superseded", message: "같은 상품의 더 최근 샵플링 업로드가 있어 이전 업로드는 마켓전송하지 않습니다." }, { status: 409 });
+    return Response.json(
+      { ok: false, error: "shopling_selected_job_superseded", message: "같은 상품의 더 최근 샵플링 업로드가 있어 이전 업로드는 마켓전송하지 않습니다." },
+      { status: 409 },
+    );
   }
 
   const ownerId = tasksFromJob[0].ownerId;
   const launchItemId = tasksFromJob[0].launchItemId;
-  const goodsKeys = tasksFromJob.map((task) => task.goodsKey);
+  const batchGoodsKeys = tasksFromJob.map((task) => task.goodsKey);
   const now = new Date().toISOString();
 
   const hydrated = await supabase
@@ -212,7 +227,7 @@ export async function POST(request: Request) {
       updated_at: now,
     })
     .eq("owner_id", ownerId)
-    .in("goods_key", goodsKeys)
+    .in("goods_key", batchGoodsKeys)
     .eq("status", "legacy_ignored")
     .eq("market_status", "legacy_ignored")
     .is("submit_armed_at", null);
@@ -230,7 +245,7 @@ export async function POST(request: Request) {
       updated_at: now,
     })
     .eq("owner_id", ownerId)
-    .in("goods_key", goodsKeys)
+    .in("goods_key", batchGoodsKeys)
     .eq("status", "claimed")
     .eq("market_status", "pending")
     .lt("claimed_at", staleCutoff)
@@ -246,7 +261,7 @@ export async function POST(request: Request) {
     .eq("market_status", "pending")
     .limit(80);
   if (!stale.error) {
-    const current = new Set(goodsKeys);
+    const current = new Set(batchGoodsKeys);
     const staleKeys = (Array.isArray(stale.data) ? stale.data : [])
       .map((row) => text(record(row).goods_key))
       .filter((goodsKey) => /^\d{5,9}$/.test(goodsKey) && !current.has(goodsKey));
@@ -276,13 +291,15 @@ export async function POST(request: Request) {
     .eq("claim_run_id", runId)
     .eq("status", "claimed")
     .eq("market_status", "pending")
-    .in("goods_key", goodsKeys)
+    .in("goods_key", batchGoodsKeys)
     .limit(3);
   if (recovered.error) {
     return Response.json({ ok: false, error: "shopling_selected_claim_recovery_failed", message: recovered.error.message }, { status: 503 });
   }
   if (Array.isArray(recovered.data) && recovered.data.length) {
-    const recoveredTasks = sortTasks(recovered.data.map(taskFromLedger).filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[]);
+    const recoveredTasks = sortTasks(
+      recovered.data.map(taskFromLedger).filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[],
+    );
     return Response.json({ ok: true, bridge: BRIDGE, runId, jobId, tasks: recoveredTasks, taskCount: recoveredTasks.length, recovered: true });
   }
 
@@ -290,7 +307,7 @@ export async function POST(request: Request) {
     .from(LEDGER_TABLE)
     .select("owner_id,goods_key,launch_item_id,model_number,product_group_key,profile,ptn_goods_cd,search_prefix,registry_registered_at")
     .eq("owner_id", ownerId)
-    .in("goods_key", goodsKeys)
+    .in("goods_key", batchGoodsKeys)
     .eq("status", "queued")
     .eq("market_status", "pending")
     .limit(6);
@@ -298,7 +315,11 @@ export async function POST(request: Request) {
     return Response.json({ ok: false, error: "shopling_selected_candidate_failed", message: candidates.error.message }, { status: 503 });
   }
 
-  const candidateTasks = sortTasks((Array.isArray(candidates.data) ? candidates.data : []).map(taskFromLedger).filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[]);
+  const candidateTasks = sortTasks(
+    (Array.isArray(candidates.data) ? candidates.data : [])
+      .map(taskFromLedger)
+      .filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[],
+  ).filter((task) => !excludeGoodsKeys.has(task.goodsKey));
   const wave = candidateTasks.slice(0, maxTasks);
   if (wave.length) {
     const claimAt = new Date().toISOString();
@@ -313,7 +334,11 @@ export async function POST(request: Request) {
     if (claimed.error) {
       return Response.json({ ok: false, error: "shopling_selected_claim_failed", message: claimed.error.message }, { status: 503 });
     }
-    const tasks = sortTasks((Array.isArray(claimed.data) ? claimed.data : []).map(taskFromLedger).filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[]);
+    const tasks = sortTasks(
+      (Array.isArray(claimed.data) ? claimed.data : [])
+        .map(taskFromLedger)
+        .filter(Boolean) as NonNullable<ReturnType<typeof taskFromLedger>>[],
+    );
     if (!tasks.length) return Response.json({ ok: false, error: "shopling_selected_claim_race" }, { status: 409 });
     return Response.json({ ok: true, bridge: BRIDGE, runId, jobId, tasks, taskCount: tasks.length, recovered: false });
   }
@@ -322,15 +347,26 @@ export async function POST(request: Request) {
     .from(LEDGER_TABLE)
     .select("goods_key,status,market_status,reason_code,message")
     .eq("owner_id", ownerId)
-    .in("goods_key", goodsKeys)
+    .in("goods_key", batchGoodsKeys)
     .limit(6);
   if (summaryResult.error) {
     return Response.json({ ok: false, error: "shopling_selected_summary_failed", message: summaryResult.error.message }, { status: 503 });
   }
   const summaryRows = Array.isArray(summaryResult.data) ? summaryResult.data.map(record) : [];
-  const successCount = summaryRows.filter((row) => ["sent", "already_registered"].includes(text(row.status)) || ["sent", "already_registered"].includes(text(row.market_status))).length;
-  const confirmNeededCount = summaryRows.filter((row) => text(row.status) === "confirm_needed" || text(row.market_status) === "confirm_needed").length;
-  const busyCount = summaryRows.filter((row) => text(row.status) === "claimed" || text(row.market_status) === "submit_armed").length;
+  const successCount = summaryRows.filter(
+    (row) => ["sent", "already_registered"].includes(text(row.status)) || ["sent", "already_registered"].includes(text(row.market_status)),
+  ).length;
+  const confirmNeededCount = summaryRows.filter(
+    (row) => text(row.status) === "confirm_needed" || text(row.market_status) === "confirm_needed",
+  ).length;
+  const busyCount = summaryRows.filter(
+    (row) => text(row.status) === "claimed" || text(row.market_status) === "submit_armed",
+  ).length;
+  const pendingRows = summaryRows.filter(
+    (row) => text(row.status) === "queued" && text(row.market_status) === "pending",
+  );
+  const excludedPendingCount = pendingRows.filter((row) => excludeGoodsKeys.has(text(row.goods_key))).length;
+  const pendingCount = pendingRows.length;
 
   return Response.json({
     ok: true,
@@ -344,8 +380,13 @@ export async function POST(request: Request) {
       successCount,
       confirmNeededCount,
       busyCount,
+      pendingCount,
+      excludedPendingCount,
       totalCount: 6,
-      completed: successCount + confirmNeededCount >= 6 && busyCount === 0,
+      completed: successCount + confirmNeededCount >= 6 && busyCount === 0 && pendingCount === 0,
+      completedWithExceptions:
+        busyCount === 0 &&
+        successCount + confirmNeededCount + excludedPendingCount >= 6,
     },
   });
 }
