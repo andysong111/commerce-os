@@ -37,5 +37,5 @@ test("v0.3.16 preserves safety guardrails", async () => {
   const source = await readFile(packageRoute, "utf8");
   assert.equal(source.includes('response.contexts.length !== 1'), true);
   assert.equal(source.includes('candidateGoodsKeys.includes(task.goodsKey)'), true);
-  assert.equal(source.includes('document.documentElement.appendChild(box)'), false);
+  assert.equal(source.includes('if (content.includes("document.documentElement.appendChild(box)"))'), true);
 });
