@@ -15,9 +15,10 @@ const [manifestText, background, content, popup, planRoute, downloadRoute] = awa
 test("A21 resend extension is fail-closed and keeps price/option separate", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.1.1");
   assert.ok(manifest.permissions.includes("windows"));
   assert.ok(manifest.permissions.includes("tabs"));
+  assert.ok(manifest.permissions.includes("scripting"));
   assert.match(background, /MAX_CONCURRENT = 4/);
   assert.match(background, /MAX_SEARCH_CODES = 200/);
   assert.match(background, /A21_SPLIT_REQUIRED/);
@@ -29,6 +30,18 @@ test("A21 resend extension is fail-closed and keeps price/option separate", () =
   assert.match(content, /A21_VISIBLE_ROW_COUNT_MISMATCH/);
   assert.match(content, /A21_ROW_SELECTION_MISMATCH/);
   assert.match(popup, /Shopling 가격 재조회 VERIFIED/);
+});
+
+test("A21 resend can start from an A18 blank Shopling tab and recover missing content scripts", () => {
+  assert.match(popup, /A18 빈 화면에서도 실행할 수 있습니다/);
+  assert.doesNotMatch(popup, /A21_IDENTIFY/);
+  assert.match(background, /Shopling 로그인 탭\(A18 빈 화면 포함\)/);
+  assert.match(background, /clickA21Menu/);
+  assert.match(background, /쇼핑몰상품수정/);
+  assert.match(background, /waitForA21ListFrame/);
+  assert.match(background, /chrome\.scripting\.executeScript/);
+  assert.match(background, /injectContentIfMissing/);
+  assert.match(background, /frameIds: \[frameId\]/);
 });
 
 test("A21 resend plan is only released after full Shopling readback verification", () => {
@@ -45,5 +58,7 @@ test("A21 resend plan is only released after full Shopling readback verification
   assert.match(planRoute, /sourcePrice: "SHOPPING_MALL_SPECIFIC_SELL_PRICE"/);
   assert.match(planRoute, /priceMode: "PRICE_ONLY"/);
   assert.match(planRoute, /optionMode: "OPTION_ONLY"/);
+  assert.match(downloadRoute, /const VERSION = "0\.1\.1"/);
+  assert.match(downloadRoute, /entries\[fileName\]/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
