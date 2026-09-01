@@ -2,11 +2,22 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, storedClose, route, panel, fallbackPanel, layout, receiptEngine, workflow] = await Promise.all([
+const [
+  engine,
+  storedClose,
+  route,
+  panel,
+  historyPanel,
+  fallbackPanel,
+  layout,
+  receiptEngine,
+  workflow,
+] = await Promise.all([
   readFile("src/lib/internalChinaForwarderCost.ts", "utf8"),
   readFile("src/lib/internalChinaForwarderStoredClose.ts", "utf8"),
   readFile("src/app/api/china-order-manager/forwarder-cost/route.ts", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaReceiptPanel.tsx", "utf8"),
+  readFile("src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx", "utf8"),
   readFile("src/app/china-order-manager/layout.tsx", "utf8"),
   readFile("src/lib/internalChinaReceipt.ts", "utf8"),
@@ -56,6 +67,25 @@ test("completed monthly drafts remain visible until actual landed cost is closed
   assert.ok(layout.includes("currentCycleDrafts.map"));
   assert.ok(layout.includes("실제 원가 미마감"));
   assert.ok(layout.includes("loadInternalChinaForwarderCostSummary"));
+});
+
+test("recent closed monthly landed costs stay visible after the calendar month changes", () => {
+  assert.ok(layout.includes("loadRecentStoredInternalChinaForwarderCloses(6)"));
+  assert.ok(layout.includes("InternalChinaForwarderCloseHistory"));
+  assert.ok(layout.includes("FORWARDER_HISTORY_TIMEBOX_MS = 3_000"));
+  assert.ok(storedClose.includes("loadRecentStoredInternalChinaForwarderCloses"));
+  assert.ok(storedClose.includes("order=started_at.desc"));
+  assert.ok(historyPanel.includes("최근 마감 원가"));
+  assert.ok(historyPanel.includes("매입금액(중국내운임 포함)"));
+  assert.ok(historyPanel.includes("실제 부대비용"));
+  assert.ok(historyPanel.includes("실제 총지출"));
+  assert.ok(historyPanel.includes("중국내운임 포함 배수"));
+  assert.ok(
+    historyPanel.includes(
+      "표시 배수 = (상품대금 + 중국내운임 + 실제 부대비용) ÷ (상품대금 + 중국내운임)",
+    ),
+  );
+  assert.ok(historyPanel.includes("기존 내부 원가배수 저장값은 변경하지 않고"));
 });
 
 test("China order manager fails fast instead of exhausting the Vercel function timeout", () => {
@@ -135,6 +165,7 @@ test("closing the forwarding expense rewrites same-cycle receipt costs with the 
 test("the forwarder regression suite is permanently wired into China Order Ledger CI", () => {
   assert.ok(workflow.includes('src/lib/internalChinaForwarderCost.ts'));
   assert.ok(workflow.includes('src/lib/internalChinaForwarderStoredClose.ts'));
+  assert.ok(workflow.includes('src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx'));
   assert.ok(workflow.includes('src/app/api/china-order-manager/forwarder-cost/route.ts'));
   assert.ok(workflow.includes('tests/internalChinaForwarderCost.test.mjs'));
   assert.ok(workflow.includes('node --experimental-strip-types --test'));
