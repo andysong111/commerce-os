@@ -68,6 +68,6 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://shopling-group-canary-build-check.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_shopling_group_canary_build_check
-          SUPABASE_SECRET_KEY: sb_secret_shopling_group_canary-build-check
+          SUPABASE_SECRET_KEY: sb_secret_shopling_group_canary_build_check
           PRICE_ADJUSTMENT_ENGINE_INTEGRATION_SECRET: ci-price-adjustment-secret
           PRICE_ADJUSTMENT_AUTOMATION_OWNER_ID: 0c23a96b-1cda-44b6-9c08-1fa1c1b45a36
