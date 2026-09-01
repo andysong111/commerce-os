@@ -29,6 +29,7 @@ on:
       - "src/app/api/china-order-manager/**"
       - "src/app/api/cron/receipt-live-price-proposals/route.ts"
       - "src/app/china-order-manager/**"
+      - "src/app/fast-purchase-mvp/page.tsx"
       - "src/components/china-order-manager/**"
       - "src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx"
       - "tests/chinaOrderLedger.test.mjs"
@@ -102,6 +103,7 @@ jobs:
           src/app/china-order-manager/page.tsx
           src/app/china-order-manager/price-review/page.tsx
           "src/app/china-order-manager/drafts/[draftId]/page.tsx"
+          src/app/fast-purchase-mvp/page.tsx
           src/components/china-order-manager/InternalChinaPurchaseDraftWorkspace.tsx
           src/components/china-order-manager/InternalChinaPurchaseBudgetAudit.tsx
           src/components/china-order-manager/InternalChinaReceiptPanel.tsx
