@@ -1,6 +1,7 @@
 const planCard = document.getElementById("planCard");
 const runState = document.getElementById("runState");
 const jobs = document.getElementById("jobs");
+const testButton = document.getElementById("test");
 const startButton = document.getElementById("start");
 const stopButton = document.getElementById("stop");
 const refreshButton = document.getElementById("refresh");
@@ -19,6 +20,11 @@ async function activeShoplingTab() {
   return tab;
 }
 
+function setRunButtons(enabled) {
+  testButton.disabled = !enabled;
+  startButton.disabled = !enabled;
+}
+
 async function loadPlan() {
   try {
     await activeShoplingTab();
@@ -30,11 +36,11 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">A18/A21 어디서든 시작할 수 있습니다. 판매가는 tsmt_sale_price_tp=J 확인 후 trsmt_env_mody_price=Y만 전송하고, 옵션은 goods_stock + trsmt_env_mody_opt=1만 전송합니다.</p>`;
-    startButton.disabled = false;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.0은 동시 1개 작업만 실행합니다. 먼저 1 GOODSKEY 테스트로 판매가→옵션 전송을 검증한 뒤 전체 실행할 수 있습니다.</p>`;
+    setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
-    startButton.disabled = true;
+    setRunButtons(false);
   }
 }
 
@@ -43,7 +49,7 @@ function renderState(state) {
     runState.innerHTML = "실행 대기";
     jobs.innerHTML = "";
     stopButton.style.display = "none";
-    startButton.disabled = !plan;
+    setRunButtons(Boolean(plan));
     return;
   }
   const rows = Array.isArray(state.jobs) ? state.jobs : [];
@@ -52,10 +58,11 @@ function renderState(state) {
   const running = rows.filter((job) => job.status === "RUNNING").length;
   const queued = rows.filter((job) => job.status === "QUEUED").length;
   const cls = state.state === "SUCCEEDED" ? "ok" : ["PARTIAL_FAILURE", "STOPPED"].includes(state.state) ? "bad" : "warn";
-  runState.innerHTML = `<b class="${cls}">${escapeHtml(state.state)}</b> · 배치 ${state.batchCount || 0} · 성공 ${success} · 실행 ${running} · 대기 ${queued} · 실패 ${failed}`;
+  const modeLabel = state.testMode ? "1 GOODSKEY TEST" : "FULL";
+  runState.innerHTML = `<b class="${cls}">${escapeHtml(state.state)}</b> · ${modeLabel} · 배치 ${state.batchCount || 0} · 성공 ${success} · 실행 ${running} · 대기 ${queued} · 실패 ${failed}`;
   jobs.innerHTML = rows.filter((job) => job.status !== "SUPERSEDED").map((job) => `<div class="job"><strong>배치 ${job.batchIndex} · ${job.mode === "PRICE" ? "판매가" : "옵션"} · ${job.goodsKeyCount} GOODSKEY</strong> <span class="pill ${job.status}">${job.status}</span><small>${escapeHtml(job.message || job.stage || "")}${job.error ? ` · ${escapeHtml(job.error)}` : ""}</small></div>`).join("");
   stopButton.style.display = state.state === "RUNNING" ? "block" : "none";
-  startButton.disabled = state.state === "RUNNING" || !plan;
+  setRunButtons(state.state !== "RUNNING" && Boolean(plan));
 }
 
 async function refreshState() {
@@ -63,18 +70,21 @@ async function refreshState() {
   if (response?.ok) renderState(response.state);
 }
 
-startButton.addEventListener("click", async () => {
-  startButton.disabled = true;
+async function startRun(testMode) {
+  setRunButtons(false);
   try {
     const tab = await activeShoplingTab();
-    const response = await chrome.runtime.sendMessage({ type: "A21_START", sourceTabId: tab.id });
+    const response = await chrome.runtime.sendMessage({ type: "A21_START", sourceTabId: tab.id, testMode });
     if (!response?.ok) throw new Error(response?.error || "실행 시작 실패");
     renderState(response.state);
   } catch (error) {
     runState.innerHTML = `<span class="bad">${escapeHtml(error.message || error)}</span>`;
-    startButton.disabled = false;
+    setRunButtons(true);
   }
-});
+}
+
+testButton.addEventListener("click", () => void startRun(true));
+startButton.addEventListener("click", () => void startRun(false));
 
 stopButton.addEventListener("click", async () => {
   const response = await chrome.runtime.sendMessage({ type: "A21_STOP" });
