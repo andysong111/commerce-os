@@ -74,7 +74,14 @@ export async function POST(request: Request) {
   const hydrated = await supabase.from(LEDGER_TABLE).upsert(seeds, { onConflict: "owner_id,goods_key", ignoreDuplicates: true });
   if (hydrated.error) return Response.json({ ok: false, error: "shopling_selected_ledger_hydration_failed", message: hydrated.error.message }, { status: 503 });
 
-  await supabase.from(LEDGER_TABLE).update({ status: "queued", title_status: "pending", market_status: "pending", claim_run_id: "", claimed_at: null, reason_code: "", message: "", completed_at: null, updated_at: now }).eq("owner_id", ownerId).in("goods_key", keys).eq("status", "legacy_ignored").eq("market_status", "legacy_ignored").is("submit_armed_at", null);
+  // Legacy unknown rows are safe to re-open because the worker always runs an exact A18 unregistered preflight before any submit.
+  await supabase.from(LEDGER_TABLE).update({ status: "queued", title_status: "pending", market_status: "pending", claim_run_id: "", claimed_at: null, submit_armed_at: null, reason_code: "selected_legacy_preflight_reconcile_v0328", message: "선택 실행에서 A18 미등록 정확조회로 실등록 여부를 다시 확인합니다.", completed_at: null, updated_at: now }).eq("owner_id", ownerId).in("goods_key", keys).eq("status", "legacy_ignored").eq("market_status", "legacy_ignored");
+
+  // Explicit user selection may retry confirm-needed rows, but only through the same exact A18 unregistered preflight.
+  await supabase.from(LEDGER_TABLE).update({ status: "queued", title_status: "pending", market_status: "pending", claim_run_id: "", claimed_at: null, submit_armed_at: null, reason_code: "selected_confirm_reconcile_v0328", message: "확인필요 채널을 사용자가 다시 선택했습니다. A18 미등록 정확조회에서 실제 미등록일 때만 송신합니다.", completed_at: null, updated_at: now }).eq("owner_id", ownerId).in("goods_key", keys).eq("status", "confirm_needed").eq("market_status", "confirm_needed");
+
+  const staleSubmitCutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+  await supabase.from(LEDGER_TABLE).update({ status: "queued", title_status: "pending", market_status: "pending", claim_run_id: "", claimed_at: null, submit_armed_at: null, reason_code: "selected_stale_submit_reconcile_v0328", message: "이전 송신경계 상태가 3분 이상 미확정되어 사용자의 재선택으로 A18 미등록 정확조회부터 안전하게 재검증합니다.", completed_at: null, updated_at: now }).eq("owner_id", ownerId).in("goods_key", keys).eq("status", "claimed").eq("market_status", "submit_armed").lt("submit_armed_at", staleSubmitCutoff);
 
   const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   await supabase.from(LEDGER_TABLE).update({ status: "queued", market_status: "pending", claim_run_id: "", claimed_at: null, reason_code: "stale_selected_claim_released", message: "이전 실행이 송신 전에 중단되어 자동 원복했습니다.", updated_at: now }).eq("owner_id", ownerId).in("goods_key", keys).eq("status", "claimed").eq("market_status", "pending").lt("claimed_at", staleCutoff).is("submit_armed_at", null);
