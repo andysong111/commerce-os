@@ -98,17 +98,19 @@ async function handoffToExtension(orchestrationId: string, token: string) {
 }
 
 function stateLabel(state: string) {
-  return {
-    waiting_upload: "Shopling 업로드 대기",
-    uploading: "Shopling 업로드 중",
-    market_ready: "마켓전송 준비",
-    market_claimed: "브라우저 에이전트 연결",
-    market_running: "마켓전송 중",
-    completed: "Shopling 업로드 + 마켓전송 완료",
-    completed_with_exceptions: "완료 · 일부 예외 확인필요",
-    exception: "예외",
-    cancelled: "취소",
-  }[state] ?? state || "대기";
+  return (
+    {
+      waiting_upload: "Shopling 업로드 대기",
+      uploading: "Shopling 업로드 중",
+      market_ready: "마켓전송 준비",
+      market_claimed: "브라우저 에이전트 연결",
+      market_running: "마켓전송 중",
+      completed: "Shopling 업로드 + 마켓전송 완료",
+      completed_with_exceptions: "완료 · 일부 예외 확인필요",
+      exception: "예외",
+      cancelled: "취소",
+    }[state] ?? state
+  ) || "대기";
 }
 
 function terminalState(state: string) {
