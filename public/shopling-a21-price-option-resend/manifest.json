@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["https://a.shopling.co.kr/*"],
-      "js": ["content-a21.js", "content-a21-v014.js"],
+      "js": ["content-a21.js"],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
