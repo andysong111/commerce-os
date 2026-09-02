@@ -111,17 +111,11 @@ function rewriteBackground(source: string) {
 }
 
 function rewriteContent(source: string) {
-  let rewritten = rewriteRuntime(source)
+  const rewritten = rewriteRuntime(source)
     .replace('const LEGACY_RUN_STATE_KEY = "commerceOsShoplingParallelRunV0326";', 'const LEGACY_RUN_STATE_KEY = "commerceOsShoplingParallelRunV0327";')
     .replace('const LEGACY_WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV0326";', 'const LEGACY_WORKER_STATE_PREFIX = "commerceOsShoplingParallelWorkerV0327";')
     .replace('const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0326";', 'const LEGACY_SELECTION_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0327";')
     .replace('const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0326";', 'const LEGACY_SELECTION_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0327";');
-  rewritten = replaceRequired(
-    rewritten,
-    'status: "superseded_by_v0327"',
-    'status: "superseded_by_v0328"',
-    "v0328_content_running_queue_retire_missing",
-  );
   assertScript("content-v0328", rewritten);
   return rewritten;
 }
@@ -129,8 +123,7 @@ function rewriteContent(source: string) {
 function rewritePopup(source: string) {
   let rewritten = rewriteRuntime(source)
     .replace('const LEGACY_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0326";', 'const LEGACY_QUEUE_KEY = "commerceOsShoplingMarketSelectionQueueV0327";')
-    .replace('const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0326";', 'const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0327";')
-    .replace('status: "superseded_by_v0327"', 'status: "superseded_by_v0328"');
+    .replace('const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0326";', 'const LEGACY_INTENT_KEY = "commerceOsShoplingMarketSelectionIntentV0327";');
 
   rewritten = replaceRequired(
     rewritten,
