@@ -2,15 +2,15 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.2.1",
-  "description": "Shopling A21 실제 form name/value를 기준으로 판매가와 옵션을 직렬 안전전송하고, 마지막 송신은 Shopling 원본 함수를 MAIN world에서 실행합니다. 1 GOODSKEY 안전 테스트를 지원합니다.",
+  "version": "0.2.2",
+  "description": "Shopling A21 실제 form name/value를 기준으로 판매가와 옵션을 직렬 안전전송하고, 배송정보는 수정안함으로 고정하며 Shopling 원본 송신함수와 예상 안내창을 MAIN world에서 안전 처리합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-v021.js"
+    "service_worker": "background-v020.js"
   },
   "action": {
     "default_title": "Shopling A21 가격·옵션 수정전송",
@@ -27,7 +27,14 @@
     },
     {
       "matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
-      "js": ["content-a21-v021.js"],
+      "js": ["main-a21-v022.js"],
+      "world": "MAIN",
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
+      "js": ["content-a21-v022.js"],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
