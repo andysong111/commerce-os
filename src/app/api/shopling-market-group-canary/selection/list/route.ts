@@ -11,6 +11,7 @@ const BUSY_STATUS = new Set(["claimed"]);
 const BUSY_MARKET = new Set(["submit_armed"]);
 const CONFIRM_MARKET = new Set(["confirm_needed"]);
 const LEGACY_UNKNOWN = new Set(["legacy_ignored"]);
+const STALE_BUSY_MS = 3 * 60 * 1000;
 
 function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
@@ -49,6 +50,13 @@ function isoParam(value: string | null) {
   if (!raw) return "";
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function isStaleBusy(ledger: Record<string, unknown>) {
+  const raw = text(ledger.submit_armed_at || ledger.updated_at || ledger.claimed_at);
+  if (!raw) return false;
+  const timestamp = new Date(raw).getTime();
+  return Number.isFinite(timestamp) && Date.now() - timestamp >= STALE_BUSY_MS;
 }
 
 export async function GET(request: Request) {
@@ -126,7 +134,7 @@ export async function GET(request: Request) {
   if (allGoodsKeys.length > 0) {
     const ledgerResult = await supabase
       .from(LEDGER_TABLE)
-      .select("goods_key,status,market_status,reason_code,message,submit_armed_at")
+      .select("goods_key,status,market_status,reason_code,message,claimed_at,submit_armed_at,updated_at")
       .in("goods_key", allGoodsKeys)
       .limit(Math.min(700, Math.max(150, allGoodsKeys.length + 20)));
     if (ledgerResult.error) {
@@ -149,7 +157,8 @@ export async function GET(request: Request) {
     const successfulRows = uploadRows.filter((row) => row.status === "success");
     let marketDoneCount = 0;
     let confirmNeededCount = 0;
-    let busyCount = 0;
+    let activeBusyCount = 0;
+    let staleBusyCount = 0;
     let pendingCount = 0;
     let registrationUnknownCount = 0;
 
@@ -162,7 +171,8 @@ export async function GET(request: Request) {
       } else if (CONFIRM_MARKET.has(status) || CONFIRM_MARKET.has(marketStatus)) {
         confirmNeededCount += 1;
       } else if (BUSY_STATUS.has(status) || BUSY_MARKET.has(marketStatus)) {
-        busyCount += 1;
+        if (ledger && isStaleBusy(ledger)) staleBusyCount += 1;
+        else activeBusyCount += 1;
       } else if (LEGACY_UNKNOWN.has(status) || LEGACY_UNKNOWN.has(marketStatus)) {
         registrationUnknownCount += 1;
       } else {
@@ -175,10 +185,11 @@ export async function GET(request: Request) {
     const isLatestBatch = latestBatchByLaunch.get(launchItemId) === jobId;
     const uploadSuccessCount = successfulRows.length;
     const uploadReady = text(job.status) === "success" && uploadSuccessCount === 6;
+    const actionableCount = pendingCount + registrationUnknownCount + confirmNeededCount + staleBusyCount;
     const selectable = isLatestBatch
       && uploadReady
-      && busyCount === 0
-      && confirmNeededCount === 0
+      && activeBusyCount === 0
+      && actionableCount > 0
       && marketDoneCount < 6;
     const modelNumber = text(payload.modelNumber) || text(seoFinal.modelNumber);
     const modelName = text(payload.modelName) || text(seoFinal.productName) || modelNumber;
@@ -199,7 +210,10 @@ export async function GET(request: Request) {
       marketPendingCount: pendingCount,
       registrationUnknownCount,
       confirmNeededCount,
-      busyCount,
+      activeBusyCount,
+      staleBusyCount,
+      busyCount: activeBusyCount + staleBusyCount,
+      actionableCount,
       selectable,
       channels: successfulRows,
     };
