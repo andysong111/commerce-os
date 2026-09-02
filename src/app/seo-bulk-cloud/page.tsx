@@ -7,6 +7,7 @@ import SeoBulkMallSeoRecoveryBridge from "./SeoBulkMallSeoRecoveryBridge";
 import SeoBulkRegistrationFailurePanel from "./SeoBulkRegistrationFailurePanel";
 import SeoBulkRegistrationRetryAllControl from "./SeoBulkRegistrationRetryAllControl";
 import SeoBulkRunMigrationBridge from "./SeoBulkRunMigrationBridge";
+import SeoBulkShoplingOneClickControl from "./SeoBulkShoplingOneClickControl";
 import SeoBulkWindowBridge from "./SeoBulkWindowBridge";
 
 export default function SeoBulkCloudPage() {
@@ -21,6 +22,7 @@ export default function SeoBulkCloudPage() {
       <SeoBulkRegistrationRetryAllControl />
       <SeoBulkCustomBlockedTermsPanel />
       <SeoBulkArchiveSummary />
+      <SeoBulkShoplingOneClickControl />
       <SeoBulkRunCloudClient />
     </>
   );
