@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.1.4",
-  "description": "Commerce OS에서 검증된 Shopling 가격변경 대상만 A21에서 쇼핑몰별판매가와 옵션을 분리해 병렬 수정전송합니다. 판매가만 수정하고 나머지 일반항목은 수정안함으로 검증한 뒤 송신합니다.",
-  "permissions": ["storage", "tabs", "windows", "scripting"],
+  "version": "0.1.5",
+  "description": "Commerce OS에서 검증된 Shopling 가격변경 대상만 A21에서 쇼핑몰별판매가와 옵션을 분리해 병렬 수정전송합니다. Chrome webNavigation으로 실제 작업창이 연 송신 팝업을 정확히 연결합니다.",
+  "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
