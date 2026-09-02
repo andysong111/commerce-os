@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
@@ -39,7 +39,7 @@ export async function GET() {
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
       if (manifest.background?.service_worker !== "background-v013.js") throw new Error("shopling_a21_resend_background_version_mismatch");
       if (!manifest.content_scripts?.some((item) => item.js?.length === 1 && item.js[0] === "content-a21.js")) throw new Error("shopling_a21_resend_unified_content_missing");
-      if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting")) {
+      if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting") || !manifest.permissions?.includes("webNavigation")) {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
     }
