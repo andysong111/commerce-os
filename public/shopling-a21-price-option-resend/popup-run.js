@@ -36,7 +36,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.0은 동시 1개 작업만 실행합니다. 먼저 1 GOODSKEY 테스트로 판매가→옵션 전송을 검증한 뒤 전체 실행할 수 있습니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.2는 동시 1개 작업만 실행하며 배송정보는 반드시 수정안함으로 고정합니다. 먼저 1 GOODSKEY 테스트로 판매가→옵션 전송을 검증한 뒤 전체 실행할 수 있습니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
