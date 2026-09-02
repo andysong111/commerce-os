@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.5";
+const VERSION = "0.1.6";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
@@ -13,6 +13,7 @@ const FILES = [
   "background-v013.js",
   "background-v013-overlay.js",
   "content-a21.js",
+  "content-a21-v016.js",
   "popup.html",
   "popup.js",
   "README.txt",
@@ -34,11 +35,16 @@ export async function GET() {
     const source = await readFile(path.join(publicRoot, fileName), "utf8");
     if (fileName.endsWith(".js")) assertJavaScript(fileName, source);
     if (fileName === "manifest.json") {
-      const manifest = JSON.parse(source) as { manifest_version?: number; version?: string; permissions?: string[]; background?: { service_worker?: string }; content_scripts?: Array<{ js?: string[] }> };
+      const manifest = JSON.parse(source) as { manifest_version?: number; version?: string; permissions?: string[]; background?: { service_worker?: string }; content_scripts?: Array<{ js?: string[]; exclude_matches?: string[] }> };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
       if (manifest.background?.service_worker !== "background-v013.js") throw new Error("shopling_a21_resend_background_version_mismatch");
-      if (!manifest.content_scripts?.some((item) => item.js?.length === 1 && item.js[0] === "content-a21.js")) throw new Error("shopling_a21_resend_unified_content_missing");
+      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21.js") && item.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml")))) {
+        throw new Error("shopling_a21_resend_list_popup_separation_missing");
+      }
+      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v016.js"))) {
+        throw new Error("shopling_a21_resend_v016_popup_runtime_missing");
+      }
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting") || !manifest.permissions?.includes("webNavigation")) {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
