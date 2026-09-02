@@ -1,4 +1,4 @@
-Commerce OS · Shopling A21 Price/Option Resend v0.2.0
+Commerce OS · Shopling A21 Price/Option Resend v0.2.1
 
 목적
 - Commerce OS에서 Shopling 쇼핑몰별 가격 재조회까지 VERIFIED 된 GOODSKEY만 A21 쇼핑몰상품수정에서 마켓으로 수정전송합니다.
@@ -15,6 +15,11 @@ Commerce OS · Shopling A21 Price/Option Resend v0.2.0
 - 옵션송신: trsmt_env_mody_opt=1
 - 최종 송신버튼: value='상품수정 송신', onclick=goods_mallMdfy_submit_sp()
 
+v0.2.1 변경
+- 라디오/form 제어는 확장프로그램 isolated world에서 수행합니다.
+- 마지막 송신만 Chrome scripting MAIN world에서 다시 form 값을 검증한 뒤 Shopling 원본 goods_mallMdfy_submit_sp() 함수를 직접 1회 호출합니다.
+- isolated world의 button.click()이 Shopling inline onclick으로 이어지지 않는 문제를 제거했습니다.
+
 안전장치
 1) Shopling 가격 재조회가 VERIFIED가 아니면 실행하지 않습니다.
 2) A18 빈 화면에서도 새 작업창이 [21] 쇼핑몰상품수정으로 자동 진입합니다.
@@ -25,10 +30,11 @@ Commerce OS · Shopling A21 Price/Option Resend v0.2.0
 7) 판매가 송신 직전 tsmt_sale_price_tp=J와 각 일반항목의 정확한 radio name/value를 다시 검증합니다.
 8) 옵션 송신 직전 modify_tp=goods_stock, trsmt_env_mody_opt=1을 다시 검증합니다.
 9) prod_join_chk[] 전송대상이 없으면 송신하지 않습니다.
-10) 정확한 goods_mallMdfy_submit_sp() 버튼을 찾지 못하면 송신하지 않습니다.
-11) form 설정 완료 후 1.2초 동안 화면에 상태를 보여준 뒤 송신합니다.
-12) Shopling 결과 화면을 background가 직접 읽어 성공을 확인하지 못하면 성공으로 기록하지 않습니다.
-13) 기존에 열려 있던 상품수정 송신 팝업은 실행 시작 시 기준선으로 제외합니다.
+10) MAIN world에서도 동일한 form 값을 다시 검증합니다.
+11) Shopling 원본 goods_mallMdfy_submit_sp 함수가 없으면 송신하지 않습니다.
+12) form 설정 완료 후 1.2초 동안 화면에 상태를 보여준 뒤 MAIN world 송신을 예약합니다.
+13) Shopling 결과 화면을 background가 직접 읽어 성공을 확인하지 못하면 성공으로 기록하지 않습니다.
+14) 기존에 열려 있던 상품수정 송신 팝업은 실행 시작 시 기준선으로 제외합니다.
 
 사용
 1) chrome://extensions에서 개발자 모드를 켭니다.
