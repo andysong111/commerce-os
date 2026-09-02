@@ -17,12 +17,13 @@ const [manifestText, backgroundBase, backgroundWrapper, backgroundOverlay, conte
 test("A21 resend extension is fail-closed and keeps price/option separate", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.4");
+  assert.equal(manifest.version, "0.1.5");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.deepEqual(manifest.content_scripts[0].js, ["content-a21.js"]);
   assert.ok(manifest.permissions.includes("windows"));
   assert.ok(manifest.permissions.includes("tabs"));
   assert.ok(manifest.permissions.includes("scripting"));
+  assert.ok(manifest.permissions.includes("webNavigation"));
   assert.match(backgroundBase, /MAX_CONCURRENT = 4/);
   assert.match(backgroundBase, /MAX_SEARCH_CODES = 200/);
   assert.match(backgroundBase, /A21_SPLIT_REQUIRED/);
@@ -36,7 +37,7 @@ test("A21 resend extension is fail-closed and keeps price/option separate", () =
   assert.match(popup, /Shopling 가격 재조회 VERIFIED/);
 });
 
-test("A21 v0.1.4 selects only 판매가 for general modification before submit", () => {
+test("A21 v0.1.5 selects only 판매가 for general modification before submit", () => {
   assert.match(content, /GENERAL_ROWS/);
   assert.match(content, /"상품명", "판매가", "카테고리"/);
   assert.match(content, /label === "판매가"/);
@@ -46,7 +47,7 @@ test("A21 v0.1.4 selects only 판매가 for general modification before submit",
   assert.match(content, /쇼핑몰배송정보/);
 });
 
-test("A21 v0.1.4 keeps option transmission separate and supports legacy submit controls", () => {
+test("A21 v0.1.5 keeps option transmission separate and supports legacy submit controls", () => {
   assert.match(content, /modeRadio\("옵션송신"\)/);
   assert.match(content, /optionSelectionControl/);
   assert.match(content, /추가상품송신/);
@@ -56,12 +57,12 @@ test("A21 v0.1.4 keeps option transmission separate and supports legacy submit c
   assert.match(content, /clickSubmitButton/);
 });
 
-test("A21 v0.1.4 binds only the popup opened by the exact worker", () => {
-  assert.match(content, /commerce-os-a21-v014:/);
-  assert.match(content, /window\.opener\?\.name/);
-  assert.match(content, /A21_POPUP_READY_V013/);
-  assert.match(backgroundOverlay, /popupAutoV013/);
-  assert.match(backgroundOverlay, /popupAssignmentBusy = true/);
+test("A21 v0.1.5 binds popup to the exact worker through Chrome webNavigation", () => {
+  assert.match(backgroundOverlay, /webNavigation\?\.onCreatedNavigationTarget/);
+  assert.match(backgroundOverlay, /details\.sourceTabId/);
+  assert.match(backgroundOverlay, /item\.workerTabId === details\.sourceTabId/);
+  assert.match(backgroundOverlay, /job\.popupTabId = details\.tabId/);
+  assert.match(backgroundOverlay, /popupAutoV015/);
 });
 
 test("A21 resend can start from A18 and does not fail while a Shopling popup is still about:blank", () => {
@@ -93,9 +94,10 @@ test("A21 resend plan is only released after full Shopling readback verification
   assert.match(planRoute, /sourcePrice: "SHOPPING_MALL_SPECIFIC_SELL_PRICE"/);
   assert.match(planRoute, /priceMode: "PRICE_ONLY"/);
   assert.match(planRoute, /optionMode: "OPTION_ONLY"/);
-  assert.match(downloadRoute, /const VERSION = "0\.1\.4"/);
+  assert.match(downloadRoute, /const VERSION = "0\.1\.5"/);
   assert.match(downloadRoute, /background-v013\.js/);
   assert.match(downloadRoute, /content-a21\.js/);
+  assert.match(downloadRoute, /webNavigation/);
   assert.match(downloadRoute, /entries\[fileName\]/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
