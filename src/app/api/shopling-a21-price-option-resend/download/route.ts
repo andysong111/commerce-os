@@ -5,15 +5,14 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
-  "background-v021.js",
-  "background-v021-overlay.js",
   "content-a21.js",
-  "content-a21-v021.js",
+  "main-a21-v022.js",
+  "content-a21-v022.js",
   "popup-run.html",
   "popup-run.js",
   "README.txt",
@@ -41,17 +40,20 @@ export async function GET() {
         permissions?: string[];
         background?: { service_worker?: string };
         action?: { default_popup?: string };
-        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[] }>;
+        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string }>;
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v021.js") throw new Error("shopling_a21_resend_background_v021_required");
+      if (manifest.background?.service_worker !== "background-v020.js") throw new Error("shopling_a21_resend_background_v020_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21.js") && item.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml")))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
       }
-      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v021.js"))) {
-        throw new Error("shopling_a21_resend_v021_popup_runtime_missing");
+      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v022.js"))) {
+        throw new Error("shopling_a21_resend_v022_popup_runtime_missing");
+      }
+      if (!manifest.content_scripts?.some((item) => item.js?.includes("main-a21-v022.js") && item.world === "MAIN")) {
+        throw new Error("shopling_a21_resend_v022_main_world_bridge_missing");
       }
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting") || !manifest.permissions?.includes("webNavigation")) {
         throw new Error("shopling_a21_resend_permissions_missing");
