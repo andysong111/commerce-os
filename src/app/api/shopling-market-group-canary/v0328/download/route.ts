@@ -39,6 +39,12 @@ function rewriteBackground(source: string) {
   );
   rewritten = replaceRequired(
     rewritten,
+    "    settled: Boolean(resultLike && goodsKey && (success || failure || successCount === 0 || failureCount === 0)),",
+    "    settled: Boolean(resultLike && (success || failure || successCount === 0 || failureCount === 0)),",
+    "v0328_background_settle_without_goods_key_missing",
+  );
+  rewritten = replaceRequired(
+    rewritten,
     "    failureCount,\n    href: String(location.href || ''),",
     "    failureCount,\n    numericTokens,\n    href: String(location.href || ''),",
     "v0328_background_numeric_token_return_missing",
