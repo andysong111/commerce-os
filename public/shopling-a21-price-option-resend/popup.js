@@ -8,6 +8,8 @@ const diagnoseButton = document.getElementById("diagnose");
 const copyDiagnosticButton = document.getElementById("copyDiagnostic");
 const diagnosticBox = document.getElementById("diagnostic");
 const DIAGNOSTIC_ONLY = true;
+const SHOPLING_ORIGIN = "https://a.shopling.co.kr/";
+const TARGET_POPUP_PATH = "/prodlinkage/goods_mallMdfy_trsmt.phtml";
 let plan = null;
 let sourceTabId = null;
 let lastDiagnostic = null;
@@ -16,10 +18,23 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;" }[char]));
 }
 
+function isShoplingUrl(url) {
+  return String(url || "").startsWith(SHOPLING_ORIGIN);
+}
+
+function isTargetPopupUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    return parsed.origin === "https://a.shopling.co.kr" && parsed.pathname.toLowerCase() === TARGET_POPUP_PATH.toLowerCase();
+  } catch {
+    return String(url || "").toLowerCase().includes("goods_mallmdfy_trsmt.phtml");
+  }
+}
+
 async function activeShoplingTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
-  if (!tab?.id || !tab.url?.startsWith("https://a.shopling.co.kr/")) {
+  if (!tab?.id || !isShoplingUrl(tab.url)) {
     throw new Error("Shopling 로그인 탭에서 확장프로그램을 열어주세요. A18 빈 화면에서도 진단할 수 있습니다.");
   }
   return tab;
@@ -62,11 +77,23 @@ async function refreshState() {
   if (response?.ok) renderState(response.state);
 }
 
-function diagnosticProbe() {
+function diagnosticProbe(forceDetail = false) {
   const norm = (v) => String(v ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
   const text = norm(document.body?.innerText || document.body?.textContent || "");
-  const isPopup = /상품수정\s*송신/i.test(text) && /일반내용수정/i.test(text) && /옵션송신/i.test(text);
-  if (!isPopup) return null;
+  const href = location.href;
+  const path = String(location.pathname || "").toLowerCase();
+  const isTargetUrl = path === "/prodlinkage/goods_mallmdfy_trsmt.phtml" || href.toLowerCase().includes("goods_mallmdfy_trsmt.phtml");
+  const isPopupText = /상품수정\s*송신/i.test(text) && /일반내용수정/i.test(text) && /옵션송신/i.test(text);
+  const base = {
+    href,
+    title: document.title,
+    textHead: text.slice(0, 700),
+    isTargetUrl,
+    isPopupText,
+    inputCount: document.querySelectorAll("input").length,
+    formCount: document.forms.length,
+  };
+  if (!forceDetail && !isTargetUrl && !isPopupText) return base;
   const rect = (el) => {
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
@@ -75,7 +102,7 @@ function diagnosticProbe() {
     const parts = [];
     for (const node of [el.parentElement, el.parentElement?.parentElement, el.closest?.("td"), el.closest?.("tr")]) {
       const t = norm(node?.textContent || "");
-      if (t && !parts.includes(t)) parts.push(t.slice(0, 180));
+      if (t && !parts.includes(t)) parts.push(t.slice(0, 220));
     }
     return parts.slice(0, 4);
   };
@@ -101,13 +128,13 @@ function diagnosticProbe() {
     name: el instanceof HTMLInputElement ? el.name || "" : "",
     id: el.id || "",
     value: el instanceof HTMLInputElement ? el.value || "" : "",
-    text: norm(el.textContent || "").slice(0, 120),
+    text: norm(el.textContent || "").slice(0, 160),
     alt: el.getAttribute("alt") || "",
     title: el.getAttribute("title") || "",
     href: el.getAttribute("href") || "",
     onclick: el.getAttribute("onclick") || "",
     rect: rect(el),
-  })).filter((item) => /송신|수정|선택/.test(`${item.value} ${item.text} ${item.alt} ${item.title} ${item.onclick}`));
+  })).filter((item) => /송신|수정|선택|trans|submit|send/i.test(`${item.value} ${item.text} ${item.alt} ${item.title} ${item.onclick} ${item.name}`));
   const forms = [...document.forms].map((form, index) => ({
     index,
     name: form.name || "",
@@ -118,48 +145,89 @@ function diagnosticProbe() {
     inputCount: form.querySelectorAll("input").length,
   }));
   return {
-    href: location.href,
-    title: document.title,
-    textHead: text.slice(0, 500),
+    ...base,
     forms,
     radios: inputs.filter((item) => item.type === "radio"),
     checkboxes: inputs.filter((item) => item.type === "checkbox"),
+    hiddenInputs: inputs.filter((item) => item.type === "hidden").slice(0, 80),
     submitCandidates: clickables,
   };
 }
 
+async function allChromeTabs() {
+  const windows = await chrome.windows.getAll({ populate: true });
+  const result = [];
+  for (const win of windows) {
+    for (const tab of win.tabs || []) {
+      if (!tab?.id) continue;
+      result.push({
+        ...tab,
+        chromeWindowId: win.id,
+        chromeWindowType: win.type,
+      });
+    }
+  }
+  return result;
+}
+
+async function probeTab(tab, forceDetail) {
+  const records = [];
+  try {
+    const main = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: diagnosticProbe, args: [forceDetail] });
+    for (const frame of main || []) {
+      if (frame?.result) records.push({ tabId: tab.id, windowId: tab.chromeWindowId, windowType: tab.chromeWindowType, frameId: frame.frameId, tabUrl: tab.url || "", mainFrame: true, ...frame.result });
+    }
+  } catch (error) {
+    records.push({ tabId: tab.id, windowId: tab.chromeWindowId, windowType: tab.chromeWindowType, tabUrl: tab.url || "", stage: "main", error: String(error?.message || error) });
+  }
+  const hasDetailed = records.some((item) => Array.isArray(item.radios));
+  if (hasDetailed) return records;
+  try {
+    const frames = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: diagnosticProbe, args: [forceDetail] });
+    for (const frame of frames || []) {
+      if (frame?.result) records.push({ tabId: tab.id, windowId: tab.chromeWindowId, windowType: tab.chromeWindowType, frameId: frame.frameId, tabUrl: tab.url || "", mainFrame: frame.frameId === 0, ...frame.result });
+    }
+  } catch (error) {
+    records.push({ tabId: tab.id, windowId: tab.chromeWindowId, windowType: tab.chromeWindowType, tabUrl: tab.url || "", stage: "allFrames", error: String(error?.message || error) });
+  }
+  return records;
+}
+
 async function collectDiagnostic() {
   diagnoseButton.disabled = true;
-  diagnosticBox.textContent = "열린 Shopling 상품수정 송신 팝업 탐색 중...";
+  diagnosticBox.textContent = "Chrome 전체 창에서 Shopling 송신 팝업 URL 직접 탐색 중...";
   copyDiagnosticButton.disabled = true;
   try {
-    const tabs = await chrome.tabs.query({ url: "https://a.shopling.co.kr/*" });
+    const tabs = await allChromeTabs();
+    const shoplingTabs = tabs.filter((tab) => isShoplingUrl(tab.url));
+    const exactTabs = shoplingTabs.filter((tab) => isTargetPopupUrl(tab.url));
+    const remainingTabs = shoplingTabs.filter((tab) => !isTargetPopupUrl(tab.url));
+    const scanOrder = [...exactTabs, ...remainingTabs];
     const found = [];
-    for (const tab of tabs) {
-      if (!Number.isInteger(tab.id)) continue;
-      let frames = [];
-      try {
-        frames = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: diagnosticProbe });
-      } catch (error) {
-        found.push({ tabId: tab.id, url: tab.url || "", error: String(error?.message || error) });
-        continue;
-      }
-      for (const frame of frames) {
-        if (!frame?.result) continue;
-        found.push({ tabId: tab.id, windowId: tab.windowId, frameId: frame.frameId, tabUrl: tab.url || "", ...frame.result });
-      }
+    for (const tab of scanOrder) {
+      const records = await probeTab(tab, isTargetPopupUrl(tab.url));
+      found.push(...records);
+      if (found.some((item) => Array.isArray(item.radios) && (item.isTargetUrl || isTargetPopupUrl(item.tabUrl)))) break;
     }
-    const popupFrames = found.filter((item) => Array.isArray(item.radios));
+    const popupFrames = found.filter((item) => Array.isArray(item.radios) && (item.isTargetUrl || item.isPopupText || isTargetPopupUrl(item.tabUrl)));
     if (!popupFrames.length) {
-      lastDiagnostic = { scannedTabs: tabs.length, popupFrames: [], errors: found.filter((item) => item.error) };
-      diagnosticBox.textContent = "상품수정 송신 팝업 DOM을 찾지 못했습니다. 화면에 해당 팝업을 열어둔 상태에서 다시 눌러주세요.";
+      lastDiagnostic = {
+        capturedAt: new Date().toISOString(),
+        totalChromeTabs: tabs.length,
+        shoplingTabCount: shoplingTabs.length,
+        exactPopupTabCount: exactTabs.length,
+        exactPopupTabs: exactTabs.map((tab) => ({ id: tab.id, windowId: tab.chromeWindowId, windowType: tab.chromeWindowType, url: tab.url || "", title: tab.title || "" })),
+        scanResults: found.map((item) => ({ tabId: item.tabId, windowId: item.windowId, windowType: item.windowType, tabUrl: item.tabUrl, href: item.href, title: item.title, isTargetUrl: item.isTargetUrl, isPopupText: item.isPopupText, inputCount: item.inputCount, formCount: item.formCount, textHead: item.textHead, error: item.error || "" })),
+      };
+      diagnosticBox.textContent = `송신 팝업 DOM 상세값을 아직 읽지 못했습니다.\nChrome 탭 ${tabs.length}개 / Shopling ${shoplingTabs.length}개 / 정확한 송신 URL 탭 ${exactTabs.length}개\n\n${JSON.stringify(lastDiagnostic, null, 2)}`;
+      copyDiagnosticButton.disabled = false;
       return;
     }
-    lastDiagnostic = { capturedAt: new Date().toISOString(), scannedTabs: tabs.length, popupFrames };
+    lastDiagnostic = { capturedAt: new Date().toISOString(), totalChromeTabs: tabs.length, shoplingTabCount: shoplingTabs.length, exactPopupTabCount: exactTabs.length, popupFrames };
     const summary = popupFrames.map((frame, idx) => {
-      const radios = frame.radios.map((r) => `#${r.index} name=${r.name || "-"} value=${r.value || "-"} checked=${r.checked} x=${r.rect.x} y=${r.rect.y} nearby=${(r.nearby || []).join(" / ").slice(0, 120)}`).join("\n");
+      const radios = frame.radios.map((r) => `#${r.index} name=${r.name || "-"} value=${r.value || "-"} checked=${r.checked} id=${r.id || "-"} x=${r.rect.x} y=${r.rect.y} nearby=${(r.nearby || []).join(" / ").slice(0, 180)}`).join("\n");
       const buttons = frame.submitCandidates.map((b) => `${b.tag} type=${b.type || "-"} name=${b.name || "-"} value=${b.value || "-"} text=${b.text || "-"} onclick=${b.onclick || "-"} x=${b.rect.x} y=${b.rect.y}`).join("\n");
-      return `[POPUP ${idx + 1}] ${frame.href}\nFORMS ${JSON.stringify(frame.forms)}\nRADIOS\n${radios}\nSUBMIT CANDIDATES\n${buttons}`;
+      return `[POPUP ${idx + 1}] tab=${frame.tabId} window=${frame.windowId} type=${frame.windowType} ${frame.href}\nFORMS ${JSON.stringify(frame.forms)}\nRADIOS\n${radios}\nSUBMIT CANDIDATES\n${buttons}`;
     }).join("\n\n");
     diagnosticBox.textContent = summary;
     copyDiagnosticButton.disabled = false;
@@ -183,7 +251,7 @@ copyDiagnosticButton.addEventListener("click", async () => {
 });
 
 startButton.addEventListener("click", () => {
-  if (DIAGNOSTIC_ONLY) runState.innerHTML = '<span class="warn">v0.1.7은 진단 전용이라 자동전송이 잠겨 있습니다.</span>';
+  if (DIAGNOSTIC_ONLY) runState.innerHTML = '<span class="warn">v0.1.8은 진단 전용이라 자동전송이 잠겨 있습니다.</span>';
 });
 
 stopButton.addEventListener("click", async () => {
