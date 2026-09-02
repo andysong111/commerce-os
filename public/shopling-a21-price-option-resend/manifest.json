@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.1.7",
-  "description": "Shopling A21 수정송신 팝업의 실제 form/radio/button 구조를 읽어 안전하게 진단합니다. 진단 완료 전 자동 송신은 잠깁니다.",
+  "version": "0.1.8",
+  "description": "Shopling A21 수정송신 팝업을 Chrome 전체 창에서 실제 URL로 찾아 form/radio/button 구조를 읽어 안전하게 진단합니다. 진단 완료 전 자동 송신은 잠깁니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
