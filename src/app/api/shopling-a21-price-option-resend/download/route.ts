@@ -13,7 +13,6 @@ const FILES = [
   "background-v013.js",
   "background-v013-overlay.js",
   "content-a21.js",
-  "content-a21-v014.js",
   "popup.html",
   "popup.js",
   "README.txt",
@@ -39,7 +38,7 @@ export async function GET() {
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
       if (manifest.background?.service_worker !== "background-v013.js") throw new Error("shopling_a21_resend_background_version_mismatch");
-      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v014.js"))) throw new Error("shopling_a21_resend_exact_control_content_missing");
+      if (!manifest.content_scripts?.some((item) => item.js?.length === 1 && item.js[0] === "content-a21.js")) throw new Error("shopling_a21_resend_unified_content_missing");
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting")) {
         throw new Error("shopling_a21_resend_parallel_permissions_missing");
       }
