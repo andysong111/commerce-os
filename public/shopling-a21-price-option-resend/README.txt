@@ -1,4 +1,4 @@
-Commerce OS · Shopling A21 Price/Option Resend v0.2.1
+Commerce OS · Shopling A21 Price/Option Resend v0.2.2
 
 목적
 - Commerce OS에서 Shopling 쇼핑몰별 가격 재조회까지 VERIFIED 된 GOODSKEY만 A21 쇼핑몰상품수정에서 마켓으로 수정전송합니다.
@@ -10,15 +10,21 @@ Commerce OS · Shopling A21 Price/Option Resend v0.2.1
 - 판매가 모드: modify_tp=goods_normal
 - 쇼핑몰별 판매가 source: tsmt_sale_price_tp=J 필수
 - 판매가 수정: trsmt_env_mody_price=Y
-- 나머지 일반항목: 빈값(수정안함)
+- 배송정보: trsmt_env_mody_dlvyinfo='' (수정안함) 필수
+- 상품명/카테고리/이미지/수수료/상세설명/키워드/유료서비스도 빈값(수정안함)
 - 옵션 모드: modify_tp=goods_stock
 - 옵션송신: trsmt_env_mody_opt=1
-- 최종 송신버튼: value='상품수정 송신', onclick=goods_mallMdfy_submit_sp()
+- 최종 송신함수: goods_mallMdfy_submit_sp()
 
-v0.2.1 변경
-- 라디오/form 제어는 확장프로그램 isolated world에서 수행합니다.
-- 마지막 송신만 Chrome scripting MAIN world에서 다시 form 값을 검증한 뒤 Shopling 원본 goods_mallMdfy_submit_sp() 함수를 직접 1회 호출합니다.
-- isolated world의 button.click()이 Shopling inline onclick으로 이어지지 않는 문제를 제거했습니다.
+v0.2.2 변경
+- v0.2.1의 MAIN-submit runtime message가 기존 background listener의 unsupported_message 응답과 충돌하던 문제를 제거했습니다.
+- 송신 요청은 isolated content script와 MAIN-world content script 사이의 DOM CustomEvent bridge로 전달합니다.
+- Shopling 원본 함수 실행 전에 MAIN world에서 판매가/옵션 form 값을 다시 검증합니다.
+- 판매가 작업은 배송정보가 반드시 수정안함이어야 하며 그렇지 않으면 송신하지 않습니다.
+- 원본 함수에서 나타나는 예상 안내창만 자동 처리합니다.
+  · '수정전송 할 상품을 선택하셨습니까?' confirm → 확인
+  · '배송정보(A17 정보)가 수정되지 않고 유지됩니다' alert → 안내로 기록 후 계속
+- 위 두 종류가 아닌 예상하지 못한 confirm/alert는 자동 승인하지 않고 송신을 중단합니다.
 
 안전장치
 1) Shopling 가격 재조회가 VERIFIED가 아니면 실행하지 않습니다.
@@ -27,12 +33,12 @@ v0.2.1 변경
 4) 전체 실행은 최대 200 GOODSKEY씩 검색합니다.
 5) 화면출력 500을 초과하면 전송 전에 더 작은 묶음으로 자동 분할합니다.
 6) 검색한 모든 GOODSKEY가 결과에 있고 총 조회수와 실제 선택행 수가 같아야 전송합니다.
-7) 판매가 송신 직전 tsmt_sale_price_tp=J와 각 일반항목의 정확한 radio name/value를 다시 검증합니다.
+7) 판매가 송신 직전 tsmt_sale_price_tp=J, 판매가=Y, 배송정보 포함 나머지 일반항목=수정안함을 다시 검증합니다.
 8) 옵션 송신 직전 modify_tp=goods_stock, trsmt_env_mody_opt=1을 다시 검증합니다.
 9) prod_join_chk[] 전송대상이 없으면 송신하지 않습니다.
 10) MAIN world에서도 동일한 form 값을 다시 검증합니다.
 11) Shopling 원본 goods_mallMdfy_submit_sp 함수가 없으면 송신하지 않습니다.
-12) form 설정 완료 후 1.2초 동안 화면에 상태를 보여준 뒤 MAIN world 송신을 예약합니다.
+12) 예상하지 못한 확인/경고창은 자동 승인하지 않습니다.
 13) Shopling 결과 화면을 background가 직접 읽어 성공을 확인하지 못하면 성공으로 기록하지 않습니다.
 14) 기존에 열려 있던 상품수정 송신 팝업은 실행 시작 시 기준선으로 제외합니다.
 
