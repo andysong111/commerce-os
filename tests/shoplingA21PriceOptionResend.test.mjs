@@ -3,84 +3,37 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../public/shopling-a21-price-option-resend/", import.meta.url);
-const [manifestText, backgroundBase, backgroundWrapper, backgroundOverlay, content, popup, planRoute, downloadRoute] = await Promise.all([
+const [manifestText, popup, popupHtml, planRoute, downloadRoute] = await Promise.all([
   readFile(new URL("manifest.json", root), "utf8"),
-  readFile(new URL("background-v012.js", root), "utf8"),
-  readFile(new URL("background-v013.js", root), "utf8"),
-  readFile(new URL("background-v013-overlay.js", root), "utf8"),
-  readFile(new URL("content-a21.js", root), "utf8"),
   readFile(new URL("popup.js", root), "utf8"),
+  readFile(new URL("popup.html", root), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/plan/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/download/route.ts", import.meta.url), "utf8"),
 ]);
 
-test("A21 resend extension is fail-closed and keeps price/option separate", () => {
+test("A21 v0.1.7 is diagnostic-only and keeps auto-send locked", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.5");
-  assert.equal(manifest.background.service_worker, "background-v013.js");
-  assert.deepEqual(manifest.content_scripts[0].js, ["content-a21.js"]);
-  assert.ok(manifest.permissions.includes("windows"));
-  assert.ok(manifest.permissions.includes("tabs"));
+  assert.equal(manifest.version, "0.1.7");
   assert.ok(manifest.permissions.includes("scripting"));
   assert.ok(manifest.permissions.includes("webNavigation"));
-  assert.match(backgroundBase, /MAX_CONCURRENT = 4/);
-  assert.match(backgroundBase, /MAX_SEARCH_CODES = 200/);
-  assert.match(backgroundBase, /A21_SPLIT_REQUIRED/);
-  assert.match(backgroundBase, /A21_POPUP_RESULT_ASSIGNMENT/);
-  assert.match(backgroundWrapper, /background-v012\.js/);
-  assert.match(backgroundWrapper, /background-v013-overlay\.js/);
-  assert.match(content, /MAX_VISIBLE_RESULTS = 500/);
-  assert.match(content, /쇼핑몰별판매가/);
-  assert.match(content, /A21_VISIBLE_ROW_COUNT_MISMATCH/);
-  assert.match(content, /A21_ROW_SELECTION_MISMATCH/);
-  assert.match(popup, /Shopling 가격 재조회 VERIFIED/);
+  assert.match(popup, /DIAGNOSTIC_ONLY = true/);
+  assert.match(popupHtml, /진단 완료 전 자동전송 잠금/);
+  assert.match(popupHtml, /열린 상품수정 송신 팝업 DOM 진단/);
 });
 
-test("A21 v0.1.5 selects only 판매가 for general modification before submit", () => {
-  assert.match(content, /GENERAL_ROWS/);
-  assert.match(content, /"상품명", "판매가", "카테고리"/);
-  assert.match(content, /label === "판매가"/);
-  assert.match(content, /verifyPriceConfiguration/);
-  assert.match(content, /A21_PRICE_CONFIGURATION_VERIFY_FAILED/);
-  assert.match(content, /A21_PRICE_CONFIGURATION_CHANGED/);
-  assert.match(content, /쇼핑몰배송정보/);
+test("A21 diagnostic captures exact form controls without clicking submit", () => {
+  assert.match(popup, /diagnosticProbe/);
+  assert.match(popup, /document\.querySelectorAll\("input"\)/);
+  assert.match(popup, /name: el\.name/);
+  assert.match(popup, /value: el\.value/);
+  assert.match(popup, /checked: Boolean\(el\.checked\)/);
+  assert.match(popup, /onclick: el\.getAttribute\("onclick"\)/);
+  assert.match(popup, /chrome\.scripting\.executeScript/);
+  assert.doesNotMatch(popup, /A21_START.*, sourceTabId/);
 });
 
-test("A21 v0.1.5 keeps option transmission separate and supports legacy submit controls", () => {
-  assert.match(content, /modeRadio\("옵션송신"\)/);
-  assert.match(content, /optionSelectionControl/);
-  assert.match(content, /추가상품송신/);
-  assert.match(content, /input\[type=\\"image\\"\]/);
-  assert.match(content, /\[onclick\]/);
-  assert.match(content, /A21_SUBMIT_BUTTON_NOT_FOUND_V014/);
-  assert.match(content, /clickSubmitButton/);
-});
-
-test("A21 v0.1.5 binds popup to the exact worker through Chrome webNavigation", () => {
-  assert.match(backgroundOverlay, /webNavigation\?\.onCreatedNavigationTarget/);
-  assert.match(backgroundOverlay, /details\.sourceTabId/);
-  assert.match(backgroundOverlay, /item\.workerTabId === details\.sourceTabId/);
-  assert.match(backgroundOverlay, /job\.popupTabId = details\.tabId/);
-  assert.match(backgroundOverlay, /popupAutoV015/);
-});
-
-test("A21 resend can start from A18 and does not fail while a Shopling popup is still about:blank", () => {
-  assert.match(popup, /A18 빈 화면에서도 실행할 수 있습니다/);
-  assert.doesNotMatch(popup, /A21_IDENTIFY/);
-  assert.match(backgroundBase, /Shopling 로그인 탭\(A18 빈 화면 포함\)/);
-  assert.match(backgroundBase, /clickA21Menu/);
-  assert.match(backgroundBase, /waitForA21ListFrame/);
-  assert.match(backgroundBase, /chrome\.scripting\.executeScript/);
-  assert.match(backgroundBase, /injectContentIfMissing/);
-  assert.match(backgroundBase, /frameIds: \[frameId\]/);
-  assert.match(backgroundBase, /about:blank/);
-  assert.match(backgroundBase, /transientFrameError/);
-  assert.match(backgroundBase, /waitForPopupFrame/);
-  assert.match(backgroundBase, /discoverPopupForJob/);
-});
-
-test("A21 resend plan is only released after full Shopling readback verification", () => {
+test("A21 resend plan remains gated by full Shopling readback verification", () => {
   for (const needle of [
     'readback.state === "VERIFIED"',
     "readback.verifiedGoodsKeyCount === plan.goodsKeyCount",
@@ -88,16 +41,8 @@ test("A21 resend plan is only released after full Shopling readback verification
     "readback.mallMismatchCount === 0",
     "readback.mallMissingCount === 0",
     "readback.mallMatchCount === readback.mallCheckCount",
-  ]) {
-    assert.ok(planRoute.includes(needle), `missing ${needle}`);
-  }
-  assert.match(planRoute, /sourcePrice: "SHOPPING_MALL_SPECIFIC_SELL_PRICE"/);
-  assert.match(planRoute, /priceMode: "PRICE_ONLY"/);
-  assert.match(planRoute, /optionMode: "OPTION_ONLY"/);
-  assert.match(downloadRoute, /const VERSION = "0\.1\.5"/);
-  assert.match(downloadRoute, /background-v013\.js/);
-  assert.match(downloadRoute, /content-a21\.js/);
-  assert.match(downloadRoute, /webNavigation/);
-  assert.match(downloadRoute, /entries\[fileName\]/);
+  ]) assert.ok(planRoute.includes(needle), `missing ${needle}`);
+  assert.match(downloadRoute, /const VERSION = "0\.1\.7"/);
+  assert.match(downloadRoute, /content-a21-v016\.js/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
