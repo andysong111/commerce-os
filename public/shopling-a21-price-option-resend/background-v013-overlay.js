@@ -1,5 +1,6 @@
 const A21_V013_STATE_KEY = "commerceOsShoplingA21PriceOptionResendV012";
 const A21_V013_READY = "A21_POPUP_READY_V013";
+const A21_SHOPLING_ORIGIN = "https://a.shopling.co.kr/";
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === "install" || details.reason === "update") {
@@ -34,3 +35,39 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   })();
   return false;
 });
+
+// Shopling의 상품수정 송신 팝업은 환경에 따라 tabs.openerTabId가 비어 있을 수 있다.
+// webNavigation은 새 팝업/탭을 만든 실제 sourceTabId를 제공하므로 병렬 작업에서도
+// 판매가/옵션 Job과 정확한 송신 팝업을 일대일로 연결할 수 있다.
+if (chrome.webNavigation?.onCreatedNavigationTarget) {
+  chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+    void (async () => {
+      if (!Number.isInteger(details?.tabId) || !Number.isInteger(details?.sourceTabId)) return;
+      if (!String(details.url || "").startsWith(A21_SHOPLING_ORIGIN)) return;
+
+      const stored = await chrome.storage.local.get(A21_V013_STATE_KEY);
+      const state = stored[A21_V013_STATE_KEY];
+      if (!state || state.state !== "RUNNING" || !Array.isArray(state.jobs)) return;
+
+      const job = state.jobs.find((item) =>
+        item
+        && item.status === "RUNNING"
+        && item.workerTabId === details.sourceTabId
+        && ["POPUP_OPENING", "POPUP_CONFIG"].includes(item.stage)
+        && (!Number.isInteger(item.popupTabId) || item.popupTabId === details.tabId),
+      );
+      if (!job) return;
+
+      const tab = await chrome.tabs.get(details.tabId).catch(() => null);
+      job.popupTabId = details.tabId;
+      job.popupWindowId = Number.isInteger(tab?.windowId) ? tab.windowId : null;
+      job.popupFrameId = null;
+      job.popupAssignmentBusy = false;
+      job.popupAutoV015 = true;
+      job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 송신 팝업 생성 감지 · 로딩 대기`;
+      job.updatedAt = Date.now();
+      state.updatedAt = Date.now();
+      await chrome.storage.local.set({ [A21_V013_STATE_KEY]: state });
+    })();
+  });
+}
