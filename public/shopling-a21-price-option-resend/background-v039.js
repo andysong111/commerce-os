@@ -6,6 +6,7 @@ importScripts("background-v020.js");
   const POLL_MS = 1_500;
   const REFRESH_INTERVAL_MS = 2_500;
   const READBACK_STABLE_MS = 1_800;
+  const SAME_MINUTE_FALLBACK_MS = 35_000;
   const WAIT_LIMIT_MS = 30 * 60 * 1000;
   const activeWatchers = new Set();
   const baselineCaptures = new Set();
@@ -190,11 +191,11 @@ importScripts("background-v020.js");
       await sleepV039(80);
       const state = await loadStateV039();
       const job = state?.jobs?.find((item) => item.id === jobId);
-      if (!state || !job || job.status !== "RUNNING") return;
+      if (!state || !job || job.status !== "RUNNING" || job.finalSendBaselineAt) return;
       const snapshot = await readFinalTransmissionRows(job);
       const latest = await loadStateV039();
       const current = latest?.jobs?.find((item) => item.id === jobId);
-      if (!latest || !current || current.status !== "RUNNING") return;
+      if (!latest || !current || current.status !== "RUNNING" || current.finalSendBaselineAt) return;
       current.finalSendBaseline = snapshot.rows || {};
       current.finalSendBaselineAt = Date.now();
       await saveStateV039(latest);
@@ -206,20 +207,32 @@ importScripts("background-v020.js");
   function updatedGoodsKeys(job, snapshot, ackAt) {
     const keys = Array.isArray(job.goodsKeys) ? job.goodsKeys.map(String) : [];
     const baseline = job.finalSendBaseline || {};
-    const ackMinute = Math.floor(Number(ackAt || 0) / 60_000) * 60_000;
+    const ackValue = Number(ackAt || 0);
+    const ackMinute = Math.floor(ackValue / 60_000) * 60_000;
+    const elapsed = Date.now() - ackValue;
     const updated = [];
     const pending = [];
+    const sameMinuteFallback = [];
     for (const key of keys) {
       const current = snapshot.rows?.[key];
       const before = baseline?.[key];
       const currentTs = Number(current?.timestamp || 0);
       const beforeTs = Number(before?.timestamp || 0);
       const changed = currentTs > 0 && beforeTs > 0 && currentTs > beforeTs;
-      const recent = currentTs > 0 && currentTs >= ackMinute;
-      if (changed || recent) updated.push(key);
-      else pending.push(key);
+      const recentWithoutBaseline = currentTs > 0 && beforeTs <= 0 && currentTs >= ackMinute;
+      const sameMinuteSafe = currentTs > 0
+        && beforeTs > 0
+        && currentTs === beforeTs
+        && currentTs >= ackMinute
+        && elapsed >= SAME_MINUTE_FALLBACK_MS;
+      if (changed || recentWithoutBaseline || sameMinuteSafe) {
+        updated.push(key);
+        if (sameMinuteSafe && !changed) sameMinuteFallback.push(key);
+      } else {
+        pending.push(key);
+      }
     }
-    return { updated, pending };
+    return { updated, pending, sameMinuteFallback };
   }
 
   async function watchFinalTransmissionDate(jobId) {
@@ -255,7 +268,10 @@ importScripts("background-v020.js");
         if (status.pending.length === 0 && status.updated.length === job.goodsKeys.length && job.goodsKeys.length > 0) {
           if (!allUpdatedSince) allUpdatedSince = Date.now();
           const stableMs = Date.now() - allUpdatedSince;
-          job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 최종전송일 갱신 확인 ${status.updated.length}/${job.goodsKeys.length} · 안정화 ${Math.min(stableMs, READBACK_STABLE_MS)}/${READBACK_STABLE_MS}ms v${VERSION}`;
+          const fallbackText = status.sameMinuteFallback.length
+            ? ` · 동일 분 단위 ${status.sameMinuteFallback.length}건 ${Math.round(SAME_MINUTE_FALLBACK_MS / 1000)}초 안전대기 적용`
+            : "";
+          job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 최종전송일 갱신 확인 ${status.updated.length}/${job.goodsKeys.length}${fallbackText} · 안정화 ${Math.min(stableMs, READBACK_STABLE_MS)}/${READBACK_STABLE_MS}ms v${VERSION}`;
           await saveStateV039(state);
           if (stableMs >= READBACK_STABLE_MS) {
             await completeJob(
