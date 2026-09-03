@@ -5,18 +5,17 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.3";
+const VERSION = "0.3.4";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
   "background-v030.js",
-  "background-v032.js",
-  "background-v033.js",
+  "background-v034.js",
   "content-a21.js",
-  "main-result-bridge-v033.js",
+  "main-result-bridge-v034.js",
   "main-a21-v024.js",
-  "result-relay-v033.js",
+  "result-relay-v034.js",
   "content-a21-v024.js",
   "popup-run.html",
   "popup-run.js",
@@ -45,25 +44,25 @@ export async function GET() {
         permissions?: string[];
         background?: { service_worker?: string };
         action?: { default_popup?: string };
-        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string; match_about_blank?: boolean }>;
+        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string }>;
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v033.js") throw new Error("shopling_a21_resend_background_v033_required");
+      if (manifest.background?.service_worker !== "background-v034.js") throw new Error("shopling_a21_resend_background_v034_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
       }
       const mainRuntime = manifest.content_scripts?.find((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN");
-      if (!mainRuntime?.js?.includes("main-result-bridge-v033.js")) {
-        throw new Error("shopling_a21_resend_v033_main_result_bridge_missing");
+      if (!mainRuntime?.js?.includes("main-result-bridge-v034.js")) {
+        throw new Error("shopling_a21_resend_v034_main_result_bridge_missing");
       }
       const popupRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21-v024.js"));
-      if (!popupRuntime?.js?.includes("result-relay-v033.js")) {
-        throw new Error("shopling_a21_resend_v033_result_relay_missing");
+      if (!popupRuntime?.js?.includes("result-relay-v034.js")) {
+        throw new Error("shopling_a21_resend_v034_result_relay_missing");
       }
-      if (manifest.content_scripts?.some((item) => item.js?.includes("result-complete-v032.js") || item.js?.includes("result-wait-v028.js"))) {
+      if (manifest.content_scripts?.some((item) => item.js?.includes("main-result-bridge-v033.js") || item.js?.includes("result-relay-v033.js") || item.js?.includes("result-complete-v032.js") || item.js?.includes("result-wait-v028.js"))) {
         throw new Error("shopling_a21_resend_legacy_result_runtime_forbidden");
       }
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting") || !manifest.permissions?.includes("webNavigation")) {
