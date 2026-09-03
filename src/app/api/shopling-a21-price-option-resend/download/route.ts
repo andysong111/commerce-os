@@ -5,13 +5,14 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.4.2";
+const VERSION = "0.4.3";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
   "background-v041.js",
   "background-v042.js",
+  "background-v043.js",
   "content-a21.js",
   "main-a21-v024.js",
   "content-a21-v024.js",
@@ -46,16 +47,16 @@ export async function GET() {
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v042.js") throw new Error("shopling_a21_resend_background_v042_required");
+      if (manifest.background?.service_worker !== "background-v043.js") throw new Error("shopling_a21_resend_background_v043_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
       }
       const mainRuntime = manifest.content_scripts?.find((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN");
-      if (!mainRuntime) throw new Error("shopling_a21_resend_v042_native_submit_required");
+      if (!mainRuntime) throw new Error("shopling_a21_resend_v043_native_submit_required");
       if (manifest.content_scripts?.some((item) => item.js?.some((name) => name.includes("result-watch")))) {
-        throw new Error("shopling_a21_resend_v042_static_result_observer_forbidden");
+        throw new Error("shopling_a21_resend_v043_static_result_observer_forbidden");
       }
       for (const permission of ["windows", "tabs", "scripting", "webNavigation", "debugger"]) {
         if (!manifest.permissions?.includes(permission)) throw new Error(`shopling_a21_resend_permission_missing:${permission}`);
