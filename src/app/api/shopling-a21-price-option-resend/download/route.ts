@@ -12,6 +12,7 @@ const FILES = [
   "background-v020.js",
   "content-a21.js",
   "main-a21-v022.js",
+  "delivery-radio-v023.js",
   "content-a21-v022.js",
   "popup-run.html",
   "popup-run.js",
@@ -53,8 +54,12 @@ export async function GET() {
       if (listRuntime.match_about_blank === true) {
         throw new Error("shopling_a21_resend_legacy_about_blank_injection_forbidden");
       }
-      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v022.js"))) {
-        throw new Error("shopling_a21_resend_v022_popup_runtime_missing");
+      const popupRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21-v022.js"));
+      if (!popupRuntime?.js?.includes("delivery-radio-v023.js")) {
+        throw new Error("shopling_a21_resend_delivery_unchanged_guard_missing");
+      }
+      if (popupRuntime.js.indexOf("delivery-radio-v023.js") > popupRuntime.js.indexOf("content-a21-v022.js")) {
+        throw new Error("shopling_a21_resend_delivery_guard_must_load_first");
       }
       if (!manifest.content_scripts?.some((item) => item.js?.includes("main-a21-v022.js") && item.world === "MAIN")) {
         throw new Error("shopling_a21_resend_v022_main_world_bridge_missing");
