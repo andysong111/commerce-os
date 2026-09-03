@@ -10,6 +10,7 @@ importScripts("background-v020.js");
 
   const sleepV028 = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const isShoplingV028 = (url) => String(url || "").startsWith(SHOPLING_ORIGIN);
+  const modeRank = (mode) => mode === "PRICE" ? 0 : mode === "OPTION" ? 1 : 2;
 
   async function loadStateV028() {
     const stored = await chrome.storage.local.get(STATE_KEY);
@@ -26,7 +27,6 @@ importScripts("background-v020.js");
   function sortJobsPricesFirst(state) {
     if (!state?.jobs) return;
     state.jobs.sort((a, b) => {
-      const modeRank = (mode) => mode === "PRICE" ? 0 : mode === "OPTION" ? 1 : 2;
       const byMode = modeRank(a.mode) - modeRank(b.mode);
       if (byMode) return byMode;
       return Number(a.batchIndex || 0) - Number(b.batchIndex || 0);
@@ -60,10 +60,15 @@ importScripts("background-v020.js");
     if (!state || state.state !== "RUNNING" || state.stopped) return;
     if (state.jobs.some((job) => job.status === "RUNNING")) return;
 
-    // 전체 PRICE 묶음을 모두 처리한 뒤 OPTION 단계로 넘어간다.
-    const next = state.jobs.find((job) => job.status === "QUEUED" && job.mode === "PRICE")
-      || state.jobs.find((job) => job.status === "QUEUED" && job.mode === "OPTION")
-      || state.jobs.find((job) => job.status === "QUEUED");
+    // 전체 PRICE 묶음을 배치 순서대로 모두 처리한 뒤 OPTION 단계로 넘어간다.
+    const queued = state.jobs
+      .filter((job) => job.status === "QUEUED")
+      .sort((a, b) => {
+        const byMode = modeRank(a.mode) - modeRank(b.mode);
+        if (byMode) return byMode;
+        return Number(a.batchIndex || 0) - Number(b.batchIndex || 0);
+      });
+    const next = queued[0];
 
     if (!next) return finalizeOrPump();
     try {
@@ -97,8 +102,8 @@ importScripts("background-v020.js");
       if (!state || !job || job.status !== "RUNNING") return;
       if (job.stage === "RESULT_WAIT") {
         job.loadingWaitArmed = true;
-        job.loadingWaitStartedAt = Date.now();
-        job.sawShoplingProcessing = false;
+        job.loadingWaitStartedAt = job.loadingWaitStartedAt || Date.now();
+        job.sawShoplingProcessing = Boolean(job.sawShoplingProcessing);
         job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} 수정전송 처리중 · Shopling 로딩 종료 대기 · 결과 성공/실패 검증 없음`;
         await saveStateV028(state);
         return;
