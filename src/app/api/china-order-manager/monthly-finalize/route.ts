@@ -1,3 +1,4 @@
+import { assertInternalChinaMonthlyPurchaseOpen } from "@/lib/internalChinaMonthlyPurchaseClose";
 import {
   consolidateMonthlyPurchaseDrafts,
   type MonthlyPurchaseConsolidationInput,
@@ -23,6 +24,9 @@ export async function POST(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   try {
     const input = (await request.json()) as MonthlyPurchaseConsolidationInput;
+    await assertInternalChinaMonthlyPurchaseOpen(
+      (input as { cycleMonth?: unknown }).cycleMonth,
+    );
     const result = await consolidateMonthlyPurchaseDrafts(input);
     return Response.json(
       {
@@ -38,9 +42,13 @@ export async function POST(request: Request) {
       },
     );
   } catch (error) {
-    const raw = error instanceof Error ? error.message : "MONTHLY_PURCHASE_FINAL_FAILED";
+    const raw =
+      error instanceof Error
+        ? error.message
+        : "MONTHLY_PURCHASE_FINAL_FAILED";
     const code = raw.split(":", 1)[0] || "MONTHLY_PURCHASE_FINAL_FAILED";
     const conflict = [
+      "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED",
       "MONTHLY_PURCHASE_FINAL_CURRENT_CYCLE_ONLY",
       "MONTHLY_PURCHASE_FINAL_BASE_DRAFT_NOT_ACTIVE",
       "MONTHLY_PURCHASE_FINAL_MULTIPLE_DRAFTS_REQUIRED",
@@ -51,19 +59,21 @@ export async function POST(request: Request) {
         ok: false,
         code,
         message:
-          code === "MONTHLY_PURCHASE_FINAL_CURRENT_CYCLE_ONLY"
-            ? "현재 달의 미주문 내부 Draft만 최종 정리할 수 있습니다."
-            : code === "MONTHLY_PURCHASE_FINAL_BASE_DRAFT_NOT_ACTIVE"
-              ? "기준 Draft가 더 이상 활성 상태가 아닙니다. 원장을 새로고침하세요."
-              : code === "MONTHLY_PURCHASE_FINAL_MULTIPLE_DRAFTS_REQUIRED"
-                ? "활성 Draft가 이미 1건으로 정리되어 추가 통합이 필요하지 않습니다."
-                : code === "MONTHLY_PURCHASE_FINAL_SOURCE_ALREADY_PROGRESSING"
-                  ? "일부 Draft가 이미 주문 전송·실주문·입고 단계로 진행되어 자동 통합을 차단했습니다."
-                  : code === "MONTHLY_PURCHASE_FINAL_LEDGER_UNAVAILABLE"
-                    ? "발주·입고 원장을 확인하지 못해 월간 최종화를 안전하게 중단했습니다."
-                    : code === "MONTHLY_PURCHASE_FINAL_QUANTITY_INVALID"
-                      ? "최종 주문수량은 SKU당 1~9,999개 범위로 입력하세요."
-                      : "월간 최종 Draft 정리 조건을 확인하지 못했습니다.",
+          code === "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED"
+            ? "이 발주월은 이미 마감했습니다. Draft 통합·추가 발주는 차단하고 기존 입고·원가 마감만 계속합니다."
+            : code === "MONTHLY_PURCHASE_FINAL_CURRENT_CYCLE_ONLY"
+              ? "현재 달의 미주문 내부 Draft만 최종 정리할 수 있습니다."
+              : code === "MONTHLY_PURCHASE_FINAL_BASE_DRAFT_NOT_ACTIVE"
+                ? "기준 Draft가 더 이상 활성 상태가 아닙니다. 원장을 새로고침하세요."
+                : code === "MONTHLY_PURCHASE_FINAL_MULTIPLE_DRAFTS_REQUIRED"
+                  ? "활성 Draft가 이미 1건으로 정리되어 추가 통합이 필요하지 않습니다."
+                  : code === "MONTHLY_PURCHASE_FINAL_SOURCE_ALREADY_PROGRESSING"
+                    ? "일부 Draft가 이미 주문 전송·실주문·입고 단계로 진행되어 자동 통합을 차단했습니다."
+                    : code === "MONTHLY_PURCHASE_FINAL_LEDGER_UNAVAILABLE"
+                      ? "발주·입고 원장을 확인하지 못해 월간 최종화를 안전하게 중단했습니다."
+                      : code === "MONTHLY_PURCHASE_FINAL_QUANTITY_INVALID"
+                        ? "최종 주문수량은 SKU당 1~9,999개 범위로 입력하세요."
+                        : "월간 최종 Draft 정리 조건을 확인하지 못했습니다.",
       },
       {
         status: conflict ? 409 : 400,

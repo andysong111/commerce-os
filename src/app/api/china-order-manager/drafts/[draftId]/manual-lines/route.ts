@@ -2,6 +2,9 @@ import {
   addInternalChinaManualDraftLine,
   searchInternalChinaManualDraftCandidates,
 } from "@/lib/internalChinaPurchaseDraftManualAdd";
+import { assertInternalChinaMonthlyPurchaseOpen } from "@/lib/internalChinaMonthlyPurchaseClose";
+import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
+import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -25,10 +28,15 @@ function unauthorized() {
 }
 
 function errorResponse(error: unknown) {
-  const raw = error instanceof Error ? error.message : "INTERNAL_CHINA_MANUAL_ADD_FAILED";
+  const raw =
+    error instanceof Error
+      ? error.message
+      : "INTERNAL_CHINA_MANUAL_ADD_FAILED";
   const code = raw.split(":", 1)[0] || "INTERNAL_CHINA_MANUAL_ADD_FAILED";
   let message = raw;
-  if (code === "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED") {
+  if (code === "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED") {
+    message = "이 발주월은 이미 마감했습니다. 신규 품목 추가는 차단하고 기존 입고·원가 마감만 계속합니다.";
+  } else if (code === "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED") {
     message = "이미 실제 주문 기록이 시작된 Draft에는 품목을 추가할 수 없습니다.";
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_AFTER_ORDER_STARTED") {
     message = "이 Draft에서 실제 주문 기록이 이미 시작되어 추가 품목을 넣을 수 없습니다.";
@@ -37,11 +45,20 @@ function errorResponse(error: unknown) {
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_QUANTITY_EXCEEDED") {
     message = "기존 수량과 추가수량의 합계는 B-code당 9,999개를 넘을 수 없습니다.";
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_BARCODE_NOT_ACTIVE") {
-    message = `상품마스터에서 활성 B-code를 찾지 못했습니다: ${raw.split(":").slice(1).join(":")}`;
+    message = `상품마스터에서 활성 B-code를 찾지 못했습니다: ${raw
+      .split(":")
+      .slice(1)
+      .join(":")}`;
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_BARCODE_INVALID") {
-    message = `B-code 형식을 확인하세요: ${raw.split(":").slice(1).join(":")}`;
+    message = `B-code 형식을 확인하세요: ${raw
+      .split(":")
+      .slice(1)
+      .join(":")}`;
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_CANCELLED_LINE") {
-    message = `이 Draft에서 이미 취소된 B-code는 같은 Draft에 다시 추가하지 않습니다: ${raw.split(":").slice(1).join(":")}`;
+    message = `이 Draft에서 이미 취소된 B-code는 같은 Draft에 다시 추가하지 않습니다: ${raw
+      .split(":")
+      .slice(1)
+      .join(":")}`;
   } else if (code === "INTERNAL_CHINA_MANUAL_ADD_REQUEST_ID_INVALID") {
     message = "수동 추가 요청 식별값이 올바르지 않습니다. 페이지를 새로고침한 뒤 다시 시도하세요.";
   } else if (code === "CHINA_ORDER_LEDGER_UNAVAILABLE") {
@@ -49,6 +66,7 @@ function errorResponse(error: unknown) {
   }
   const notFound = code === "INTERNAL_CHINA_MANUAL_ADD_BARCODE_NOT_ACTIVE";
   const conflict = [
+    "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED",
     "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED",
     "INTERNAL_CHINA_MANUAL_ADD_AFTER_ORDER_STARTED",
     "INTERNAL_CHINA_MANUAL_ADD_CANCELLED_LINE",
@@ -90,14 +108,19 @@ export async function GET(request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   const { draftId } = await context.params;
+  const decodedDraftId = decodeURIComponent(draftId);
   try {
+    const draft = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    await assertInternalChinaMonthlyPurchaseOpen(
+      seoulCalendarMonth(draft.sourceUpdatedAt),
+    );
     const body = (await request.json().catch(() => ({}))) as {
       barcode?: unknown;
       addQuantity?: unknown;
       requestId?: unknown;
     };
     const result = await addInternalChinaManualDraftLine({
-      draftId: decodeURIComponent(draftId),
+      draftId: decodedDraftId,
       barcode: body.barcode,
       addQuantity: body.addQuantity,
       requestId: body.requestId,
