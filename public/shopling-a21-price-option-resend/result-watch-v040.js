@@ -8,6 +8,18 @@
   let lastSignature = "";
   let lastSentAt = 0;
 
+  function scrollResultToBottom() {
+    try {
+      const root = document.scrollingElement || document.documentElement || document.body;
+      if (root) root.scrollTop = root.scrollHeight;
+      window.scrollTo(0, Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0));
+      for (const element of document.querySelectorAll("div,section,main,table,tbody")) {
+        if (!(element instanceof HTMLElement)) continue;
+        if (element.scrollHeight > element.clientHeight + 40) element.scrollTop = element.scrollHeight;
+      }
+    } catch { /* visual helper only */ }
+  }
+
   function snapshot() {
     const text = normalize(document.body?.innerText || document.body?.textContent || document.documentElement?.innerText || "");
     if (!text) return null;
@@ -21,16 +33,17 @@
     const outcomeRows = /성공여부/i.test(text) && /쇼핑몰상품코드/i.test(text);
     const footer = /상품\s*수정\s*전송이\s*완료되었습니다/i.test(text) || /상품\s*수정\s*전송\s*완료/i.test(text);
     const evidence = resultHeading || successCountLabels > 0 || failCountLabels > 0 || outcomeRows || footer;
-    const strongEvidence = footer || ((successCountLabels > 0 || failCountLabels > 0) && outcomeRows);
 
     if ((listPage || configPage) && !evidence && !processing) return null;
     if (!evidence && !processing) return null;
+
+    scrollResultToBottom();
 
     return {
       version: VERSION,
       processing,
       evidence,
-      strongEvidence,
+      strongEvidence: footer,
       footer,
       resultHeading,
       successCountLabels,
