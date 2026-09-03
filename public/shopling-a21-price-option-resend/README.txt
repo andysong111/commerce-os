@@ -1,4 +1,4 @@
-Commerce OS · Shopling A21 Price/Option Resend v0.2.3
+Commerce OS · Shopling A21 Price/Option Resend v0.2.4
 
 목적
 - Commerce OS에서 Shopling 쇼핑몰별 가격 재조회까지 VERIFIED 된 GOODSKEY만 A21 쇼핑몰상품수정에서 마켓으로 수정전송합니다.
@@ -10,19 +10,21 @@ Commerce OS · Shopling A21 Price/Option Resend v0.2.3
 - 판매가 모드: modify_tp=goods_normal
 - 쇼핑몰별 판매가 source: tsmt_sale_price_tp=J 필수
 - 판매가 수정: trsmt_env_mody_price=Y
-- 배송정보: trsmt_env_mody_dlvyinfo='' (수정안함) 필수
-- 상품명/카테고리/이미지/수수료/상세설명/키워드/유료서비스도 빈값(수정안함)
+- 배송정보: 값만 보고 추정하지 않고 실제 '수정안함' 라디오를 DOM 라벨/onclick 증거로 식별해 고정
+- 상품명/카테고리/이미지/수수료/상세설명/키워드/유료서비스는 수정안함
 - 옵션 모드: modify_tp=goods_stock
 - 옵션송신: trsmt_env_mody_opt=1
 - 최종 송신함수: goods_mallMdfy_submit_sp()
 
-v0.2.3 변경
-- Shopling 배송정보 기본값이 수정(Y)인 점을 전제로 합니다.
-- 배송정보 수정안함 라디오(value='')에 붙어 있는 onclick='dlvy_notice();'를 송신팝업 로드 시 제거합니다.
-- 따라서 자동화가 배송정보 수정안함을 선택할 때 native alert 때문에 화면 재도색/후속 자동화가 막히지 않습니다.
-- 배송정보 오른쪽 수정안함을 선택한 뒤 왼쪽 수정(Y)이 해제되었는지 DOM으로 재검증합니다.
-- MAIN world 원본 송신 직전에도 배송정보 값이 blank가 아니면 전송을 차단합니다.
-- 목록용 content-a21.js는 송신팝업에 절대 주입하지 않도록 분리합니다.
+v0.2.4 변경
+- 배송정보 선택을 value='' 가정 하나에 의존하지 않습니다.
+- '수정안함' 라벨, dlvy_notice onclick, 기존 form 계약을 순서대로 사용해 배송정보 수정안함 라디오를 식별합니다.
+- 배송정보 라디오는 클릭 대신 checked 상태를 직접 고정해 안내창 때문에 다시 '수정함'으로 돌아가는 경로를 제거합니다.
+- ISOLATED content world와 MAIN world 양쪽에서 송신 직전 배송정보 수정안함을 재검증합니다.
+- 송신창이 닫히면 즉시 V020_RESULT_WINDOW_CLOSED로 실패시키지 않습니다.
+- SUBMIT_CLICKED 이후 생성된 새 결과창, 관련 Shopling 탭 이동, 동일 팝업의 결과 화면을 180초까지 추적합니다.
+- 실제 성공건수/실패건수 또는 성공여부를 확인한 뒤에만 SUCCEEDED/FAILED를 확정합니다.
+- 결과를 끝까지 확인하지 못하면 V024_RESULT_TIMEOUT으로 fail-closed 처리합니다.
 
 안전장치
 1) Shopling 가격 재조회가 VERIFIED가 아니면 실행하지 않습니다.
@@ -31,7 +33,7 @@ v0.2.3 변경
 4) 전체 실행은 최대 200 GOODSKEY씩 검색합니다.
 5) 화면출력 500을 초과하면 전송 전에 더 작은 묶음으로 자동 분할합니다.
 6) 검색한 모든 GOODSKEY가 결과에 있고 총 조회수와 실제 선택행 수가 같아야 전송합니다.
-7) 판매가 송신 직전 tsmt_sale_price_tp=J, 판매가=Y, 배송정보 포함 나머지 일반항목=수정안함을 다시 검증합니다.
+7) 판매가 송신 직전 tsmt_sale_price_tp=J, 판매가=수정, 배송정보=실제 수정안함, 나머지 일반항목=수정안함을 다시 검증합니다.
 8) 옵션 송신 직전 modify_tp=goods_stock, trsmt_env_mody_opt=1을 다시 검증합니다.
 9) prod_join_chk[] 전송대상이 없으면 송신하지 않습니다.
 10) MAIN world에서도 동일한 form 값을 다시 검증합니다.
@@ -39,15 +41,16 @@ v0.2.3 변경
 12) 예상하지 못한 확인/경고창은 자동 승인하지 않습니다.
 13) Shopling 결과 화면을 background가 직접 읽어 성공을 확인하지 못하면 성공으로 기록하지 않습니다.
 14) 기존에 열려 있던 상품수정 송신 팝업은 실행 시작 시 기준선으로 제외합니다.
+15) 송신창이 닫혀도 그 사실만으로 실패 확정하지 않고 관련 결과창/탭 이동을 추적합니다.
 
 사용
 1) chrome://extensions에서 개발자 모드를 켭니다.
-2) 기존 A21 Resend를 제거하고 ZIP 압축을 풉니다.
+2) 기존 A21 Resend를 제거하고 v0.2.4 ZIP 압축을 풉니다.
 3) '압축해제된 확장 프로그램을 로드합니다'로 압축을 푼 폴더를 선택합니다.
 4) 기존 수동 송신 팝업은 닫고 Shopling 로그인 상태에서 A18 또는 A21 화면 하나를 엽니다.
 5) 확장프로그램 아이콘을 눌러 VERIFIED 수량을 확인합니다.
 6) 먼저 '1 GOODSKEY 안전 테스트'를 실행합니다.
-7) 첫 판매가 팝업에서 판매가=수정, 배송정보=수정안함 파란점이 보이는지 확인합니다.
+7) 첫 판매가 팝업에서 배송정보가 실제로 '수정안함' 상태인지 확인합니다.
 8) 테스트에서 판매가/옵션 모두 SUCCEEDED 확인 후 '전체 가격·옵션 수정전송 시작'을 사용합니다.
 9) 실행 중 관리되는 Shopling 작업창/송신창을 임의로 조작하지 않습니다.
 
