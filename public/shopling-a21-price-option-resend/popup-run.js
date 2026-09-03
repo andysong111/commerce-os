@@ -36,7 +36,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.8은 수정전송 후 Shopling ‘처리중입니다’ 로딩이 끝날 때까지 해당 창을 유지합니다. 마켓별 성공/실패는 판정하지 않으며, 전체 실행은 모든 판매가 배치를 먼저 끝낸 뒤 옵션 배치를 진행합니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.9은 수정전송 후 Shopling ‘처리중입니다’ 로딩이 끝날 때까지 해당 창을 유지하고, service worker가 결과화면과 로딩 소멸을 직접 폴링해 다음 단계로 넘어갑니다. 마켓별 성공/실패는 판정하지 않으며, 전체 실행은 모든 판매가 배치를 먼저 끝낸 뒤 옵션 배치를 진행합니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
