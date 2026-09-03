@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { InternalChinaCurrentPurchaseBudget } from "@/components/china-order-manager/InternalChinaCurrentPurchaseBudget";
 import { InternalChinaForwarderCloseHistory } from "@/components/china-order-manager/InternalChinaForwarderCloseHistory";
 import { InternalChinaForwarderCostFallback } from "@/components/china-order-manager/InternalChinaForwarderCostFallback";
 import { InternalChinaReceiptPanel } from "@/components/china-order-manager/InternalChinaReceiptPanel";
@@ -217,6 +218,8 @@ export default async function ChinaOrderManagerLayout({
           발주원장 실시간 조회 지연 · {internalDraftState.error}
         </section>
       ) : null}
+
+      <InternalChinaCurrentPurchaseBudget cycleMonth={currentCycleMonth} />
 
       <InternalChinaForwarderCloseHistory summaries={recentForwarderCloses} />
 
