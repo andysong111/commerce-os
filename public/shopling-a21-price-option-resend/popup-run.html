@@ -10,10 +10,10 @@
 </head>
 <body>
 <h1>Shopling A21 가격·옵션 수정전송</h1>
-<p>v0.2.5 · 배송정보 수정안함 고정 · 모든 쇼핑몰 결과 합산 검증 · 동시 1개</p>
+<p>v0.2.6 · 배송정보 수정안함 안전검증 · Shopling 송신 ACK 기준 · 마켓 결과검증 생략 · 동시 1개</p>
 <div class="card" id="planCard">대상 확인 중...</div>
 <div class="card">
-  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 라디오 재검증 · 결과: 각 쇼핑몰의 총건수/성공건수/실패건수를 모두 합산한 뒤에만 완료 판정 · 옵션: goods_stock + 옵션송신(1)만</div>
+  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · Shopling 원본 송신함수가 정상 접수되면 성공 처리하고 개별 마켓 실패/결과창은 기다리지 않음 · 옵션: goods_stock + 옵션송신(1)만</div>
   <div id="runState" style="margin-top:10px">실행 대기</div>
   <div id="jobs"></div>
   <button id="test" class="test" disabled>1 GOODSKEY 안전 테스트</button>
