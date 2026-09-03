@@ -2,21 +2,29 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.3.5",
-  "description": "Shopling A21 판매가/옵션 직렬 전송. Shopling 기본 송신 동작은 건드리지 않고 결과 팝업의 실제 로딩 종료와 결과표 안정화만 Chrome background에서 확인해 다음 단계로 진행합니다.",
+  "version": "0.3.6",
+  "description": "Shopling A21 판매가/옵션 직렬 전송. 결과 팝업 문서 자체에 로딩 감지기를 주입해 about:blank 기반 결과창까지 직접 확인하고 로딩 종료 후 다음 단계로 진행합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-v035.js"
+    "service_worker": "background-v036.js"
   },
   "action": {
     "default_title": "Shopling A21 가격·옵션 수정전송",
     "default_popup": "popup-run.html"
   },
   "content_scripts": [
+    {
+      "matches": ["https://a.shopling.co.kr/*"],
+      "js": ["result-loading-v036.js"],
+      "all_frames": true,
+      "run_at": "document_start",
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
+    },
     {
       "matches": ["https://a.shopling.co.kr/*"],
       "exclude_matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
