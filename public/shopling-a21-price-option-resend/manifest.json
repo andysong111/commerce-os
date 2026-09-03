@@ -2,15 +2,15 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.2.3",
-  "description": "Shopling A21 실제 form name/value 기준 직렬 안전전송. 목록/송신 팝업을 분리하고 배송정보 수정안함 라디오의 blocking 안내 클릭을 제거한 뒤 수정안함 상태를 재검증합니다.",
+  "version": "0.2.4",
+  "description": "Shopling A21 판매가/옵션 직렬 안전전송. 배송정보는 실제 수정안함 라디오를 DOM 증거로 고정하고, 송신창이 닫히거나 이동해도 관련 결과창을 추적해 성공/실패를 확인합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-v020.js"
+    "service_worker": "background-v024.js"
   },
   "action": {
     "default_title": "Shopling A21 가격·옵션 수정전송",
@@ -26,14 +26,14 @@
     },
     {
       "matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
-      "js": ["main-a21-v022.js"],
+      "js": ["main-a21-v024.js"],
       "world": "MAIN",
       "all_frames": true,
       "run_at": "document_start"
     },
     {
       "matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
-      "js": ["delivery-radio-v023.js", "content-a21-v022.js"],
+      "js": ["content-a21-v024.js"],
       "all_frames": true,
       "run_at": "document_idle"
     }
