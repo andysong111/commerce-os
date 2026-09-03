@@ -36,7 +36,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.5는 동시 1개 작업만 실행합니다. 배송정보는 실제 ‘수정안함’ 상태를 유지하고, 실행 시작 전에 열려 있던 Shopling 탭을 기준선으로 제외한 뒤 새 결과창/이동 탭/프레임의 모든 쇼핑몰 결과를 180초 동안 합산 검증합니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.2.6은 동시 1개 작업만 실행합니다. 배송정보 수정안함 및 송신 직전 form 안전검증은 유지하지만, Shopling 원본 송신 함수가 정상 접수되면 개별 마켓 결과창을 기다리지 않고 해당 작업을 완료 처리합니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
