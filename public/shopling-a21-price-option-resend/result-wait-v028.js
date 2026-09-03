@@ -1,8 +1,10 @@
 (() => {
   const VERSION = "0.2.8";
   const POLL_MS = 500;
+  const HEARTBEAT_MS = 1_000;
   let clearSince = 0;
   let lastSignature = "";
+  let lastSentAt = 0;
 
   const norm = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
 
@@ -27,8 +29,10 @@
 
   function sample() {
     const text = norm(document.body?.innerText || document.body?.textContent || "");
-    const processing = hasVisibleProcessingOverlay();
     const resultEvidence = /쇼핑몰\s*상품\s*수정\s*전송\s*결과|상품\s*수정\s*전송중입니다|성공건수|실패건수|총건수/i.test(text);
+    const processingText = /처리중입니다|잠시만\s*기다려주시기\s*바랍니다/.test(text);
+    if (!resultEvidence && !processingText) return { processing: false, resultEvidence: false };
+    const processing = processingText && hasVisibleProcessingOverlay();
     return { processing, resultEvidence };
   }
 
@@ -37,6 +41,7 @@
     if (!processing && !resultEvidence) {
       clearSince = 0;
       lastSignature = "";
+      lastSentAt = 0;
       return;
     }
 
@@ -45,8 +50,10 @@
 
     const clearForMs = clearSince ? Date.now() - clearSince : 0;
     const signature = `${processing ? 1 : 0}|${resultEvidence ? 1 : 0}|${Math.floor(clearForMs / 1000)}`;
-    if (signature === lastSignature) return;
+    const now = Date.now();
+    if (signature === lastSignature && now - lastSentAt < HEARTBEAT_MS) return;
     lastSignature = signature;
+    lastSentAt = now;
 
     await chrome.runtime.sendMessage({
       type: "A21_RESULT_LOADING_V028",
@@ -58,9 +65,7 @@
     }).catch(() => null);
   }
 
-  const observer = new MutationObserver(() => void emit());
   const start = () => {
-    if (document.documentElement) observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden"] });
     void emit();
     setInterval(() => void emit(), POLL_MS);
   };
