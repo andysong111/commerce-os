@@ -144,7 +144,7 @@ importScripts("background-v030.js");
         const state = await loadState();
         const job = state?.jobs?.find((item) => item.id === jobId);
         if (!state || state.state !== "RUNNING" || !job || job.status !== "RUNNING" || state.stopped) return;
-        if (!['SUBMIT_CLICKED', 'RESULT_WAIT'].includes(String(job.stage || ""))) {
+        if (!["SUBMIT_CLICKED", "RESULT_WAIT"].includes(String(job.stage || ""))) {
           await sleep(120);
           continue;
         }
@@ -152,7 +152,7 @@ importScripts("background-v030.js");
         const snapshot = await resultCandidates(job);
         const candidates = snapshot.candidates;
         const loadingCandidates = candidates.filter((row) => row.processing);
-        const doneCandidates = candidates.filter((row) => row.resultEvidence !== false && !row.processing && row.ready);
+        const doneCandidates = candidates.filter((row) => !row.processing && row.ready);
 
         if (loadingCandidates.length) {
           stableSignature = "";
