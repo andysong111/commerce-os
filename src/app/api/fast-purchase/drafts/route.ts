@@ -3,6 +3,8 @@ import {
   loadFastPurchaseInternalDrafts,
   type FastPurchaseInternalDraftInput,
 } from "@/lib/fastPurchaseInternalDraft";
+import { loadInternalChinaMonthlyPurchaseClose } from "@/lib/internalChinaMonthlyPurchaseClose";
+import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -40,6 +42,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
   try {
+    const cycleMonth = seoulCalendarMonth(new Date());
+    const monthlyClose = await loadInternalChinaMonthlyPurchaseClose(cycleMonth);
+    if (monthlyClose) {
+      throw new Error(`FAST_PURCHASE_MONTHLY_CYCLE_CLOSED:${cycleMonth}`);
+    }
     const input = (await request.json()) as FastPurchaseInternalDraftInput;
     const draft = await createFastPurchaseInternalDraft(input);
     return Response.json(
@@ -64,6 +71,7 @@ export async function POST(request: Request) {
       "FAST_PURCHASE_DRAFT_MODE_CHANGED",
       "FAST_PURCHASE_DRAFT_REFERENCE_CHANGED",
       "FAST_PURCHASE_MONTHLY_CYCLE_ALREADY_USED",
+      "FAST_PURCHASE_MONTHLY_CYCLE_CLOSED",
     ].includes(code);
     return Response.json(
       {
@@ -79,9 +87,11 @@ export async function POST(request: Request) {
                 ? "주문 예정수량은 SKU당 최대 9,999개까지 입력할 수 있습니다."
                 : code === "FAST_PURCHASE_MONTHLY_CYCLE_ALREADY_USED"
                   ? "이번 달 발주차시는 이미 생성했습니다. 기존 월간 Draft를 사용하고 새 발주안은 다음 달에 만드세요."
-                  : code === "FAST_PURCHASE_MONTHLY_CYCLE_LEDGER_UNAVAILABLE"
-                    ? "월간 발주차시 원장을 확인하지 못해 신규 Draft 생성을 안전하게 중단했습니다."
-                    : "내부 발주 Draft 저장 조건을 확인하지 못했습니다.",
+                  : code === "FAST_PURCHASE_MONTHLY_CYCLE_CLOSED"
+                    ? "이번 달 발주 사이클은 이미 마감했습니다. 추가 발주안은 다음 달에 생성하세요."
+                    : code === "FAST_PURCHASE_MONTHLY_CYCLE_LEDGER_UNAVAILABLE"
+                      ? "월간 발주차시 원장을 확인하지 못해 신규 Draft 생성을 안전하게 중단했습니다."
+                      : "내부 발주 Draft 저장 조건을 확인하지 못했습니다.",
       },
       {
         status: conflict ? 409 : 400,
