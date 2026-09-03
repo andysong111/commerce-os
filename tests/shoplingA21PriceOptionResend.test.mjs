@@ -14,23 +14,28 @@ const [manifestText, popupRun, popupRunHtml, exactPopup, mainBridge, background,
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/download/route.ts", import.meta.url), "utf8"),
 ]);
 
-test("A21 v0.2.2 uses serial isolated + MAIN-world Shopling runtime", () => {
+test("A21 v0.2.3 isolates list runtime from the submit popup", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.2.2");
+  assert.equal(manifest.version, "0.2.3");
   assert.equal(manifest.background.service_worker, "background-v020.js");
   assert.equal(manifest.action.default_popup, "popup-run.html");
   assert.ok(manifest.permissions.includes("scripting"));
   assert.ok(manifest.permissions.includes("windows"));
   assert.ok(manifest.permissions.includes("webNavigation"));
+  const listRuntime = manifest.content_scripts.find((row) => row.js?.includes("content-a21.js"));
+  assert.ok(listRuntime);
+  assert.ok(listRuntime.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml")));
+  assert.notEqual(listRuntime.match_about_blank, true);
   assert.ok(manifest.content_scripts.some((row) => row.js?.includes("content-a21-v022.js")));
   assert.ok(manifest.content_scripts.some((row) => row.js?.includes("main-a21-v022.js") && row.world === "MAIN"));
-  assert.match(popupRunHtml, /배송정보 수정안함 고정/);
+  assert.match(popupRunHtml, /목록\/송신팝업 완전분리/);
+  assert.match(popupRunHtml, /배송정보 수정안함/);
   assert.match(popupRunHtml, /1 GOODSKEY 안전 테스트/);
   assert.match(popupRun, /testMode/);
 });
 
-test("A21 v0.2.2 serializes jobs so popup claim is unique", () => {
+test("A21 v0.2.3 serializes jobs so popup claim is unique", () => {
   assert.match(background, /if \(state\.jobs\.some\(\(job\) => job\.status === "RUNNING"\)\) return/);
   assert.match(background, /A21_POPUP_CLAIM_V020/);
   assert.match(background, /candidates\.length !== 1/);
@@ -38,7 +43,7 @@ test("A21 v0.2.2 serializes jobs so popup claim is unique", () => {
   assert.match(background, /newPopupCandidates/);
 });
 
-test("A21 v0.2.2 selects only mall-specific price and keeps delivery info unchanged", () => {
+test("A21 v0.2.3 selects only mall-specific price and keeps delivery info unchanged", () => {
   assert.match(exactPopup, /tsmt_sale_price_tp/);
   assert.match(exactPopup, /value !== "J"/);
   assert.match(exactPopup, /trsmt_env_mody_price/);
@@ -49,7 +54,7 @@ test("A21 v0.2.2 selects only mall-specific price and keeps delivery info unchan
   assert.match(mainBridge, /deliveryInfoUnchanged/);
 });
 
-test("A21 v0.2.2 sends option-only and invokes original Shopling function in MAIN world", () => {
+test("A21 v0.2.3 sends option-only and invokes original Shopling function in MAIN world", () => {
   assert.match(exactPopup, /goods_stock/);
   assert.match(exactPopup, /trsmt_env_mody_opt/);
   assert.match(exactPopup, /selectRadio\("trsmt_env_mody_opt", "1"\)/);
@@ -62,7 +67,7 @@ test("A21 v0.2.2 sends option-only and invokes original Shopling function in MAI
   assert.match(mainBridge, /unexpected_alert/);
 });
 
-test("A21 v0.2.2 background verifies Shopling result independently", () => {
+test("A21 v0.2.3 background verifies Shopling result independently", () => {
   assert.match(background, /inspectResult/);
   assert.match(background, /성공건수/);
   assert.match(background, /실패건수/);
@@ -79,7 +84,8 @@ test("A21 resend plan remains gated by full Shopling readback verification", () 
     "readback.mallMissingCount === 0",
     "readback.mallMatchCount === readback.mallCheckCount",
   ]) assert.ok(planRoute.includes(needle), `missing ${needle}`);
-  assert.match(downloadRoute, /const VERSION = "0\.2\.2"/);
+  assert.match(downloadRoute, /const VERSION = "0\.2\.3"/);
+  assert.match(downloadRoute, /legacy_about_blank_injection_forbidden/);
   assert.match(downloadRoute, /background-v020\.js/);
   assert.match(downloadRoute, /main-a21-v022\.js/);
   assert.match(downloadRoute, /content-a21-v022\.js/);
