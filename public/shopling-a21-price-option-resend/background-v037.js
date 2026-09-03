@@ -36,7 +36,7 @@ importScripts("background-v020.js");
       tabId: Number.isInteger(details?.tabId) ? details.tabId : -1,
       type: String(details?.type || ""),
       url: String(details?.url || ""),
-      initiator: String(details?.initiator || details?.originUrl || document?.url || ""),
+      initiator: String(details?.initiator || details?.originUrl || ""),
       phase,
       at: Date.now(),
     };
