@@ -4,10 +4,15 @@ import {
   loadChinaOrderLedger,
   normalizeChinaOrderCommitmentEvent,
 } from "@/lib/chinaOrderLedger";
+import {
+  loadInternalChinaMonthlyPurchaseSummary,
+  type InternalChinaMonthlyPurchaseSummary,
+} from "@/lib/internalChinaMonthlyPurchaseSummary";
 import type {
   InternalChinaPurchaseDraft,
   InternalChinaPurchaseDraftInput,
 } from "@/lib/internalChinaPurchaseDraft";
+import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 import {
   createSupabaseAdminClient,
   createSupabaseAdminHeaders,
@@ -126,9 +131,73 @@ export function applyInternalChinaQuantityOverrides(
 ): InternalChinaPurchaseDraft {
   const lines = draft.lines.map((line) => {
     const override = overrides.get(normalizeBarcode(line.barcode));
-    return override
-      ? { ...line, quantity: override.targetQuantity }
-      : line;
+    return override ? { ...line, quantity: override.targetQuantity } : line;
+  });
+  return {
+    ...draft,
+    lines,
+    lineCount: lines.length,
+    totalQuantity: lines.reduce((sum, line) => sum + line.quantity, 0),
+  };
+}
+
+/**
+ * The actual 1688 import stores goods, service fee and China domestic freight
+ * separately. Operational landed-cost calculations must treat goods + 1688
+ * service fee as the product purchase unit cost, while domestic freight stays
+ * a separate per-order-group add-on. This overlay also upgrades already-saved
+ * September data without rewriting the immutable source snapshot.
+ */
+export function applyInternalChinaActualPurchaseCosts(
+  draft: InternalChinaPurchaseDraft,
+  monthly: InternalChinaMonthlyPurchaseSummary | null,
+): InternalChinaPurchaseDraft {
+  if (!monthly) return draft;
+
+  type ActualCostAggregate = {
+    quantity: number;
+    goodsPaidCny: number;
+    serviceFeeCny: number;
+    domesticChinaFreightCny: number;
+  };
+  const byBarcode = new Map<string, ActualCostAggregate>();
+  for (const line of monthly.lines) {
+    const key = normalizeBarcode(line.barcode);
+    if (
+      !line.assigned ||
+      line.draftId !== draft.draftId ||
+      !BARCODE.test(key)
+    ) {
+      continue;
+    }
+    const current = byBarcode.get(key) ?? {
+      quantity: 0,
+      goodsPaidCny: 0,
+      serviceFeeCny: 0,
+      domesticChinaFreightCny: 0,
+    };
+    current.quantity += line.quantity;
+    current.goodsPaidCny += line.goodsPaidCny;
+    current.serviceFeeCny += line.serviceFeeCny;
+    current.domesticChinaFreightCny += line.domesticChinaFreightCny;
+    byBarcode.set(key, current);
+  }
+  if (!byBarcode.size) return draft;
+
+  const lines = draft.lines.map((line) => {
+    const actual = byBarcode.get(normalizeBarcode(line.barcode));
+    if (!actual || actual.quantity <= 0) return line;
+    const actualProductUnitCny =
+      (actual.goodsPaidCny + actual.serviceFeeCny) / actual.quantity;
+    return {
+      ...line,
+      unitPriceCny:
+        actualProductUnitCny > 0
+          ? Math.round(actualProductUnitCny * 1_000_000) / 1_000_000
+          : line.unitPriceCny,
+      domesticChinaFreightCny:
+        Math.round(actual.domesticChinaFreightCny * 10_000) / 10_000,
+    };
   });
   return {
     ...draft,
@@ -141,8 +210,15 @@ export function applyInternalChinaQuantityOverrides(
 export async function loadInternalChinaDraftWithQuantityOverrides(
   draft: InternalChinaPurchaseDraft,
 ) {
-  const overrides = await loadInternalChinaQuantityOverrides(draft.draftId);
-  return applyInternalChinaQuantityOverrides(draft, overrides);
+  const cycleMonth = seoulCalendarMonth(draft.sourceUpdatedAt);
+  const [overrides, monthly] = await Promise.all([
+    loadInternalChinaQuantityOverrides(draft.draftId),
+    loadInternalChinaMonthlyPurchaseSummary(cycleMonth).catch(() => null),
+  ]);
+  return applyInternalChinaActualPurchaseCosts(
+    applyInternalChinaQuantityOverrides(draft, overrides),
+    monthly,
+  );
 }
 
 export async function saveInternalChinaQuantityOverride(input: {
