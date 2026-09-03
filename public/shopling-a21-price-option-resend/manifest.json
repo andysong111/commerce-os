@@ -2,15 +2,15 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
-  "version": "0.2.5",
-  "description": "Shopling A21 판매가/옵션 직렬 안전전송. 배송정보 수정안함을 유지하고, 새 결과창과 모든 쇼핑몰 결과 블록의 총건수·성공건수·실패건수를 합산해 최종 상태를 판정합니다.",
+  "version": "0.2.6",
+  "description": "Shopling A21 판매가/옵션 직렬 전송. 배송정보 수정안함 안전검증은 유지하고, Shopling 원본 송신 ACK가 확인되면 마켓별 결과 검증 없이 다음 작업으로 진행합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-v025.js"
+    "service_worker": "background-v026.js"
   },
   "action": {
     "default_title": "Shopling A21 가격·옵션 수정전송",
