@@ -5,12 +5,13 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
   "background-v030.js",
+  "background-v031.js",
   "content-a21.js",
   "main-a21-v024.js",
   "content-a21-v024.js",
@@ -45,7 +46,7 @@ export async function GET() {
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v030.js") throw new Error("shopling_a21_resend_background_v030_required");
+      if (manifest.background?.service_worker !== "background-v031.js") throw new Error("shopling_a21_resend_background_v031_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {

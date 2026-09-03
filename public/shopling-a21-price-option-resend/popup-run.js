@@ -6,6 +6,7 @@ const startButton = document.getElementById("start");
 const stopButton = document.getElementById("stop");
 const refreshButton = document.getElementById("refresh");
 let plan = null;
+let refreshBusy = false;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;" }[char]));
@@ -36,7 +37,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.0은 이전 결과창을 시작 전에 정리하고, 수정전송 후 Shopling 결과창의 ‘상품 수정 전송이 완료되었습니다’ 문구를 직접 확인한 뒤 다음 단계로 넘어갑니다. 마켓별 성공/실패는 판정하지 않으며, 전체 실행은 모든 판매가 배치를 먼저 끝낸 뒤 옵션 배치를 진행합니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.1은 실행 팝업이 1초마다 Shopling 결과창을 직접 재조회합니다. ‘상품 수정 전송이 완료되었습니다’가 보이는 즉시 해당 작업을 완료 처리하므로 service worker 대기 루프가 중간에 잠들어도 멈추지 않습니다. 마켓별 성공/실패는 판정하지 않으며 모든 판매가 배치 후 옵션 배치를 진행합니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
@@ -66,8 +67,19 @@ function renderState(state) {
 }
 
 async function refreshState() {
-  const response = await chrome.runtime.sendMessage({ type: "A21_GET_STATE" });
-  if (response?.ok) renderState(response.state);
+  if (refreshBusy) return;
+  refreshBusy = true;
+  try {
+    const reconcile = await chrome.runtime.sendMessage({ type: "A21_RECONCILE_V031" }).catch(() => null);
+    if (reconcile?.ok && reconcile.state) {
+      renderState(reconcile.state);
+      return;
+    }
+    const response = await chrome.runtime.sendMessage({ type: "A21_GET_STATE" });
+    if (response?.ok) renderState(response.state);
+  } finally {
+    refreshBusy = false;
+  }
 }
 
 async function startRun(testMode) {
@@ -96,5 +108,5 @@ refreshButton.addEventListener("click", async () => {
   await refreshState();
 });
 
-setInterval(refreshState, 1000);
+setInterval(() => void refreshState(), 1000);
 void loadPlan().then(refreshState);
