@@ -5,16 +5,17 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
   "background-v030.js",
-  "background-v031.js",
+  "background-v032.js",
   "content-a21.js",
   "main-a21-v024.js",
   "content-a21-v024.js",
+  "result-complete-v032.js",
   "popup-run.html",
   "popup-run.js",
   "README.txt",
@@ -42,11 +43,17 @@ export async function GET() {
         permissions?: string[];
         background?: { service_worker?: string };
         action?: { default_popup?: string };
-        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string; match_about_blank?: boolean }>;
+        content_scripts?: Array<{
+          js?: string[];
+          exclude_matches?: string[];
+          world?: string;
+          match_about_blank?: boolean;
+          match_origin_as_fallback?: boolean;
+        }>;
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v031.js") throw new Error("shopling_a21_resend_background_v031_required");
+      if (manifest.background?.service_worker !== "background-v032.js") throw new Error("shopling_a21_resend_background_v032_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
@@ -59,6 +66,10 @@ export async function GET() {
       if (!popupRuntime) throw new Error("shopling_a21_resend_v024_popup_runtime_missing");
       if (!manifest.content_scripts?.some((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN")) {
         throw new Error("shopling_a21_resend_v024_main_world_bridge_missing");
+      }
+      const resultRuntime = manifest.content_scripts?.find((item) => item.js?.includes("result-complete-v032.js"));
+      if (!resultRuntime?.match_about_blank || !resultRuntime?.match_origin_as_fallback) {
+        throw new Error("shopling_a21_resend_v032_result_fallback_injection_missing");
       }
       if (manifest.content_scripts?.some((item) => item.js?.includes("result-wait-v028.js"))) {
         throw new Error("shopling_a21_resend_legacy_result_observer_forbidden");
