@@ -14,11 +14,14 @@
         Number(doc.documentElement?.scrollHeight || 0),
         Number(doc.body?.scrollHeight || 0),
       );
-      if (height > 0) child.scrollTo(0, height);
+      if (root && height > 0) root.scrollTop = height;
+      if (height > 0 && typeof child.scrollTo === "function") child.scrollTo(0, height);
       const candidates = [doc.documentElement, doc.body, ...doc.querySelectorAll("div,main,section,article,table,tbody")];
       for (const node of candidates) {
-        if (!(node instanceof Element)) continue;
-        if (node.scrollHeight > node.clientHeight + 24) node.scrollTop = node.scrollHeight;
+        if (!node) continue;
+        const scrollHeight = Number(node.scrollHeight || 0);
+        const clientHeight = Number(node.clientHeight || 0);
+        if (scrollHeight > clientHeight + 24) node.scrollTop = scrollHeight;
       }
     } catch {
       // Cross-origin / navigation transition. Keep polling until the Shopling result document is readable.
@@ -63,7 +66,6 @@
     return track(originalOpen(...args));
   };
 
-  // Keep the wrapper behavior close to the native function for Shopling code that inspects it loosely.
   try { Object.defineProperty(window.open, "name", { value: "open" }); } catch { /* no-op */ }
 
   setInterval(() => {
