@@ -5,15 +5,15 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.2.3";
+const VERSION = "0.2.4";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
+  "background-v024.js",
   "content-a21.js",
-  "main-a21-v022.js",
-  "delivery-radio-v023.js",
-  "content-a21-v022.js",
+  "main-a21-v024.js",
+  "content-a21-v024.js",
   "popup-run.html",
   "popup-run.js",
   "README.txt",
@@ -45,7 +45,7 @@ export async function GET() {
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v020.js") throw new Error("shopling_a21_resend_background_v020_required");
+      if (manifest.background?.service_worker !== "background-v024.js") throw new Error("shopling_a21_resend_background_v024_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
@@ -54,15 +54,10 @@ export async function GET() {
       if (listRuntime.match_about_blank === true) {
         throw new Error("shopling_a21_resend_legacy_about_blank_injection_forbidden");
       }
-      const popupRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21-v022.js"));
-      if (!popupRuntime?.js?.includes("delivery-radio-v023.js")) {
-        throw new Error("shopling_a21_resend_delivery_unchanged_guard_missing");
-      }
-      if (popupRuntime.js.indexOf("delivery-radio-v023.js") > popupRuntime.js.indexOf("content-a21-v022.js")) {
-        throw new Error("shopling_a21_resend_delivery_guard_must_load_first");
-      }
-      if (!manifest.content_scripts?.some((item) => item.js?.includes("main-a21-v022.js") && item.world === "MAIN")) {
-        throw new Error("shopling_a21_resend_v022_main_world_bridge_missing");
+      const popupRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21-v024.js"));
+      if (!popupRuntime) throw new Error("shopling_a21_resend_v024_popup_runtime_missing");
+      if (!manifest.content_scripts?.some((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN")) {
+        throw new Error("shopling_a21_resend_v024_main_world_bridge_missing");
       }
       if (!manifest.permissions?.includes("windows") || !manifest.permissions?.includes("tabs") || !manifest.permissions?.includes("scripting") || !manifest.permissions?.includes("webNavigation")) {
         throw new Error("shopling_a21_resend_permissions_missing");
