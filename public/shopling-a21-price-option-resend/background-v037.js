@@ -41,7 +41,7 @@ importScripts("background-v020.js");
       at: Date.now(),
     };
     recentEvents.push(event);
-    if (recentEvents.length > 300) recentEvents.splice(0, recentEvents.length - 300);
+    if (recentEvents.length > 400) recentEvents.splice(0, recentEvents.length - 400);
   }
 
   chrome.webRequest.onBeforeRequest.addListener((details) => {
@@ -137,17 +137,29 @@ importScripts("background-v020.js");
       || String(row?.initiator || "").startsWith("https://a.shopling.co.kr/");
   }
 
+  function candidateTabIdsFromEvents(job, cutoff) {
+    const ids = new Set();
+    for (const row of recentEvents) {
+      if (row.at < cutoff || !isShoplingInitiated(row) || !Number.isInteger(row.tabId) || row.tabId < 0) continue;
+      if (row.tabId === job?.workerTabId || row.tabId === job?.popupTabId || row.tabId === job?.sourceTabId) continue;
+      if (row.type === "main_frame" || row.type === "sub_frame" || row.type === "xmlhttprequest") ids.add(row.tabId);
+    }
+    return ids;
+  }
+
   async function networkSnapshot(job, watchStartedAt) {
-    const ids = await relatedTabIds(job);
     const cutoff = watchStartedAt - PREWATCH_GRACE_MS;
-    const relevantActive = [...activeRequests.values()].filter((row) => {
+    const ids = await relatedTabIds(job);
+    for (const id of candidateTabIdsFromEvents(job, cutoff)) ids.add(id);
+
+    const belongs = (row) => {
       if (!isShoplingInitiated(row)) return false;
-      return row.startedAt >= cutoff && (ids.has(row.tabId) || row.tabId < 0 || String(row.initiator || "").startsWith("https://a.shopling.co.kr/"));
-    });
-    const relevantRecent = recentEvents.filter((row) => {
-      if (row.at < cutoff || !isShoplingInitiated(row)) return false;
-      return ids.has(row.tabId) || row.tabId < 0 || String(row.initiator || "").startsWith("https://a.shopling.co.kr/");
-    });
+      if (Number.isInteger(row.tabId) && row.tabId >= 0) return ids.has(row.tabId);
+      return String(row.initiator || "").startsWith("https://a.shopling.co.kr/");
+    };
+
+    const relevantActive = [...activeRequests.values()].filter((row) => row.startedAt >= cutoff && belongs(row));
+    const relevantRecent = recentEvents.filter((row) => row.at >= cutoff && belongs(row));
     const lastActivityAt = Math.max(
       0,
       ...relevantActive.map((row) => Number(row.startedAt || 0)),
@@ -156,8 +168,8 @@ importScripts("background-v020.js");
     const resultTabCandidates = relevantRecent
       .filter((row) => Number.isInteger(row.tabId) && row.tabId >= 0 && row.tabId !== job.workerTabId && row.tabId !== job.popupTabId && row.type === "main_frame")
       .sort((a, b) => b.at - a.at);
+
     return {
-      ids,
       activeCount: relevantActive.length,
       eventCount: relevantRecent.length,
       sawNetwork: relevantRecent.length > 0 || relevantActive.length > 0,
@@ -189,7 +201,7 @@ importScripts("background-v020.js");
 
         if (!snap.sawNetwork) {
           quietSince = 0;
-          job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} Shopling 송신 ACK 완료 · 브라우저 네트워크 시작 대기 v${VERSION}`;
+          job.message = `${job.mode === "PRICE" ? "판매가" : "옵션"} Shopling 송신 ACK 완료 · 현재 작업 네트워크 시작 대기 v${VERSION}`;
           await saveStateV037(state);
           await sleepV037(POLL_MS);
           continue;
@@ -231,11 +243,19 @@ importScripts("background-v020.js");
     }
   }
 
+  async function resumeWatcherFromState() {
+    const state = await loadStateV037();
+    const job = state?.jobs?.find((item) => item.status === "RUNNING" && String(item.stage || "") === "RESULT_WAIT");
+    if (job?.id) setTimeout(() => void watchNetworkIdle(String(job.id)), 0);
+  }
+
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === "A21_STAGE"
         && String(message.stage || "") === "RESULT_WAIT"
         && message.jobId) {
       setTimeout(() => void watchNetworkIdle(String(message.jobId)), 10);
+    } else if (message?.type === "A21_GET_STATE") {
+      setTimeout(() => void resumeWatcherFromState(), 0);
     }
     return false;
   });
