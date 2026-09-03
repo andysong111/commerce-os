@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.2.2";
+const VERSION = "0.2.3";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
@@ -40,14 +40,18 @@ export async function GET() {
         permissions?: string[];
         background?: { service_worker?: string };
         action?: { default_popup?: string };
-        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string }>;
+        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string; match_about_blank?: boolean }>;
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
       if (manifest.background?.service_worker !== "background-v020.js") throw new Error("shopling_a21_resend_background_v020_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
-      if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21.js") && item.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml")))) {
+      const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
+      if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
+      }
+      if (listRuntime.match_about_blank === true) {
+        throw new Error("shopling_a21_resend_legacy_about_blank_injection_forbidden");
       }
       if (!manifest.content_scripts?.some((item) => item.js?.includes("content-a21-v022.js"))) {
         throw new Error("shopling_a21_resend_v022_popup_runtime_missing");
