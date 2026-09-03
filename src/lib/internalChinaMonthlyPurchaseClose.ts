@@ -333,9 +333,9 @@ export async function loadInternalChinaMonthlyPurchaseClose(
     (row) => row.cycleMonth === cycleMonth,
   );
   if (legacy) return enrichLegacy(legacy);
-  const purchase = await loadInternalChinaMonthlyPurchaseSummary(
-    cycleMonth,
-  ).catch(() => null);
+  const purchase = await loadInternalChinaMonthlyPurchaseSummary(cycleMonth).catch(
+    () => null,
+  );
   return purchase?.cashFlowEarlyClose
     ? enrichActualOrderClose(purchase)
     : null;
@@ -380,8 +380,8 @@ export async function loadRecentInternalChinaMonthlyPurchaseCloses(
   }
   const generic = ((genericResult.data ?? []) as StoredRow[])
     .map(parseGeneric)
-    .filter((row): row is InternalChinaMonthlyPurchaseCloseSummary =>
-      Boolean(row),
+    .filter(
+      (row): row is NonNullable<ReturnType<typeof parseGeneric>> => row !== null,
     );
   const byMonth = new Map<string, InternalChinaMonthlyPurchaseCloseSummary>();
   for (const row of generic) byMonth.set(row.cycleMonth, row);
@@ -394,7 +394,10 @@ export async function loadRecentInternalChinaMonthlyPurchaseCloses(
     if (!purchase.cashFlowEarlyClose || byMonth.has(purchase.cycleMonth)) {
       continue;
     }
-    byMonth.set(purchase.cycleMonth, await enrichActualOrderClose(purchase));
+    byMonth.set(
+      purchase.cycleMonth,
+      await enrichActualOrderClose(purchase),
+    );
   }
 
   return [...byMonth.values()]
