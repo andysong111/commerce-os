@@ -3,7 +3,7 @@
   "name": "Commerce OS · Shopling A21 Price/Option Resend",
   "short_name": "A21 Resend",
   "version": "0.2.3",
-  "description": "Shopling A21 실제 form name/value 기준 직렬 안전전송. 목록 스크립트와 송신 팝업 스크립트를 완전히 분리하고 배송정보는 수정안함으로 고정합니다.",
+  "description": "Shopling A21 실제 form name/value 기준 직렬 안전전송. 목록/송신 팝업을 분리하고 배송정보 수정안함 라디오의 blocking 안내 클릭을 제거한 뒤 수정안함 상태를 재검증합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
@@ -33,7 +33,7 @@
     },
     {
       "matches": ["https://a.shopling.co.kr/prodlinkage/goods_mallMdfy_trsmt.phtml*"],
-      "js": ["content-a21-v022.js"],
+      "js": ["delivery-radio-v023.js", "content-a21-v022.js"],
       "all_frames": true,
       "run_at": "document_idle"
     }
