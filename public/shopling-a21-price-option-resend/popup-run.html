@@ -10,10 +10,10 @@
 </head>
 <body>
 <h1>Shopling A21 가격·옵션 수정전송</h1>
-<p>v0.3.6 · 결과문서 자체 감지 · about:blank 팝업 포함 · 판매가 전체 우선 · 동시 1개</p>
+<p>v0.3.7 · 결과 DOM 검수 제거 · Shopling 네트워크 종료 감지 · 판매가 전체 우선 · 동시 1개</p>
 <div class="card" id="planCard">대상 확인 중...</div>
 <div class="card">
-  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · Shopling의 창/스크롤/target은 건드리지 않음 · 결과 팝업 문서 자체에 경량 감지기를 넣고 about:blank로 생성된 Shopling 결과창까지 포함해 ‘처리중입니다’가 사라진 뒤 결과표가 약 1.8초 안정화되면 직접 background에 완료 통보 · footer와 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 모든 판매가 묶음을 먼저 끝낸 뒤 옵션 묶음을 진행</div>
+  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · v0.2.7에서 정상 작동했던 판매가→옵션 큐 전환 구조를 유지 · 결과창 문구/스크롤/DOM은 더 이상 완료 조건으로 사용하지 않음 · Chrome이 Shopling의 main-frame/sub-frame/XHR 요청을 직접 추적해 활성 요청이 모두 끝나고 2.5초간 무통신이면 현재 전송 완료로 처리 · 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 판매가 배치를 모두 끝낸 뒤 옵션 배치를 진행</div>
   <div id="runState" style="margin-top:10px">실행 대기</div>
   <div id="jobs"></div>
   <button id="test" class="test" disabled>1 GOODSKEY 안전 테스트</button>
