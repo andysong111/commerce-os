@@ -1,0 +1,30 @@
+.inputScope input,
+.inputScope select,
+.inputScope textarea {
+  border-color: #f59e0b !important;
+  background: #fffbeb !important;
+}
+
+.inputScope input:focus,
+.inputScope select:focus,
+.inputScope textarea:focus {
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 3px rgb(245 158 11 / 0.16);
+}
+
+.detailsCard > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.detailsCard > summary::-webkit-details-marker {
+  display: none;
+}
+
+.detailsCard[open] > summary .detailsChevron {
+  transform: rotate(180deg);
+}
+
+.detailsChevron {
+  transition: transform 160ms ease;
+}
