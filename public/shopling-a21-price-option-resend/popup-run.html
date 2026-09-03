@@ -10,10 +10,10 @@
 </head>
 <body>
 <h1>Shopling A21 가격·옵션 수정전송</h1>
-<p>v0.4.1 · Chrome CDP 실제 결과창 직접 판독 · 판매가 전체 우선 · 동시 1개</p>
+<p>v0.4.2 · 최종 완료 footer + document complete 확인 · 판매가 전체 우선 · 동시 1개</p>
 <div class="card" id="planCard">대상 확인 중...</div>
 <div class="card">
-  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · 기존 결과창 content-script/self-observer/최종전송일 판정은 사용하지 않음 · Chrome debugger(CDP)가 실행 중 생성된 실제 결과창과 모든 실행 컨텍스트를 직접 읽고 자동 스크롤 · ‘처리중입니다/잠시만 기다려주시기 바랍니다’가 사라지고 결과표/완료 신호가 안정된 뒤에만 판매가 SUCCEEDED → 옵션전송 · 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 모든 판매가 배치를 끝낸 뒤 옵션 배치를 진행</div>
+  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · v0.4.1처럼 일부 쇼핑몰 결과표가 먼저 보였다는 이유로 다음 단계로 넘어가지 않음 · 실제 Shopling 결과창을 CDP로 직접 읽고 맨 아래까지 스크롤 · ‘상품 수정 전송이 완료되었습니다.’ 최종 footer와 document.readyState=complete가 둘 다 확인되고 2.5초 안정된 뒤에만 판매가 SUCCEEDED → 옵션전송 · 그 전에는 옵션전송 금지 · 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 모든 판매가 배치를 끝낸 뒤 옵션 배치를 진행</div>
   <div id="runState" style="margin-top:10px">실행 대기</div>
   <div id="jobs"></div>
   <button id="test" class="test" disabled>1 GOODSKEY 안전 테스트</button>
