@@ -3,7 +3,9 @@ import {
   loadInternalChinaQuantityOverrides,
   saveInternalChinaQuantityOverride,
 } from "@/lib/internalChinaDraftQuantityOverride";
+import { assertInternalChinaMonthlyPurchaseOpen } from "@/lib/internalChinaMonthlyPurchaseClose";
 import { loadInternalChinaPurchaseDraft } from "@/lib/internalChinaPurchaseDraft";
+import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -28,25 +30,37 @@ function unauthorized() {
 }
 
 function errorResponse(error: unknown) {
-  const raw = error instanceof Error ? error.message : "INTERNAL_CHINA_QUANTITY_FAILED";
+  const raw =
+    error instanceof Error ? error.message : "INTERNAL_CHINA_QUANTITY_FAILED";
   const code = raw.split(":", 1)[0] || "INTERNAL_CHINA_QUANTITY_FAILED";
   let message = raw;
   if (code === "INTERNAL_CHINA_DRAFT_NOT_FOUND") {
     message = "해당 내부 발주 Draft를 찾지 못했습니다.";
+  } else if (code === "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED") {
+    message = "이 발주월은 이미 마감했습니다. 주문수량 변경은 차단하고 기존 입고·원가 마감만 계속합니다.";
   } else if (code === "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED") {
     message = "이미 실제 주문완료로 기록된 Draft라 수량을 변경할 수 없습니다.";
   } else if (code === "INTERNAL_CHINA_QUANTITY_INVALID") {
     message = "주문수량은 1개 이상 9,999개 이하로 입력하세요.";
   } else if (code === "INTERNAL_CHINA_QUANTITY_BARCODE_INVALID") {
-    message = `B-code 형식을 확인하세요: ${raw.split(":").slice(1).join(":")}`;
+    message = `B-code 형식을 확인하세요: ${raw
+      .split(":")
+      .slice(1)
+      .join(":")}`;
   } else if (code === "INTERNAL_CHINA_QUANTITY_BARCODE_NOT_IN_DRAFT") {
-    message = `현재 Draft에 없는 B-code입니다: ${raw.split(":").slice(1).join(":")}`;
+    message = `현재 Draft에 없는 B-code입니다: ${raw
+      .split(":")
+      .slice(1)
+      .join(":")}`;
   }
   const notFound = [
     "INTERNAL_CHINA_DRAFT_NOT_FOUND",
     "INTERNAL_CHINA_QUANTITY_BARCODE_NOT_IN_DRAFT",
   ].includes(code);
-  const conflict = code === "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED";
+  const conflict = [
+    "INTERNAL_CHINA_MONTHLY_CLOSE_LOCKED",
+    "INTERNAL_CHINA_DRAFT_ALREADY_ORDERED",
+  ].includes(code);
   return Response.json(
     { ok: false, code, message, externalOrderExecuted: false },
     {
@@ -84,6 +98,9 @@ export async function POST(request: Request, context: RouteContext) {
   const decodedDraftId = decodeURIComponent(draftId);
   try {
     const base = await loadInternalChinaPurchaseDraft(decodedDraftId);
+    await assertInternalChinaMonthlyPurchaseOpen(
+      seoulCalendarMonth(base.sourceUpdatedAt),
+    );
     if (base.status !== "DRAFT") {
       throw new Error("INTERNAL_CHINA_DRAFT_ALREADY_ORDERED");
     }
@@ -91,9 +108,14 @@ export async function POST(request: Request, context: RouteContext) {
       barcode?: unknown;
       targetQuantity?: unknown;
     };
-    const barcode = String(body.barcode ?? "").normalize("NFKC").trim().toUpperCase();
+    const barcode = String(body.barcode ?? "")
+      .normalize("NFKC")
+      .trim()
+      .toUpperCase();
     if (!base.lines.some((line) => line.barcode === barcode)) {
-      throw new Error(`INTERNAL_CHINA_QUANTITY_BARCODE_NOT_IN_DRAFT:${barcode}`);
+      throw new Error(
+        `INTERNAL_CHINA_QUANTITY_BARCODE_NOT_IN_DRAFT:${barcode}`,
+      );
     }
     const saved = await saveInternalChinaQuantityOverride({
       draftId: decodedDraftId,
