@@ -3,23 +3,23 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../public/shopling-a21-price-option-resend/", import.meta.url);
-const [manifestText, popupRun, popupRunHtml, exactPopup, deliveryGuard, mainBridge, background, planRoute, downloadRoute] = await Promise.all([
+const [manifestText, popupRun, popupRunHtml, exactPopup, mainBridge, backgroundBase, backgroundTracker, planRoute, downloadRoute] = await Promise.all([
   readFile(new URL("manifest.json", root), "utf8"),
   readFile(new URL("popup-run.js", root), "utf8"),
   readFile(new URL("popup-run.html", root), "utf8"),
-  readFile(new URL("content-a21-v022.js", root), "utf8"),
-  readFile(new URL("delivery-radio-v023.js", root), "utf8"),
-  readFile(new URL("main-a21-v022.js", root), "utf8"),
+  readFile(new URL("content-a21-v024.js", root), "utf8"),
+  readFile(new URL("main-a21-v024.js", root), "utf8"),
   readFile(new URL("background-v020.js", root), "utf8"),
+  readFile(new URL("background-v024.js", root), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/plan/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../src/app/api/shopling-a21-price-option-resend/download/route.ts", import.meta.url), "utf8"),
 ]);
 
-test("A21 v0.2.3 isolates list runtime from the submit popup", () => {
+test("A21 v0.2.4 isolates list runtime and loads the v0.2.4 safety runtimes", () => {
   const manifest = JSON.parse(manifestText);
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.2.3");
-  assert.equal(manifest.background.service_worker, "background-v020.js");
+  assert.equal(manifest.version, "0.2.4");
+  assert.equal(manifest.background.service_worker, "background-v024.js");
   assert.equal(manifest.action.default_popup, "popup-run.html");
   assert.ok(manifest.permissions.includes("scripting"));
   assert.ok(manifest.permissions.includes("windows"));
@@ -28,51 +28,37 @@ test("A21 v0.2.3 isolates list runtime from the submit popup", () => {
   assert.ok(listRuntime);
   assert.ok(listRuntime.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml")));
   assert.notEqual(listRuntime.match_about_blank, true);
-  const popupRuntime = manifest.content_scripts.find((row) => row.js?.includes("content-a21-v022.js"));
-  assert.ok(popupRuntime);
-  assert.deepEqual(popupRuntime.js.slice(0, 2), ["delivery-radio-v023.js", "content-a21-v022.js"]);
-  assert.ok(manifest.content_scripts.some((row) => row.js?.includes("main-a21-v022.js") && row.world === "MAIN"));
-  assert.match(popupRunHtml, /목록\/송신팝업 완전분리/);
-  assert.match(popupRunHtml, /배송정보 수정안함/);
+  assert.ok(manifest.content_scripts.some((row) => row.js?.includes("content-a21-v024.js")));
+  assert.ok(manifest.content_scripts.some((row) => row.js?.includes("main-a21-v024.js") && row.world === "MAIN"));
+  assert.match(popupRunHtml, /결과창 이동\/닫힘 추적/);
+  assert.match(popupRunHtml, /배송정보 실화면 수정안함/);
   assert.match(popupRunHtml, /1 GOODSKEY 안전 테스트/);
-  assert.match(popupRun, /v0\.2\.3/);
+  assert.match(popupRun, /v0\.2\.4/);
   assert.match(popupRun, /testMode/);
 });
 
-test("A21 v0.2.3 neutralizes only the delivery unchanged blocking onclick", () => {
-  assert.match(deliveryGuard, /trsmt_env_mody_dlvyinfo/);
-  assert.match(deliveryGuard, /value \?\? ""\) === ""/);
-  assert.match(deliveryGuard, /value \?\? ""\) === "Y"/);
-  assert.match(deliveryGuard, /removeAttribute\("onclick"\)/);
-  assert.match(deliveryGuard, /keepUnchanged\.onclick = null/);
-  assert.match(deliveryGuard, /commerceOsDeliveryUnchanged/);
-  assert.doesNotMatch(deliveryGuard, /goods_mallMdfy_submit_sp/);
-});
-
-test("A21 v0.2.3 serializes jobs so popup claim is unique", () => {
-  assert.match(background, /if \(state\.jobs\.some\(\(job\) => job\.status === "RUNNING"\)\) return/);
-  assert.match(background, /A21_POPUP_CLAIM_V020/);
-  assert.match(background, /candidates\.length !== 1/);
-  assert.match(background, /baselinePopupTabIds/);
-  assert.match(background, /newPopupCandidates/);
-});
-
-test("A21 v0.2.3 selects only mall-specific price and keeps delivery info unchanged", () => {
-  assert.match(exactPopup, /tsmt_sale_price_tp/);
-  assert.match(exactPopup, /value !== "J"/);
-  assert.match(exactPopup, /trsmt_env_mody_price/);
-  assert.match(exactPopup, /trsmt_env_mody_dlvyinfo/);
-  assert.match(exactPopup, /verifyRadio\("trsmt_env_mody_dlvyinfo", ""\)/);
-  assert.match(exactPopup, /V022_DELIVERY_GUARD/);
-  assert.match(mainBridge, /v022_delivery_must_remain_unchanged/);
+test("A21 v0.2.4 selects delivery unchanged by DOM evidence instead of value-only assumption", () => {
+  for (const source of [exactPopup, mainBridge]) {
+    assert.match(source, /trsmt_env_mody_dlvyinfo/);
+    assert.match(source, /수정\\s\*안함|수정안함/);
+    assert.match(source, /dlvy_notice/);
+    assert.match(source, /commerceOsDeliveryUnchanged/);
+    assert.match(source, /forceDeliveryUnchanged/);
+    assert.match(source, /deliveryDiagnostics/);
+  }
+  assert.doesNotMatch(exactPopup, /verifyRadio\("trsmt_env_mody_dlvyinfo", ""\)/);
+  assert.match(mainBridge, /v024_delivery_label_guard_invalid/);
   assert.match(mainBridge, /deliveryInfoUnchanged/);
 });
 
-test("A21 v0.2.3 sends option-only and invokes original Shopling function in MAIN world", () => {
+test("A21 v0.2.4 keeps non-delivery price fields isolated and option send unchanged", () => {
+  assert.match(exactPopup, /tsmt_sale_price_tp/);
+  assert.match(exactPopup, /value !== "J"/);
+  assert.match(exactPopup, /trsmt_env_mody_price/);
   assert.match(exactPopup, /goods_stock/);
   assert.match(exactPopup, /trsmt_env_mody_opt/);
   assert.match(exactPopup, /selectRadio\("trsmt_env_mody_opt", "1"\)/);
-  assert.match(exactPopup, /commerce-os-a21-v022-main-submit-request/);
+  assert.match(exactPopup, /commerce-os-a21-v024-main-submit-request/);
   assert.match(mainBridge, /typeof window\.goods_mallMdfy_submit_sp !== "function"/);
   assert.match(mainBridge, /window\.goods_mallMdfy_submit_sp\(\)/);
   assert.match(mainBridge, /수정전송\\s\*할\\s\*상품을\\s\*선택하셨습니까/);
@@ -81,12 +67,28 @@ test("A21 v0.2.3 sends option-only and invokes original Shopling function in MAI
   assert.match(mainBridge, /unexpected_alert/);
 });
 
-test("A21 v0.2.3 background verifies Shopling result independently", () => {
-  assert.match(background, /inspectResult/);
-  assert.match(background, /성공건수/);
-  assert.match(background, /실패건수/);
-  assert.match(background, /monitorResult/);
-  assert.match(background, /V020_RESULT_TIMEOUT/);
+test("A21 v0.2.4 serializes jobs and tracks result tabs after popup close or navigation", () => {
+  assert.match(backgroundBase, /if \(state\.jobs\.some\(\(job\) => job\.status === "RUNNING"\)\) return/);
+  assert.match(backgroundBase, /A21_POPUP_CLAIM_V020/);
+  assert.match(backgroundBase, /baselinePopupTabIds/);
+  assert.match(backgroundTracker, /importScripts\("background-v020\.js"\)/);
+  assert.match(backgroundTracker, /monitorResult = monitorResultV024/);
+  assert.match(backgroundTracker, /onCreatedNavigationTarget/);
+  assert.match(backgroundTracker, /onCommitted/);
+  assert.match(backgroundTracker, /chrome\.tabs\.onRemoved/);
+  assert.match(backgroundTracker, /송신창 닫힘 감지/);
+  assert.match(backgroundTracker, /V024_RESULT_TIMEOUT/);
+  assert.doesNotMatch(backgroundTracker, /V020_RESULT_WINDOW_CLOSED/);
+});
+
+test("A21 v0.2.4 still requires independent Shopling success or failure evidence", () => {
+  assert.match(backgroundBase, /inspectResult/);
+  assert.match(backgroundBase, /성공건수/);
+  assert.match(backgroundBase, /실패건수/);
+  assert.match(backgroundTracker, /inspectResult\(tabId\)/);
+  assert.match(backgroundTracker, /completeJob/);
+  assert.match(backgroundTracker, /failJob/);
+  assert.match(backgroundTracker, /180초/);
 });
 
 test("A21 resend plan remains gated by full Shopling readback verification", () => {
@@ -98,14 +100,12 @@ test("A21 resend plan remains gated by full Shopling readback verification", () 
     "readback.mallMissingCount === 0",
     "readback.mallMatchCount === readback.mallCheckCount",
   ]) assert.ok(planRoute.includes(needle), `missing ${needle}`);
-  assert.match(downloadRoute, /const VERSION = "0\.2\.3"/);
+  assert.match(downloadRoute, /const VERSION = "0\.2\.4"/);
   assert.match(downloadRoute, /legacy_about_blank_injection_forbidden/);
-  assert.match(downloadRoute, /delivery-radio-v023\.js/);
-  assert.match(downloadRoute, /delivery_unchanged_guard_missing/);
-  assert.match(downloadRoute, /delivery_guard_must_load_first/);
   assert.match(downloadRoute, /background-v020\.js/);
-  assert.match(downloadRoute, /main-a21-v022\.js/);
-  assert.match(downloadRoute, /content-a21-v022\.js/);
+  assert.match(downloadRoute, /background-v024\.js/);
+  assert.match(downloadRoute, /main-a21-v024\.js/);
+  assert.match(downloadRoute, /content-a21-v024\.js/);
   assert.match(downloadRoute, /popup-run\.html/);
   assert.match(downloadRoute, /shopling_a21_resend_manifest_version_mismatch/);
 });
