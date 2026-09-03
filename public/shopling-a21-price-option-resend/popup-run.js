@@ -37,7 +37,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.4는 동일 Shopling 송신함수가 연속 호출되는 경우 두 번째 송신을 차단합니다. 송신 form의 target 결과창을 직접 확보해 자동으로 끝까지 스크롤하고 ‘상품 수정 전송이 완료되었습니다’를 확인한 뒤 다음 작업으로 진행합니다. 시작 전에 남아 있는 Shopling 팝업도 정리하며 마켓별 성공/실패는 판정하지 않습니다. 모든 판매가 배치 후 옵션 배치를 진행합니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.5는 Shopling의 결과창 생성/스크롤 방식을 더 이상 건드리지 않습니다. Chrome background가 결과 팝업/탭의 실제 화면에서 ‘처리중입니다/잠시만 기다려주시기 바랍니다’가 사라졌는지 확인하고 결과표가 약 1.8초 동안 안정적이면 전송 완료로 처리합니다. ‘상품 수정 전송이 완료되었습니다’ footer를 찾지 않으며 마켓별 성공/실패도 판정하지 않습니다. 모든 판매가 배치 후 옵션 배치를 진행합니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
