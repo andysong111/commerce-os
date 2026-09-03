@@ -34,7 +34,6 @@ test("A21 v0.2.8 waits for Shopling processing overlay to finish without validat
 });
 
 test("A21 v0.2.8 runs every PRICE batch before OPTION batches", () => {
-  assert.match(backgroundV028, /job\.mode === "QUEUED" && job\.mode === "PRICE"/);
   assert.match(backgroundV028, /job\.status === "QUEUED" && job\.mode === "PRICE"/);
   assert.match(backgroundV028, /job\.status === "QUEUED" && job\.mode === "OPTION"/);
   assert.match(backgroundV028, /sortJobsPricesFirst/);
