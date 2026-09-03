@@ -5,12 +5,12 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.3.7";
+const VERSION = "0.3.8";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
-  "background-v037.js",
+  "background-v038.js",
   "content-a21.js",
   "main-a21-v024.js",
   "content-a21-v024.js",
@@ -45,19 +45,19 @@ export async function GET() {
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v037.js") throw new Error("shopling_a21_resend_background_v037_required");
+      if (manifest.background?.service_worker !== "background-v038.js") throw new Error("shopling_a21_resend_background_v038_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
-      if (!manifest.permissions?.includes("webRequest")) throw new Error("shopling_a21_resend_v037_webrequest_required");
+      if (!manifest.permissions?.includes("webRequest")) throw new Error("shopling_a21_resend_v038_webrequest_required");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
       }
       const mainRuntime = manifest.content_scripts?.find((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN");
       if (!mainRuntime || mainRuntime.js?.some((name) => name.includes("result-bridge"))) {
-        throw new Error("shopling_a21_resend_v037_native_submit_required");
+        throw new Error("shopling_a21_resend_v038_native_submit_required");
       }
       if (manifest.content_scripts?.some((item) => item.js?.some((name) => /result-(loading|bridge|relay|complete|wait)/.test(name)))) {
-        throw new Error("shopling_a21_resend_v037_dom_result_runtime_forbidden");
+        throw new Error("shopling_a21_resend_v038_static_result_runtime_forbidden");
       }
       for (const permission of ["windows", "tabs", "scripting", "webNavigation", "webRequest"]) {
         if (!manifest.permissions?.includes(permission)) throw new Error(`shopling_a21_resend_permission_missing:${permission}`);
