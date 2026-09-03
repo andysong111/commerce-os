@@ -37,7 +37,7 @@ async function loadPlan() {
       && Number(plan.readback?.mallMissingCount || 0) === 0
       && Number(plan.readback?.mallMatchCount || 0) === Number(plan.readback?.mallCheckCount || 0);
     if (!verified) throw new Error("Shopling 쇼핑몰별 판매가 재조회가 100% 일치 상태가 아닙니다.");
-    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.7은 이전에 정상적으로 옵션전송까지 넘어갔던 v0.2.7의 큐 전환 구조를 유지하면서, ACK 직후 바로 넘어가지는 않습니다. 결과창 DOM이나 완료문구 대신 Chrome webRequest가 Shopling의 main-frame/sub-frame/XHR 네트워크를 직접 추적하고, 활성 요청이 모두 끝난 뒤 2.5초간 새 통신이 없으면 현재 판매가/옵션 전송이 끝난 것으로 처리합니다. 마켓별 성공/실패는 진행 조건으로 쓰지 않으며 모든 판매가 배치 후 옵션 배치를 진행합니다.</p>`;
+    planCard.innerHTML = `<div class="grid"><div class="metric">GOODSKEY<b>${plan.goodsKeyCount}</b></div><div class="metric">검증 쇼핑몰가격<b>${plan.readback.mallMatchCount}/${plan.readback.mallCheckCount}</b></div></div><p class="ok" style="margin-top:8px;font-weight:700">Shopling 가격 재조회 VERIFIED · 불일치 ${plan.readback.mallMismatchCount} · 누락 ${plan.readback.mallMissingCount}</p><p style="margin-top:5px">v0.3.8은 v0.3.7의 네트워크 무통신만으로 완료 처리하지 않습니다. 네트워크 이벤트로 현재 작업의 실제 결과 탭을 특정한 뒤 해당 탭을 직접 읽어 ‘처리중입니다/잠시만 기다려주시기 바랍니다’ 표시를 실제로 관찰하고, 그 표시가 사라진 상태가 약 1.8초 안정될 때만 판매가/옵션 작업을 완료합니다. 따라서 로딩 중인 Shopling 결과창을 조기에 닫거나 다음 옵션전송으로 넘어가지 않습니다. 마켓별 성공/실패는 진행 조건으로 사용하지 않습니다.</p>`;
     setRunButtons(true);
   } catch (error) {
     planCard.innerHTML = `<span class="bad"><b>시작 차단</b><br>${escapeHtml(error.message || error)}</span>`;
