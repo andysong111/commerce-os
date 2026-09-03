@@ -42,7 +42,7 @@ test("A21 v0.3.0 ignores per-market success or failure while still blocking duri
   assert.match(backgroundV030, /monitorResult = async \(\) => \{\}/);
   assert.match(backgroundV030, /processing/);
   assert.match(backgroundV030, /마켓 성공\/실패 검증 없음/);
-  assert.doesNotMatch(backgroundV030, /failure > 0|성공여부\\s\*\[:/);
+  assert.doesNotMatch(backgroundV030, /failure > 0|성공여부/);
 });
 
 test("A21 v0.3.0 runs every PRICE batch before OPTION batches", () => {
