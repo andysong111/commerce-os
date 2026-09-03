@@ -145,7 +145,6 @@ importScripts("background-v020.js");
 
   if (chrome.webNavigation?.onCommitted) {
     chrome.webNavigation.onCommitted.addListener((details) => {
-      if (details.frameId !== 0) return;
       void (async () => {
         const tab = await chrome.tabs.get(details.tabId).catch(() => null);
         if (!tab || !isShoplingV024(tab.url)) return;
@@ -157,7 +156,7 @@ importScripts("background-v020.js");
           && relatedToJob(item, tab),
         );
         if (!job) return;
-        await noteResultTab(job.id, details.tabId, "관련 Shopling 탭 이동 감지");
+        await noteResultTab(job.id, details.tabId, `관련 Shopling 프레임/탭 이동 감지 · frame ${details.frameId}`);
       })();
     });
   }
