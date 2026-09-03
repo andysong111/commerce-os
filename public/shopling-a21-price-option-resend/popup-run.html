@@ -10,10 +10,10 @@
 </head>
 <body>
 <h1>Shopling A21 가격·옵션 수정전송</h1>
-<p>v0.3.3 · 배송정보 수정안함 안전검증 · 결과창 자동 스크롤 후 완료문구 직접 감지 · 판매가 전체 우선 · 동시 1개</p>
+<p>v0.3.4 · 중복 송신 차단 · form target 결과창 1개 직접 확보/자동 스크롤 · 판매가 전체 우선 · 동시 1개</p>
 <div class="card" id="planCard">대상 확인 중...</div>
 <div class="card">
-  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · 송신창 MAIN world가 자신이 연 Shopling 결과창을 직접 추적하고 스크롤을 끝까지 자동 이동 · ‘상품 수정 전송이 완료되었습니다’ 확인 즉시 다음 작업 진행 · 마켓별 성공/실패 내용은 검증하지 않음 · 전체 실행은 모든 판매가 묶음을 먼저 끝낸 뒤 옵션 묶음을 진행</div>
+  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · 같은 Shopling 송신 함수가 5초 안에 중복 호출되면 2번째 호출 차단 · 실제 form target 결과창을 단일 이름으로 확보하고 window/body/내부 스크롤을 끝까지 자동 이동 · ‘상품 수정 전송이 완료되었습니다’ 확인 즉시 다음 작업 진행 · 마켓별 성공/실패 내용은 검증하지 않음 · 전체 실행은 모든 판매가 묶음을 먼저 끝낸 뒤 옵션 묶음을 진행</div>
   <div id="runState" style="margin-top:10px">실행 대기</div>
   <div id="jobs"></div>
   <button id="test" class="test" disabled>1 GOODSKEY 안전 테스트</button>
