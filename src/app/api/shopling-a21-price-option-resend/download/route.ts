@@ -5,16 +5,15 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 const ROOT = "shopling-a21-price-option-resend";
 const FILES = [
   "manifest.json",
   "background-v020.js",
-  "background-v040.js",
+  "background-v041.js",
   "content-a21.js",
   "main-a21-v024.js",
   "content-a21-v024.js",
-  "result-watch-v040.js",
   "popup-run.html",
   "popup-run.js",
   "README.txt",
@@ -42,37 +41,22 @@ export async function GET() {
         permissions?: string[];
         background?: { service_worker?: string };
         action?: { default_popup?: string };
-        content_scripts?: Array<{
-          js?: string[];
-          exclude_matches?: string[];
-          world?: string;
-          all_frames?: boolean;
-          match_about_blank?: boolean;
-          match_origin_as_fallback?: boolean;
-          run_at?: string;
-        }>;
+        content_scripts?: Array<{ js?: string[]; exclude_matches?: string[]; world?: string }>;
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_a21_resend_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_a21_resend_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v040.js") throw new Error("shopling_a21_resend_background_v040_required");
+      if (manifest.background?.service_worker !== "background-v041.js") throw new Error("shopling_a21_resend_background_v041_required");
       if (manifest.action?.default_popup !== "popup-run.html") throw new Error("shopling_a21_resend_run_popup_missing");
       const listRuntime = manifest.content_scripts?.find((item) => item.js?.includes("content-a21.js"));
       if (!listRuntime?.exclude_matches?.some((match) => match.includes("goods_mallMdfy_trsmt.phtml"))) {
         throw new Error("shopling_a21_resend_list_popup_separation_missing");
       }
       const mainRuntime = manifest.content_scripts?.find((item) => item.js?.includes("main-a21-v024.js") && item.world === "MAIN");
-      if (!mainRuntime || mainRuntime.js?.some((name) => name.includes("result-bridge"))) {
-        throw new Error("shopling_a21_resend_v040_native_submit_required");
+      if (!mainRuntime) throw new Error("shopling_a21_resend_v041_native_submit_required");
+      if (manifest.content_scripts?.some((item) => item.js?.some((name) => name.includes("result-watch")))) {
+        throw new Error("shopling_a21_resend_v041_static_result_observer_forbidden");
       }
-      const resultRuntime = manifest.content_scripts?.find((item) => item.js?.includes("result-watch-v040.js"));
-      if (!resultRuntime
-          || resultRuntime.all_frames !== true
-          || resultRuntime.match_about_blank !== true
-          || resultRuntime.match_origin_as_fallback !== true
-          || resultRuntime.run_at !== "document_start") {
-        throw new Error("shopling_a21_resend_v040_result_self_observer_required");
-      }
-      for (const permission of ["windows", "tabs", "scripting", "webNavigation"]) {
+      for (const permission of ["windows", "tabs", "scripting", "webNavigation", "debugger"]) {
         if (!manifest.permissions?.includes(permission)) throw new Error(`shopling_a21_resend_permission_missing:${permission}`);
       }
     }
