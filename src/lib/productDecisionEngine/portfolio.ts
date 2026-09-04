@@ -16,7 +16,9 @@ export type PortfolioItemInput = {
   netRequiredQuantity: number;
   unitCost: number;
   totalScore: number;
+  /** 공급처 참고정보. V2 예산배분과 수량결정에는 사용하지 않습니다. */
   moq?: number;
+  /** 공급처 참고정보. V2 예산배분과 수량결정에는 사용하지 않습니다. */
   cartonQuantity?: number;
 };
 
@@ -51,7 +53,7 @@ export type PortfolioAllocationResult = {
 
 function quantity(value: unknown) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
+  return Number.isFinite(parsed) ? Math.max(0, Math.ceil(parsed)) : 0;
 }
 
 function normalizeMultiplier(value: unknown) {
@@ -73,16 +75,6 @@ export function calculateProductOrderBudget(
   );
 }
 
-function roundUpToCarton(quantityValue: number, cartonQuantity = 1) {
-  const unit = Math.max(1, Math.round(cartonQuantity));
-  return Math.max(0, Math.ceil(quantityValue / unit) * unit);
-}
-
-function roundDownToCarton(quantityValue: number, cartonQuantity = 1) {
-  const unit = Math.max(1, Math.round(cartonQuantity));
-  return Math.max(0, Math.floor(quantityValue / unit) * unit);
-}
-
 function groupRank(group: SalesOrderGroup) {
   if (group === "발주 추천") return 0;
   if (group === "소량 검토") return 1;
@@ -99,10 +91,11 @@ function emptyGroupCounts(): Record<SalesOrderGroup, number> {
 }
 
 /**
- * 기본값은 직전 매출의 절반을 총 발주비용 한도로 사용한다. 현금흐름 제약이
- * 있는 달에는 grossBudgetOverrideKrw를 넘겨 같은 우선순위·MOQ·박스입수·
- * 최소 주문금액 규칙을 그대로 유지한 채 실제 집행 가능한 현금 안에서만
- * 포트폴리오를 줄인다.
+ * V2 현금 배분 규칙
+ * 1) MOQ·박스입수로 필요수량을 올리거나 내리지 않는다.
+ * 2) 5천원 기준은 강제 증량이 아니라 소액주문 검토표시로만 사용한다.
+ * 3) 예산이 부족하면 상위 SKU 한두 개에 전액을 몰지 않고 35% → 70% → 100%
+ *    세 라운드로 배정해 품절방지·안정상품·성장상품에 자금이 분산되게 한다.
  */
 export function allocatePurchasePortfolio(
   input: PortfolioAllocationInput,
@@ -132,30 +125,14 @@ export function allocatePurchasePortfolio(
   const prepared: PortfolioItemResult[] = input.items.map((source) => {
     const netRequiredQuantity = quantity(source.netRequiredQuantity);
     const unitCost = Math.max(0, Number(source.unitCost) || 0);
-    const moq = Math.max(1, Math.round(source.moq ?? 1));
-    const cartonQuantity = Math.max(
-      1,
-      Math.round(source.cartonQuantity ?? 1),
-    );
-    const economicRaw =
-      minimumOrderAmount > 0 && unitCost > 0
-        ? Math.ceil(minimumOrderAmount / unitCost)
-        : 0;
-    const minimumOrderQuantity = roundUpToCarton(
-      Math.max(moq, economicRaw),
-      cartonQuantity,
-    );
     const orderable =
-      ORDERABLE_GROUPS.has(source.group) && netRequiredQuantity > 0;
-    const targetQuantity = orderable
-      ? Math.max(netRequiredQuantity, minimumOrderQuantity)
-      : 0;
-    const minimumApplied = orderable && targetQuantity > netRequiredQuantity;
-    const minimumReview =
-      minimumApplied &&
+      ORDERABLE_GROUPS.has(source.group) &&
       netRequiredQuantity > 0 &&
-      targetQuantity >
-        Math.max(netRequiredQuantity * 3, netRequiredQuantity + 10);
+      unitCost > 0;
+    const targetQuantity = orderable ? netRequiredQuantity : 0;
+    const targetCost = targetQuantity * unitCost;
+    const minimumReview =
+      orderable && minimumOrderAmount > 0 && targetCost < minimumOrderAmount;
     const finalGroup =
       minimumReview && source.group === "발주 추천"
         ? ("소량 검토" as const)
@@ -165,14 +142,14 @@ export function allocatePurchasePortfolio(
       ...source,
       netRequiredQuantity,
       unitCost,
-      moq,
-      cartonQuantity,
-      minimumOrderQuantity,
+      moq: source.moq,
+      cartonQuantity: source.cartonQuantity,
+      minimumOrderQuantity: orderable ? 1 : 0,
       targetQuantity,
-      allocatedQuantity: targetQuantity,
+      allocatedQuantity: 0,
       finalGroup,
-      expectedCost: targetQuantity * unitCost,
-      minimumApplied,
+      expectedCost: 0,
+      minimumApplied: false,
       minimumReview,
       budgetReduced: false,
     };
@@ -189,35 +166,44 @@ export function allocatePurchasePortfolio(
     .sort((left, right) => {
       const group = groupRank(left.finalGroup) - groupRank(right.finalGroup);
       if (group !== 0) return group;
-      return right.totalScore - left.totalScore;
+      return (
+        right.totalScore - left.totalScore ||
+        left.barcode.localeCompare(right.barcode, "ko")
+      );
     });
 
-  for (const entry of candidates) {
-    const desiredCost = entry.targetQuantity * entry.unitCost;
-    if (desiredCost <= remainingBudget) {
-      remainingBudget -= desiredCost;
-      continue;
+  const allocateRound = (fraction: number) => {
+    for (const entry of candidates) {
+      if (remainingBudget < entry.unitCost) break;
+      const roundTarget = Math.min(
+        entry.targetQuantity,
+        Math.max(1, Math.ceil(entry.targetQuantity * fraction)),
+      );
+      const missing = Math.max(0, roundTarget - entry.allocatedQuantity);
+      if (missing <= 0) continue;
+      const affordable = Math.floor(remainingBudget / entry.unitCost);
+      const added = Math.min(missing, affordable);
+      if (added <= 0) continue;
+      entry.allocatedQuantity += added;
+      remainingBudget = Math.max(
+        0,
+        remainingBudget - added * entry.unitCost,
+      );
     }
+  };
 
-    const affordableRaw = Math.floor(remainingBudget / entry.unitCost);
-    const affordable = Math.min(
-      entry.targetQuantity,
-      roundDownToCarton(affordableRaw, entry.cartonQuantity),
-    );
-    entry.allocatedQuantity =
-      affordable >= entry.minimumOrderQuantity ? affordable : 0;
-    entry.budgetReduced = entry.allocatedQuantity < entry.targetQuantity;
-    entry.finalGroup =
-      entry.allocatedQuantity > 0
-        ? entry.finalGroup
-        : ("발주 보류" as const);
-    entry.expectedCost = entry.allocatedQuantity * entry.unitCost;
-    remainingBudget = Math.max(0, remainingBudget - entry.expectedCost);
-  }
+  allocateRound(0.35);
+  allocateRound(0.7);
+  allocateRound(1);
 
   const groupCounts = emptyGroupCounts();
   let expectedSpend = 0;
   for (const entry of prepared) {
+    entry.budgetReduced = entry.allocatedQuantity < entry.targetQuantity;
+    if (entry.targetQuantity > 0 && entry.allocatedQuantity <= 0) {
+      entry.finalGroup = "발주 보류";
+    }
+    entry.expectedCost = entry.allocatedQuantity * entry.unitCost;
     groupCounts[entry.finalGroup] += 1;
     if (ORDERABLE_GROUPS.has(entry.finalGroup)) {
       expectedSpend += entry.expectedCost;
