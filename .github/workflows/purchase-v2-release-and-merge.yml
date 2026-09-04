@@ -1,0 +1,126 @@
+name: Purchase V2 release and merge
+
+on:
+  push:
+    branches:
+      - feat/purchase-v2-stockout-reset-20260905
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: purchase-v2-release-and-merge
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH_NAME: feat/purchase-v2-stockout-reset-20260905
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/purchase-v2-stockout-reset-20260905
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply remaining idempotent finalizers
+        run: |
+          for script in \
+            scripts/finalize-purchase-v2-branch-3.mjs \
+            scripts/finalize-purchase-v2-branch-4.mjs \
+            scripts/finalize-purchase-v2-branch-5.mjs \
+            scripts/finalize-purchase-v2-branch-6.mjs
+          do
+            if [ -f "$script" ]; then
+              node "$script"
+            fi
+          done
+
+      - name: Verify finalized source layout
+        run: |
+          test -f src/lib/productDecisionEngine/purchaseV2.ts
+          test -f src/lib/purchaseRecommendationV2.ts
+          test -f src/lib/purchaseV2Feedback.ts
+          test -f src/lib/purchaseRecommendationFinalization.ts
+          test -f src/lib/inventoryLifecycleLedger.ts
+          test -f src/app/api/inventory-lifecycle/route.ts
+          test -f src/app/api/shopling-inventory-lifecycle-extension/download/route.ts
+          test -f public/shopling-inventory-lifecycle/manifest.json
+          grep -q '"version": "0.1.2"' public/shopling-inventory-lifecycle/manifest.json
+          grep -q 'feedbackMultiplier' src/lib/productDecisionEngine/purchaseV2.ts
+          grep -q 'pendingDesiredStatus' src/lib/inventoryLifecycleLedger.ts
+          grep -q 'automaticSellingJob' src/app/api/china-order-ledger/events/route.ts
+          ! grep -R -E '\bmoq\b|cartonQuantity|roundUpToCarton|roundDownToCarton' src/lib/productDecisionEngine/purchaseV2.ts
+
+      - name: Check lifecycle extension syntax
+        run: |
+          node --check public/shopling-inventory-lifecycle/background.js
+          node --check public/shopling-inventory-lifecycle/content-ops.js
+          node --check public/shopling-inventory-lifecycle/content-shopling.js
+          node --check public/shopling-inventory-lifecycle/popup.js
+
+      - name: Run V2 logic and exact inventory tests
+        run: >-
+          npx tsx --test
+          tests/purchaseV2.test.mjs
+          tests/purchaseV2Feedback.test.mjs
+          tests/inventoryLifecycleLedger.test.mjs
+
+      - name: Run persistence, receipt restore, UI and extension contracts
+        run: >-
+          node --test
+          tests/purchaseV2PersistenceContract.test.mjs
+          tests/shoplingInventoryLifecycleExtension.test.mjs
+          tests/receiptSellingRestoreContract.test.mjs
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build
+
+      - name: Remove one-time release machinery
+        run: |
+          rm -f .github/workflows/purchase-v2-release-and-merge.yml
+          rm -f docs/purchase-v2-release-gate.md
+          rm -f scripts/finalize-purchase-v2-branch*.mjs
+          rm -f .github/workflows/purchase-v2-stockout-lifecycle-ci.yml
+          rm -f .github/workflows/purchase-v2-complete-ci.yml
+          rm -f .github/workflows/purchase-v2-authoritative-ci.yml
+          rm -f .github/workflows/purchase-v2-release-candidate-ci.yml
+
+      - name: Commit the exact verified source
+        run: |
+          if ! git diff --quiet || [ -n "$(git status --porcelain)" ]; then
+            git config user.name "commerce-os-purchase-v2-release-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "[purchase-v2-release] finalize verified V2 lifecycle source"
+            git push origin HEAD:$BRANCH_NAME
+          fi
+
+      - name: Merge verified pull request
+        run: |
+          PR_NUMBER=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+          test -n "$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --delete-branch=false
+          if gh pr view 1062 --repo "$GITHUB_REPOSITORY" --json state --jq '.state' | grep -q OPEN; then
+            gh pr close 1062 --repo "$GITHUB_REPOSITORY" --comment "Superseded by Purchase V2 lifecycle PR #${PR_NUMBER}, which includes the cash-envelope functionality without MOQ/carton rounding."
+          fi
