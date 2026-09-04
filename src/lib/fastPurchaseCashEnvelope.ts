@@ -241,7 +241,7 @@ export async function loadFastPurchaseCashEnvelope(
         originalGroup: item.group,
         finalGroup: item.finalGroup,
         priorityScore: Math.round(item.totalScore * 100) / 100,
-        baselineQuantity: item.targetQuantity,
+        baselineQuantity: money(source?.recommendedQty),
         allocatedQuantity: item.allocatedQuantity,
         minimumOrderQuantity: item.minimumOrderQuantity,
         unitCostKrw: money(item.unitCost),
