@@ -10,8 +10,10 @@ export type InternalChinaMonthlyPurchaseLine = {
   barcode: string;
   modelNo: string;
   modelName: string;
+  saleOption: string;
   chinaOption: string;
   orderNumber: string;
+  supplierLink: string;
   quantity: number;
   goodsPaidCny: number;
   domesticChinaFreightCny: number;
@@ -125,8 +127,10 @@ function parseLine(
     barcode: barcode || "UNASSIGNED",
     modelNo,
     modelName,
+    saleOption: text(row.saleOption),
     chinaOption: text(row.chinaOption),
     orderNumber,
+    supplierLink: text(row.supplierLink),
     quantity,
     goodsPaidCny,
     domesticChinaFreightCny,
