@@ -1,4 +1,4 @@
-import type { FreightApplicationItem } from "@/types/freightBarcodeRequest";
+import type { FreightApplicationItem } from "../types/freightBarcodeRequest.ts";
 
 export const FREIGHT_MONTHLY_ORDER_CONTEXT_STORAGE_KEY =
   "commerce-os:freight-monthly-order-context:v1";
@@ -70,12 +70,24 @@ function candidateScore(item: FreightApplicationItem, line: FreightMonthlyOrderL
   const lineOffer = offerId(line.supplierLink);
   if (itemOffer && lineOffer && itemOffer === lineOffer) score += 400;
 
-  if (item.barcode && text(item.barcode).toUpperCase() === line.barcode) score += 250;
   if (overlap(item.optionText, line.chinaOption)) score += 160;
   if (overlap(item.optionText, line.saleOption)) score += 120;
   if (overlap(item.itemName, line.modelName)) score += 50;
   if (item.quantity > 0 && item.quantity === line.quantity) score += 25;
   return score;
+}
+
+function chooseUniqueBest(
+  values: Array<{ index: number; score: number }>,
+  minimumScore: number,
+) {
+  if (!values.length) return -1;
+  const sorted = [...values].sort(
+    (left, right) => right.score - left.score || left.index - right.index,
+  );
+  if (sorted[0].score < minimumScore) return -1;
+  if (sorted.length > 1 && sorted[0].score === sorted[1].score) return -1;
+  return sorted[0].index;
 }
 
 function chooseLineIndex(
@@ -93,11 +105,9 @@ function chooseLineIndex(
     const exactOrder = available.filter(
       ({ line }) => orderKey(line.orderNumber) === itemOrder,
     );
-    if (exactOrder.length) {
-      exactOrder.sort(
-        (left, right) => right.score - left.score || left.index - right.index,
-      );
-      return exactOrder[0].index;
+    if (exactOrder.length === 1) return exactOrder[0].index;
+    if (exactOrder.length > 1) {
+      return chooseUniqueBest(exactOrder, 1_001);
     }
   }
 
@@ -106,18 +116,13 @@ function chooseLineIndex(
     const exactOffer = available.filter(
       ({ line }) => offerId(line.supplierLink) === itemOffer,
     );
-    if (exactOffer.length) {
-      exactOffer.sort(
-        (left, right) => right.score - left.score || left.index - right.index,
-      );
-      return exactOffer[0].index;
+    if (exactOffer.length === 1) return exactOffer[0].index;
+    if (exactOffer.length > 1) {
+      return chooseUniqueBest(exactOffer, 401);
     }
   }
 
-  available.sort(
-    (left, right) => right.score - left.score || left.index - right.index,
-  );
-  return available[0].score >= 120 ? available[0].index : -1;
+  return chooseUniqueBest(available, 120);
 }
 
 function appendMonthlyMemo(
