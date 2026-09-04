@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ProductKind = "OPTION" | "SINGLE";
 type DesiredStatus = "SOLD_OUT" | "ON_SALE";
@@ -59,19 +59,48 @@ type SyncJob = {
 type SyncResultMessage = {
   type: "COMMERCE_OS_SHOPLING_STOCK_SYNC_RESULT";
   jobId: string;
+  job?: SyncJob | null;
   outcome: Exclude<SyncOutcome, "STARTED">;
   message?: string;
   evidence?: unknown;
+  finishedAt?: number;
+};
+
+type SyncStatusMessage = {
+  type: "COMMERCE_OS_SHOPLING_STOCK_SYNC_STATUS";
+  active?: {
+    status?: string;
+    stage?: string;
+    message?: string;
+    job?: SyncJob;
+  } | null;
 };
 
 const number = new Intl.NumberFormat("ko-KR");
 
-function eventId(prefix: string) {
+function randomId(prefix: string) {
   const random =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}:${random}`;
+}
+
+function stableEventId(
+  prefix: string,
+  job: SyncJob,
+  outcome?: SyncOutcome,
+  finishedAt?: number,
+) {
+  return [
+    prefix,
+    job.jobId,
+    outcome || "",
+    Number(finishedAt || 0),
+  ]
+    .filter(Boolean)
+    .join(":")
+    .slice(0, 480);
 }
 
 function statusLabel(value: DesiredStatus) {
@@ -99,6 +128,7 @@ export function InventoryStockControlPanel() {
   const [runningJobId, setRunningJobId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [extensionReady, setExtensionReady] = useState(false);
+  const handledResults = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     const [stateResponse, jobsResponse] = await Promise.all([
@@ -129,9 +159,59 @@ export function InventoryStockControlPanel() {
     );
   }, [refresh]);
 
+  const recordSync = useCallback(
+    async (
+      job: SyncJob,
+      outcome: SyncOutcome,
+      message: string,
+      evidence?: unknown,
+      finishedAt?: number,
+    ) => {
+      const eventId =
+        outcome === "STARTED"
+          ? stableEventId("shopling-stock-started", job, outcome)
+          : stableEventId(
+              "shopling-stock-result",
+              job,
+              outcome,
+              finishedAt || Date.now(),
+            );
+      const response = await fetch("/api/inventory-stock-control/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          eventId,
+          jobId: job.jobId,
+          barcode: job.barcode,
+          productKind: job.productKind,
+          modelNo: job.modelNo,
+          desiredStatus: job.desiredStatus,
+          outcome,
+          message,
+          evidence: evidence ?? null,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+      };
+      if (!response.ok || !payload.ok) {
+        throw new Error(
+          payload.message || "Shopling 실행결과를 저장하지 못했습니다.",
+        );
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== window || !event.data || typeof event.data !== "object") {
+      if (
+        event.source !== window ||
+        event.origin !== window.location.origin ||
+        !event.data ||
+        typeof event.data !== "object"
+      ) {
         return;
       }
       const data = event.data as Record<string, unknown>;
@@ -139,32 +219,73 @@ export function InventoryStockControlPanel() {
         setExtensionReady(true);
         return;
       }
+      if (data.type === "COMMERCE_OS_SHOPLING_STOCK_SYNC_STATUS") {
+        const status = data as unknown as SyncStatusMessage;
+        if (status.active?.status === "RUNNING" && status.active.job?.jobId) {
+          setRunningJobId(status.active.job.jobId);
+          setNotice(
+            `${status.active.job.barcode} · ${status.active.message || status.active.stage || "Shopling 작업 복구 중"}`,
+          );
+        }
+        return;
+      }
+      if (data.type === "COMMERCE_OS_SHOPLING_STOCK_SYNC_PROGRESS") {
+        const jobId = String(data.jobId || "");
+        if (jobId) setRunningJobId(jobId);
+        if (data.message) setNotice(String(data.message));
+        return;
+      }
       if (data.type !== "COMMERCE_OS_SHOPLING_STOCK_SYNC_RESULT") return;
       const result = data as unknown as SyncResultMessage;
-      if (!result.jobId || result.jobId !== runningJobId) return;
+      const resultKey = `${result.jobId}:${result.outcome}:${Number(result.finishedAt || 0)}`;
+      if (!result.jobId || handledResults.current.has(resultKey)) return;
+      const job =
+        result.job ||
+        jobs.find((row) => row.jobId === result.jobId) ||
+        null;
+      if (!job) {
+        setNotice(
+          `${result.jobId} 확장 결과를 받았지만 B코드 작업정보가 없어 수동 확인이 필요합니다.`,
+        );
+        return;
+      }
+      handledResults.current.add(resultKey);
       void (async () => {
         try {
-          const job = jobs.find((row) => row.jobId === result.jobId);
-          if (!job) return;
-          await recordSync(job, result.outcome, result.message || "", result.evidence);
+          await recordSync(
+            job,
+            result.outcome,
+            result.message || "",
+            result.evidence,
+            result.finishedAt,
+          );
           setNotice(
             result.outcome === "SUCCEEDED"
               ? `${job.barcode} Shopling ${statusLabel(job.desiredStatus)} 반영 완료`
               : `${job.barcode} 실행 결과 ${result.outcome}: ${result.message || "수동 확인 필요"}`,
           );
           await refresh();
+        } catch (error) {
+          handledResults.current.delete(resultKey);
+          setNotice(
+            error instanceof Error
+              ? error.message
+              : "Shopling 결과 저장에 실패했습니다.",
+          );
         } finally {
-          setRunningJobId(null);
+          setRunningJobId((current) =>
+            current === result.jobId ? null : current,
+          );
         }
       })();
     };
     window.addEventListener("message", onMessage);
     window.postMessage(
       { type: "COMMERCE_OS_SHOPLING_STOCK_SYNC_EXTENSION_PING" },
-      "*",
+      window.location.origin,
     );
     return () => window.removeEventListener("message", onMessage);
-  }, [jobs, refresh, runningJobId]);
+  }, [jobs, recordSync, refresh]);
 
   const pendingJobs = useMemo(
     () => jobs.filter((job) => job.jobId !== runningJobId),
@@ -192,7 +313,7 @@ export function InventoryStockControlPanel() {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({
           action: "RESET_ZERO",
-          eventId: eventId("stockout-reset"),
+          eventId: randomId("stockout-reset"),
           barcode: normalizedBarcode,
           productKind,
           modelNo: modelNo.trim() || null,
@@ -212,39 +333,11 @@ export function InventoryStockControlPanel() {
       setNotice(payload.message || "재고 0 기준점을 저장했습니다.");
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "품절 기준점 저장 실패");
+      setNotice(
+        error instanceof Error ? error.message : "품절 기준점 저장 실패",
+      );
     } finally {
       setLoading(false);
-    }
-  };
-
-  const recordSync = async (
-    job: SyncJob,
-    outcome: SyncOutcome,
-    message: string,
-    evidence?: unknown,
-  ) => {
-    const response = await fetch("/api/inventory-stock-control/sync", {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({
-        eventId: eventId(`shopling-stock-${outcome.toLowerCase()}`),
-        jobId: job.jobId,
-        barcode: job.barcode,
-        productKind: job.productKind,
-        modelNo: job.modelNo,
-        desiredStatus: job.desiredStatus,
-        outcome,
-        message,
-        evidence: evidence ?? null,
-      }),
-    });
-    const payload = (await response.json().catch(() => ({}))) as {
-      ok?: boolean;
-      message?: string;
-    };
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.message || "Shopling 실행결과를 저장하지 못했습니다.");
     }
   };
 
@@ -257,23 +350,31 @@ export function InventoryStockControlPanel() {
       return;
     }
     if (runningJobId) {
-      setNotice("이미 실행 중인 B코드가 있습니다. 반대 상태를 동시에 실행하지 않습니다.");
+      setNotice(
+        "이미 실행 중인 B코드가 있습니다. 반대 상태를 동시에 실행하지 않습니다.",
+      );
       return;
     }
     setRunningJobId(job.jobId);
     try {
-      await recordSync(job, "STARTED", "사용자가 1건 안전실행을 시작했습니다.");
+      await recordSync(
+        job,
+        "STARTED",
+        "사용자가 1건 안전실행을 시작했습니다.",
+      );
       window.postMessage(
         {
           type: "COMMERCE_OS_SHOPLING_STOCK_SYNC_START",
           job,
         },
-        "*",
+        window.location.origin,
       );
       setNotice(`${job.barcode} · ${routeLabel(job)} 실행을 시작했습니다.`);
     } catch (error) {
       setRunningJobId(null);
-      setNotice(error instanceof Error ? error.message : "Shopling 실행 시작 실패");
+      setNotice(
+        error instanceof Error ? error.message : "Shopling 실행 시작 실패",
+      );
     }
   };
 
@@ -311,7 +412,9 @@ export function InventoryStockControlPanel() {
             상품형태
             <select
               value={productKind}
-              onChange={(event) => setProductKind(event.target.value as ProductKind)}
+              onChange={(event) =>
+                setProductKind(event.target.value as ProductKind)
+              }
               className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm outline-none focus:border-blue-500"
             >
               <option value="OPTION">옵션상품</option>
@@ -358,7 +461,11 @@ export function InventoryStockControlPanel() {
         <Metric label="정확재고 계산" value={report?.exactCount ?? 0} />
         <Metric label="품절 상태" value={report?.soldOutCount ?? 0} />
         <Metric label="판매중 상태" value={report?.onSaleCount ?? 0} />
-        <Metric label="Shopling 대기" value={report?.pendingSyncCount ?? 0} emphasized />
+        <Metric
+          label="Shopling 대기"
+          value={report?.pendingSyncCount ?? 0}
+          emphasized
+        />
         <Metric label="수동확인" value={report?.uncertainSyncCount ?? 0} />
       </section>
 
@@ -401,9 +508,12 @@ export function InventoryStockControlPanel() {
               {pendingJobs.map((job) => (
                 <tr key={job.jobId}>
                   <td className="px-3 py-3">
-                    <strong className="font-mono text-slate-950">{job.barcode}</strong>
+                    <strong className="font-mono text-slate-950">
+                      {job.barcode}
+                    </strong>
                     <span className="ml-2 text-slate-500">
-                      {job.modelNo ? `${job.modelNo} · ` : ""}{job.productName}
+                      {job.modelNo ? `${job.modelNo} · ` : ""}
+                      {job.productName}
                     </span>
                   </td>
                   <td className="px-3 py-3 font-black text-slate-950">
@@ -419,7 +529,9 @@ export function InventoryStockControlPanel() {
                     >
                       {statusLabel(job.desiredStatus)}
                     </span>
-                    <span className="ml-2 text-slate-500">{kindLabel(job.productKind)}</span>
+                    <span className="ml-2 text-slate-500">
+                      {kindLabel(job.productKind)}
+                    </span>
                   </td>
                   <td className="px-3 py-3 font-bold text-slate-700">
                     {routeLabel(job)}
@@ -438,7 +550,10 @@ export function InventoryStockControlPanel() {
               ))}
               {!pendingJobs.length ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                  <td
+                    colSpan={5}
+                    className="px-4 py-8 text-center text-slate-500"
+                  >
                     현재 실행 가능한 Shopling 품절·판매중 작업이 없습니다.
                   </td>
                 </tr>
@@ -458,7 +573,7 @@ export function InventoryStockControlPanel() {
               <th className="px-3 py-3 text-right">판매누계</th>
               <th className="px-3 py-3 text-right">현재 정확재고</th>
               <th className="px-3 py-3">최근30일 품절</th>
-              <th className="px-3 py-3">Shopling</th>
+              <th className="px-3 py-3">Shopling 목표</th>
               <th className="px-3 py-3">차단/상태</th>
             </tr>
           </thead>
@@ -466,14 +581,23 @@ export function InventoryStockControlPanel() {
             {(report?.rows ?? []).map((row) => (
               <tr key={`${row.barcode}:${row.resetAt}`}>
                 <td className="px-3 py-3">
-                  <strong className="font-mono text-slate-950">{row.barcode}</strong>
+                  <strong className="font-mono text-slate-950">
+                    {row.barcode}
+                  </strong>
                   <span className="ml-2 text-slate-500">
-                    {row.modelNo ? `${row.modelNo} · ` : ""}{row.productName}
+                    {row.modelNo ? `${row.modelNo} · ` : ""}
+                    {row.productName}
                   </span>
                 </td>
-                <td className="px-3 py-3 font-bold">{kindLabel(row.productKind)}</td>
-                <td className="px-3 py-3 text-right">{number.format(row.receivedSinceReset)}</td>
-                <td className="px-3 py-3 text-right">{number.format(row.soldSinceReset)}</td>
+                <td className="px-3 py-3 font-bold">
+                  {kindLabel(row.productKind)}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {number.format(row.receivedSinceReset)}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {number.format(row.soldSinceReset)}
+                </td>
                 <td className="px-3 py-3 text-right text-base font-black text-slate-950">
                   {number.format(row.exactInventoryQuantity)}
                 </td>
@@ -492,7 +616,10 @@ export function InventoryStockControlPanel() {
             ))}
             {!report?.rows.length ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                <td
+                  colSpan={8}
+                  className="px-4 py-8 text-center text-slate-500"
+                >
                   아직 품절 0 기준점을 만든 B코드가 없습니다.
                 </td>
               </tr>
@@ -516,7 +643,9 @@ function Metric({
   return (
     <article
       className={`rounded-xl border p-4 ${
-        emphasized ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"
+        emphasized
+          ? "border-blue-300 bg-blue-50"
+          : "border-slate-200 bg-white"
       }`}
     >
       <span className="text-[11px] font-bold text-slate-500">{label}</span>
