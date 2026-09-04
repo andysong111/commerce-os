@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 
 const items = [
   { href: "/china-order-manager", label: "월별 발주·입고" },
-  { href: "/china-order-manager/cash-envelope", label: "현금 제약 발주" },
+  { href: "/china-order-manager/cash-envelope", label: "현금 제약 발주 V2" },
+  { href: "/china-order-manager/stock-control", label: "재고·품절·재입고" },
 ] as const;
 
 export function ChinaOrderManagerNav() {
