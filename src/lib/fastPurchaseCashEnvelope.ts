@@ -1,38 +1,65 @@
+import { createHash } from "node:crypto";
+import { openChinaOrderCommitmentsByBarcode } from "@/lib/chinaOrderLedger";
 import { loadInternalChinaMonthlyPurchaseSummary } from "@/lib/internalChinaMonthlyPurchaseSummary";
-import {
-  DEFAULT_PURCHASE_COST_MULTIPLIER,
-  allocatePurchasePortfolio,
-} from "@/lib/productDecisionEngine/portfolio";
-import type { SalesOrderGroup } from "@/lib/productDecisionEngine/salesOrder";
-import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import { loadInventoryStockControlReport } from "@/lib/inventoryStockControl";
 import { seoulCalendarMonth } from "@/lib/monthlyPurchasePolicy";
+import { loadProductMasterCanonicalSalesAudit } from "@/lib/productMasterCanonicalSalesAudit";
+import { loadProductPlanningSnapshot } from "@/lib/productDecisionLiveRefresh";
+import {
+  PURCHASE_V2_DEFAULT_COST_MULTIPLIER,
+  PURCHASE_V2_DEFAULT_MINIMUM_LINE_KRW,
+  PURCHASE_V2_RULE_VERSION,
+  allocatePurchaseV2Portfolio,
+  calculatePurchaseV2Product,
+  type PurchaseV2AllocationRound,
+  type PurchaseV2Decision,
+  type PurchaseV2InventorySource,
+  type PurchaseV2Pattern,
+  type PurchaseV2PriceEffect,
+} from "@/lib/productDecisionEngine/purchaseV2";
+import { loadPurchaseForecastFeedback } from "@/lib/purchaseRecommendationFinalization";
 import { loadCanonicalPurchaseShadow } from "@/lib/stage8CanonicalPurchaseShadow";
+import { loadStage8CanonicalSalesEventSnapshot } from "@/lib/stage8CanonicalSalesEventSnapshot";
+import { loadProvisionalInventoryDiagnostics } from "@/lib/stage8ProvisionalInventoryDiagnostics";
 
 const MAX_CASH_INPUT_KRW = 100_000_000;
-const ORDERABLE_GROUPS = new Set<SalesOrderGroup>([
-  "발주 추천",
-  "소량 검토",
-]);
 
 export type FastPurchaseCashEnvelopeRow = {
   barcode: string;
   modelNo: string | null;
   productName: string;
-  originalGroup: SalesOrderGroup;
-  finalGroup: SalesOrderGroup;
+  pattern: PurchaseV2Pattern;
+  decision: PurchaseV2Decision;
   priorityScore: number;
-  baselineQuantity: number;
+  forecast30Quantity: number;
+  target44Quantity: number;
+  observedRecent30Units: number;
+  restoredRecent30Units: number;
+  stockoutDemandRecovered: number;
+  recent30StockoutDays: number;
+  priceEffect: PurchaseV2PriceEffect;
+  priceChangeRate: number | null;
+  feedbackMultiplier: number;
+  inventorySource: PurchaseV2InventorySource;
+  inventoryLowQuantity: number;
+  inventoryHighQuantity: number;
+  openCommitmentQuantity: number;
+  recommendedQuantity: number;
   allocatedQuantity: number;
-  minimumOrderQuantity: number;
+  minimumLineReview: boolean;
   unitCostKrw: number;
   expectedProductCostKrw: number;
   budgetReduced: boolean;
+  allocations: Record<PurchaseV2AllocationRound, number>;
+  reasons: string[];
 };
 
 export type FastPurchaseCashEnvelopeReport = {
   generatedAt: string;
   state: "READY" | "BLOCKED";
   message: string;
+  ruleVersion: string;
+  calculationFingerprint: string;
   cycleMonth: string;
   budgetMonth: string;
   requestedCashKrw: number;
@@ -47,7 +74,14 @@ export type FastPurchaseCashEnvelopeReport = {
   expectedAllInSpendKrw: number;
   remainingCashKrw: number;
   recommendedSkuCount: number;
+  allocatedSkuCount: number;
   budgetReducedSkuCount: number;
+  exactInventorySkuCount: number;
+  inventoryReviewSkuCount: number;
+  smallReviewSkuCount: number;
+  feedbackObservationCount: number;
+  patternCounts: Record<PurchaseV2Pattern, number>;
+  roundSpendKrw: Record<PurchaseV2AllocationRound, number>;
   rows: FastPurchaseCashEnvelopeRow[];
   blockers: string[];
 };
@@ -61,17 +95,31 @@ function text(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim();
 }
 
-function normalizeGroup(value: unknown): SalesOrderGroup {
-  const candidate = text(value);
-  if (
-    candidate === "발주 추천" ||
-    candidate === "소량 검토" ||
-    candidate === "발주 보류" ||
-    candidate === "데이터 부족"
-  ) {
-    return candidate;
-  }
-  return "발주 보류";
+function barcode(value: unknown) {
+  return text(value).toUpperCase().replace(/\s+/g, "");
+}
+
+function sha256(value: unknown) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function emptyPatterns(): Record<PurchaseV2Pattern, number> {
+  return {
+    GROWTH: 0,
+    STABLE_CORE: 0,
+    GENERAL: 0,
+    DECLINING: 0,
+    DORMANT: 0,
+  };
+}
+
+function emptyRounds(): Record<PurchaseV2AllocationRound, number> {
+  return {
+    URGENT_14_DAY: 0,
+    STABLE_CORE_30_DAY: 0,
+    GROWTH_30_DAY: 0,
+    FULL_44_DAY: 0,
+  };
 }
 
 function blockedReport(input: {
@@ -93,6 +141,12 @@ function blockedReport(input: {
     generatedAt: new Date().toISOString(),
     state: "BLOCKED",
     message: input.message,
+    ruleVersion: PURCHASE_V2_RULE_VERSION,
+    calculationFingerprint: sha256({
+      state: "BLOCKED",
+      message: input.message,
+      cycleMonth: input.cycleMonth,
+    }),
     cycleMonth: input.cycleMonth,
     budgetMonth: input.budgetMonth,
     requestedCashKrw: input.requestedCashKrw,
@@ -101,13 +155,20 @@ function blockedReport(input: {
     maxAdditionalGrossBudgetKrw,
     effectiveCashKrw: 0,
     cashClamped: input.requestedCashKrw > maxAdditionalGrossBudgetKrw,
-    purchaseCostMultiplier: DEFAULT_PURCHASE_COST_MULTIPLIER,
+    purchaseCostMultiplier: PURCHASE_V2_DEFAULT_COST_MULTIPLIER,
     productOrderBudgetKrw: 0,
     expectedProductSpendKrw: 0,
     expectedAllInSpendKrw: 0,
     remainingCashKrw: 0,
     recommendedSkuCount: 0,
+    allocatedSkuCount: 0,
     budgetReducedSkuCount: 0,
+    exactInventorySkuCount: 0,
+    inventoryReviewSkuCount: 0,
+    smallReviewSkuCount: 0,
+    feedbackObservationCount: 0,
+    patternCounts: emptyPatterns(),
+    roundSpendKrw: emptyRounds(),
     rows: [],
     blockers: input.blockers ?? [],
   };
@@ -122,10 +183,24 @@ export async function loadFastPurchaseCashEnvelope(
   }
 
   const cycleMonth = seoulCalendarMonth(new Date());
-  const [shadow, planning, purchase] = await Promise.all([
+  const [
+    shadow,
+    audit,
+    planning,
+    purchase,
+    stockControl,
+    diagnostics,
+    salesEvents,
+    commitments,
+  ] = await Promise.all([
     loadCanonicalPurchaseShadow(),
+    loadProductMasterCanonicalSalesAudit(),
     loadProductPlanningSnapshot(),
     loadInternalChinaMonthlyPurchaseSummary(cycleMonth).catch(() => null),
+    loadInventoryStockControlReport(),
+    loadProvisionalInventoryDiagnostics(),
+    loadStage8CanonicalSalesEventSnapshot(),
+    openChinaOrderCommitmentsByBarcode(),
   ]);
 
   const maxGrossBudgetKrw = money(shadow.purchaseBudgetMonthRevenue / 2);
@@ -141,147 +216,208 @@ export async function loadFastPurchaseCashEnvelope(
     maxAdditionalGrossBudgetKrw,
   );
   const cashClamped = requestedCashKrw !== effectiveCashKrw;
+  const blockers: string[] = [];
 
-  if (!shadow.shadowReady || !shadow.snapshot) {
-    return blockedReport({
-      message:
-        "현재 canonical 발주안의 구조 검증이 끝나지 않아 현금 제약 권장안을 만들지 않았습니다.",
-      cycleMonth,
-      budgetMonth: shadow.purchaseBudgetMonth,
-      requestedCashKrw,
-      maxGrossBudgetKrw,
-      recorded1688SpendKrw,
-      blockers: shadow.blockers.map((row) => row.message),
-    });
+  if (!audit.ready || !audit.snapshot) {
+    blockers.push(audit.message || "Canonical 12×30일 판매원장이 준비되지 않았습니다.");
   }
+  if (!planning.products.length) {
+    blockers.push("Product Planning 상품정보가 없습니다.");
+  }
+  if (stockControl.state !== "READY") {
+    blockers.push(...stockControl.blockers);
+  }
+  if (salesEvents.state !== "READY_READ_ONLY") {
+    blockers.push("Canonical 판매 이벤트 원장을 읽지 못했습니다.");
+  }
+  if (commitments.error) blockers.push(commitments.error);
   if (maxGrossBudgetKrw <= 0) {
-    return blockedReport({
-      message: "이번 발주월의 전체 지출가능금액을 확정하지 못했습니다.",
-      cycleMonth,
-      budgetMonth: shadow.purchaseBudgetMonth,
-      requestedCashKrw,
-      maxGrossBudgetKrw,
-      recorded1688SpendKrw,
-    });
+    blockers.push("이번 발주월의 전체 지출가능금액을 확정하지 못했습니다.");
   }
   if (effectiveCashKrw <= 0) {
+    blockers.push(
+      "이미 기록된 1688 결제액이 전체 지출가능금액을 사용해 신규 발주 현금이 없습니다.",
+    );
+  }
+  if (blockers.length) {
     return blockedReport({
       message:
-        "이미 기록된 1688 결제액이 현재 전체 지출가능금액을 사용해 신규 발주에 배정할 한도가 없습니다.",
+        "V2 수요·재고·미입고·현금 입력 중 차단 조건이 있어 발주권장안을 만들지 않았습니다.",
       cycleMonth,
       budgetMonth: shadow.purchaseBudgetMonth,
       requestedCashKrw,
       maxGrossBudgetKrw,
       recorded1688SpendKrw,
+      blockers: [...new Set(blockers)],
     });
   }
 
+  const feedback = await loadPurchaseForecastFeedback(
+    salesEvents.events,
+  ).catch(() => ({
+    multipliers: new Map<string, number>(),
+    observationCount: 0,
+    fingerprint: "feedback-unavailable",
+  }));
   const planningByBarcode = new Map(
     planning.products
       .filter((row) => row.skuActive !== false)
-      .map((row) => [text(row.barcode).toUpperCase(), row] as const),
+      .map((row) => [barcode(row.barcode), row] as const),
   );
-  const baselineProducts = (shadow.snapshot.products ?? []).filter((row) => {
-    const group = normalizeGroup(row.status);
-    return (
-      ORDERABLE_GROUPS.has(group) &&
-      money(row.recommendedQty) > 0 &&
-      Number(row.expectedCost ?? 0) > 0
-    );
-  });
-
-  if (!baselineProducts.length) {
-    return blockedReport({
-      message: "현재 기존 발주엔진에서 추가 발주 대상으로 남아 있는 SKU가 없습니다.",
-      cycleMonth,
-      budgetMonth: shadow.purchaseBudgetMonth,
-      requestedCashKrw,
-      maxGrossBudgetKrw,
-      recorded1688SpendKrw,
-    });
-  }
-
-  const sourceByBarcode = new Map(
-    baselineProducts.map((row) => [text(row.barcode).toUpperCase(), row] as const),
+  const exactByBarcode = new Map(
+    stockControl.rows
+      .filter((row) => row.salesCoverageReady)
+      .map((row) => [row.barcode, row] as const),
   );
-  const allocation = allocatePurchasePortfolio({
-    recent30DayRevenue: shadow.purchaseBudgetMonthRevenue,
-    grossBudgetOverrideKrw: effectiveCashKrw,
-    purchaseCostMultiplier: DEFAULT_PURCHASE_COST_MULTIPLIER,
-    items: baselineProducts.map((row) => {
-      const barcode = text(row.barcode).toUpperCase();
-      const baselineQuantity = money(row.recommendedQty);
-      const expectedCost = Math.max(0, Number(row.expectedCost ?? 0));
-      const planningRow = planningByBarcode.get(barcode);
-      return {
-        barcode,
-        group: normalizeGroup(row.status),
-        netRequiredQuantity: baselineQuantity,
-        unitCost:
-          baselineQuantity > 0 && expectedCost > 0
-            ? expectedCost / baselineQuantity
-            : Math.max(0, Number(planningRow?.latestCostKrw ?? 0)),
-        totalScore: Math.max(0, Number(row.score?.total ?? 0)),
-        moq: Math.max(1, money(planningRow?.moq) || 1),
-        cartonQuantity: Math.max(
-          1,
-          money(planningRow?.cartonQuantity) || 1,
-        ),
-      };
-    }),
-  });
+  const diagnosticByBarcode = new Map(
+    diagnostics.rows.map((row) => [barcode(row.barcode), row] as const),
+  );
 
-  const rows: FastPurchaseCashEnvelopeRow[] = allocation.items
-    .map((item) => {
-      const source = sourceByBarcode.get(item.barcode);
-      return {
-        barcode: item.barcode,
-        modelNo: source?.modelNo ?? null,
-        productName: text(source?.name) || item.barcode,
-        originalGroup: item.group,
-        finalGroup: item.finalGroup,
-        priorityScore: Math.round(item.totalScore * 100) / 100,
-        baselineQuantity: money(source?.recommendedQty),
-        allocatedQuantity: item.allocatedQuantity,
-        minimumOrderQuantity: item.minimumOrderQuantity,
-        unitCostKrw: money(item.unitCost),
-        expectedProductCostKrw: money(item.expectedCost),
-        budgetReduced: item.budgetReduced,
-      };
-    })
-    .sort((left, right) => {
-      const allocated = Number(right.allocatedQuantity > 0) - Number(left.allocatedQuantity > 0);
-      if (allocated !== 0) return allocated;
-      const group =
-        Number(left.finalGroup === "소량 검토") -
-        Number(right.finalGroup === "소량 검토");
-      if (group !== 0) return group;
-      return (
-        right.priorityScore - left.priorityScore ||
-        left.barcode.localeCompare(right.barcode, "ko")
+  const products = (audit.snapshot?.rows ?? [])
+    .map((salesRow) => {
+      const key = barcode(salesRow.barcode);
+      const profile = planningByBarcode.get(key);
+      if (!key || !profile) return null;
+      const exact = exactByBarcode.get(key);
+      const diagnostic = diagnosticByBarcode.get(key);
+      let inventorySource: PurchaseV2InventorySource = "UNKNOWN";
+      let inventoryLowQuantity = 0;
+      let inventoryHighQuantity = 0;
+      let recent30StockoutDays = 0;
+      if (exact) {
+        inventorySource = "EXACT_AFTER_STOCKOUT_RESET";
+        inventoryLowQuantity = exact.exactInventoryQuantity;
+        inventoryHighQuantity = exact.exactInventoryQuantity;
+        recent30StockoutDays = exact.recent30StockoutDays;
+      } else if (
+        diagnostic?.state === "BAND_READY" &&
+        diagnostic.diagnosticLowQuantity !== null &&
+        diagnostic.diagnosticHighQuantity !== null
+      ) {
+        inventorySource = "ESTIMATED_BAND";
+        inventoryLowQuantity = money(diagnostic.diagnosticLowQuantity);
+        inventoryHighQuantity = money(diagnostic.diagnosticHighQuantity);
+      } else if (diagnostic?.cumulativeResidualCandidate !== null && diagnostic?.cumulativeResidualCandidate !== undefined) {
+        inventorySource = "ESTIMATED_BAND";
+        inventoryLowQuantity = money(diagnostic.cumulativeResidualCandidate);
+        inventoryHighQuantity = money(diagnostic.cumulativeResidualCandidate);
+      }
+      const recentUnits = (salesRow.monthlyUnits ?? []).slice(0, 3).reduce(
+        (total, value) => total + money(value),
+        0,
       );
-    });
+      const recentRevenue = (salesRow.monthlyRevenue ?? []).slice(0, 3).reduce(
+        (total, value) => total + money(value),
+        0,
+      );
+      const storedCost = money(
+        profile.latestCostKrw || profile.protectedCostKrw,
+      );
+      const unitCostKrw =
+        storedCost > 0
+          ? storedCost
+          : recentUnits > 0
+            ? Math.round((recentRevenue / recentUnits) * 0.5)
+            : 0;
+      return calculatePurchaseV2Product(
+        {
+          barcode: key,
+          name: text(profile.productName) || key,
+          modelNo: text(profile.modelNo) || null,
+          monthlyUnits: salesRow.monthlyUnits,
+          monthlyRevenue: salesRow.monthlyRevenue,
+          unitCostKrw,
+          inventorySource,
+          inventoryLowQuantity,
+          inventoryHighQuantity,
+          openCommitmentQuantity: money(commitments.commitments.get(key)),
+          recent30StockoutDays,
+          feedbackMultiplier: feedback.multipliers.get(key) ?? 1,
+        },
+        PURCHASE_V2_DEFAULT_MINIMUM_LINE_KRW,
+      );
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-  const expectedProductSpendKrw = money(allocation.expectedSpend);
-  const expectedAllInSpendKrw = Math.min(
+  const allocation = allocatePurchaseV2Portfolio({
+    grossCashBudgetKrw: effectiveCashKrw,
+    purchaseCostMultiplier: PURCHASE_V2_DEFAULT_COST_MULTIPLIER,
+    minimumLineAmountKrw: PURCHASE_V2_DEFAULT_MINIMUM_LINE_KRW,
+    products,
+  });
+  const rows: FastPurchaseCashEnvelopeRow[] = allocation.products.map((row) => {
+    const unitCostKrw =
+      row.recommendedQuantity > 0
+        ? money(row.expectedProductCostKrw / row.recommendedQuantity)
+        : 0;
+    return {
+      barcode: row.barcode,
+      modelNo: row.modelNo,
+      productName: row.name,
+      pattern: row.pattern,
+      decision: row.decision,
+      priorityScore: row.score.total,
+      forecast30Quantity: row.forecast30Quantity,
+      target44Quantity: row.target44Quantity,
+      observedRecent30Units: row.observedRecent30Units,
+      restoredRecent30Units: row.restoredRecent30Units,
+      stockoutDemandRecovered: row.stockoutDemandRecovered,
+      recent30StockoutDays: row.recent30StockoutDays,
+      priceEffect: row.priceEffect,
+      priceChangeRate: row.priceChangeRate,
+      feedbackMultiplier: row.feedbackMultiplier,
+      inventorySource: row.inventorySource,
+      inventoryLowQuantity: row.inventoryLowQuantity,
+      inventoryHighQuantity: row.inventoryHighQuantity,
+      openCommitmentQuantity: row.openCommitmentQuantity,
+      recommendedQuantity: row.recommendedQuantity,
+      allocatedQuantity: row.allocatedQuantity,
+      minimumLineReview: row.minimumLineReview,
+      unitCostKrw,
+      expectedProductCostKrw: row.expectedAllocatedProductCostKrw,
+      budgetReduced: row.budgetReduced,
+      allocations: row.allocations,
+      reasons: row.reasons,
+    };
+  });
+  const patternCounts = emptyPatterns();
+  for (const row of rows) patternCounts[row.pattern] += 1;
+  const calculationFingerprint = sha256({
+    ruleVersion: PURCHASE_V2_RULE_VERSION,
+    cycleMonth,
+    budgetMonth: shadow.purchaseBudgetMonth,
+    requestedCashKrw,
     effectiveCashKrw,
-    money(expectedProductSpendKrw * allocation.purchaseCostMultiplier),
-  );
-  const remainingCashKrw = Math.max(
-    0,
-    effectiveCashKrw - expectedAllInSpendKrw,
-  );
-  const recommendedSkuCount = rows.filter(
-    (row) => row.allocatedQuantity > 0 && ORDERABLE_GROUPS.has(row.finalGroup),
-  ).length;
-  const budgetReducedSkuCount = rows.filter((row) => row.budgetReduced).length;
+    canonicalFingerprint: audit.snapshot?.contentFingerprint,
+    stockFingerprint: stockControl.fingerprint,
+    feedbackFingerprint: feedback.fingerprint,
+    commitmentRows: [...commitments.commitments.entries()].sort(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+    rows: rows.map((row) => ({
+      barcode: row.barcode,
+      pattern: row.pattern,
+      decision: row.decision,
+      forecast30Quantity: row.forecast30Quantity,
+      target44Quantity: row.target44Quantity,
+      inventoryLowQuantity: row.inventoryLowQuantity,
+      inventoryHighQuantity: row.inventoryHighQuantity,
+      openCommitmentQuantity: row.openCommitmentQuantity,
+      recommendedQuantity: row.recommendedQuantity,
+      allocatedQuantity: row.allocatedQuantity,
+      priceEffect: row.priceEffect,
+      priorityScore: row.priorityScore,
+    })),
+  });
 
   return {
     generatedAt: new Date().toISOString(),
     state: "READY",
     message: cashClamped
-      ? "입력 현금이 현재 추가 지출가능한도를 넘어 한도까지만 적용했습니다. 기존 발주 우선순위·MOQ·박스입수·최소주문금액 규칙은 그대로 유지합니다."
-      : "입력한 현금 안에서 기존 발주 우선순위·MOQ·박스입수·최소주문금액 규칙을 그대로 적용했습니다.",
+      ? "입력 현금이 추가 지출가능 상한을 넘어 상한까지만 적용했습니다. V2는 품절수요·가격변동·성장형·안정형·44일 목표·추정/정확재고·미입고를 계산한 뒤 다단계로 현금을 배분합니다."
+      : "V2는 품절수요·가격변동·성장형·안정형·44일 목표·추정/정확재고·미입고를 계산한 뒤 다단계로 현금을 배분합니다.",
+    ruleVersion: PURCHASE_V2_RULE_VERSION,
+    calculationFingerprint,
     cycleMonth,
     budgetMonth: shadow.purchaseBudgetMonth,
     requestedCashKrw,
@@ -291,12 +427,25 @@ export async function loadFastPurchaseCashEnvelope(
     effectiveCashKrw,
     cashClamped,
     purchaseCostMultiplier: allocation.purchaseCostMultiplier,
-    productOrderBudgetKrw: allocation.productOrderBudget,
-    expectedProductSpendKrw,
-    expectedAllInSpendKrw,
-    remainingCashKrw,
-    recommendedSkuCount,
-    budgetReducedSkuCount,
+    productOrderBudgetKrw: allocation.productOrderBudgetKrw,
+    expectedProductSpendKrw: allocation.expectedProductSpendKrw,
+    expectedAllInSpendKrw: allocation.expectedAllInSpendKrw,
+    remainingCashKrw: allocation.remainingGrossCashKrw,
+    recommendedSkuCount: allocation.recommendedSkuCount,
+    allocatedSkuCount: allocation.allocatedSkuCount,
+    budgetReducedSkuCount: allocation.budgetReducedSkuCount,
+    exactInventorySkuCount: rows.filter(
+      (row) => row.inventorySource === "EXACT_AFTER_STOCKOUT_RESET",
+    ).length,
+    inventoryReviewSkuCount: rows.filter(
+      (row) => row.decision === "INVENTORY_REVIEW",
+    ).length,
+    smallReviewSkuCount: rows.filter(
+      (row) => row.decision === "SMALL_REVIEW",
+    ).length,
+    feedbackObservationCount: feedback.observationCount,
+    patternCounts,
+    roundSpendKrw: allocation.roundSpendKrw,
     rows,
     blockers: [],
   };
