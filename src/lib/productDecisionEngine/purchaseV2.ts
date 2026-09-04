@@ -442,7 +442,7 @@ export function calculatePurchaseV2Product(
 
   let decision: PurchaseV2Decision = "HOLD";
   let recommendedQuantity = 0;
-  let referenceNeedQuantity = Math.max(lowScenarioNeed, highScenarioNeed);
+  const referenceNeedQuantity = Math.max(lowScenarioNeed, highScenarioNeed);
   if (pattern === "DORMANT" || target44Quantity <= 0) {
     decision = "HOLD";
   } else if (money(input.unitCostKrw) <= 0) {
@@ -667,7 +667,10 @@ export function allocatePurchaseV2Portfolio(
       if (product.allocatedQuantity === 0) {
         need = Math.max(need, minimumFirstQuantity);
       }
-      need = Math.min(need, product.recommendedQuantity - product.allocatedQuantity);
+      need = Math.min(
+        need,
+        product.recommendedQuantity - product.allocatedQuantity,
+      );
       const affordable = Math.floor(remaining / unitCost);
       const allocated = Math.max(0, Math.min(need, affordable));
       if (allocated <= 0) continue;
@@ -688,12 +691,14 @@ export function allocatePurchaseV2Portfolio(
   allocateRound(
     "STABLE_CORE_30_DAY",
     eligible.filter((product) => product.pattern === "STABLE_CORE"),
-    (product) => Math.max(product.urgentNeedQuantity, product.normal30NeedQuantity),
+    (product) =>
+      Math.max(product.urgentNeedQuantity, product.normal30NeedQuantity),
   );
   allocateRound(
     "GROWTH_30_DAY",
     eligible.filter((product) => product.pattern === "GROWTH"),
-    (product) => Math.max(product.urgentNeedQuantity, product.normal30NeedQuantity),
+    (product) =>
+      Math.max(product.urgentNeedQuantity, product.normal30NeedQuantity),
   );
   allocateRound(
     "FULL_44_DAY",
@@ -728,7 +733,8 @@ export function allocatePurchaseV2Portfolio(
       grossCashBudgetKrw - expectedAllInSpendKrw,
     ),
     recommendedSkuCount: products.filter(
-      (product) => product.decision === "ORDER" && product.recommendedQuantity > 0,
+      (product) =>
+        product.decision === "ORDER" && product.recommendedQuantity > 0,
     ).length,
     allocatedSkuCount: products.filter(
       (product) => product.allocatedQuantity > 0,
@@ -738,7 +744,8 @@ export function allocatePurchaseV2Portfolio(
     roundSpendKrw,
     products: products.sort((left, right) => {
       const allocated =
-        Number(right.allocatedQuantity > 0) - Number(left.allocatedQuantity > 0);
+        Number(right.allocatedQuantity > 0) -
+        Number(left.allocatedQuantity > 0);
       if (allocated !== 0) return allocated;
       return sortByPriority(left, right);
     }),
