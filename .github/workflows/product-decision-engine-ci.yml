@@ -4,10 +4,15 @@ on:
   pull_request:
     paths:
       - "src/lib/productDecisionEngine/**"
+      - "src/lib/fastPurchaseCashEnvelope.ts"
       - "src/app/product-decision-agent/migration/**"
       - "src/app/api/product-decision-agent/migration/**"
+      - "src/app/api/fast-purchase/cash-envelope/**"
+      - "src/app/china-order-manager/cash-envelope/**"
+      - "src/components/china-order-manager/InternalChinaCashEnvelopePanel.tsx"
       - "tests/productDecisionEngine.test.mjs"
       - "tests/productDecisionShadow*.test.mjs"
+      - "tests/fastPurchaseCashEnvelope.test.mjs"
       - ".github/workflows/product-decision-engine-ci.yml"
   workflow_dispatch:
 
@@ -29,19 +34,25 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint product decision engine and migration bridge
+      - name: Lint product decision engine and purchase cash envelope
         run: >-
           npx eslint
           src/lib/productDecisionEngine/*.ts
+          src/lib/fastPurchaseCashEnvelope.ts
           src/app/product-decision-agent/migration/*.tsx
           src/app/api/product-decision-agent/migration/import/route.ts
+          src/app/api/fast-purchase/cash-envelope/route.ts
+          src/app/china-order-manager/cash-envelope/page.tsx
+          src/components/china-order-manager/InternalChinaCashEnvelopePanel.tsx
           tests/productDecisionEngine.test.mjs
           tests/productDecisionShadow*.test.mjs
-      - name: Run product decision engine and shadow replay tests
+          tests/fastPurchaseCashEnvelope.test.mjs
+      - name: Run product decision engine, shadow replay, and cash envelope tests
         run: >-
           node --experimental-strip-types --test
           tests/productDecisionEngine.test.mjs
           tests/productDecisionShadow*.test.mjs
+          tests/fastPurchaseCashEnvelope.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:
