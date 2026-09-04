@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { parseFreightApplicationText } from "@/lib/freightApplicationParser";
 import { createWarehouseLabelPdf } from "@/lib/warehouseLabelGenerator";
@@ -143,9 +142,17 @@ function matchItem(item: FreightApplicationItem, lines: MonthlyLine[]): MatchRes
   return { item, source: null, basis: "미매칭" };
 }
 
+function currentMonthFromLocation() {
+  if (typeof window !== "undefined") {
+    const candidate = new URLSearchParams(window.location.search).get("month")?.trim() ?? "";
+    if (/^\d{4}-\d{2}$/.test(candidate)) return candidate;
+  }
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export default function MonthlyFreightBarcodeRequestPage() {
-  const searchParams = useSearchParams();
-  const month = searchParams.get("month") || new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState(() => currentMonthFromLocation());
   const [monthly, setMonthly] = useState<MonthlyResponse | null>(null);
   const [rawText, setRawText] = useState("");
   const [application, setApplication] = useState<FreightApplication>(EMPTY_APPLICATION);
@@ -153,6 +160,11 @@ export default function MonthlyFreightBarcodeRequestPage() {
   const [status, setStatus] = useState("온돌패스 신청서의 제품정보 영역을 그대로 붙여넣으세요.");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const pdfRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const resolved = currentMonthFromLocation();
+    if (resolved !== month) setMonth(resolved);
+  }, [month]);
 
   useEffect(() => {
     let cancelled = false;
