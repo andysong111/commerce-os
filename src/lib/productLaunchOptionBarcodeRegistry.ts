@@ -12,6 +12,11 @@ type OptionBarcodeIdentity = {
   composition: Array<{ bCode: string; option: string; quantity: number }>;
 };
 
+type OptionBarcodeResolveRequest = OptionBarcodeIdentity & {
+  previousIdentityKey: string;
+  existingOptionBarcodeNo: string;
+};
+
 export function normalizeOptionBCode(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -105,7 +110,7 @@ export async function attachOptionBarcodeNosToChangedItems(
 
   const state = structuredClone(stateInput) as ProductLaunchTrackerState;
   const items = Array.isArray(state.items) ? state.items.map(asRecord) : [];
-  const requests = new Map<string, OptionBarcodeIdentity>();
+  const requests = new Map<string, OptionBarcodeResolveRequest>();
   const bindings: Array<{
     item: UnknownRecord;
     option: UnknownRecord;
@@ -127,7 +132,35 @@ export async function attachOptionBarcodeNosToChangedItems(
         optionId,
         option,
       });
-      requests.set(identity.identityKey, identity);
+      const previousIdentityKey = text(option.optionBarcodeIdentityKey);
+      const existingOptionBarcodeNo = text(option.optionBarcodeNo);
+      const request: OptionBarcodeResolveRequest = {
+        ...identity,
+        previousIdentityKey:
+          previousIdentityKey && previousIdentityKey !== identity.identityKey
+            ? previousIdentityKey
+            : "",
+        existingOptionBarcodeNo,
+      };
+      const existingRequest = requests.get(identity.identityKey);
+      if (
+        existingRequest?.existingOptionBarcodeNo &&
+        existingOptionBarcodeNo &&
+        existingRequest.existingOptionBarcodeNo !== existingOptionBarcodeNo
+      ) {
+        throw new Error(
+          `동일 B-code에 서로 다른 옵션바코드NO가 연결되어 있습니다: ${identity.identityKey}`,
+        );
+      }
+      requests.set(identity.identityKey, {
+        ...request,
+        previousIdentityKey:
+          request.previousIdentityKey || existingRequest?.previousIdentityKey || "",
+        existingOptionBarcodeNo:
+          request.existingOptionBarcodeNo ||
+          existingRequest?.existingOptionBarcodeNo ||
+          "",
+      });
       bindings.push({ item, option, identity });
     });
     item.orderOptions = options;
@@ -149,8 +182,10 @@ export async function attachOptionBarcodeNosToChangedItems(
   );
   const body = (await response.json().catch(() => [])) as unknown;
   if (!response.ok || !Array.isArray(body)) {
+    const detail = asRecord(body);
+    const message = text(detail.message);
     throw new Error(
-      `옵션바코드NO 원장 발급에 실패했습니다. status=${response.status}`,
+      message || `옵션바코드NO 원장 발급에 실패했습니다. status=${response.status}`,
     );
   }
 
