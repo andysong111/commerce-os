@@ -1,0 +1,53 @@
+name: Purchase V2 and stockout CI
+
+on:
+  pull_request:
+    paths:
+      - "src/lib/productDecisionEngine/**"
+      - "src/lib/purchaseV2Recommendation.ts"
+      - "src/lib/purchaseV2Finalization.ts"
+      - "src/lib/inventoryTruthLedger.ts"
+      - "src/app/api/fast-purchase/v2/**"
+      - "src/app/api/inventory-truth/**"
+      - "src/app/api/china-order-ledger/events/**"
+      - "src/app/china-order-manager/purchase-v2/**"
+      - "src/components/china-order-manager/PurchaseV2Workspace.tsx"
+      - "src/components/china-order-manager/FinalizedPurchaseV2Banner.tsx"
+      - "public/shopling-a21-price-option-resend/**"
+      - "tests/purchaseV2.test.mjs"
+      - ".github/workflows/purchase-v2-stockout-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/lib/productDecisionEngine/**"
+      - "src/lib/purchaseV2Recommendation.ts"
+      - "src/lib/purchaseV2Finalization.ts"
+      - "src/lib/inventoryTruthLedger.ts"
+      - "src/app/api/fast-purchase/v2/**"
+      - "src/app/api/inventory-truth/**"
+      - "src/app/api/china-order-ledger/events/**"
+      - "src/app/china-order-manager/purchase-v2/**"
+      - "src/components/china-order-manager/PurchaseV2Workspace.tsx"
+      - "src/components/china-order-manager/FinalizedPurchaseV2Banner.tsx"
+      - "public/shopling-a21-price-option-resend/**"
+      - "tests/purchaseV2.test.mjs"
+      - ".github/workflows/purchase-v2-stockout-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  purchase-v2-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Purchase V2 deterministic regression tests
+        run: node --test tests/purchaseV2.test.mjs
+      - name: Type check
+        run: npx tsc --noEmit
