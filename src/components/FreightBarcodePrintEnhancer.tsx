@@ -6,11 +6,17 @@ import {
   buildFreightWorkRequestPdfFilename,
   buildFreightWorkRequestPrintTitle,
 } from "@/lib/freightBarcodeDownload";
+import {
+  normalizeFreightImageUpstreamUrl,
+  readFreightImageProxyUpstreamUrl,
+  toFreightImageProxyUrl,
+} from "@/lib/freightImageProxy";
 
 const FREIGHT_BARCODE_ROUTE = "/freight-barcode-request";
 const WORK_REQUEST_BUTTON_LABEL = "작업요청서 PDF 저장/인쇄";
 const FORWARDER_ZIP_BUTTON_LABEL = "배대지 전달용 개별 PDF ZIP 다운로드";
 const SERVER_SAVE_BUTTON_LABEL = "서버 이력에 저장";
+const IMAGE_PROXY_RETRY_ATTRIBUTE = "data-freight-image-proxy-retried";
 
 function normalizeText(value: string | null | undefined): string {
   return value?.replace(/\s+/g, " ").trim() ?? "";
@@ -93,6 +99,49 @@ function prepareWorkRequestPrintTitle() {
   window.addEventListener("afterprint", restoreTitle, { once: true });
 }
 
+function currentImageSource(image: HTMLImageElement) {
+  return image.currentSrc || image.getAttribute("src") || "";
+}
+
+function prepareExternalFreightImage(image: HTMLImageElement) {
+  const source = currentImageSource(image);
+  if (!normalizeFreightImageUpstreamUrl(source)) return;
+  image.referrerPolicy = "no-referrer";
+}
+
+function prepareImageNode(node: Node) {
+  if (node instanceof HTMLImageElement) {
+    prepareExternalFreightImage(node);
+    return;
+  }
+  if (!(node instanceof Element)) return;
+  node
+    .querySelectorAll<HTMLImageElement>("img")
+    .forEach(prepareExternalFreightImage);
+}
+
+function retryBlockedFreightImage(event: Event) {
+  const image = event.target instanceof HTMLImageElement ? event.target : null;
+  if (!image) return;
+  if (image.hasAttribute(IMAGE_PROXY_RETRY_ATTRIBUTE)) return;
+
+  const source = currentImageSource(image);
+  if (!source || readFreightImageProxyUpstreamUrl(source)) return;
+  const proxyUrl = toFreightImageProxyUrl(source);
+  if (!proxyUrl) return;
+
+  // React's target-level onError would otherwise mark the candidate as failed
+  // before the safe same-origin proxy retry gets a chance to load.
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  image.setAttribute(IMAGE_PROXY_RETRY_ATTRIBUTE, "1");
+  image.referrerPolicy = "no-referrer";
+  image.removeAttribute("srcset");
+  image.removeAttribute("sizes");
+  image.src = proxyUrl;
+}
+
 export function FreightBarcodePrintEnhancer() {
   const pathname = usePathname();
 
@@ -101,6 +150,25 @@ export function FreightBarcodePrintEnhancer() {
 
     updateRecommendedFilename();
     updateServerArchiveCopy();
+    document
+      .querySelectorAll<HTMLImageElement>("img")
+      .forEach(prepareExternalFreightImage);
+
+    const imageObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === "attributes") {
+          prepareImageNode(record.target);
+          continue;
+        }
+        record.addedNodes.forEach(prepareImageNode);
+      }
+    });
+    imageObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["src", "srcset"],
+    });
 
     const handleClick = (event: MouseEvent) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -128,10 +196,13 @@ export function FreightBarcodePrintEnhancer() {
       }
     };
 
+    document.addEventListener("error", retryBlockedFreightImage, true);
     document.addEventListener("click", handleClick, true);
     document.addEventListener("input", handleInput, true);
 
     return () => {
+      imageObserver.disconnect();
+      document.removeEventListener("error", retryBlockedFreightImage, true);
       document.removeEventListener("click", handleClick, true);
       document.removeEventListener("input", handleInput, true);
     };
