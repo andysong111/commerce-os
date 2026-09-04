@@ -5,6 +5,7 @@ import {
   normalizeChinaOrderCommitmentEvent,
   type ChinaOrderCommitmentEventInput,
 } from "@/lib/chinaOrderLedger";
+import { recordReceiptConfirmedAndMaybeRestore } from "@/lib/inventoryTruthLedger";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 import { createSupabaseAdminHeaders } from "@/lib/supabase/admin";
 
@@ -80,6 +81,18 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChinaOrderCommitmentEventInput;
     const event = normalizeChinaOrderCommitmentEvent(body);
+    const receiptEvent = ["PARTIALLY_RECEIVED", "RECEIVED"].includes(
+      event.status,
+    );
+    const beforeLedger = receiptEvent ? await loadChinaOrderLedger() : null;
+    const previousReceived =
+      beforeLedger?.commitments.find(
+        (row) =>
+          row.sourceSystem === event.sourceSystem &&
+          row.sourceLineId === event.sourceLineId &&
+          row.barcode === event.barcode,
+      )?.receivedQuantity ?? 0;
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim().replace(
       /\/$/,
       "",
@@ -139,8 +152,8 @@ export async function POST(request: Request) {
         cache: "no-store",
       },
     );
-    const text = await response.text();
-    const responseBody = text ? safeJson(text) : null;
+    const responseText = await response.text();
+    const responseBody = responseText ? safeJson(responseText) : null;
     if (!response.ok) {
       return Response.json(
         {
@@ -152,6 +165,40 @@ export async function POST(request: Request) {
       );
     }
     const storedRows = Array.isArray(responseBody) ? responseBody : [];
+
+    let inventoryTruth: unknown = null;
+    let inventoryTruthWarning: string | null = null;
+    if (receiptEvent && storedRows.length > 0) {
+      try {
+        const afterLedger = await loadChinaOrderLedger();
+        const currentReceived =
+          afterLedger.commitments.find(
+            (row) =>
+              row.sourceSystem === event.sourceSystem &&
+              row.sourceLineId === event.sourceLineId &&
+              row.barcode === event.barcode,
+          )?.receivedQuantity ?? previousReceived;
+        const quantityDelta = Math.max(0, currentReceived - previousReceived);
+        if (quantityDelta > 0) {
+          inventoryTruth = await recordReceiptConfirmedAndMaybeRestore({
+            sourceSystem: event.sourceSystem,
+            sourceLineId: event.sourceLineId,
+            sourceEventId: event.sourceEventId,
+            barcode: event.barcode,
+            quantityDelta,
+            occurredAt: event.occurredAt,
+            note:
+              "중국 주문 입고확정에서 발생한 신규 입고수량을 정확재고에 반영했습니다.",
+          });
+        }
+      } catch (error) {
+        inventoryTruthWarning =
+          error instanceof Error
+            ? error.message
+            : "입고확정은 저장됐지만 정확재고 후속처리에 실패했습니다.";
+      }
+    }
+
     return Response.json(
       {
         ok: true,
@@ -159,10 +206,16 @@ export async function POST(request: Request) {
         sourceEventId,
         correlationId,
         event,
+        inventoryTruth,
+        inventoryTruthWarning,
         message:
           storedRows.length === 0
             ? "이미 처리한 중국 주문·입고 이벤트라 중복 저장하지 않았습니다."
-            : "중국 주문·입고 이벤트를 Ops Center 불변 원장에 저장했습니다.",
+            : receiptEvent
+              ? inventoryTruthWarning
+                ? "입고확정은 저장됐지만 정확재고·판매중 복구 작업은 재확인이 필요합니다."
+                : "입고확정을 저장하고 정확재고를 갱신했습니다. 기존 품절 상품이면 Shopling 판매중 복구 작업도 생성했습니다."
+              : "중국 주문·입고 이벤트를 Ops Center 불변 원장에 저장했습니다.",
       },
       {
         status: storedRows.length === 0 ? 200 : 201,
