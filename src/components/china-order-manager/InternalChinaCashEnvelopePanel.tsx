@@ -64,26 +64,23 @@ export function InternalChinaCashEnvelopePanel({
   recorded1688SpendKrw: number;
   monthlyClosed: boolean;
 }) {
-  const [cashInput, setCashInput] = useState("");
+  const currentMonth = cycleMonth === currentCycleMonth;
+  const storageKey = `commerceOs.cashEnvelope.${cycleMonth}`;
+  const [cashInput, setCashInput] = useState(() => {
+    if (typeof window === "undefined" || !currentMonth) return "";
+    try {
+      return digits(window.localStorage.getItem(storageKey) ?? "");
+    } catch {
+      return "";
+    }
+  });
   const [report, setReport] = useState<CashEnvelopeReport | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-  const currentMonth = cycleMonth === currentCycleMonth;
   const maxAdditionalGrossBudgetKrw = Math.max(
     0,
     maxGrossBudgetKrw - recorded1688SpendKrw,
   );
-  const storageKey = `commerceOs.cashEnvelope.${cycleMonth}`;
-
-  useEffect(() => {
-    if (!currentMonth) return;
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      if (stored) setCashInput(digits(stored));
-    } catch {
-      // Local persistence is optional; calculation remains available.
-    }
-  }, [currentMonth, storageKey]);
 
   useEffect(() => {
     if (!currentMonth) return;
