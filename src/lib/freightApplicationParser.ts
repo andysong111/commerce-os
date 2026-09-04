@@ -8,6 +8,7 @@ import { findProductsByText } from "./productMaster.ts";
 import { applyActiveFreightMonthlyOrderContext } from "./freightMonthlyOrderContext.ts";
 import { applyActiveFreightMonthlyOrderContext } from "./freightMonthlyOrderContext.ts";
 import { applyActiveFreightMonthlyOrderContext } from "./freightMonthlyOrderContext.ts";
+import { applyActiveFreightMonthlyOrderContext } from "./freightMonthlyOrderContext.ts";
 
 const PRODUCT_BLOCK_PATTERN = /제품\s*정보\s*:?\s*\(\s*(\d+)\s*\)/gi;
 const TRACKING_PLACEHOLDER = "입력란에 하나의 트래킹만 입력";
