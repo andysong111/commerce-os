@@ -1,4 +1,4 @@
-name: Monthly freight barcode integration patch
+name: Monthly freight barcode integration validation
 
 on:
   push:
@@ -9,16 +9,21 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/monthly-freight-barcode-flow
           fetch-depth: 0
-      - name: Apply source patch
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply source patch if needed
         run: python scripts/temp_monthly_freight_patch.py
-      - name: Commit source patch
+      - name: Run focused matching tests
+        run: node --experimental-strip-types --test tests/freightMonthlyOrderContext.test.mjs
+      - name: Commit source patch if needed
         run: |
           if git diff --quiet; then
             echo "No patch changes required."
