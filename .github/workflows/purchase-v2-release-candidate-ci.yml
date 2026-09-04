@@ -1,0 +1,81 @@
+name: Purchase V2 release candidate CI
+
+on:
+  push:
+    branches:
+      - feat/purchase-v2-stockout-reset-20260905
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: purchase-v2-release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/purchase-v2-stockout-reset-20260905
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply idempotent release finalizers
+        run: |
+          node scripts/finalize-purchase-v2-branch-3.mjs
+          node scripts/finalize-purchase-v2-branch-4.mjs
+          node scripts/finalize-purchase-v2-branch-5.mjs
+
+      - name: Check extension JavaScript syntax
+        run: |
+          node --check public/shopling-inventory-lifecycle/background.js
+          node --check public/shopling-inventory-lifecycle/content-ops.js
+          node --check public/shopling-inventory-lifecycle/content-shopling.js
+          node --check public/shopling-inventory-lifecycle/popup.js
+
+      - name: Verify V2 demand, feedback, exact inventory and allocation
+        run: >-
+          npx tsx --test
+          tests/purchaseV2.test.mjs
+          tests/purchaseV2Feedback.test.mjs
+          tests/inventoryLifecycleLedger.test.mjs
+
+      - name: Verify persistence, receipt restore, UI and extension contracts
+        run: >-
+          node --test
+          tests/purchaseV2PersistenceContract.test.mjs
+          tests/shoplingInventoryLifecycleExtension.test.mjs
+          tests/receiptSellingRestoreContract.test.mjs
+
+      - name: Lint
+        run: npm run lint --if-present
+
+      - name: Production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run build
+
+      - name: Commit release finalizer output
+        run: |
+          if git diff --quiet; then
+            echo "No finalizer output to commit."
+            exit 0
+          fi
+          git config user.name "commerce-os-purchase-v2-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "[purchase-v2-bot] prepare purchase V2 release candidate"
+          git push origin HEAD:feat/purchase-v2-stockout-reset-20260905
