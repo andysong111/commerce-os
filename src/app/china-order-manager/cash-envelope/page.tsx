@@ -36,16 +36,24 @@ export default async function CashEnvelopePurchasePage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="COMMERCE OS · CASH-CONSTRAINED PURCHASE"
-        title="현금 제약 발주"
-        description="전체 지출가능금액은 그대로 두고, 지금 실제로 추가 발주에 투입할 수 있는 현금만 입력합니다. 기존 발주 추천·소량 검토·점수·MOQ·박스입수·최소주문금액 순서를 그대로 사용해 현금 안에서만 수량을 줄입니다."
+        eyebrow="COMMERCE OS · PURCHASE V2 · CASH CONSTRAINT"
+        title="현금 제약 발주 V2"
+        description="품절로 못 판 수요를 복원하고, 가격변동·성장형·핵심 안정형·44일 목표수요·추정 또는 정확재고·중국 미입고를 반영합니다. 실제 현금 안에서 14일 긴급 → 안정형 → 성장형 → 44일 완성 순으로 배분합니다."
         actions={
-          <Link
-            href="/fast-purchase-mvp"
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50"
-          >
-            기존 빠른 발주안 보기
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/china-order-manager/stock-control"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50"
+            >
+              재고·품절 기준점
+            </Link>
+            <Link
+              href="/fast-purchase-mvp"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 hover:bg-slate-50"
+            >
+              V1 비교화면
+            </Link>
+          </div>
         }
       />
 
@@ -56,7 +64,7 @@ export default async function CashEnvelopePurchasePage() {
             {koreanMonthLabel(currentCycleMonth)}
           </strong>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">
-            현금 입력은 현재 발주월에만 적용
+            실제 주문일에 계산하고 예산확정
           </p>
         </article>
         <article className="rounded-xl border border-blue-200 bg-blue-50 p-4">
@@ -75,8 +83,8 @@ export default async function CashEnvelopePurchasePage() {
           </strong>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">
             {monthlyClose
-              ? "계산은 미리보기만 가능 · 기존 주문/입고 원장 불변"
-              : "계산 후 권장안 검토 · 자동 주문/결제 없음"}
+              ? "기존 확정안·주문·입고 원장만 유지"
+              : "계산 → 검토 → 예산확정 → 1688 주문"}
           </p>
         </article>
       </section>
@@ -96,9 +104,9 @@ export default async function CashEnvelopePurchasePage() {
       />
 
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-        <strong className="text-slate-950">이번 단계의 범위</strong>
+        <strong className="text-slate-950">운영 경계</strong>
         <p className="mt-1">
-          현금 제약 층만 추가했습니다. 기존 발주 권장안의 수요·재고·점수 계산은 변경하지 않았고, 계산 버튼도 내부 Draft·1688 주문·결제·상품마스터 재고를 변경하지 않습니다. 다음 단계에서 발주 권장안 로직 자체를 별도로 개편합니다.
+          MOQ와 박스입수는 발주수량 계산에서 사용하지 않습니다. 품목당 5,000원 미만은 수량을 억지로 늘리지 않고 소액 검토로 분리합니다. 계산만으로는 주문되지 않으며, 예산확정한 불변 스냅샷만 1688 주문·발주마감 단계에 전달됩니다.
         </p>
       </section>
     </div>
