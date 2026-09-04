@@ -341,7 +341,7 @@ export default async function ChinaOrderManagerPage({
       <PageHeader
         eyebrow="COMMERCE OS · MONTHLY PURCHASE WORKSPACE"
         title="월별 발주·입고 관리"
-        description="월 하나를 선택해 예산 → 1688 주문 → 입고 → 실제 원가 → 자금 마감 순서로 처리합니다. 지금 입력해야 할 영역만 기본 화면에 두고, 원가 상세·월별 이력·원장은 접어서 보관합니다."
+        description="월 하나를 선택해 예산 → 1688 주문 → 배송대행지 바코드 출력 → 입고 → 실제 원가 → 자금 마감 순서로 처리합니다. 바코드 단계에서는 해당 월 실제 주문정보를 온돌패스 신청서와 자동 연결합니다."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -598,6 +598,24 @@ export default async function ChinaOrderManagerPage({
             />
             <FlowStep
               number="3"
+              title="배송대행지 바코드 출력"
+              state={receiptDone ? "done" : hasOrder ? "active" : "wait"}
+              detail={
+                receiptDone
+                  ? "입고 단계 통과 · 필요 시 월 주문정보로 다시 출력 가능"
+                  : hasOrder
+                    ? `${money.format(purchase?.assignedLineCount ?? selectedRows.length)}개 주문 품목 전달 · 온돌패스 주문번호로 B-code 자동연결`
+                    : "실주문 후 진행"
+              }
+              href={
+                hasOrder
+                  ? `/freight-barcode-request/monthly?month=${encodeURIComponent(selectedMonth)}`
+                  : undefined
+              }
+              actionLabel="바코드 출력으로 이동"
+            />
+            <FlowStep
+              number="4"
               title="입고"
               state={openQuantity ? "active" : receiptDone ? "done" : "wait"}
               detail={
@@ -609,7 +627,7 @@ export default async function ChinaOrderManagerPage({
               }
             />
             <FlowStep
-              number="4"
+              number="5"
               title="배송대행 실제비용·원가"
               state={forwarderDone ? "done" : receiptDone ? "active" : "wait"}
               detail={
@@ -621,7 +639,7 @@ export default async function ChinaOrderManagerPage({
               }
             />
             <FlowStep
-              number="5"
+              number="6"
               title="월 자금 마감"
               state={fundingDone ? "done" : forwarderDone ? "active" : "wait"}
               detail={
@@ -632,7 +650,7 @@ export default async function ChinaOrderManagerPage({
             />
           </div>
           <p className="mt-5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-3 text-xs leading-5 text-slate-300">
-            발주 마감은 추가 구매만 차단합니다. 이미 주문한 품목의 입고·실제 원가·자금 마감은 계속 진행됩니다.
+            발주 마감 후 배송대행지 바코드 출력에서 해당 월 주문번호·B-code를 온돌패스 신청서와 연결합니다. 이후 입고·실제 원가·자금 마감을 계속 진행합니다.
           </p>
         </aside>
       </section>
@@ -1058,11 +1076,15 @@ function FlowStep({
   title,
   state,
   detail,
+  href,
+  actionLabel,
 }: {
   number: string;
   title: string;
   state: "done" | "active" | "wait";
   detail: string;
+  href?: string;
+  actionLabel?: string;
 }) {
   const marker =
     state === "done"
@@ -1081,9 +1103,17 @@ function FlowStep({
       <span className={`grid size-8 shrink-0 place-items-center rounded-lg text-sm font-black ${marker}`}>
         {state === "done" ? "✓" : number}
       </span>
-      <div>
+      <div className="min-w-0 flex-1">
         <strong className="text-sm text-white">{title}</strong>
         <p className="mt-1 text-xs leading-5 text-slate-400">{detail}</p>
+        {href && actionLabel ? (
+          <Link
+            href={href}
+            className="mt-2 inline-flex rounded-lg border border-cyan-500/60 bg-cyan-400/10 px-3 py-1.5 text-xs font-black text-cyan-200 hover:bg-cyan-400/20"
+          >
+            {actionLabel} →
+          </Link>
+        ) : null}
       </div>
     </div>
   );
