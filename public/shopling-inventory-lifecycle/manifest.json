@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Commerce OS · Shopling 재고상태 전환",
+  "short_name": "재고상태 전환",
+  "version": "0.1.0",
+  "description": "B코드 품절 시 A6→A22 또는 A6→A21로 품절을 전송하고, 확정입고 후 같은 경로로 판매중을 복구합니다.",
+  "permissions": ["storage", "tabs", "scripting", "webNavigation"],
+  "host_permissions": [
+    "https://a.shopling.co.kr/*",
+    "https://commerce-os-ops-center.vercel.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Shopling 품절·판매중 전환",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://commerce-os-ops-center.vercel.app/*"],
+      "js": ["content-ops.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://a.shopling.co.kr/*"],
+      "js": ["content-shopling.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}
