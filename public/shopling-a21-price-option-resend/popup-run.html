@@ -10,10 +10,10 @@
 </head>
 <body>
 <h1>Shopling A21 가격·옵션 수정전송</h1>
-<p>v0.4.3 · 판매가/옵션별 최종 완료문구 확인 · 판매가 전체 우선 · 동시 1개</p>
+<p>v0.4.4 · 모든 frame + 접근성 트리 최종완료 확인 · 판매가 전체 우선 · 동시 1개</p>
 <div class="card" id="planCard">대상 확인 중...</div>
 <div class="card">
-  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · 판매가는 ‘상품 수정 전송이 완료되었습니다.’, 옵션은 ‘상품옵션 수정 전송이 완료되었습니다.’를 각각 따로 확인 · 해당 완료문구와 document.readyState=complete가 둘 다 확인되고 2.5초 안정된 뒤에만 다음 큐 진행 · 일부 마켓 결과표만 보이는 시점에는 완료 처리하지 않음 · 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 모든 판매가 배치를 끝낸 뒤 옵션 배치를 진행</div>
+  <div class="safe">판매가: 쇼핑몰별판매가(J) + 판매가만 수정 · 배송정보는 실제 ‘수정안함’ 재검증 · 판매가는 ‘상품 수정 전송이 완료되었습니다.’, 옵션은 ‘상품옵션 수정 전송이 완료되었습니다.’를 각각 확인 · v0.4.3처럼 top document 하나만 읽지 않고 결과창의 모든 실행 frame DOM과 Chrome Accessibility 트리까지 동시에 검사 · 처리중 문구가 남아 있으면 대기 · 해당 완료문구 + document complete가 2.5초 안정된 뒤에만 다음 큐 진행 · 일부 마켓 결과표만 보이는 시점에는 완료 처리하지 않음 · 마켓별 성공/실패는 판정하지 않음 · 전체 실행은 모든 판매가 배치를 끝낸 뒤 옵션 배치를 진행</div>
   <div id="runState" style="margin-top:10px">실행 대기</div>
   <div id="jobs"></div>
   <button id="test" class="test" disabled>1 GOODSKEY 안전 테스트</button>
