@@ -347,7 +347,10 @@ function baseForecast(
   if (pattern === "GROWTH") {
     const value =
       restoredRecent30 * 0.55 + previousTwo * 0.3 + fourToSix * 0.15;
-    return Math.min(value * 1.1, Math.max(restoredRecent30, recentThree * 1.5));
+    return Math.max(
+      restoredRecent30,
+      Math.min(value * 1.1, Math.max(restoredRecent30, recentThree * 1.5)),
+    );
   }
   if (pattern === "STABLE_CORE") {
     return recentThree * 0.6 + recentSix * 0.3 + annual * 0.1;
