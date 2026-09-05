@@ -136,7 +136,8 @@ test("Shopling stock guard keeps only the exact A6 menu and rejects the historic
   });
 
   const result = document.querySelectorAll(MENU_QUERY);
-  assert.deepEqual(result, [safeA6]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0], safeA6);
   assert.ok(!result.includes(historicalWrongA6));
 });
 
@@ -147,7 +148,7 @@ test("Shopling stock guard blocks prodBulkOptLst.phtml even when its visible lab
   );
   const { document } = await loadGuard({ candidates: [disguisedWrongRoute] });
 
-  assert.deepEqual(document.querySelectorAll(MENU_QUERY), []);
+  assert.equal(document.querySelectorAll(MENU_QUERY).length, 0);
 });
 
 test("Shopling stock guard refuses to guess when two distinct exact A6 routes exist", async () => {
@@ -155,7 +156,7 @@ test("Shopling stock guard refuses to guess when two distinct exact A6 routes ex
   const second = menu("[A6] 옵션대량수정", "/goods/a6-second.phtml");
   const { document } = await loadGuard({ candidates: [first, second] });
 
-  assert.deepEqual(document.querySelectorAll(MENU_QUERY), []);
+  assert.equal(document.querySelectorAll(MENU_QUERY).length, 0);
 });
 
 test("Shopling access-denied alert fails the active pre-submit job once and disables further menu navigation", async () => {
@@ -170,7 +171,9 @@ test("Shopling access-denied alert fails the active pre-submit job once and disa
     active,
   });
 
-  assert.deepEqual(document.querySelectorAll(MENU_QUERY), [safeA6]);
+  const beforeAlert = document.querySelectorAll(MENU_QUERY);
+  assert.equal(beforeAlert.length, 1);
+  assert.equal(beforeAlert[0], safeA6);
   window.dispatchEvent(
     new FakeCustomEvent("commerce-os-stock-main-alert", {
       detail: { message: "페이지 접근권한이 없습니다." },
@@ -186,7 +189,7 @@ test("Shopling access-denied alert fails the active pre-submit job once and disa
   assert.equal(failures[0].stage, "A6");
   assert.equal(failures[0].result?.code, "SHOPLING_PERMISSION_DENIED");
   assert.equal(failures[0].result?.ok, false);
-  assert.deepEqual(document.querySelectorAll(MENU_QUERY), []);
+  assert.equal(document.querySelectorAll(MENU_QUERY).length, 0);
 
   window.dispatchEvent(
     new FakeCustomEvent("commerce-os-stock-main-alert", {
