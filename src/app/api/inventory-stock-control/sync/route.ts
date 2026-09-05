@@ -4,6 +4,7 @@ import {
   normalizeShoplingStockSyncInput,
   storeInventoryOperation,
 } from "@/lib/inventoryStockControl";
+import { normalizeRetryableShoplingSyncReport } from "@/lib/inventoryStockSyncResolution";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -21,9 +22,15 @@ function unauthorized() {
   );
 }
 
+async function loadRetryableReport() {
+  return normalizeRetryableShoplingSyncReport(
+    await loadInventoryStockControlReport(),
+  );
+}
+
 export async function GET(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
-  const report = await loadInventoryStockControlReport();
+  const report = await loadRetryableReport();
   return Response.json(
     {
       ok: report.state === "READY",
@@ -76,7 +83,7 @@ export async function POST(request: Request) {
       correlationId: `shopling-stock:${event.barcode}`,
       snapshot: event,
     });
-    const report = await loadInventoryStockControlReport();
+    const report = await loadRetryableReport();
     return Response.json(
       {
         ok: true,
