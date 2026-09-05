@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling Stock State Sync",
   "short_name": "Stock State Sync",
-  "version": "0.1.1",
-  "description": "Commerce OS 품절 0 기준점과 입고확정에 따라 Shopling A6·A22 또는 A6·A21을 프레임 인식 직렬 실행해 품절/판매중 상태를 동기화합니다.",
+  "version": "0.1.2",
+  "description": "Commerce OS 품절 0 기준점과 입고확정에 따라 Shopling A6·A22 또는 A6·A21을 프레임 인식 직렬 실행하며, 정확 메뉴 경로 검증과 접근권한 차단 감지로 품절/판매중 상태를 안전하게 동기화합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
@@ -31,7 +31,7 @@
     },
     {
       "matches": ["https://a.shopling.co.kr/*"],
-      "js": ["content-shopling-v011.js"],
+      "js": ["menu-guard-v012.js", "content-shopling-v011.js"],
       "all_frames": true,
       "run_at": "document_idle"
     }
