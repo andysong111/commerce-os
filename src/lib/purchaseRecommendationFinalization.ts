@@ -223,8 +223,9 @@ export async function savePurchaseRecommendationFinalization(
   if (result.error) {
     throw new Error(`PURCHASE_FINALIZATION_STORE_FAILED:${result.error.message}`);
   }
+  const storedRows = Array.isArray(result.data) ? result.data : [];
   return {
-    duplicate: !result.data?.length,
+    duplicate: storedRows.length === 0,
     snapshot,
     sourceEventId,
   };
