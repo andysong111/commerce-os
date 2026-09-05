@@ -16,9 +16,7 @@ export type PortfolioItemInput = {
   netRequiredQuantity: number;
   unitCost: number;
   totalScore: number;
-  /** 공급처 참고정보. V2 예산배분과 수량결정에는 사용하지 않습니다. */
   moq?: number;
-  /** 공급처 참고정보. V2 예산배분과 수량결정에는 사용하지 않습니다. */
   cartonQuantity?: number;
 };
 
@@ -35,7 +33,6 @@ export type PortfolioItemResult = PortfolioItemInput & {
 
 export type PortfolioAllocationInput = {
   recent30DayRevenue: number;
-  grossBudgetOverrideKrw?: number;
   purchaseCostMultiplier?: number;
   minimumOrderAmount?: number;
   items: PortfolioItemInput[];
@@ -53,7 +50,7 @@ export type PortfolioAllocationResult = {
 
 function quantity(value: unknown) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.ceil(parsed)) : 0;
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
 }
 
 function normalizeMultiplier(value: unknown) {
@@ -75,6 +72,16 @@ export function calculateProductOrderBudget(
   );
 }
 
+function roundUpToCarton(quantityValue: number, cartonQuantity = 1) {
+  const unit = Math.max(1, Math.round(cartonQuantity));
+  return Math.max(0, Math.ceil(quantityValue / unit) * unit);
+}
+
+function roundDownToCarton(quantityValue: number, cartonQuantity = 1) {
+  const unit = Math.max(1, Math.round(cartonQuantity));
+  return Math.max(0, Math.floor(quantityValue / unit) * unit);
+}
+
 function groupRank(group: SalesOrderGroup) {
   if (group === "발주 추천") return 0;
   if (group === "소량 검토") return 1;
@@ -91,11 +98,9 @@ function emptyGroupCounts(): Record<SalesOrderGroup, number> {
 }
 
 /**
- * V2 현금 배분 규칙
- * 1) MOQ·박스입수로 필요수량을 올리거나 내리지 않는다.
- * 2) 5천원 기준은 강제 증량이 아니라 소액주문 검토표시로만 사용한다.
- * 3) 예산이 부족하면 상위 SKU 한두 개에 전액을 몰지 않고 35% → 70% → 100%
- *    세 라운드로 배정해 품절방지·안정상품·성장상품에 자금이 분산되게 한다.
+ * 직전 30일 정상매출의 절반을 총 발주비용 한도로 잡고 배송대행 포함 배수로
+ * 상품 주문 가능 예산을 계산한다. 이후 최소 주문금액·MOQ·박스입수를 적용한
+ * 상품을 발주 추천, 소량 검토, 점수 순서로 배분한다.
  */
 export function allocatePurchasePortfolio(
   input: PortfolioAllocationInput,
@@ -104,10 +109,7 @@ export function allocatePurchasePortfolio(
     0,
     Math.round(Number(input.recent30DayRevenue) || 0),
   );
-  const override = Number(input.grossBudgetOverrideKrw);
-  const grossBudget = Number.isFinite(override)
-    ? Math.max(0, Math.round(override))
-    : Math.round(recent30DayRevenue / 2);
+  const grossBudget = Math.round(recent30DayRevenue / 2);
   const purchaseCostMultiplier = normalizeMultiplier(
     input.purchaseCostMultiplier,
   );
@@ -125,14 +127,30 @@ export function allocatePurchasePortfolio(
   const prepared: PortfolioItemResult[] = input.items.map((source) => {
     const netRequiredQuantity = quantity(source.netRequiredQuantity);
     const unitCost = Math.max(0, Number(source.unitCost) || 0);
+    const moq = Math.max(1, Math.round(source.moq ?? 1));
+    const cartonQuantity = Math.max(
+      1,
+      Math.round(source.cartonQuantity ?? 1),
+    );
+    const economicRaw =
+      minimumOrderAmount > 0 && unitCost > 0
+        ? Math.ceil(minimumOrderAmount / unitCost)
+        : 0;
+    const minimumOrderQuantity = roundUpToCarton(
+      Math.max(moq, economicRaw),
+      cartonQuantity,
+    );
     const orderable =
-      ORDERABLE_GROUPS.has(source.group) &&
-      netRequiredQuantity > 0 &&
-      unitCost > 0;
-    const targetQuantity = orderable ? netRequiredQuantity : 0;
-    const targetCost = targetQuantity * unitCost;
+      ORDERABLE_GROUPS.has(source.group) && netRequiredQuantity > 0;
+    const targetQuantity = orderable
+      ? Math.max(netRequiredQuantity, minimumOrderQuantity)
+      : 0;
+    const minimumApplied = orderable && targetQuantity > netRequiredQuantity;
     const minimumReview =
-      orderable && minimumOrderAmount > 0 && targetCost < minimumOrderAmount;
+      minimumApplied &&
+      netRequiredQuantity > 0 &&
+      targetQuantity >
+        Math.max(netRequiredQuantity * 3, netRequiredQuantity + 10);
     const finalGroup =
       minimumReview && source.group === "발주 추천"
         ? ("소량 검토" as const)
@@ -142,14 +160,14 @@ export function allocatePurchasePortfolio(
       ...source,
       netRequiredQuantity,
       unitCost,
-      moq: source.moq,
-      cartonQuantity: source.cartonQuantity,
-      minimumOrderQuantity: orderable ? 1 : 0,
+      moq,
+      cartonQuantity,
+      minimumOrderQuantity,
       targetQuantity,
-      allocatedQuantity: 0,
+      allocatedQuantity: targetQuantity,
       finalGroup,
-      expectedCost: 0,
-      minimumApplied: false,
+      expectedCost: targetQuantity * unitCost,
+      minimumApplied,
       minimumReview,
       budgetReduced: false,
     };
@@ -166,44 +184,35 @@ export function allocatePurchasePortfolio(
     .sort((left, right) => {
       const group = groupRank(left.finalGroup) - groupRank(right.finalGroup);
       if (group !== 0) return group;
-      return (
-        right.totalScore - left.totalScore ||
-        left.barcode.localeCompare(right.barcode, "ko")
-      );
+      return right.totalScore - left.totalScore;
     });
 
-  const allocateRound = (fraction: number) => {
-    for (const entry of candidates) {
-      if (remainingBudget < entry.unitCost) break;
-      const roundTarget = Math.min(
-        entry.targetQuantity,
-        Math.max(1, Math.ceil(entry.targetQuantity * fraction)),
-      );
-      const missing = Math.max(0, roundTarget - entry.allocatedQuantity);
-      if (missing <= 0) continue;
-      const affordable = Math.floor(remainingBudget / entry.unitCost);
-      const added = Math.min(missing, affordable);
-      if (added <= 0) continue;
-      entry.allocatedQuantity += added;
-      remainingBudget = Math.max(
-        0,
-        remainingBudget - added * entry.unitCost,
-      );
+  for (const entry of candidates) {
+    const desiredCost = entry.targetQuantity * entry.unitCost;
+    if (desiredCost <= remainingBudget) {
+      remainingBudget -= desiredCost;
+      continue;
     }
-  };
 
-  allocateRound(0.35);
-  allocateRound(0.7);
-  allocateRound(1);
+    const affordableRaw = Math.floor(remainingBudget / entry.unitCost);
+    const affordable = Math.min(
+      entry.targetQuantity,
+      roundDownToCarton(affordableRaw, entry.cartonQuantity),
+    );
+    entry.allocatedQuantity =
+      affordable >= entry.minimumOrderQuantity ? affordable : 0;
+    entry.budgetReduced = entry.allocatedQuantity < entry.targetQuantity;
+    entry.finalGroup =
+      entry.allocatedQuantity > 0
+        ? entry.finalGroup
+        : ("발주 보류" as const);
+    entry.expectedCost = entry.allocatedQuantity * entry.unitCost;
+    remainingBudget = Math.max(0, remainingBudget - entry.expectedCost);
+  }
 
   const groupCounts = emptyGroupCounts();
   let expectedSpend = 0;
   for (const entry of prepared) {
-    entry.budgetReduced = entry.allocatedQuantity < entry.targetQuantity;
-    if (entry.targetQuantity > 0 && entry.allocatedQuantity <= 0) {
-      entry.finalGroup = "발주 보류";
-    }
-    entry.expectedCost = entry.allocatedQuantity * entry.unitCost;
     groupCounts[entry.finalGroup] += 1;
     if (ORDERABLE_GROUPS.has(entry.finalGroup)) {
       expectedSpend += entry.expectedCost;
