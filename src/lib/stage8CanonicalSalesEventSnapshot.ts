@@ -6,6 +6,7 @@ import {
 import {
   SALES_EVENT_CHUNK,
   loadProductMasterShoplingSalesEventSyncStatus,
+  type SalesEventSyncStatus,
 } from "@/lib/productMasterShoplingSalesEventSync";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -32,6 +33,15 @@ export type Stage8CanonicalSalesEventSnapshot = {
   writesEnabled: false;
   events: CombinedSalesEvent[];
 };
+
+const CANONICAL_REPORT_READY_STATES: ReadonlySet<SalesEventSyncStatus["state"]> =
+  new Set(["READY_CANARY", "READY_FULL", "COMPLETED"]);
+
+export function isStage8CanonicalSalesReportReadyState(
+  state: SalesEventSyncStatus["state"],
+) {
+  return CANONICAL_REPORT_READY_STATES.has(state);
+}
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -65,7 +75,7 @@ async function loadSalesEventChunks(requestId: string) {
 export async function loadStage8CanonicalSalesEventSnapshot(): Promise<Stage8CanonicalSalesEventSnapshot> {
   const generatedAt = new Date().toISOString();
   const status = await loadProductMasterShoplingSalesEventSyncStatus();
-  if (status.state !== "COMPLETED" || !status.requestId) {
+  if (!status.requestId || !isStage8CanonicalSalesReportReadyState(status.state)) {
     return {
       generatedAt,
       state: "BLOCKED",
@@ -90,10 +100,11 @@ export async function loadStage8CanonicalSalesEventSnapshot(): Promise<Stage8Can
   const orderedDates = validEvents
     .map((event) => event.occurredAt)
     .sort((left, right) => Date.parse(left) - Date.parse(right));
-  // coverageEndAt means how far the completed canonical read has observed,
-  // not the timestamp of the most recent sale. A sold-out SKU may correctly
-  // have no sale after a reset, so requiring a post-reset sale would block
-  // exact inventory forever. analysisAsOf is the completed read's upper bound.
+  // coverageEndAt means how far the canonical read has observed,
+  // not the timestamp of the most recent sale. READY_CANARY/READY_FULL already
+  // have a completed report; downstream Product Master write promotion is not
+  // required for this read-only exact-inventory consumer. A sold-out SKU may
+  // correctly have no sale after a reset, so analysisAsOf is the read upper bound.
   const coverageEndAt = status.analysisAsOf ?? orderedDates.at(-1) ?? null;
   const stable = {
     requestId: status.requestId,
