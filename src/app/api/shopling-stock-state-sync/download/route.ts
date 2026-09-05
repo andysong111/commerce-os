@@ -5,14 +5,14 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const ROOT = "shopling-stock-state-sync";
 const FILES = [
   "manifest.json",
-  "background.js",
+  "background-v011.js",
   "content-ops.js",
   "main-shopling.js",
-  "content-shopling.js",
+  "content-shopling-v011.js",
   "popup.html",
   "popup.js",
   "README.txt",
@@ -55,7 +55,7 @@ export async function GET() {
       if (manifest.version !== VERSION) {
         throw new Error("shopling_stock_state_manifest_version_mismatch");
       }
-      if (manifest.background?.service_worker !== "background.js") {
+      if (manifest.background?.service_worker !== "background-v011.js") {
         throw new Error("shopling_stock_state_background_required");
       }
       if (manifest.action?.default_popup !== "popup.html") {
@@ -91,13 +91,16 @@ export async function GET() {
           script.all_frames === true,
       );
       const shopling = manifest.content_scripts?.find((script) =>
-        script.js?.includes("content-shopling.js"),
+        script.js?.includes("content-shopling-v011.js"),
       );
       const ops = manifest.content_scripts?.find((script) =>
         script.js?.includes("content-ops.js"),
       );
       if (!main || !shopling || !ops) {
         throw new Error("shopling_stock_state_content_scripts_missing");
+      }
+      if (shopling.all_frames !== true) {
+        throw new Error("shopling_stock_state_shopling_all_frames_required");
       }
     }
     entries[fileName] = strToU8(source);
