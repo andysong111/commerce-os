@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type ProductKind = "OPTION" | "SINGLE";
 type DesiredStatus = "SOLD_OUT" | "ON_SALE";
 type SyncOutcome = "STARTED" | "SUCCEEDED" | "FAILED" | "UNCERTAIN";
+type ReportLoadState = "LOADING" | "READY" | "BLOCKED" | "ERROR";
 
 type StockRow = {
   barcode: string;
@@ -119,6 +120,8 @@ function routeLabel(job: SyncJob) {
 
 export function InventoryStockControlPanel() {
   const [report, setReport] = useState<StockReport | null>(null);
+  const [reportLoadState, setReportLoadState] =
+    useState<ReportLoadState>("LOADING");
   const [jobs, setJobs] = useState<SyncJob[]>([]);
   const [barcode, setBarcode] = useState("");
   const [productKind, setProductKind] = useState<ProductKind>("OPTION");
@@ -131,32 +134,68 @@ export function InventoryStockControlPanel() {
   const handledResults = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [stateResponse, jobsResponse] = await Promise.all([
-      fetch("/api/inventory-stock-control", {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      }),
-      fetch("/api/inventory-stock-control/sync", {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-      }),
-    ]);
-    const statePayload = (await stateResponse.json().catch(() => ({}))) as {
-      report?: StockReport;
-      message?: string;
-    };
-    const jobsPayload = (await jobsResponse.json().catch(() => ({}))) as {
-      jobs?: SyncJob[];
-    };
-    if (statePayload.report) setReport(statePayload.report);
-    setJobs(Array.isArray(jobsPayload.jobs) ? jobsPayload.jobs : []);
-    if (!stateResponse.ok && statePayload.message) setNotice(statePayload.message);
+    setReportLoadState((current) =>
+      current === "READY" ? current : "LOADING",
+    );
+    try {
+      const [stateResponse, jobsResponse] = await Promise.all([
+        fetch("/api/inventory-stock-control", {
+          cache: "no-store",
+          headers: { accept: "application/json" },
+        }),
+        fetch("/api/inventory-stock-control/sync", {
+          cache: "no-store",
+          headers: { accept: "application/json" },
+        }),
+      ]);
+      const statePayload = (await stateResponse.json().catch(() => ({}))) as {
+        report?: StockReport;
+        message?: string;
+      };
+      const jobsPayload = (await jobsResponse.json().catch(() => ({}))) as {
+        jobs?: SyncJob[];
+        message?: string;
+      };
+
+      if (!statePayload.report) {
+        throw new Error(
+          statePayload.message ||
+            "재고·품절 원장 응답에 상태 보고서가 없습니다.",
+        );
+      }
+
+      setReport(statePayload.report);
+      if (!stateResponse.ok || statePayload.report.state !== "READY") {
+        setReportLoadState("BLOCKED");
+        const blockerMessage = statePayload.report.blockers.length
+          ? statePayload.report.blockers.join(" · ")
+          : statePayload.report.message;
+        setNotice(
+          `재고 원장 조회가 차단되었습니다: ${blockerMessage} 0건으로 간주하지 않습니다.`,
+        );
+      } else {
+        setReportLoadState("READY");
+      }
+
+      if (!jobsResponse.ok) {
+        throw new Error(
+          jobsPayload.message || "Shopling 동기화 작업목록을 불러오지 못했습니다.",
+        );
+      }
+      setJobs(Array.isArray(jobsPayload.jobs) ? jobsPayload.jobs : []);
+    } catch (error) {
+      setReportLoadState("ERROR");
+      const message =
+        error instanceof Error
+          ? error.message
+          : "재고·품절 원장을 불러오지 못했습니다.";
+      setNotice(`${message} 조회 실패를 0건으로 처리하지 않습니다.`);
+      throw error;
+    }
   }, []);
 
   useEffect(() => {
-    void refresh().catch(() =>
-      setNotice("재고·품절 원장을 불러오지 못했습니다."),
-    );
+    void refresh().catch(() => undefined);
   }, [refresh]);
 
   const recordSync = useCallback(
@@ -291,6 +330,8 @@ export function InventoryStockControlPanel() {
     () => jobs.filter((job) => job.jobId !== runningJobId),
     [jobs, runningJobId],
   );
+  const reportReady = reportLoadState === "READY" && report?.state === "READY";
+  const unresolvedMetric = reportLoadState === "LOADING" ? "조회 중" : "—";
 
   const saveReset = async () => {
     setNotice("");
@@ -304,6 +345,12 @@ export function InventoryStockControlPanel() {
     }
     if (productKind === "SINGLE" && !modelNo.trim()) {
       setNotice("단품은 A21 검색에 사용할 모델번호가 필요합니다.");
+      return;
+    }
+    if (!report) {
+      setNotice(
+        "재고 원장 조회가 완료되기 전에는 새 기준점을 저장하지 않습니다.",
+      );
       return;
     }
     setLoading(true);
@@ -443,12 +490,22 @@ export function InventoryStockControlPanel() {
         <button
           type="button"
           onClick={saveReset}
-          disabled={loading}
+          disabled={loading || !report}
           className="mt-4 rounded-xl bg-rose-700 px-5 py-3 text-sm font-black text-white hover:bg-rose-800 disabled:bg-slate-400"
         >
-          {loading ? "기준점 저장 중..." : "품절 확정 · 재고 0 초기화"}
+          {loading
+            ? "기준점 저장 중..."
+            : !report
+              ? "재고 원장 확인 중..."
+              : "품절 확정 · 재고 0 초기화"}
         </button>
       </section>
+
+      {reportLoadState === "LOADING" ? (
+        <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold leading-6 text-blue-950">
+          재고 기준점과 정확재고 원장을 조회하고 있습니다. 조회가 끝나기 전에는 0건으로 표시하지 않습니다.
+        </section>
+      ) : null}
 
       {notice ? (
         <section className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold leading-6 text-amber-950">
@@ -457,16 +514,31 @@ export function InventoryStockControlPanel() {
       ) : null}
 
       <section className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
-        <Metric label="0 기준점" value={report?.resetCount ?? 0} />
-        <Metric label="정확재고 계산" value={report?.exactCount ?? 0} />
-        <Metric label="품절 상태" value={report?.soldOutCount ?? 0} />
-        <Metric label="판매중 상태" value={report?.onSaleCount ?? 0} />
+        <Metric
+          label="0 기준점"
+          value={reportReady ? report.resetCount : unresolvedMetric}
+        />
+        <Metric
+          label="정확재고 계산"
+          value={reportReady ? report.exactCount : unresolvedMetric}
+        />
+        <Metric
+          label="품절 상태"
+          value={reportReady ? report.soldOutCount : unresolvedMetric}
+        />
+        <Metric
+          label="판매중 상태"
+          value={reportReady ? report.onSaleCount : unresolvedMetric}
+        />
         <Metric
           label="Shopling 대기"
-          value={report?.pendingSyncCount ?? 0}
+          value={reportReady ? report.pendingSyncCount : unresolvedMetric}
           emphasized
         />
-        <Metric label="수동확인" value={report?.uncertainSyncCount ?? 0} />
+        <Metric
+          label="수동확인"
+          value={reportReady ? report.uncertainSyncCount : unresolvedMetric}
+        />
       </section>
 
       <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm">
@@ -505,50 +577,63 @@ export function InventoryStockControlPanel() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pendingJobs.map((job) => (
-                <tr key={job.jobId}>
-                  <td className="px-3 py-3">
-                    <strong className="font-mono text-slate-950">
-                      {job.barcode}
-                    </strong>
-                    <span className="ml-2 text-slate-500">
-                      {job.modelNo ? `${job.modelNo} · ` : ""}
-                      {job.productName}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 font-black text-slate-950">
-                    {number.format(job.exactInventoryQuantity)}개
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={`rounded-full px-2.5 py-1 font-black ${
-                        job.desiredStatus === "SOLD_OUT"
-                          ? "bg-rose-100 text-rose-800"
-                          : "bg-emerald-100 text-emerald-800"
-                      }`}
-                    >
-                      {statusLabel(job.desiredStatus)}
-                    </span>
-                    <span className="ml-2 text-slate-500">
-                      {kindLabel(job.productKind)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 font-bold text-slate-700">
-                    {routeLabel(job)}
-                  </td>
-                  <td className="px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={() => startJob(job)}
-                      disabled={Boolean(runningJobId) || !extensionReady}
-                      className="rounded-lg bg-slate-950 px-3 py-2 font-black text-white disabled:bg-slate-400"
-                    >
-                      1건 안전 실행
-                    </button>
+              {reportReady
+                ? pendingJobs.map((job) => (
+                    <tr key={job.jobId}>
+                      <td className="px-3 py-3">
+                        <strong className="font-mono text-slate-950">
+                          {job.barcode}
+                        </strong>
+                        <span className="ml-2 text-slate-500">
+                          {job.modelNo ? `${job.modelNo} · ` : ""}
+                          {job.productName}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 font-black text-slate-950">
+                        {number.format(job.exactInventoryQuantity)}개
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={`rounded-full px-2.5 py-1 font-black ${
+                            job.desiredStatus === "SOLD_OUT"
+                              ? "bg-rose-100 text-rose-800"
+                              : "bg-emerald-100 text-emerald-800"
+                          }`}
+                        >
+                          {statusLabel(job.desiredStatus)}
+                        </span>
+                        <span className="ml-2 text-slate-500">
+                          {kindLabel(job.productKind)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 font-bold text-slate-700">
+                        {routeLabel(job)}
+                      </td>
+                      <td className="px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => startJob(job)}
+                          disabled={Boolean(runningJobId) || !extensionReady}
+                          className="rounded-lg bg-slate-950 px-3 py-2 font-black text-white disabled:bg-slate-400"
+                        >
+                          1건 안전 실행
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                : null}
+              {!reportReady ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-4 py-8 text-center font-bold text-amber-800"
+                  >
+                    {reportLoadState === "LOADING"
+                      ? "Shopling 작업목록을 조회 중입니다."
+                      : "재고 원장 상태가 확정되지 않아 작업목록을 0건으로 간주하지 않습니다."}
                   </td>
                 </tr>
-              ))}
-              {!pendingJobs.length ? (
+              ) : !pendingJobs.length ? (
                 <tr>
                   <td
                     colSpan={5}
@@ -578,43 +663,56 @@ export function InventoryStockControlPanel() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {(report?.rows ?? []).map((row) => (
-              <tr key={`${row.barcode}:${row.resetAt}`}>
-                <td className="px-3 py-3">
-                  <strong className="font-mono text-slate-950">
-                    {row.barcode}
-                  </strong>
-                  <span className="ml-2 text-slate-500">
-                    {row.modelNo ? `${row.modelNo} · ` : ""}
-                    {row.productName}
-                  </span>
-                </td>
-                <td className="px-3 py-3 font-bold">
-                  {kindLabel(row.productKind)}
-                </td>
-                <td className="px-3 py-3 text-right">
-                  {number.format(row.receivedSinceReset)}
-                </td>
-                <td className="px-3 py-3 text-right">
-                  {number.format(row.soldSinceReset)}
-                </td>
-                <td className="px-3 py-3 text-right text-base font-black text-slate-950">
-                  {number.format(row.exactInventoryQuantity)}
-                </td>
-                <td className="px-3 py-3">{row.recent30StockoutDays}일</td>
-                <td className="px-3 py-3 font-black">
-                  {statusLabel(row.desiredStatus)}
-                </td>
-                <td className="px-3 py-3 text-slate-600">
-                  {row.syncBlocked
-                    ? row.syncBlockReason
-                    : row.syncNeeded
-                      ? "동기화 대기"
-                      : `완료 · ${row.latestSyncOutcome ?? "SUCCEEDED"}`}
+            {reportReady
+              ? report.rows.map((row) => (
+                  <tr key={`${row.barcode}:${row.resetAt}`}>
+                    <td className="px-3 py-3">
+                      <strong className="font-mono text-slate-950">
+                        {row.barcode}
+                      </strong>
+                      <span className="ml-2 text-slate-500">
+                        {row.modelNo ? `${row.modelNo} · ` : ""}
+                        {row.productName}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 font-bold">
+                      {kindLabel(row.productKind)}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {number.format(row.receivedSinceReset)}
+                    </td>
+                    <td className="px-3 py-3 text-right">
+                      {number.format(row.soldSinceReset)}
+                    </td>
+                    <td className="px-3 py-3 text-right text-base font-black text-slate-950">
+                      {number.format(row.exactInventoryQuantity)}
+                    </td>
+                    <td className="px-3 py-3">{row.recent30StockoutDays}일</td>
+                    <td className="px-3 py-3 font-black">
+                      {statusLabel(row.desiredStatus)}
+                    </td>
+                    <td className="px-3 py-3 text-slate-600">
+                      {row.syncBlocked
+                        ? row.syncBlockReason
+                        : row.syncNeeded
+                          ? "동기화 대기"
+                          : `완료 · ${row.latestSyncOutcome ?? "SUCCEEDED"}`}
+                    </td>
+                  </tr>
+                ))
+              : null}
+            {!reportReady ? (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-4 py-8 text-center font-bold text-amber-800"
+                >
+                  {reportLoadState === "LOADING"
+                    ? "재고 기준점과 정확재고를 조회 중입니다."
+                    : "재고 원장 조회가 완료되지 않았습니다. 실패 또는 차단 상태를 0건으로 표시하지 않습니다."}
                 </td>
               </tr>
-            ))}
-            {!report?.rows.length ? (
+            ) : !report.rows.length ? (
               <tr>
                 <td
                   colSpan={8}
@@ -637,7 +735,7 @@ function Metric({
   emphasized = false,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   emphasized?: boolean;
 }) {
   return (
@@ -650,7 +748,7 @@ function Metric({
     >
       <span className="text-[11px] font-bold text-slate-500">{label}</span>
       <strong className="mt-1 block text-xl font-black text-slate-950">
-        {number.format(value)}
+        {typeof value === "number" ? number.format(value) : value}
       </strong>
     </article>
   );
