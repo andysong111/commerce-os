@@ -1,6 +1,7 @@
 (() => {
   const REQUEST_EVENT = "commerce-os-stock-main-click";
   const RESULT_EVENT = "commerce-os-stock-main-click-result";
+  const ALERT_EVENT = "commerce-os-stock-main-alert";
   const TOKEN_ATTRIBUTE = "data-commerce-os-stock-click-token";
 
   const text = (value) =>
@@ -8,6 +9,21 @@
       .normalize("NFKC")
       .replace(/\s+/g, " ")
       .trim();
+
+  const browserAlert = window.alert.bind(window);
+  window.alert = (message) => {
+    const normalized = text(message);
+    window.dispatchEvent(
+      new CustomEvent(ALERT_EVENT, {
+        detail: {
+          message: normalized,
+          href: String(location.href || ""),
+          title: String(document.title || ""),
+        },
+      }),
+    );
+    return browserAlert(message);
+  };
 
   window.addEventListener(REQUEST_EVENT, (event) => {
     const token = text(event?.detail?.token);
