@@ -157,10 +157,52 @@ export async function POST(request: Request) {
       correlationId: `inventory-stock:${event.barcode}`,
       snapshot: event,
     });
+
+    // A write is not considered successful until the canonical read path can see
+    // the exact reset again. This prevents a transient/permission/cache problem
+    // from being presented to the operator as a durable 0 baseline.
+    const persistenceReport = await loadInventoryStockControlReport();
+    const persistedReset = persistenceReport.rows.some(
+      (row) =>
+        row.barcode === event.barcode && row.resetEventId === event.eventId,
+    );
+    if (!persistedReset) {
+      return Response.json(
+        {
+          ok: false,
+          code: "INVENTORY_STOCKOUT_RESET_PERSISTENCE_NOT_VISIBLE",
+          event,
+          report: persistenceReport,
+          message:
+            "재고 0 기준점 저장 직후 재조회 검증에 실패했습니다. 저장 성공으로 처리하지 않았으며, 원장 가시성을 확인한 뒤 다시 시도해야 합니다.",
+        },
+        { status: 503, headers: { "cache-control": "no-store" } },
+      );
+    }
+
     const canonicalSalesRefresh = await ensureCanonicalSalesCoverageAfterReset(
       event.occurredAt,
     );
     const report = await loadInventoryStockControlReport();
+    const stillVisible = report.rows.some(
+      (row) =>
+        row.barcode === event.barcode && row.resetEventId === event.eventId,
+    );
+    if (!stillVisible) {
+      return Response.json(
+        {
+          ok: false,
+          code: "INVENTORY_STOCKOUT_RESET_PERSISTENCE_LOST_AFTER_REFRESH",
+          event,
+          canonicalSalesRefresh,
+          report,
+          message:
+            "Canonical 판매 최신화 이후 기준점 재조회 검증에 실패했습니다. 기준점을 0건으로 간주하지 않고 작업을 차단했습니다.",
+        },
+        { status: 503, headers: { "cache-control": "no-store" } },
+      );
+    }
+
     return Response.json(
       {
         ok: true,
@@ -169,8 +211,8 @@ export async function POST(request: Request) {
         canonicalSalesRefresh,
         report,
         message: stored.duplicate
-          ? "이미 저장한 품절 기준점입니다. Canonical 판매 범위 최신화 상태를 함께 확인했습니다."
-          : "B코드 재고를 0으로 초기화하고, 기준시점 이후까지 확인할 Canonical 판매 최신화를 접수했습니다.",
+          ? "이미 저장한 품절 기준점입니다. 저장·재조회 일치와 Canonical 판매 범위를 함께 확인했습니다."
+          : "B코드 재고를 0으로 초기화했고 저장·재조회 일치를 검증한 뒤, 기준시점 이후까지 확인할 Canonical 판매 최신화를 접수했습니다.",
       },
       {
         status: stored.duplicate ? 200 : 201,
