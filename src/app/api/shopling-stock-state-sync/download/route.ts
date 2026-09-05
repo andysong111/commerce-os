@@ -5,13 +5,14 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 const ROOT = "shopling-stock-state-sync";
 const FILES = [
   "manifest.json",
   "background-v011.js",
   "content-ops.js",
   "main-shopling.js",
+  "menu-guard-v012.js",
   "content-shopling-v011.js",
   "popup.html",
   "popup.js",
@@ -90,8 +91,10 @@ export async function GET() {
           script.js?.includes("main-shopling.js") &&
           script.all_frames === true,
       );
-      const shopling = manifest.content_scripts?.find((script) =>
-        script.js?.includes("content-shopling-v011.js"),
+      const shopling = manifest.content_scripts?.find(
+        (script) =>
+          script.js?.includes("menu-guard-v012.js") &&
+          script.js?.includes("content-shopling-v011.js"),
       );
       const ops = manifest.content_scripts?.find((script) =>
         script.js?.includes("content-ops.js"),
