@@ -4,6 +4,7 @@ import {
   normalizeStockoutResetInput,
   storeInventoryOperation,
 } from "@/lib/inventoryStockControl";
+import { normalizeRetryableShoplingSyncReport } from "@/lib/inventoryStockSyncResolution";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 import { wakeOpsDispatchTask } from "@/lib/opsAdaptiveDispatcher";
 import {
@@ -35,12 +36,16 @@ function unauthorized() {
 }
 
 async function loadStableInventoryStockControlReport() {
-  const first = await loadInventoryStockControlReport();
+  const first = normalizeRetryableShoplingSyncReport(
+    await loadInventoryStockControlReport(),
+  );
   if (first.state !== "READY" || first.resetCount > 0) return first;
 
   // A reset ledger has no operator delete path, so an unexpected zero can be a
   // transient read. Re-read once before presenting an empty canonical state.
-  const second = await loadInventoryStockControlReport();
+  const second = normalizeRetryableShoplingSyncReport(
+    await loadInventoryStockControlReport(),
+  );
   return second.resetCount >= first.resetCount ? second : first;
 }
 
