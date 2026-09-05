@@ -4,6 +4,7 @@ import {
   loadProductMasterShoplingSalesEventSyncStatus,
   runProductMasterShoplingSalesEventSyncStep,
 } from "@/lib/productMasterShoplingSalesEventSync";
+import { recoverProductMasterShoplingSalesEventRequest } from "@/lib/productMasterShoplingSalesEventRecovery";
 import { loadCandidatePromotionGate } from "@/lib/stage8CandidatePromotionGate";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 import { wakeOpsDispatchTask } from "@/lib/opsAdaptiveDispatcher";
@@ -121,6 +122,28 @@ export async function POST(request: Request) {
     }
 
     const current = await loadProductMasterShoplingSalesEventSyncStatus();
+    if (current.state === "FAILED") {
+      const recovered = await recoverProductMasterShoplingSalesEventRequest();
+      const wakeRequested = recovered.recovered
+        ? await wakeOpsDispatchTask("product-master-shopling-sales-events", 0)
+        : false;
+      return Response.json(
+        {
+          ok: recovered.recovered,
+          accepted: recovered.recovered,
+          recovered: recovered.recovered,
+          wakeRequested,
+          ...recovered,
+          message: recovered.recovered
+            ? "실패한 판매 이벤트 읽기를 같은 분석시점으로 더 작은 조회구간에 안전 재접수하고 worker를 깨웠습니다."
+            : "판매 이벤트 자동 축소 재시도 한도를 소진했습니다. 외부 쓰기는 차단된 상태입니다.",
+        },
+        {
+          status: recovered.recovered ? 202 : 409,
+          headers: { "cache-control": "no-store" },
+        },
+      );
+    }
     if (
       [
         "QUEUED",
