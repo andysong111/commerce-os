@@ -13,8 +13,35 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
+const OPERATOR_BURST_MAX_STEPS = 60;
+const OPERATOR_BURST_BUDGET_MS = 240_000;
+
 function authorized(request: Request) {
   return isSameOriginOpsRequest(request);
+}
+
+async function runOperatorBurst() {
+  const startedAt = Date.now();
+  let stepCount = 0;
+  let result = await runProductMasterShoplingSalesEventSyncStep();
+  stepCount += 1;
+  while (
+    stepCount < OPERATOR_BURST_MAX_STEPS &&
+    result.processed === true &&
+    result.state === "RUNNING" &&
+    Date.now() - startedAt < OPERATOR_BURST_BUDGET_MS
+  ) {
+    result = await runProductMasterShoplingSalesEventSyncStep();
+    stepCount += 1;
+  }
+  return {
+    ...result,
+    stepCount,
+    elapsedMs: Date.now() - startedAt,
+    budgetReached:
+      stepCount >= OPERATOR_BURST_MAX_STEPS ||
+      Date.now() - startedAt >= OPERATOR_BURST_BUDGET_MS,
+  };
 }
 
 export async function GET(request: Request) {
@@ -58,6 +85,12 @@ export async function POST(request: Request) {
     if (action === "run-next") {
       return Response.json(
         { ok: true, result: await runProductMasterShoplingSalesEventSyncStep() },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (action === "run-burst") {
+      return Response.json(
+        { ok: true, result: await runOperatorBurst() },
         { headers: { "cache-control": "no-store" } },
       );
     }
