@@ -34,6 +34,16 @@ function unauthorized() {
   );
 }
 
+async function loadStableInventoryStockControlReport() {
+  const first = await loadInventoryStockControlReport();
+  if (first.state !== "READY" || first.resetCount > 0) return first;
+
+  // A reset ledger has no operator delete path, so an unexpected zero can be a
+  // transient read. Re-read once before presenting an empty canonical state.
+  const second = await loadInventoryStockControlReport();
+  return second.resetCount >= first.resetCount ? second : first;
+}
+
 async function ensureCanonicalSalesCoverageAfterReset(resetAt: string) {
   try {
     const current = await loadProductMasterShoplingSalesEventSyncStatus();
@@ -119,7 +129,7 @@ async function ensureCanonicalSalesCoverageAfterReset(resetAt: string) {
 
 export async function GET(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
-  const report = await loadInventoryStockControlReport();
+  const report = await loadStableInventoryStockControlReport();
   return Response.json(
     { ok: report.state === "READY", report },
     {
@@ -161,7 +171,7 @@ export async function POST(request: Request) {
     // A write is not considered successful until the canonical read path can see
     // the exact reset again. This prevents a transient/permission/cache problem
     // from being presented to the operator as a durable 0 baseline.
-    const persistenceReport = await loadInventoryStockControlReport();
+    const persistenceReport = await loadStableInventoryStockControlReport();
     const persistedReset = persistenceReport.rows.some(
       (row) =>
         row.barcode === event.barcode && row.resetEventId === event.eventId,
@@ -183,7 +193,7 @@ export async function POST(request: Request) {
     const canonicalSalesRefresh = await ensureCanonicalSalesCoverageAfterReset(
       event.occurredAt,
     );
-    const report = await loadInventoryStockControlReport();
+    const report = await loadStableInventoryStockControlReport();
     const stillVisible = report.rows.some(
       (row) =>
         row.barcode === event.barcode && row.resetEventId === event.eventId,
