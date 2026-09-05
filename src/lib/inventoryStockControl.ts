@@ -651,8 +651,9 @@ export async function storeInventoryOperation(input: {
   if (result.error) {
     throw new Error(`INVENTORY_OPERATION_STORE_FAILED:${result.error.message}`);
   }
+  const storedRows = Array.isArray(result.data) ? result.data : [];
   return {
-    duplicate: !result.data?.length,
-    rows: result.data ?? [],
+    duplicate: storedRows.length === 0,
+    rows: storedRows,
   };
 }
