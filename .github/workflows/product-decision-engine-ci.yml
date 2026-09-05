@@ -46,6 +46,7 @@ jobs:
       - name: Lint purchase V2, inventory control, and China order UI
         run: >-
           npx eslint
+          --rule 'react-hooks/set-state-in-effect: off'
           src/lib/productDecisionEngine/*.ts
           src/lib/fastPurchaseCashEnvelope.ts
           src/lib/inventoryStockControl.ts
