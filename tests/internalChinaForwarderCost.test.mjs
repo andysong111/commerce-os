@@ -9,7 +9,7 @@ const [
   panel,
   historyPanel,
   fallbackPanel,
-  layout,
+  page,
   receiptEngine,
   workflow,
 ] = await Promise.all([
@@ -19,7 +19,7 @@ const [
   readFile("src/components/china-order-manager/InternalChinaReceiptPanel.tsx", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaForwarderCloseHistory.tsx", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaForwarderCostFallback.tsx", "utf8"),
-  readFile("src/app/china-order-manager/layout.tsx", "utf8"),
+  readFile("src/app/china-order-manager/page.tsx", "utf8"),
   readFile("src/lib/internalChinaReceipt.ts", "utf8"),
   readFile(".github/workflows/china-order-ledger-ci.yml", "utf8"),
 ]);
@@ -63,16 +63,16 @@ test("receipt close requires the exact forwarder amount only for the final recei
 });
 
 test("completed monthly drafts remain visible until actual landed cost is closed", () => {
-  assert.ok(layout.includes("draft.orderedQuantity > 0"));
-  assert.ok(layout.includes("currentCycleDrafts.map"));
-  assert.ok(layout.includes("실제 원가 미마감"));
-  assert.ok(layout.includes("loadInternalChinaForwarderCostSummary"));
+  assert.ok(page.includes(".filter((draft) => draft.orderedQuantity > 0)"));
+  assert.ok(page.includes("selectedDrafts"));
+  assert.ok(page.includes("loadInternalChinaForwarderCostSummary"));
+  assert.ok(page.includes("실제 원가 마감"));
 });
 
 test("recent closed monthly landed costs stay visible after the calendar month changes", () => {
-  assert.ok(layout.includes("loadRecentStoredInternalChinaForwarderCloses(6)"));
-  assert.ok(layout.includes("InternalChinaForwarderCloseHistory"));
-  assert.ok(layout.includes("FORWARDER_HISTORY_TIMEBOX_MS = 3_000"));
+  assert.ok(page.includes("loadRecentStoredInternalChinaForwarderCloses(12)"));
+  assert.ok(page.includes("월별 마감 이력"));
+  assert.ok(page.includes("selectedForwarderCloses"));
   assert.ok(storedClose.includes("loadRecentStoredInternalChinaForwarderCloses"));
   assert.ok(storedClose.includes("order=started_at.desc"));
   assert.ok(historyPanel.includes("최근 마감 원가"));
@@ -116,20 +116,19 @@ test("landed-cost close shows total monthly spend budget and remaining cash agai
 });
 
 test("China order manager fails fast instead of exhausting the Vercel function timeout", () => {
-  assert.ok(layout.includes("RECEIPT_LEDGER_TIMEBOX_MS = 4_500"));
-  assert.ok(layout.includes("DISPLAY_METADATA_TIMEBOX_MS = 2_500"));
-  assert.ok(layout.includes("FORWARDER_CLOSE_TIMEBOX_MS = 2_000"));
-  assert.ok(layout.includes("FORWARDER_SUMMARY_TIMEBOX_MS = 4_500"));
-  assert.ok(layout.includes("Promise.race"));
-  assert.ok(layout.includes("발주원장 실시간 조회 지연"));
-  assert.ok(layout.includes("실제 원장 데이터는 변경되지 않았습니다"));
+  assert.ok(page.includes("FORWARDER_TIMEOUT_MS = 4_500"));
+  assert.ok(page.includes("METADATA_TIMEOUT_MS = 2_500"));
+  assert.ok(page.includes("Promise.race"));
+  assert.ok(page.includes("실시간 원가요약 조회가 4.5초를 넘었습니다"));
+  assert.ok(page.includes("원장은 변경되지 않았습니다. 잠시 뒤 새로고침하세요"));
 });
 
 test("stored forwarder close is checked before the slower detailed summary", () => {
-  assert.ok(layout.includes("loadStoredInternalChinaForwarderClose"));
-  assert.ok(layout.includes("checkStoredForwarderClose"));
-  assert.ok(layout.includes('storedClose.kind === "unknown"'));
-  assert.ok(layout.includes("if (storedClose.summary)"));
+  const storedIndex = page.indexOf("const stored = forwarderCloses.find");
+  const summaryIndex = page.indexOf("loadInternalChinaForwarderCostSummary", storedIndex);
+  assert.ok(storedIndex >= 0);
+  assert.ok(summaryIndex > storedIndex);
+  assert.ok(route.includes("loadStoredInternalChinaForwarderClose"));
   assert.ok(storedClose.includes("source_event_id=eq."));
   assert.ok(storedClose.includes("internal-china-forwarder-cost:${draftId}"));
   assert.ok(storedClose.includes("READ_TIMEOUT_MS = 1_800"));
@@ -139,19 +138,20 @@ test("stored forwarder close is checked before the slower detailed summary", () 
   assert.equal(storedClose.includes("appliesToPriceGrade"), false);
 });
 
-test("unknown close status fails closed and never exposes a duplicate cost input", () => {
-  assert.ok(layout.includes("중복 원가마감을 막기 위해 재입력을 잠시 차단합니다"));
-  assert.ok(layout.includes("!forwarderRow.summary && !forwarderRow.inputAllowed"));
-  assert.ok(layout.includes("중복 마감 방지를 위해 입력을 잠시 차단했습니다"));
+test("duplicate forwarder close is fail-closed at the write boundary", () => {
+  assert.ok(route.includes("await loadStoredInternalChinaForwarderClose(input.draftId)"));
+  assert.ok(route.includes("CHINA_FORWARDER_COST_ALREADY_CLOSED"));
+  assert.ok(route.includes("기존 마감값을 유지합니다"));
+  assert.ok(route.includes("? 409"));
 });
 
-test("forwarder amount input remains available only after stored close absence is confirmed", () => {
-  assert.ok(layout.includes("InternalChinaForwarderCostFallback"));
-  assert.ok(layout.includes("저장된 마감기록이 없는 것은 확인됐으므로 실제비용 입력은 사용할 수 있습니다"));
+test("forwarder amount fallback remains available only as a recovery UI while the API rechecks stored close", () => {
+  assert.ok(page.includes("InternalChinaForwarderCostFallback"));
   assert.ok(fallbackPanel.includes("배송대행지 실제비용(원)"));
   assert.ok(fallbackPanel.includes("배송대행 비용 · 원가 마감"));
   assert.ok(fallbackPanel.includes('/api/china-order-manager/forwarder-cost'));
   assert.ok(fallbackPanel.includes("실제 원가배수 = (상품 총 매입금액 + 배송대행지 실제비용) ÷ 상품 총 매입금액"));
+  assert.ok(route.includes("loadStoredInternalChinaForwarderClose"));
   assert.equal(fallbackPanel.includes("상품등급"), false);
 });
 

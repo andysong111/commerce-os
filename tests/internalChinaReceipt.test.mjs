@@ -2,19 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [engine, route, panel, layout, monthlyPolicy] = await Promise.all([
+const [engine, route, panel, page, monthlyPolicy] = await Promise.all([
   readFile("src/lib/internalChinaReceipt.ts", "utf8"),
   readFile("src/app/api/china-order-manager/receipts/route.ts", "utf8"),
   readFile("src/components/china-order-manager/InternalChinaReceiptPanel.tsx", "utf8"),
-  readFile("src/app/china-order-manager/layout.tsx", "utf8"),
+  readFile("src/app/china-order-manager/page.tsx", "utf8"),
   readFile("src/lib/monthlyPurchasePolicy.ts", "utf8"),
 ]);
 
 test("China order manager exposes the calendar-month purchase and receipt cycle", () => {
   assert.ok(monthlyPolicy.includes('PURCHASE_RECOMMENDATION_CADENCE = "MONTHLY"'));
-  assert.ok(layout.includes("발주·입고 사이클"));
-  assert.ok(layout.includes("월 1회"));
-  assert.ok(layout.includes("koreanMonthLabel(currentCycleMonth)"));
+  assert.ok(page.includes("월별 발주·입고 관리"));
+  assert.ok(page.includes("월 처리 단계"));
+  assert.ok(page.includes("koreanMonthLabel(selectedMonth)"));
+  assert.ok(page.includes("1688 주문·발주 마감"));
 });
 
 test("receipt UI supports full and partial receipt quantities on the existing China order route", () => {
@@ -23,7 +24,8 @@ test("receipt UI supports full and partial receipt quantities on the existing Ch
   assert.ok(panel.includes("PARTIALLY_RECEIVED"));
   assert.ok(panel.includes("RECEIVED"));
   assert.ok(panel.includes('/api/china-order-manager/receipts'));
-  assert.ok(layout.includes("InternalChinaReceiptPanel"));
+  assert.ok(page.includes("InternalChinaReceiptPanel"));
+  assert.ok(page.includes('title="입고"'));
 });
 
 test("receipt engine never receives more than the current open quantity", () => {

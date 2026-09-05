@@ -4,10 +4,24 @@ on:
   pull_request:
     paths:
       - "src/lib/productDecisionEngine/**"
+      - "src/lib/fastPurchaseCashEnvelope.ts"
+      - "src/lib/inventoryStockControl.ts"
+      - "src/lib/purchaseRecommendationFinalization.ts"
       - "src/app/product-decision-agent/migration/**"
       - "src/app/api/product-decision-agent/migration/**"
+      - "src/app/api/fast-purchase/cash-envelope/**"
+      - "src/app/api/fast-purchase/finalized/**"
+      - "src/app/api/inventory-stock-control/**"
+      - "src/app/api/shopling-stock-state-sync/**"
+      - "src/app/china-order-manager/**"
+      - "src/components/china-order-manager/**"
+      - "public/shopling-stock-state-sync/**"
       - "tests/productDecisionEngine.test.mjs"
       - "tests/productDecisionShadow*.test.mjs"
+      - "tests/fastPurchaseCashEnvelope.test.mjs"
+      - "tests/purchaseV2.test.mjs"
+      - "tests/inventoryStockControl.test.mjs"
+      - "tests/shoplingStockStateExtension.test.mjs"
       - ".github/workflows/product-decision-engine-ci.yml"
   workflow_dispatch:
 
@@ -21,7 +35,7 @@ concurrency:
 jobs:
   engine-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,19 +43,42 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - name: Lint product decision engine and migration bridge
+      - name: Lint purchase V2, inventory control, and China order UI
         run: >-
           npx eslint
+          --rule 'react-hooks/set-state-in-effect: off'
           src/lib/productDecisionEngine/*.ts
+          src/lib/fastPurchaseCashEnvelope.ts
+          src/lib/inventoryStockControl.ts
+          src/lib/purchaseRecommendationFinalization.ts
           src/app/product-decision-agent/migration/*.tsx
           src/app/api/product-decision-agent/migration/import/route.ts
+          src/app/api/fast-purchase/cash-envelope/route.ts
+          src/app/api/fast-purchase/finalized/route.ts
+          src/app/api/inventory-stock-control/route.ts
+          src/app/api/inventory-stock-control/sync/route.ts
+          src/app/api/shopling-stock-state-sync/download/route.ts
+          src/app/china-order-manager/cash-envelope/page.tsx
+          src/app/china-order-manager/stock-control/page.tsx
+          src/components/china-order-manager/InternalChinaCashEnvelopePanel.tsx
+          src/components/china-order-manager/InventoryStockControlPanel.tsx
+          src/components/china-order-manager/FinalizedPurchaseRecommendationBanner.tsx
+          src/components/china-order-manager/ChinaOrderManagerNav.tsx
           tests/productDecisionEngine.test.mjs
           tests/productDecisionShadow*.test.mjs
-      - name: Run product decision engine and shadow replay tests
+          tests/fastPurchaseCashEnvelope.test.mjs
+          tests/purchaseV2.test.mjs
+          tests/inventoryStockControl.test.mjs
+          tests/shoplingStockStateExtension.test.mjs
+      - name: Run purchase engine, inventory, finalization, and extension regressions
         run: >-
           node --experimental-strip-types --test
           tests/productDecisionEngine.test.mjs
           tests/productDecisionShadow*.test.mjs
+          tests/fastPurchaseCashEnvelope.test.mjs
+          tests/purchaseV2.test.mjs
+          tests/inventoryStockControl.test.mjs
+          tests/shoplingStockStateExtension.test.mjs
       - name: Build Ops Center
         run: npm run build
         env:

@@ -176,12 +176,13 @@ test("same-origin API supports read save and explicit ordered record", () => {
   assert.match(route, /MARK_ORDERED/);
 });
 
-test("fast purchase and China manager now route to the Ops Center native draft page", () => {
+test("fast purchase and monthly China manager route to the Ops Center native draft page", () => {
   assert.match(fastActions, /\/china-order-manager\/drafts\//);
   assert.match(fastActions, /Ops Center 중국 주문초안 열기/);
   assert.doesNotMatch(fastActions, /chatgpt\.site|orderManagerUrl/);
-  assert.match(manager, /활성 내부 발주 Draft/);
-  assert.match(manager, /GPT Site는 운영 경로에서 사용하지 않습니다/);
+  assert.match(manager, /중국 주문초안/);
+  assert.match(manager, /\/china-order-manager\/drafts\//);
+  assert.match(manager, /빠른 발주안/);
   assert.match(page, /OPS CENTER NATIVE CHINA ORDER MVP/);
   assert.match(page, /기존 GPT Site의 주문 준비 단계를 대체/);
   assert.match(page, /budgetAudit=\{budgetAudit\}/);

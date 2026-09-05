@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [lib, route, component, page, metadata] = await Promise.all([
+const [lib, route, component, page, metadata, fastActions] = await Promise.all([
   readFile("src/lib/monthlyPurchaseDraftConsolidation.ts", "utf8"),
   readFile(
     "src/app/api/china-order-manager/monthly-finalize/route.ts",
@@ -14,6 +14,10 @@ const [lib, route, component, page, metadata] = await Promise.all([
   ),
   readFile("src/app/china-order-manager/page.tsx", "utf8"),
   readFile("src/lib/monthlyPurchaseDraftDisplayMetadata.ts", "utf8"),
+  readFile(
+    "src/components/fast-purchase-mvp/FastPurchaseDraftActions.tsx",
+    "utf8",
+  ),
 ]);
 
 test("monthly finalization closes legacy same-month drafts and creates one new RESERVED draft", () => {
@@ -43,14 +47,15 @@ test("final quantities are operator-controlled but bounded and limited to barcod
   assert.match(component, /selected: Boolean\(base\)/);
 });
 
-test("monthly consolidation shows B-code with model number, model name, and fixed sale option", () => {
+test("monthly consolidation keeps B-code identity metadata available for legacy repair", () => {
   assert.match(page, /loadMonthlyDraftDisplayMetadata/);
-  assert.match(page, /metadataByBarcode=\{consolidationMetadata\.byBarcode\}/);
+  assert.match(page, /metadata\.byBarcode\[line\.barcode\]/);
   assert.match(metadata, /loadProductLaunchPurchaseMetadataByBarcode/);
   assert.match(metadata, /loadShoplingCurrentModelSnapshot/);
   assert.match(metadata, /modelNo:/);
   assert.match(metadata, /modelName:/);
   assert.match(metadata, /saleOption:/);
+  assert.match(component, /metadataByBarcode/);
   assert.match(component, /B-code · 모델번호 · 모델명 · 옵션명/);
   assert.match(component, /모델번호/);
   assert.match(component, /모델명/);
@@ -58,9 +63,13 @@ test("monthly consolidation shows B-code with model number, model name, and fixe
   assert.doesNotMatch(component, /상품명/);
 });
 
-test("China order manager surfaces the monthly consolidation workspace only when multiple current-cycle drafts remain", () => {
-  assert.match(page, /currentCycleActiveDrafts\.length > 1/);
-  assert.match(page, /MonthlyDraftConsolidation/);
+test("new monthly drafts are single-cycle locked while legacy consolidation stays repair-safe", () => {
+  assert.match(fastActions, /currentCycleDrafts = drafts\.filter/);
+  assert.match(fastActions, /monthlyLocked = currentCycleDrafts\.length > 0/);
+  assert.match(fastActions, /FAST_PURCHASE_MONTHLY_CYCLE_ALREADY_USED/);
+  assert.match(fastActions, /같은 달에 새 내부 Draft를 만들지 않습니다/);
+  assert.match(page, /selectedDrafts = draftState\.drafts\.filter/);
+  assert.doesNotMatch(page, /MonthlyDraftConsolidation/);
   assert.match(component, /선택 수량으로 월간 최종화/);
   assert.match(component, /기존 Draft는 삭제하지 않고 CANCELLED 이력으로 보존/);
 });

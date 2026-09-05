@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopling 재고상태 동기화</title>
+    <style>
+      body { margin: 0; width: 380px; font-family: Arial, sans-serif; color: #0f172a; background: #f8fafc; }
+      main { padding: 16px; }
+      h1 { margin: 0; font-size: 17px; }
+      p { margin: 8px 0 0; font-size: 12px; line-height: 1.55; color: #475569; }
+      .card { margin-top: 14px; border: 1px solid #cbd5e1; border-radius: 14px; background: white; padding: 12px; }
+      .label { font-size: 10px; font-weight: 800; color: #64748b; }
+      .value { margin-top: 5px; font-size: 13px; font-weight: 800; line-height: 1.5; }
+      .stage { margin-top: 7px; font-size: 12px; color: #334155; }
+      .buttons { display: flex; gap: 8px; margin-top: 12px; }
+      button { flex: 1; border: 0; border-radius: 10px; padding: 10px; font-weight: 800; cursor: pointer; }
+      #open { background: #0f172a; color: white; }
+      #stop { background: #fee2e2; color: #991b1b; }
+      button:disabled { cursor: default; opacity: .5; }
+      .ok { color: #047857; }
+      .warn { color: #b45309; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Shopling 품절·판매중 동기화</h1>
+      <p>A6 상태변경 뒤 옵션상품은 A22, 단품은 A21 상품판매상태송신을 직렬 실행합니다. Chrome 디버거 권한은 사용하지 않습니다.</p>
+      <section class="card">
+        <div class="label">현재 상태</div>
+        <div id="value" class="value">상태 확인 중...</div>
+        <div id="stage" class="stage"></div>
+      </section>
+      <div class="buttons">
+        <button id="open" type="button">Commerce OS 열기</button>
+        <button id="stop" type="button" disabled>안전 중지</button>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

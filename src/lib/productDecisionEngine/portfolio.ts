@@ -33,6 +33,7 @@ export type PortfolioItemResult = PortfolioItemInput & {
 
 export type PortfolioAllocationInput = {
   recent30DayRevenue: number;
+  grossBudgetOverrideKrw?: number;
   purchaseCostMultiplier?: number;
   minimumOrderAmount?: number;
   items: PortfolioItemInput[];
@@ -98,9 +99,10 @@ function emptyGroupCounts(): Record<SalesOrderGroup, number> {
 }
 
 /**
- * 직전 30일 정상매출의 절반을 총 발주비용 한도로 잡고 배송대행 포함 배수로
- * 상품 주문 가능 예산을 계산한다. 이후 최소 주문금액·MOQ·박스입수를 적용한
- * 상품을 발주 추천, 소량 검토, 점수 순서로 배분한다.
+ * Legacy V1 allocator. Existing callers may pass grossBudgetOverrideKrw to
+ * constrain funding, but MOQ/carton/minimum economics stay unchanged here.
+ * Operational Purchase V2 uses purchaseV2.ts and deliberately ignores
+ * MOQ/carton rounding.
  */
 export function allocatePurchasePortfolio(
   input: PortfolioAllocationInput,
@@ -109,7 +111,10 @@ export function allocatePurchasePortfolio(
     0,
     Math.round(Number(input.recent30DayRevenue) || 0),
   );
-  const grossBudget = Math.round(recent30DayRevenue / 2);
+  const override = Number(input.grossBudgetOverrideKrw);
+  const grossBudget = Number.isFinite(override)
+    ? Math.max(0, Math.round(override))
+    : Math.round(recent30DayRevenue / 2);
   const purchaseCostMultiplier = normalizeMultiplier(
     input.purchaseCostMultiplier,
   );
