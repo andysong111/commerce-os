@@ -6,6 +6,7 @@ import {
 } from "@/lib/productMasterShoplingSalesEventSync";
 import { loadCandidatePromotionGate } from "@/lib/stage8CandidatePromotionGate";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import { wakeOpsDispatchTask } from "@/lib/opsAdaptiveDispatcher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,11 +130,16 @@ export async function POST(request: Request) {
         "STORAGE_NOT_READY",
       ].includes(current.state)
     ) {
+      const wakeRequested = await wakeOpsDispatchTask(
+        "product-master-shopling-sales-events",
+        0,
+      );
       return Response.json(
         {
           ok: true,
           accepted: false,
           alreadyActive: true,
+          wakeRequested,
           status: current,
           message: "기존 판매 이벤트 작업을 먼저 이어서 완료합니다.",
         },
@@ -141,13 +147,18 @@ export async function POST(request: Request) {
       );
     }
     const created = await createProductMasterShoplingSalesEventSyncRequest();
+    const wakeRequested = await wakeOpsDispatchTask(
+      "product-master-shopling-sales-events",
+      0,
+    );
     return Response.json(
       {
         ok: true,
         accepted: true,
         requestId: created.requestId,
         totalRanges: created.ranges.length,
-        message: "최근 360일 주문행 판매 이벤트 수집을 접수했습니다.",
+        wakeRequested,
+        message: "최근 360일 주문행 판매 이벤트 수집을 접수하고 worker를 즉시 깨웠습니다.",
       },
       { status: 202, headers: { "cache-control": "no-store" } },
     );
