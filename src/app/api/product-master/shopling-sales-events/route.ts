@@ -129,11 +129,10 @@ export async function POST(request: Request) {
         : false;
       return Response.json(
         {
+          ...recovered,
           ok: recovered.recovered,
           accepted: recovered.recovered,
-          recovered: recovered.recovered,
           wakeRequested,
-          ...recovered,
           message: recovered.recovered
             ? "실패한 판매 이벤트 읽기를 같은 분석시점으로 더 작은 조회구간에 안전 재접수하고 worker를 깨웠습니다."
             : "판매 이벤트 자동 축소 재시도 한도를 소진했습니다. 외부 쓰기는 차단된 상태입니다.",
