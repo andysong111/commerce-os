@@ -1,0 +1,32 @@
+name: Shopling Stock State Sync Regression
+
+on:
+  pull_request:
+    paths:
+      - "public/shopling-stock-state-sync/**"
+      - "src/app/api/shopling-stock-state-sync/**"
+      - "src/app/china-order-manager/stock-control/page.tsx"
+      - "tests/shoplingStockStateRouteGuard.test.mjs"
+      - ".github/workflows/shopling-stock-state-sync-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  route-guard-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+      - name: Syntax check stock sync extension scripts
+        run: >-
+          node --check public/shopling-stock-state-sync/menu-guard-v012.js
+          && node --check public/shopling-stock-state-sync/main-shopling.js
+          && node --check public/shopling-stock-state-sync/content-shopling-v011.js
+          && node --check public/shopling-stock-state-sync/background-v011.js
+      - name: Regression - exact Shopling route and permission guard
+        run: node --test tests/shoplingStockStateRouteGuard.test.mjs
