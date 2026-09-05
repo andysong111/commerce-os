@@ -1,4 +1,5 @@
 import { recordInternalChinaForwarderCost } from "@/lib/internalChinaForwarderCost";
+import { loadStoredInternalChinaForwarderClose } from "@/lib/internalChinaForwarderStoredClose";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
 
 export const runtime = "nodejs";
@@ -25,11 +26,21 @@ function errorResponse(error: unknown) {
     message = `남은 미입고 ${Number(raw.split(":")[1] ?? 0).toLocaleString("ko-KR")}개를 먼저 입고확정한 뒤 배송대행 비용을 마감하세요.`;
   } else if (code === "CHINA_FORWARDER_COST_CYCLE_MONTH_CONFLICT") {
     message = "화면의 발주월과 실제 발주 Draft의 월이 다릅니다. 새로고침 후 다시 시도하세요.";
+  } else if (code === "CHINA_FORWARDER_COST_ALREADY_CLOSED") {
+    const storedAmount = Number(raw.split(":")[1] ?? 0);
+    message = storedAmount > 0
+      ? `이미 배송대행 비용이 ${storedAmount.toLocaleString("ko-KR")}원으로 마감된 Draft입니다. 기존 마감값을 유지합니다.`
+      : "이미 배송대행 비용이 마감된 Draft입니다. 기존 마감값을 유지합니다.";
   }
   return Response.json(
     { ok: false, code, message },
     {
-      status: code === "CHINA_FORWARDER_COST_DRAFT_NOT_FOUND" ? 404 : 400,
+      status:
+        code === "CHINA_FORWARDER_COST_DRAFT_NOT_FOUND"
+          ? 404
+          : code === "CHINA_FORWARDER_COST_ALREADY_CLOSED"
+            ? 409
+            : 400,
       headers: { "cache-control": "no-store" },
     },
   );
@@ -49,9 +60,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await recordInternalChinaForwarderCost(
-      await request.json().catch(() => ({})),
-    );
+    const input = (await request.json().catch(() => ({}))) as {
+      draftId?: unknown;
+      cycleMonth?: unknown;
+      actualCostKrw?: unknown;
+    };
+    const stored = await loadStoredInternalChinaForwarderClose(input.draftId);
+    if (stored?.actualCostKrw) {
+      throw new Error(
+        `CHINA_FORWARDER_COST_ALREADY_CLOSED:${stored.actualCostKrw}`,
+      );
+    }
+
+    const result = await recordInternalChinaForwarderCost(input);
     const reconciliation = result.receiptCostReconciliation;
     const multiplier = result.actualMultiplier?.toFixed(4) ?? "-";
     const receiptMessage = reconciliation?.productMasterSynced
