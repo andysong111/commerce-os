@@ -90,6 +90,11 @@ export async function loadStage8CanonicalSalesEventSnapshot(): Promise<Stage8Can
   const orderedDates = validEvents
     .map((event) => event.occurredAt)
     .sort((left, right) => Date.parse(left) - Date.parse(right));
+  // coverageEndAt means how far the completed canonical read has observed,
+  // not the timestamp of the most recent sale. A sold-out SKU may correctly
+  // have no sale after a reset, so requiring a post-reset sale would block
+  // exact inventory forever. analysisAsOf is the completed read's upper bound.
+  const coverageEndAt = status.analysisAsOf ?? orderedDates.at(-1) ?? null;
   const stable = {
     requestId: status.requestId,
     analysisAsOf: status.analysisAsOf,
@@ -97,7 +102,7 @@ export async function loadStage8CanonicalSalesEventSnapshot(): Promise<Stage8Can
     eventCount: combined.events.length,
     validEventCount: validEvents.length,
     coverageStartAt: orderedDates[0] ?? null,
-    coverageEndAt: orderedDates.at(-1) ?? null,
+    coverageEndAt,
   };
 
   return {
@@ -109,7 +114,7 @@ export async function loadStage8CanonicalSalesEventSnapshot(): Promise<Stage8Can
     eventCount: combined.events.length,
     validEventCount: validEvents.length,
     coverageStartAt: orderedDates[0] ?? null,
-    coverageEndAt: orderedDates.at(-1) ?? null,
+    coverageEndAt,
     fingerprint: sha256(stable),
     writesEnabled: false,
     events: combined.events,
