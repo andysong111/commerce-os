@@ -26,6 +26,24 @@ test("stockout reset establishes zero and counts only post-reset receipt deltas 
   assert.match(inventory, /exactInventoryQuantity: transition\.quantityOnHand/);
 });
 
+test("completed canonical read covers a reset through analysisAsOf even when no post-reset sale exists", async () => {
+  const { inventory } = await sources();
+  const snapshot = await readFile(
+    "src/lib/stage8CanonicalSalesEventSnapshot.ts",
+    "utf8",
+  );
+  assert.match(
+    snapshot,
+    /const coverageEndAt = status\.analysisAsOf \?\? orderedDates\.at\(-1\) \?\? null/,
+  );
+  assert.match(snapshot, /coverageEndAt,/);
+  assert.match(inventory, /coverageEndAt >= reset\.occurredAt/);
+  assert.doesNotMatch(
+    snapshot,
+    /coverageEndAt: orderedDates\.at\(-1\) \?\? null/,
+  );
+});
+
 test("zero inventory requests stockout and confirmed inbound requests on-sale recovery", async () => {
   const { inventory, syncRoute } = await sources();
   assert.match(
