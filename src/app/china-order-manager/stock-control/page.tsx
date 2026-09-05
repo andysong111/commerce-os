@@ -17,7 +17,7 @@ export default function InventoryStockControlPage() {
             href="/api/shopling-stock-state-sync/download"
             className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800"
           >
-            Shopling 재고상태 확장 v0.1.1 다운로드
+            Shopling 재고상태 확장 v0.1.2 다운로드
           </Link>
         }
       />
