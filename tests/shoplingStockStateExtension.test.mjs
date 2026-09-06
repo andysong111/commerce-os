@@ -4,24 +4,27 @@ import test from "node:test";
 import { buildStockWorkerV030 } from "../scripts/build-shopling-stock-worker-v030.mjs";
 const root = "public/shopling-stock-state-sync";
 
-test("v0.3.1 manifest uses price-engine style all-frame workspace", async () => {
+test("v0.3.2 manifest uses price-engine style all-frame workspace", async () => {
   const m = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.3.1");
+  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.3.2");
   assert.equal(m.background.service_worker, "background-v030.js");
   const shopling = m.content_scripts.find((s) => s.js.includes("content-shopling-v030.js"));
   assert.ok(shopling?.all_frames);
 });
 
-test("all packaged and generated JS parses and uses price-style legacy row matching", async () => {
+test("generated worker uses legacy-row fix and the real A6 option-status select", async () => {
   for (const name of ["background-v020.js", "background-v030.js", "content-ops-v021.js", "main-shopling.js", "popup.js"]) {
     const src = await readFile(`${root}/${name}`, "utf8"); assert.doesNotThrow(() => new Function(src));
   }
   const built = buildStockWorkerV030(await readFile(`${root}/content-shopling-v018.js`, "utf8"), await readFile(`${root}/search-policy-v023.js`, "utf8"));
   assert.doesNotThrow(() => new Function(built));
-  assert.match(built, /const VERSION = "0\.3\.1"/);
+  assert.match(built, /const VERSION = "0\.3\.2"/);
   assert.match(built, /selectWithOption\("옵션자체관리코드"\)\.length/);
   assert.doesNotMatch(built, /filter\(\(row\) => visible\(row\) && regex\.test/);
-  assert.match(built, /totalResultCount/);
+  assert.match(built, /labels\.includes\("옵션상태"\) && labels\.includes\("판매중"\) && labels\.includes\("품절"\)/);
+  assert.match(built, /A6_TARGET_STATUS_VERIFY_FAILED/);
+  assert.match(built, /일괄\\s\*상태변경/);
+  assert.doesNotMatch(built, /targetSelects = selectWithOption\(targetLabel\)\.filter/);
 });
 
 test("search continuation waits for Shopling legacy result repaint instead of 2.5 seconds", async () => {
