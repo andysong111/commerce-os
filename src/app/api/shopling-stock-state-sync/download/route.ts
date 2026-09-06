@@ -5,7 +5,7 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 const ROOT = "shopling-stock-state-sync";
 const FILES = [
   "manifest.json",
