@@ -6,10 +6,14 @@ import {
 } from "@/lib/inventoryStockControl";
 import { normalizeRetryableShoplingSyncReport } from "@/lib/inventoryStockSyncResolution";
 import { isSameOriginOpsRequest } from "@/lib/opsLoginBypass";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const SHOPLING_STOCK_CANARY_PREPARATION_OPERATION_TYPE =
+  "SHOPLING_STOCK_CANARY_PREPARATION";
 
 function unauthorized() {
   return Response.json(
@@ -22,6 +26,65 @@ function unauthorized() {
   );
 }
 
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function text(value: unknown) {
+  return String(value ?? "").normalize("NFKC").trim();
+}
+
+function normalizedBarcode(value: unknown) {
+  return text(value)
+    .toUpperCase()
+    .replace(/[‐‑‒–—−]/g, "-")
+    .replace(/\s+/g, "");
+}
+
+function numericGoodsKey(value: unknown) {
+  const normalized = text(value);
+  return /^\d+$/.test(normalized) ? normalized : "";
+}
+
+async function loadPreparedGoodsKeysByBarcode() {
+  const result = new Map<string, Set<string>>();
+  const admin = await createSupabaseAdminClient();
+  if (!admin) return result;
+  const response = await admin
+    .from("commerce_operation_runs")
+    .select("input_snapshot,result_snapshot,started_at")
+    .eq("operation_type", SHOPLING_STOCK_CANARY_PREPARATION_OPERATION_TYPE)
+    .eq("status", "SUCCEEDED")
+    .order("started_at", { ascending: true })
+    .limit(2_000);
+  if (response.error) return result;
+
+  for (const row of response.data ?? []) {
+    const input = object(row.input_snapshot);
+    const output = object(row.result_snapshot);
+    const barcode = normalizedBarcode(input.barcode || output.barcode);
+    if (!barcode) continue;
+    const candidates = [
+      input.goodsKey,
+      input.shoplingGoodsKey,
+      input.shoplingProductId,
+      output.goodsKey,
+      output.shoplingGoodsKey,
+      output.shoplingProductId,
+      output.a6MatchedShoplingProductId,
+    ]
+      .map(numericGoodsKey)
+      .filter(Boolean);
+    if (!candidates.length) continue;
+    const values = result.get(barcode) ?? new Set<string>();
+    for (const candidate of candidates) values.add(candidate);
+    result.set(barcode, values);
+  }
+  return result;
+}
+
 async function loadRetryableReport() {
   return normalizeRetryableShoplingSyncReport(
     await loadInventoryStockControlReport(),
@@ -30,29 +93,40 @@ async function loadRetryableReport() {
 
 export async function GET(request: Request) {
   if (!isSameOriginOpsRequest(request)) return unauthorized();
-  const report = await loadRetryableReport();
+  const [report, preparedGoodsKeysByBarcode] = await Promise.all([
+    loadRetryableReport(),
+    loadPreparedGoodsKeysByBarcode(),
+  ]);
   return Response.json(
     {
       ok: report.state === "READY",
       report,
       jobs: report.rows
         .filter((row) => row.syncNeeded && !row.syncBlocked)
-        .map((row) => ({
-          jobId: `stock-sync:${row.barcode}:${row.desiredStatus}:${row.desiredSince}`,
-          barcode: row.barcode,
-          productName: row.productName,
-          productKind: row.productKind,
-          modelNo: row.modelNo,
-          goodsKeys: row.goodsKeys,
-          desiredStatus: row.desiredStatus,
-          desiredSince: row.desiredSince,
-          exactInventoryQuantity: row.exactInventoryQuantity,
-          resetAt: row.resetAt,
-          route:
-            row.productKind === "OPTION"
-              ? ["A6_OPTION_STATUS", "A21_GOODS_KEY_OPTION_SEND"]
-              : ["A4_PRODUCT_STATUS", "A21_GOODS_KEY_PRODUCT_SALE_STATUS"],
-        })),
+        .map((row) => {
+          const goodsKeys = [
+            ...new Set([
+              ...row.goodsKeys,
+              ...(preparedGoodsKeysByBarcode.get(row.barcode) ?? []),
+            ]),
+          ].sort((left, right) => Number(left) - Number(right));
+          return {
+            jobId: `stock-sync:${row.barcode}:${row.desiredStatus}:${row.desiredSince}`,
+            barcode: row.barcode,
+            productName: row.productName,
+            productKind: row.productKind,
+            modelNo: row.modelNo,
+            goodsKeys,
+            desiredStatus: row.desiredStatus,
+            desiredSince: row.desiredSince,
+            exactInventoryQuantity: row.exactInventoryQuantity,
+            resetAt: row.resetAt,
+            route:
+              row.productKind === "OPTION"
+                ? ["A6_OPTION_STATUS", "A21_GOODS_KEY_OPTION_SEND"]
+                : ["A4_PRODUCT_STATUS", "A21_GOODS_KEY_PRODUCT_SALE_STATUS"],
+          };
+        }),
     },
     {
       status: report.state === "READY" ? 200 : 503,
