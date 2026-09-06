@@ -1,4 +1,4 @@
-Commerce OS · Shopling Stock State Sync v0.1.3
+Commerce OS · Shopling Stock State Sync v0.1.5
 
 목적
 - Commerce OS 내부 재고수량을 Shopling/마켓의 재고수량과 맞추지 않습니다.
@@ -17,6 +17,14 @@ Commerce OS · Shopling Stock State Sync v0.1.3
 - A21 쇼핑몰상품수정: 같은 goods key 정확 검색 → 상품 수정전송 → 상품판매상태송신 → 품절/판매중 선택 → 상품수정 송신 → 최종 완료문구 확인
 - 단품은 A6 옵션상태 변경을 사용하지 않습니다.
 
+v0.1.5 Shopling 메뉴 클릭 및 A6 인식 보완
+- 기존 worker는 좌측 A4/A6/A21 메뉴를 isolated content-script world에서 element.click()으로 눌렀습니다.
+- Shopling 구형 메뉴의 페이지 스크립트/프레임 이동이 실제 브라우저 클릭처럼 동작하도록 A4/A6/A21 메뉴 클릭만 MAIN world bridge로 전달합니다.
+- 검색/상태변경/송신 버튼 등 다른 클릭은 기존 native click 경로를 그대로 사용합니다.
+- Shopling A6 화면은 검색 전에는 '일괄 상태변경' 버튼이 아직 렌더링되지 않을 수 있습니다.
+- [A6] 옵션대량수정 제목과 옵션수량변경/검색항목 컨트롤이 함께 있는 실제 작업 프레임만 A6로 표시해 검색 전에도 기존 자동화가 이어지도록 보완했습니다.
+- 좌측 메뉴 프레임이나 다른 화면은 A6로 오인하지 않도록 실제 A6 폼 특징을 함께 확인합니다.
+
 안전 규칙
 - 한 번에 한 B코드만 실행합니다.
 - 같은 B코드의 품절과 판매중 작업은 동시에 실행하지 않습니다.
@@ -30,10 +38,10 @@ Commerce OS · Shopling Stock State Sync v0.1.3
 - 확장프로그램은 1688 주문·결제, 가격, 상품명, 배송정보, 마켓 재고수량을 수정하지 않습니다.
 
 설치/업데이트
-1. Commerce OS 재고·품절·재입고 화면에서 v0.1.3 ZIP을 다운로드합니다.
+1. Commerce OS 재고·품절·재입고 화면에서 v0.1.5 ZIP을 다운로드합니다.
 2. ZIP 압축을 새 폴더에 풉니다.
-3. chrome://extensions 에서 기존 v0.1.2를 제거하거나 비활성화합니다.
-4. 압축해제된 v0.1.3 폴더를 로드합니다.
+3. chrome://extensions 에서 기존 v0.1.4를 제거하거나 비활성화합니다.
+4. 압축해제된 v0.1.5 폴더를 로드합니다.
 5. Commerce OS 재고·품절·재입고 화면과 로그인된 Shopling 탭을 모두 새로고침합니다.
 6. 실제 옵션상품 1건을 Canary로 먼저 검증합니다.
 7. 이후 단품 1건, 재입고 후 판매중 복구 1건을 각각 Canary로 검증합니다.
