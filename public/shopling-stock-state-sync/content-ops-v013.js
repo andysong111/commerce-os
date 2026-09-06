@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = "0.1.7";
+  const VERSION = "0.1.8";
   const STATE_KEY = "commerceOsShoplingStockStateSyncV013";
   const READY = "COMMERCE_OS_SHOPLING_STOCK_SYNC_EXTENSION_READY";
   const PING = "COMMERCE_OS_SHOPLING_STOCK_SYNC_EXTENSION_PING";
