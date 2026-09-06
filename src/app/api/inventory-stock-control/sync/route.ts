@@ -61,7 +61,10 @@ async function loadPreparedGoodsKeysByBarcode() {
     .limit(2_000);
   if (response.error) return result;
 
-  for (const row of response.data ?? []) {
+  const preparedRows = Array.isArray(response.data)
+    ? (response.data as Array<Record<string, unknown>>)
+    : [];
+  for (const row of preparedRows) {
     const input = object(row.input_snapshot);
     const output = object(row.result_snapshot);
     const barcode = normalizedBarcode(input.barcode || output.barcode);
