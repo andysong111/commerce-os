@@ -18,9 +18,15 @@
     });
   }
 
+  function hasA6PageEvidence() {
+    const path = String(location.pathname || "").toLowerCase();
+    const text = norm(document.body?.innerText || document.body?.textContent || "");
+    return /prodbulkoptlst\.phtml/i.test(path) || /\[A6\]|옵션대량수정/i.test(text);
+  }
+
   function ensureMarker() {
     if (!document.body || document.getElementById(MARKER_ID)) return false;
-    if (!hasA6SearchControl() || !hasSearchFormEvidence()) return false;
+    if (!hasA6PageEvidence() || !hasA6SearchControl() || !hasSearchFormEvidence()) return false;
     const marker = document.createElement("span");
     marker.id = MARKER_ID;
     marker.setAttribute("aria-hidden", "true");
