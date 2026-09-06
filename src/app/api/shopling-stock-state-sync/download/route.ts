@@ -5,12 +5,13 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const ROOT = "shopling-stock-state-sync";
 const FILES = [
   "manifest.json",
   "background-v020.js",
-  "content-ops-v020.js",
+  "background-v021.js",
+  "content-ops-v021.js",
   "main-shopling.js",
   "menu-guard-v014.js",
   "menu-main-click-v015.js",
@@ -53,7 +54,7 @@ export async function GET() {
       };
       if (manifest.manifest_version !== 3) throw new Error("shopling_stock_state_manifest_v3_required");
       if (manifest.version !== VERSION) throw new Error("shopling_stock_state_manifest_version_mismatch");
-      if (manifest.background?.service_worker !== "background-v020.js") throw new Error("shopling_stock_state_background_required");
+      if (manifest.background?.service_worker !== "background-v021.js") throw new Error("shopling_stock_state_background_required");
       if (manifest.action?.default_popup !== "popup.html") throw new Error("shopling_stock_state_popup_required");
       for (const permission of ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"]) {
         if (!manifest.permissions?.includes(permission)) throw new Error(`shopling_stock_state_permission_missing:${permission}`);
@@ -76,7 +77,7 @@ export async function GET() {
           script.js?.includes("content-shopling-v018.js") &&
           !script.js?.includes("home-bootstrap-v019.js"),
       );
-      const ops = manifest.content_scripts?.find((script) => script.js?.includes("content-ops-v020.js"));
+      const ops = manifest.content_scripts?.find((script) => script.js?.includes("content-ops-v021.js"));
       if (!main || !shopling || !ops) throw new Error("shopling_stock_state_content_scripts_missing");
       if (shopling.all_frames !== true) throw new Error("shopling_stock_state_shopling_all_frames_required");
     }
