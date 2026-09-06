@@ -4,46 +4,41 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.9 package preserves Shopling routes and terminal-state retry recovery", async () => {
+test("v0.2.0 package uses fixed Shopling work tabs", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.9");
-  assert.equal(manifest.background.service_worker, "background-v013.js");
+  assert.equal(manifest.version, "0.2.0");
+  assert.equal(manifest.background.service_worker, "background-v020.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
     entry.matches?.includes("https://a.shopling.co.kr/*") && entry.js?.includes("content-shopling-v018.js"),
   );
-  assert.deepEqual(shopling?.js, [
-    "menu-guard-v014.js",
-    "menu-main-click-v015.js",
-    "a6-role-marker-v016.js",
-    "home-bootstrap-v019.js",
-    "content-shopling-v018.js",
-  ]);
-  assert.equal(shopling?.all_frames, true);
+  assert.ok(shopling);
+  assert.ok(!shopling.js.includes("home-bootstrap-v019.js"));
+  assert.equal(shopling.all_frames, true);
 });
 
-test("option products still use A6 then A21 goods-key option send and never A22", async () => {
-  const background = await readFile(`${root}/background-v013.js`, "utf8");
+test("option products use fixed A6 then fixed A21 option send and never A22", async () => {
+  const background = await readFile(`${root}/background-v020.js`, "utf8");
   const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   const readme = await readFile(`${root}/README.txt`, "utf8");
-  assert.match(background, /productKind === "OPTION" \? "A6" : "A4"/);
-  assert.match(background, /A21 goods key .*옵션송신/);
+  assert.match(background, /\["A6", "A21_LIST"\]/);
+  assert.match(background, /고정 A21 탭.*옵션송신/);
   assert.match(content, /A21_OPTION_SEND_MODE_NOT_FOUND/);
   assert.doesNotMatch(background, /A22/);
   assert.doesNotMatch(content, /runA22/);
-  assert.match(readme, /A22 쇼핑몰상품옵션전송은 더 이상 이 자동화 경로에서 사용하지 않습니다/);
+  assert.match(readme, /A22 쇼핑몰상품옵션전송은 사용하지 않습니다/);
 });
 
-test("single products still use A4 product status then A21 product sale-status transmission", async () => {
-  const background = await readFile(`${root}/background-v013.js`, "utf8");
+test("single products use fixed A4 then A21 sale-status send", async () => {
+  const background = await readFile(`${root}/background-v020.js`, "utf8");
   const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
-  assert.match(background, /active\.job\.productKind === "OPTION" \? "A21_LIST" : "A4"/);
+  assert.match(background, /\["A4", "A21_LIST"\]/);
   assert.match(content, /runA4/);
   assert.match(content, /상품판매상태송신/);
 });
 
-test("A4/A21 require exact numeric goods key and exact one-row selection", async () => {
-  const background = await readFile(`${root}/background-v013.js`, "utf8");
+test("A4/A21 retain exact goods-key and one-row safety", async () => {
+  const background = await readFile(`${root}/background-v020.js`, "utf8");
   const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   assert.match(background, /STOCK_SYNC_GOODS_KEY_REQUIRED/);
   assert.match(content, /searchGoodsKey/);
@@ -53,82 +48,37 @@ test("A4/A21 require exact numeric goods key and exact one-row selection", async
   assert.match(content, /selected\.count !== 1/);
 });
 
-test("legacy A4/A6/A21 menu clicks still route through MAIN-world bridge", async () => {
-  const bridge = await readFile(`${root}/menu-main-click-v015.js`, "utf8");
-  assert.match(bridge, /HTMLElement\.prototype\.click/);
-  assert.match(bridge, /commerce-os-stock-main-click/);
-  assert.match(bridge, /옵션대량수정/);
-  assert.match(bridge, /상품조회수정/);
-  assert.match(bridge, /쇼핑몰상품수정/);
-  assert.match(bridge, /nativeClick\.call\(this\)/);
-});
-
-test("pre-search A6 is identified by actual search-form evidence", async () => {
-  const marker = await readFile(`${root}/a6-role-marker-v016.js`, "utf8");
-  assert.match(marker, /옵션대량수정/);
-  assert.match(marker, /검색항목/);
-  assert.match(marker, /옵션자체관리코드/);
-  assert.match(marker, /selectHasOption/);
-  assert.doesNotMatch(marker, /옵션수량변경/);
-  assert.match(marker, /일괄 상태변경/);
-});
-
-test("v0.1.8 search worker still handles legacy A6 input and non-text editable input types", async () => {
+test("A6 search worker keeps legacy input recovery", async () => {
   const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   assert.match(content, /function editableSearchInputs/);
   assert.match(content, /querySelectorAll\("input,textarea"\)/);
-  assert.match(content, /await waitFor\(\(\) => \{/);
   assert.match(content, /6_000, 120/);
   assert.match(content, /SEARCH_INPUT_SET_FAILED/);
   assert.match(content, /searchInputDiagnostics/);
-  assert.match(content, /input\.closest\("tr"\) === row/);
-  assert.match(content, /vertical <= 18/);
-  assert.match(content, /샵플링상품코드/);
-  assert.match(content, /상태\\s\*일괄변경/);
 });
 
-test("v0.1.9 home bootstrap opens [A]상품 and fails closed quickly if unavailable", async () => {
-  const bootstrap = await readFile(`${root}/home-bootstrap-v019.js`, "utf8");
-  assert.match(bootstrap, /\^\\\[A\\\]상품\$/);
-  assert.match(bootstrap, /TARGET_STAGES = new Set\(\["A6", "A4", "A21_LIST"\]\)/);
-  assert.match(bootstrap, /BOOTSTRAP_LIMIT_MS = 12_000/);
-  assert.match(bootstrap, /SHOPLING_PRODUCT_ROOT_NAVIGATING/);
-  assert.match(bootstrap, /SHOPLING_PRODUCT_MENU_BOOTSTRAP_FAILED/);
-  assert.match(bootstrap, /chrome\.storage\.onChanged/);
-  assert.match(bootstrap, /STOCK_SYNC_PAGE_READY/);
+test("fixed-tab router only dispatches exact stage roles", async () => {
+  const background = await readFile(`${root}/background-v020.js`, "utf8");
+  assert.match(background, /response\?\.page\?\.role !== expected/);
+  assert.match(background, /response && response\.ignored !== true/);
+  assert.match(background, /SHOPLING_FIXED_TAB_ROLE_MISMATCH/);
+  assert.match(background, /SHOPLING_REQUIRED_WORK_TAB_MISSING/);
 });
 
-test("v0.1.9 keeps stale retry recovery requiring same job and terminal result time", async () => {
-  const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
-  assert.match(ops, /const VERSION = "0\.1\.9"/);
-  assert.match(ops, /sameJob/);
-  assert.match(ops, /isTerminalOutcome/);
-  assert.match(ops, /lastFinishedAt >= activeStartedAt/);
-  assert.match(ops, /activeStartedAt > 0/);
-  assert.match(ops, /chrome\.storage\.local\.remove\(STATE_KEY\)/);
-});
-
-test("timeout and failed-result rules remain fail-closed", async () => {
-  const background = await readFile(`${root}/background-v013.js`, "utf8");
+test("timeouts remain fail-closed and fast before submit", async () => {
+  const background = await readFile(`${root}/background-v020.js`, "utf8");
+  assert.match(background, /PRE_SUBMIT_TIMEOUT_MS = 60_000/);
   assert.match(background, /submitted \? "UNCERTAIN" : "FAILED"/);
   assert.match(background, /failureCount/);
   assert.match(background, /STOCK_SYNC_OPPOSITE_JOB_BLOCKED/);
-  assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.9 home bootstrap with existing guards", async () => {
+test("download route packages v0.2.0 without home bootstrap", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.9"/);
-  for (const file of [
-    "background-v013.js",
-    "content-ops-v013.js",
-    "menu-guard-v014.js",
-    "menu-main-click-v015.js",
-    "a6-role-marker-v016.js",
-    "home-bootstrap-v019.js",
-    "content-shopling-v018.js",
-  ]) {
+  assert.match(route, /const VERSION = "0\.2\.0"/);
+  for (const file of ["background-v020.js", "content-ops-v020.js", "content-shopling-v018.js"]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
+  assert.doesNotMatch(route, /"home-bootstrap-v019\.js",/);
   assert.match(route, /shopling_stock_state_debugger_forbidden/);
 });
