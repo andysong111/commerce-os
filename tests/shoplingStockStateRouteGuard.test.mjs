@@ -17,10 +17,10 @@ test("exact goods-key and single-row gates stay in the mutation template", async
   assert.match(w, /selected\.count !== 1/);
   assert.match(b, /PRE_SUBMIT_TIMEOUT_MS = 60_000/); assert.match(b, /STOCK_SYNC_OPPOSITE_JOB_BLOCKED/);
 });
-test("ZIP generates v0.2.3.1 package with A6 frame bridge and checks all declared files", async () => {
+test("ZIP generates v0.2.3.2 package with A6 unique-control bridge and checks all declared files", async () => {
   const r = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(r, /const VERSION = "0\.2\.3\.1"/); assert.match(r, /buildStockWorker/);
+  assert.match(r, /const VERSION = "0\.2\.3\.2"/); assert.match(r, /buildStockWorker/);
   assert.match(r, /content-shopling-v023\.js/); assert.match(r, /a6-frame-bridge-v0231\.js/); assert.match(r, /missing_packaged_file/);
   assert.match(r, /shopling_stock_state_debugger_forbidden/); assert.match(r, /workerSha256/);
-  assert.match(r, /ADMIN_SOURCE_AUTO_WORKERS_A6_FRAME_BRIDGE/);
+  assert.match(r, /ADMIN_SOURCE_AUTO_WORKERS_A6_UNIQUE_CONTROL/);
 });
