@@ -1,27 +1,13 @@
 import Link from "next/link";
 import { InventoryStockControlPanel } from "@/components/china-order-manager/InventoryStockControlPanel";
 import { PageHeader } from "@/components/PageHeader";
-
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
 export default function InventoryStockControlPage() {
-  return (
-    <div className="space-y-5">
-      <PageHeader
-        eyebrow="COMMERCE OS · EXACT INVENTORY · SHOPLING STOCK STATE"
-        title="재고·품절·재입고 동기화"
-        description="B코드 품절을 실제로 확인한 순간 재고를 0으로 초기화합니다. 이후 확정입고와 Canonical 판매로 Commerce OS 정확재고를 이어가며, Shopling/마켓에는 재고수량이 아니라 품절·판매중 상태만 전송합니다. Shopling은 A4·A6·A21 작업화면을 각각 탭으로 열어둔 상태에서 실행하며, v0.2.2는 작업탭을 새로고침하지 않고 가격조정 확장의 all-frame 직접 탐색·동적 worker 주입 방식을 재사용합니다."
-        actions={
-          <Link
-            href="/api/shopling-stock-state-sync/download"
-            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800"
-          >
-            Shopling 재고상태 확장 v0.2.2 다운로드
-          </Link>
-        }
-      />
-      <InventoryStockControlPanel />
-    </div>
-  );
+  return <div className="space-y-5">
+    <PageHeader eyebrow="COMMERCE OS · EXACT INVENTORY · SHOPLING STOCK STATE" title="재고·품절·재입고 동기화"
+      description="재고수량은 Commerce OS에서 관리하고 Shopling/마켓에는 품절·판매중 상태만 전송합니다. v0.2.3: 로그인 완료된 Shopling 관리자 메인 탭 하나만 열어두세요. 필요한 A4/A6/A21 작업창을 자동 생성하고 2024-01-01부터 실행 당일까지 검색합니다. 원본 관리자 탭은 새로고침하거나 이동하지 않습니다."
+      actions={<Link href="/api/shopling-stock-state-sync/download" className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-800">Shopling 재고상태 확장 v0.2.3 다운로드</Link>} />
+    <InventoryStockControlPanel />
+  </div>;
 }
