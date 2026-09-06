@@ -26,11 +26,12 @@ jobs:
       - name: Syntax check stock sync extension scripts
         run: >-
           node --check public/shopling-stock-state-sync/menu-guard-v014.js
+          && node --check public/shopling-stock-state-sync/a6-role-marker-v015.js
           && node --check public/shopling-stock-state-sync/main-shopling.js
           && node --check public/shopling-stock-state-sync/content-shopling-v013.js
           && node --check public/shopling-stock-state-sync/background-v013.js
           && node --check public/shopling-stock-state-sync/content-ops-v013.js
-      - name: Regression - v0.1.4 menu recovery and stock-state routes
+      - name: Regression - v0.1.5 pre-search A6 recognition and stock-state routes
         run: >-
           node --test
           tests/shoplingStockStateRouteGuard.test.mjs
