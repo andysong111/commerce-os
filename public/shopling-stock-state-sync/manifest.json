@@ -2,15 +2,15 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling Stock State Sync",
   "short_name": "Stock State Sync",
-  "version": "0.2.0",
-  "description": "Shopling A4/A6/A21 작업화면을 각각 고정 탭으로 열어두면 Commerce OS가 필요한 탭을 직접 찾아 품절·판매중 상태만 안전하게 처리합니다. 관리자 메인화면 hover 메뉴 자동화는 사용하지 않습니다.",
+  "version": "0.2.1",
+  "description": "A4/A6/A21 고정 작업탭을 가격조정 확장의 검증된 all-frame 탐색·작업탭 새로고침·동적 worker 주입 방식으로 직접 찾아 품절·판매중 상태만 처리합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
     "https://commerce-os-ops-center.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background-v020.js"
+    "service_worker": "background-v021.js"
   },
   "action": {
     "default_title": "Shopling 품절·판매중 동기화",
@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["https://commerce-os-ops-center.vercel.app/*"],
-      "js": ["content-ops-v020.js"],
+      "js": ["content-ops-v021.js"],
       "run_at": "document_start"
     },
     {
