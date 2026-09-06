@@ -1,5 +1,6 @@
 (() => {
-  const VERSION = "0.1.3";
+  const VERSION = "0.1.7";
+  const STATE_KEY = "commerceOsShoplingStockStateSyncV013";
   const READY = "COMMERCE_OS_SHOPLING_STOCK_SYNC_EXTENSION_READY";
   const PING = "COMMERCE_OS_SHOPLING_STOCK_SYNC_EXTENSION_PING";
   const START = "COMMERCE_OS_SHOPLING_STOCK_SYNC_START";
@@ -9,13 +10,47 @@
 
   const post = (payload) => window.postMessage({ ...payload, extensionVersion: VERSION }, location.origin);
 
+  function isTerminalOutcome(value) {
+    return ["SUCCEEDED", "FAILED", "UNCERTAIN"].includes(String(value || "").toUpperCase());
+  }
+
+  async function reconcileStaleRunningState(response) {
+    let active = response?.active ?? null;
+    const lastResult = response?.lastResult ?? null;
+    const activeStartedAt = Number(active?.startedAt || 0);
+    const lastFinishedAt = Number(lastResult?.finishedAt || 0);
+    const sameJob = Boolean(
+      active?.job?.jobId &&
+        lastResult?.jobId &&
+        String(active.job.jobId) === String(lastResult.jobId),
+    );
+    const staleTerminalRunning = Boolean(
+      active?.status === "RUNNING" &&
+        sameJob &&
+        isTerminalOutcome(lastResult?.outcome) &&
+        activeStartedAt > 0 &&
+        lastFinishedAt >= activeStartedAt,
+    );
+
+    if (staleTerminalRunning) {
+      await chrome.storage.local.remove(STATE_KEY).catch(() => null);
+      active = null;
+    }
+
+    return { active, lastResult, staleTerminalRunning };
+  }
+
   const announce = async () => {
     post({ type: READY });
     const response = await chrome.runtime.sendMessage({ type: "STOCK_SYNC_GET_STATUS" }).catch(() => null);
     if (!response?.ok) return;
-    post({ type: STATUS, active: response.active ?? null });
-    if (response.lastResult && Date.now() - Number(response.lastResult.finishedAt || 0) < 3_600_000) {
-      post({ type: RESULT, ...response.lastResult });
+    const reconciled = await reconcileStaleRunningState(response);
+    post({ type: STATUS, active: reconciled.active });
+    if (
+      reconciled.lastResult &&
+      Date.now() - Number(reconciled.lastResult.finishedAt || 0) < 3_600_000
+    ) {
+      post({ type: RESULT, ...reconciled.lastResult });
     }
   };
 

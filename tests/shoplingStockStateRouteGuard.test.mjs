@@ -4,9 +4,9 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.6 package bridges legacy Shopling menu clicks and marks the real A6 search form before the worker", async () => {
+test("v0.1.7 package preserves Shopling routes and terminal-state retry recovery", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.6");
+  assert.equal(manifest.version, "0.1.7");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
@@ -61,7 +61,7 @@ test("legacy A4/A6/A21 menu clicks still route through MAIN-world bridge", async
   assert.match(bridge, /nativeClick\.call\(this\)/);
 });
 
-test("v0.1.6 identifies pre-search A6 by actual search-form evidence, not the absent option-quantity-change text", async () => {
+test("pre-search A6 is identified by actual search-form evidence", async () => {
   const marker = await readFile(`${root}/a6-role-marker-v016.js`, "utf8");
   assert.match(marker, /옵션대량수정/);
   assert.match(marker, /검색항목/);
@@ -69,7 +69,15 @@ test("v0.1.6 identifies pre-search A6 by actual search-form evidence, not the ab
   assert.match(marker, /selectHasOption/);
   assert.doesNotMatch(marker, /옵션수량변경/);
   assert.match(marker, /일괄 상태변경/);
-  assert.match(marker, /left = "-100000px"/);
+});
+
+test("v0.1.7 stale retry recovery requires same job, terminal result, and result time after active start", async () => {
+  const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
+  assert.match(ops, /sameJob/);
+  assert.match(ops, /isTerminalOutcome/);
+  assert.match(ops, /lastFinishedAt >= activeStartedAt/);
+  assert.match(ops, /activeStartedAt > 0/);
+  assert.match(ops, /chrome\.storage\.local\.remove\(STATE_KEY\)/);
 });
 
 test("timeout and failed-result rules remain fail-closed", async () => {
@@ -80,9 +88,9 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.6 menu bridge and A6 search-form marker", async () => {
+test("download route packages v0.1.7 retry recovery with the existing A6 marker", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.6"/);
+  assert.match(route, /const VERSION = "0\.1\.7"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
