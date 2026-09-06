@@ -4,9 +4,9 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.2.1 package uses fixed Shopling work tabs with price-engine overlay", async () => {
+test("v0.2.2 package uses fixed Shopling work tabs with price-engine overlay", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.2.1");
+  assert.equal(manifest.version, "0.2.2");
   assert.equal(manifest.background.service_worker, "background-v021.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
@@ -17,15 +17,16 @@ test("v0.2.1 package uses fixed Shopling work tabs with price-engine overlay", a
   assert.equal(shopling.all_frames, true);
 });
 
-test("price-extension proven mechanics are reused before stock worker dispatch", async () => {
+test("price-extension proven frame discovery is reused without reloading fixed Shopling tabs", async () => {
   const overlay = await readFile(`${root}/background-v021.js`, "utf8");
-  assert.match(overlay, /executeAllFramesV021/);
+  assert.match(overlay, /executeAllFramesV022/);
   assert.match(overlay, /allFrames: true/);
-  assert.match(overlay, /identifyFramesV021/);
-  assert.match(overlay, /chrome\.tabs\.reload/);
+  assert.match(overlay, /identifyFramesV022/);
+  assert.doesNotMatch(overlay, /chrome\.tabs\.reload/);
   assert.match(overlay, /chrome\.scripting\.executeScript/);
-  assert.match(overlay, /ensureWorkerV021/);
+  assert.match(overlay, /ensureWorkerV022/);
   assert.match(overlay, /content-shopling-v018\.js/);
+  assert.match(overlay, /PRESERVE_FIXED_TABS_ALL_FRAME_SCAN_AND_DYNAMIC_INJECTION/);
 });
 
 test("option products use fixed A6 then fixed A21 option send and never A22", async () => {
@@ -74,9 +75,9 @@ test("timeouts remain fail-closed and fast before submit", async () => {
   assert.match(background, /STOCK_SYNC_OPPOSITE_JOB_BLOCKED/);
 });
 
-test("download route packages v0.2.1 price-engine overlay without home bootstrap", async () => {
+test("download route packages v0.2.2 price-engine overlay without home bootstrap", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.2\.1"/);
+  assert.match(route, /const VERSION = "0\.2\.2"/);
   for (const file of ["background-v020.js", "background-v021.js", "content-ops-v021.js", "content-shopling-v018.js"]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
