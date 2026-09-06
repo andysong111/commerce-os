@@ -15,10 +15,10 @@ const jsFiles = [
   "popup.js",
 ];
 
-test("stock-state extension v0.2.1 is Manifest V3 and excludes debugger", async () => {
+test("stock-state extension v0.2.2 is Manifest V3 and excludes debugger", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.2.1");
+  assert.equal(manifest.version, "0.2.2");
   assert.equal(manifest.background.service_worker, "background-v021.js");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.ok(manifest.permissions.includes("scripting"));
@@ -27,14 +27,14 @@ test("stock-state extension v0.2.1 is Manifest V3 and excludes debugger", async 
   assert.ok(!manifest.permissions.includes("debugger"));
 });
 
-test("all shipped v0.2.1 JavaScript parses", async () => {
+test("all shipped v0.2.2 JavaScript parses", async () => {
   for (const fileName of jsFiles) {
     const source = await readFile(`${root}/${fileName}`, "utf8");
     assert.doesNotThrow(() => new Function(source), fileName);
   }
 });
 
-test("v0.2.1 keeps fixed A4/A6/A21 tabs and removes home bootstrap", async () => {
+test("v0.2.2 keeps fixed A4/A6/A21 tabs and removes home bootstrap", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   const shopling = manifest.content_scripts.find((entry) => entry.js?.includes("content-shopling-v018.js"));
   assert.deepEqual(shopling?.js, [
@@ -50,17 +50,17 @@ test("v0.2.1 keeps fixed A4/A6/A21 tabs and removes home bootstrap", async () =>
   assert.match(background, /PRE_SUBMIT_TIMEOUT_MS = 60_000/);
 });
 
-test("v0.2.1 reuses price-extension execution architecture", async () => {
+test("v0.2.2 reuses price-extension all-frame and dynamic-worker mechanics without reloading Shopling work tabs", async () => {
   const overlay = await readFile(`${root}/background-v021.js`, "utf8");
   assert.match(overlay, /importScripts\("background-v020\.js"\)/);
   assert.match(overlay, /chrome\.scripting\.executeScript/);
   assert.match(overlay, /allFrames: true/);
-  assert.match(overlay, /identifyFramesV021/);
-  assert.match(overlay, /chrome\.tabs\.reload/);
-  assert.match(overlay, /ensureWorkerV021/);
+  assert.match(overlay, /identifyFramesV022/);
+  assert.doesNotMatch(overlay, /chrome\.tabs\.reload/);
+  assert.match(overlay, /ensureWorkerV022/);
   assert.match(overlay, /files: \[WORKER_FILE\]/);
-  assert.match(overlay, /PRICE_EXTENSION_STYLE_V021/);
-  assert.match(overlay, /RELOAD_FIXED_TABS_THEN_ALL_FRAME_SCAN_AND_DYNAMIC_INJECTION/);
+  assert.match(overlay, /PRICE_EXTENSION_STYLE_V022/);
+  assert.match(overlay, /PRESERVE_FIXED_TABS_ALL_FRAME_SCAN_AND_DYNAMIC_INJECTION/);
 });
 
 test("fixed-tab preflight still prevents half-execution", async () => {
@@ -80,9 +80,9 @@ test("route remains option A6 to A21 and single A4 to A21", async () => {
   assert.doesNotMatch(content, /runA22/);
 });
 
-test("v0.2.1 ops handshake keeps same-job stale RUNNING recovery", async () => {
+test("v0.2.2 ops handshake keeps same-job stale RUNNING recovery", async () => {
   const ops = await readFile(`${root}/content-ops-v021.js`, "utf8");
-  assert.match(ops, /const VERSION = "0\.2\.1"/);
+  assert.match(ops, /const VERSION = "0\.2\.2"/);
   assert.match(ops, /staleTerminalRunning/);
   assert.match(ops, /lastFinishedAt >= activeStartedAt/);
   assert.match(ops, /chrome\.storage\.local\.remove\(STATE_KEY\)/);
