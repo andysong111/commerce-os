@@ -2,38 +2,15 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling Stock State Sync",
   "short_name": "Stock State Sync",
-  "version": "0.2.2",
-  "description": "A4/A6/A21 고정 작업탭을 유지한 채 가격조정 확장의 all-frame 직접 탐색·동적 worker 주입 방식으로 품절·판매중 상태만 처리합니다. 작업탭 전체 새로고침은 하지 않습니다.",
+  "version": "0.2.3",
+  "description": "로그인된 관리자 탭 하나에서 A4/A6/A21 작업창 자동 생성. 2024-01-01부터 오늘까지 검색하고 품절·판매중만 전송합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"],
-  "host_permissions": [
-    "https://a.shopling.co.kr/*",
-    "https://commerce-os-ops-center.vercel.app/*"
-  ],
-  "background": {
-    "service_worker": "background-v021.js"
-  },
-  "action": {
-    "default_title": "Shopling 품절·판매중 동기화",
-    "default_popup": "popup.html"
-  },
+  "host_permissions": ["https://a.shopling.co.kr/*", "https://commerce-os-ops-center.vercel.app/*"],
+  "background": { "service_worker": "background-launch-v023.js" },
+  "action": { "default_title": "Shopling 품절·판매중 동기화 v0.2.3", "default_popup": "popup.html" },
   "content_scripts": [
-    {
-      "matches": ["https://commerce-os-ops-center.vercel.app/*"],
-      "js": ["content-ops-v021.js"],
-      "run_at": "document_start"
-    },
-    {
-      "matches": ["https://a.shopling.co.kr/*"],
-      "js": ["main-shopling.js"],
-      "world": "MAIN",
-      "all_frames": true,
-      "run_at": "document_start"
-    },
-    {
-      "matches": ["https://a.shopling.co.kr/*"],
-      "js": ["menu-guard-v014.js", "menu-main-click-v015.js", "a6-role-marker-v016.js", "content-shopling-v018.js"],
-      "all_frames": true,
-      "run_at": "document_idle"
-    }
+    { "matches": ["https://commerce-os-ops-center.vercel.app/*"], "js": ["content-ops-v021.js"], "run_at": "document_start" },
+    { "matches": ["https://a.shopling.co.kr/*"], "js": ["main-shopling.js"], "world": "MAIN", "all_frames": true, "run_at": "document_start" },
+    { "matches": ["https://a.shopling.co.kr/*"], "js": ["content-shopling-v023.js"], "all_frames": true, "run_at": "document_idle" }
   ]
 }
