@@ -1,12 +1,12 @@
 // Compose the unchanged mutation template with the tested 2024 search policy.
-// v0.3.1 keeps the price-engine workspace and aligns A6 result-row detection with
-// the proven A21 price worker: legacy result rows do not need HTMLElement visibility gating.
+// v0.3.2 keeps the price-engine workspace/result-row handling and fixes the live A6
+// mutation contract: the same '옵션상태' select contains 판매중/단종/품절/미사용.
 export function buildStockWorkerV030(base, policy) {
   function once(source, before, after) {
     if (source.split(before).length !== 2) throw new Error(`stock_worker_template_mismatch:${before.slice(0,70)}`);
     return source.replace(before, after);
   }
-  let source = once(base, 'const VERSION = "0.1.8";', 'const VERSION = "0.3.1";\n  if (globalThis.__commerceStockWorkerV031) return;\n  globalThis.__commerceStockWorkerV031 = true;\n  let executionContext = {};');
+  let source = once(base, 'const VERSION = "0.1.8";', 'const VERSION = "0.3.2";\n  if (globalThis.__commerceStockWorkerV032) return;\n  globalThis.__commerceStockWorkerV032 = true;\n  let executionContext = {};');
   const start = '  async function searchExact(fieldLabel, token) {';
   const end = '  async function searchGoodsKey(goodsKey) {';
   if (source.split(start).length !== 2 || source.split(end).length !== 2) throw new Error('stock_search_template_mismatch');
@@ -31,6 +31,50 @@ export function buildStockWorkerV030(base, policy) {
     '      .filter((row) => visible(row) && regex.test(norm(row.textContent).toUpperCase()))',
     '      .filter((row) => regex.test(norm(row.textContent).toUpperCase()))',
   );
+  // Live A6 evidence: there is one toolbar select whose placeholder is '옵션상태' and whose
+  // same option list contains 판매중/단종/품절/미사용. Select the target on that control directly.
+  const oldA6Status = `    const targetLabel = desiredKorean(job.desiredStatus);
+    const selector = selectWithOption("옵션상태")[0] || null;
+    if (!selector || !selectByText(selector, "옵션상태")) {
+      return { ok: false, code: "A6_OPTION_STATUS_FIELD_NOT_FOUND", message: "A6 선택정보의 옵션상태를 찾지 못했습니다." };
+    }
+    const targetSelects = selectWithOption(targetLabel).filter((select) => select !== selector);
+    targetSelects.sort((left, right) => {
+      const base = selector.getBoundingClientRect();
+      return Math.abs(left.getBoundingClientRect().top - base.top) - Math.abs(right.getBoundingClientRect().top - base.top);
+    });
+    const statusSelect = targetSelects[0] || null;
+    if (!statusSelect || !selectByText(statusSelect, targetLabel, true)) {
+      return { ok: false, code: "A6_TARGET_STATUS_NOT_FOUND", message: \`A6 옵션상태 \${targetLabel} 선택값을 찾지 못했습니다.\` };
+    }
+    const button = buttonByText(/^(?:일괄\\s*상태변경|상태\\s*일괄변경)$/i);`;
+  const newA6Status = `    const targetLabel = desiredKorean(job.desiredStatus);
+    const statusSelects = selectWithOption("옵션상태").filter((select) => {
+      const labels = [...select.options].map((option) => norm(option.textContent));
+      return labels.includes("옵션상태") && labels.includes("판매중") && labels.includes("품절");
+    });
+    const button = buttonByText(/^(?:일괄\\s*상태변경|상태\\s*일괄변경)$/i);
+    if (!button) return { ok: false, code: "A6_BULK_STATUS_BUTTON_NOT_FOUND", message: "A6 상태 일괄변경 버튼을 찾지 못했습니다." };
+    if (!statusSelects.length) {
+      return { ok: false, code: "A6_OPTION_STATUS_FIELD_NOT_FOUND", message: "A6 옵션상태 변경 드롭다운(판매중/품절)을 찾지 못했습니다." };
+    }
+    const buttonRect = button.getBoundingClientRect();
+    statusSelects.sort((left, right) => {
+      const lr = left.getBoundingClientRect();
+      const rr = right.getBoundingClientRect();
+      const ls = Math.abs(lr.top - buttonRect.top) + Math.abs(lr.right - buttonRect.left) / 4;
+      const rs = Math.abs(rr.top - buttonRect.top) + Math.abs(rr.right - buttonRect.left) / 4;
+      return ls - rs;
+    });
+    const statusSelect = statusSelects[0];
+    if (!selectByText(statusSelect, targetLabel, true)) {
+      return { ok: false, code: "A6_TARGET_STATUS_NOT_FOUND", message: \`A6 옵션상태 드롭다운에서 \${targetLabel}을 선택하지 못했습니다.\` };
+    }
+    const selectedStatus = norm(statusSelect.options?.[statusSelect.selectedIndex]?.textContent);
+    if (selectedStatus !== targetLabel) {
+      return { ok: false, code: "A6_TARGET_STATUS_VERIFY_FAILED", message: \`A6 옵션상태가 \${targetLabel}로 유지되지 않아 일괄 변경을 차단했습니다.\`, evidence: { selectedStatus, targetLabel } };
+    }`;
+  source = once(source, oldA6Status, newA6Status);
   // Do not depend on A6 title/menu text living in the same legacy frame. The unique search option is the role contract.
   source = once(source, 'if (/옵션대량수정/i.test(text) && /(일괄\\s*상태변경|상태\\s*일괄변경)/i.test(text)) return "A6";', 'if (selectWithOption("옵션자체관리코드").length) return "A6";');
   source = once(source, '    const href = String(location.href || "");', `    const href = String(location.href || "");
