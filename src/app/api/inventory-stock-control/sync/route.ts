@@ -48,15 +48,31 @@ function numericGoodsKey(value: unknown) {
   return /^\d+$/.test(normalized) ? normalized : "";
 }
 
+function truthy(value: unknown) {
+  return value === true || text(value).toLowerCase() === "true";
+}
+
+function confirmedPreparationEvidence(
+  input: Record<string, unknown>,
+  output: Record<string, unknown>,
+) {
+  return Boolean(
+    truthy(input.preparationOnly) &&
+      text(output.state).toUpperCase() === "A6_UNIQUENESS_CONFIRMED" &&
+      Number(output.a6SearchResultCount) === 1 &&
+      text(output.externalBarcodeCollisionCheck).toUpperCase() ===
+        "EXACT_ONE_ROW_CONFIRMED",
+  );
+}
+
 async function loadPreparedGoodsKeysByBarcode() {
   const result = new Map<string, Set<string>>();
   const admin = await createSupabaseAdminClient();
   if (!admin) return result;
   const response = await admin
     .from("commerce_operation_runs")
-    .select("input_snapshot,result_snapshot,started_at")
+    .select("status,input_snapshot,result_snapshot,started_at")
     .eq("operation_type", SHOPLING_STOCK_CANARY_PREPARATION_OPERATION_TYPE)
-    .eq("status", "SUCCEEDED")
     .order("started_at", { ascending: true })
     .limit(2_000);
   if (response.error) return result;
@@ -66,7 +82,11 @@ async function loadPreparedGoodsKeysByBarcode() {
     : [];
   for (const row of preparedRows) {
     const input = object(row.input_snapshot);
-    const output = object(row.result_snapshot);
+    const outputRoot = object(row.result_snapshot);
+    const nestedOutput = object(outputRoot.snapshot);
+    const output = Object.keys(nestedOutput).length ? nestedOutput : outputRoot;
+    if (!confirmedPreparationEvidence(input, output)) continue;
+
     const barcode = normalizedBarcode(input.barcode || output.barcode);
     if (!barcode) continue;
     const candidates = [
