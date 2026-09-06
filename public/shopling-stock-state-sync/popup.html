@@ -25,7 +25,7 @@
   <body>
     <main>
       <h1>Shopling 품절·판매중 동기화</h1>
-      <p>A6 상태변경 뒤 옵션상품은 A22, 단품은 A21 상품판매상태송신을 직렬 실행합니다. Chrome 디버거 권한은 사용하지 않습니다.</p>
+      <p>옵션상품은 A6 상태변경 → A21 goods key 옵션송신, 단품은 A4 상품상태 변경 → A21 상품판매상태송신을 직렬 실행합니다. 마켓 재고수량은 수정하지 않습니다.</p>
       <section class="card">
         <div class="label">현재 상태</div>
         <div id="value" class="value">상태 확인 중...</div>
