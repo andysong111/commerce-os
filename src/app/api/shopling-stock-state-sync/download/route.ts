@@ -6,7 +6,7 @@ import { buildStockWorker } from "../../../../../scripts/build-shopling-stock-wo
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const VERSION = "0.2.3.1";
+const VERSION = "0.2.3.2";
 const FILES = ["manifest.json", "background-v020.js", "background-v023.js", "background-launch-v023.js", "content-ops-v021.js", "main-shopling.js", "a6-frame-bridge-v0231.js", "popup.html", "popup.js", "README.txt"];
 
 export async function GET(request: Request) {
@@ -17,7 +17,6 @@ export async function GET(request: Request) {
     if (name.endsWith(".js")) new Function(source);
     entries[name] = strToU8(source);
   }
-  // Keep the state-mutation template unchanged. Compose the tested date/search adapter at ZIP build time.
   const template = await readFile(path.join(root, "content-shopling-v018.js"), "utf8");
   const policy = await readFile(path.join(root, "search-policy-v023.js"), "utf8");
   const worker = buildStockWorker(template, policy);
@@ -42,7 +41,7 @@ export async function GET(request: Request) {
   const zip = zipSync(entries, { level: 9 });
   const workerSha256 = createHash("sha256").update(worker).digest("hex");
   if (new URL(request.url).searchParams.get("verify") === "1") {
-    return Response.json({ ok: true, version: VERSION, files: Object.keys(entries), zipBytes: zip.byteLength, workerSha256, searchStart: "2024-01-01", mode: "ADMIN_SOURCE_AUTO_WORKERS_A6_FRAME_BRIDGE", liveShoplingVerified: false }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ ok: true, version: VERSION, files: Object.keys(entries), zipBytes: zip.byteLength, workerSha256, searchStart: "2024-01-01", mode: "ADMIN_SOURCE_AUTO_WORKERS_A6_UNIQUE_CONTROL", liveShoplingVerified: false }, { headers: { "cache-control": "no-store" } });
   }
   return new Response(zip, { headers: {
     "content-type": "application/zip", "content-disposition": `attachment; filename="commerce-os-shopling-stock-state-v${VERSION}.zip"`,
