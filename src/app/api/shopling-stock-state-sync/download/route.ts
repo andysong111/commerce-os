@@ -6,7 +6,7 @@ import { buildStockWorkerV030 } from "../../../../../scripts/build-shopling-stoc
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const FILES = ["manifest.json", "background-v020.js", "background-v030.js", "content-ops-v021.js", "main-shopling.js", "popup.html", "popup.js", "README.txt"];
 
 export async function GET(request: Request) {
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
   const zip = zipSync(entries, { level: 9 });
   const workerSha256 = createHash("sha256").update(worker).digest("hex");
   if (new URL(request.url).searchParams.get("verify") === "1") {
-    return Response.json({ ok: true, version: VERSION, files: Object.keys(entries), zipBytes: zip.byteLength, workerSha256, searchStart: "2024-01-01", mode: "PRICE_ENGINE_ALL_FRAME_WORKSPACE", liveShoplingVerified: false }, { headers: { "cache-control": "no-store" } });
+    return Response.json({ ok: true, version: VERSION, files: Object.keys(entries), zipBytes: zip.byteLength, workerSha256, searchStart: "2024-01-01", mode: "PRICE_ENGINE_ALL_FRAME_SEARCH_RESULT_V031", liveShoplingVerified: false }, { headers: { "cache-control": "no-store" } });
   }
   return new Response(zip, { headers: {
     "content-type": "application/zip", "content-disposition": `attachment; filename="commerce-os-shopling-stock-state-v${VERSION}.zip"`,
