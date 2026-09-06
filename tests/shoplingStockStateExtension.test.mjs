@@ -10,14 +10,15 @@ const jsFiles = [
   "menu-guard-v014.js",
   "menu-main-click-v015.js",
   "a6-role-marker-v016.js",
+  "home-bootstrap-v019.js",
   "content-shopling-v018.js",
   "popup.js",
 ];
 
-test("stock-state extension v0.1.8 is Manifest V3 and excludes debugger", async () => {
+test("stock-state extension v0.1.9 is Manifest V3 and excludes debugger", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.8");
+  assert.equal(manifest.version, "0.1.9");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.ok(manifest.permissions.includes("webNavigation"));
@@ -25,16 +26,16 @@ test("stock-state extension v0.1.8 is Manifest V3 and excludes debugger", async 
   assert.ok(!manifest.permissions.includes("debugger"));
 });
 
-test("all shipped v0.1.8 JavaScript parses", async () => {
+test("all shipped v0.1.9 JavaScript parses", async () => {
   for (const fileName of jsFiles) {
     const source = await readFile(`${root}/${fileName}`, "utf8");
     assert.doesNotThrow(() => new Function(source), fileName);
   }
 });
 
-test("v0.1.8 keeps same-job stale RUNNING recovery", async () => {
+test("v0.1.9 keeps same-job stale RUNNING recovery", async () => {
   const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
-  assert.match(ops, /const VERSION = "0\.1\.8"/);
+  assert.match(ops, /const VERSION = "0\.1\.9"/);
   assert.match(ops, /commerceOsShoplingStockStateSyncV013/);
   assert.match(ops, /staleTerminalRunning/);
   assert.match(ops, /String\(active\.job\.jobId\) === String\(lastResult\.jobId\)/);
@@ -62,13 +63,21 @@ test("jobs require goods key and multiple goods keys are serialized", async () =
   assert.match(background, /continueNextGoodsKey/);
 });
 
-test("menu MAIN-world bridge and A6 role marker run before the v0.1.8 Shopling worker", async () => {
+test("v0.1.9 bootstraps [A]상품 before the existing Shopling worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   const shopling = manifest.content_scripts.find((entry) => entry.js?.includes("content-shopling-v018.js"));
   assert.deepEqual(shopling?.js, [
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
     "a6-role-marker-v016.js",
+    "home-bootstrap-v019.js",
     "content-shopling-v018.js",
   ]);
+  const bootstrap = await readFile(`${root}/home-bootstrap-v019.js`, "utf8");
+  assert.match(bootstrap, /\^\\\[A\\\]상품\$/);
+  assert.match(bootstrap, /SHOPLING_PRODUCT_ROOT_NAVIGATING/);
+  assert.match(bootstrap, /SHOPLING_PRODUCT_MENU_BOOTSTRAP_FAILED/);
+  assert.match(bootstrap, /BOOTSTRAP_LIMIT_MS = 12_000/);
+  assert.match(bootstrap, /chrome\.storage\.onChanged/);
+  assert.match(bootstrap, /STOCK_SYNC_PAGE_READY/);
 });

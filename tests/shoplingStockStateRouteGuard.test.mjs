@@ -4,9 +4,9 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.8 package preserves Shopling routes and terminal-state retry recovery", async () => {
+test("v0.1.9 package preserves Shopling routes and terminal-state retry recovery", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.8");
+  assert.equal(manifest.version, "0.1.9");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
@@ -16,6 +16,7 @@ test("v0.1.8 package preserves Shopling routes and terminal-state retry recovery
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
     "a6-role-marker-v016.js",
+    "home-bootstrap-v019.js",
     "content-shopling-v018.js",
   ]);
   assert.equal(shopling?.all_frames, true);
@@ -72,7 +73,7 @@ test("pre-search A6 is identified by actual search-form evidence", async () => {
   assert.match(marker, /일괄 상태변경/);
 });
 
-test("v0.1.8 waits for legacy A6 search input and accepts non-text editable input types", async () => {
+test("v0.1.8 search worker still handles legacy A6 input and non-text editable input types", async () => {
   const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   assert.match(content, /function editableSearchInputs/);
   assert.match(content, /querySelectorAll\("input,textarea"\)/);
@@ -86,9 +87,20 @@ test("v0.1.8 waits for legacy A6 search input and accepts non-text editable inpu
   assert.match(content, /상태\\s\*일괄변경/);
 });
 
-test("v0.1.8 keeps stale retry recovery requiring same job and terminal result time", async () => {
+test("v0.1.9 home bootstrap opens [A]상품 and fails closed quickly if unavailable", async () => {
+  const bootstrap = await readFile(`${root}/home-bootstrap-v019.js`, "utf8");
+  assert.match(bootstrap, /\^\\\[A\\\]상품\$/);
+  assert.match(bootstrap, /TARGET_STAGES = new Set\(\["A6", "A4", "A21_LIST"\]\)/);
+  assert.match(bootstrap, /BOOTSTRAP_LIMIT_MS = 12_000/);
+  assert.match(bootstrap, /SHOPLING_PRODUCT_ROOT_NAVIGATING/);
+  assert.match(bootstrap, /SHOPLING_PRODUCT_MENU_BOOTSTRAP_FAILED/);
+  assert.match(bootstrap, /chrome\.storage\.onChanged/);
+  assert.match(bootstrap, /STOCK_SYNC_PAGE_READY/);
+});
+
+test("v0.1.9 keeps stale retry recovery requiring same job and terminal result time", async () => {
   const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
-  assert.match(ops, /const VERSION = "0\.1\.8"/);
+  assert.match(ops, /const VERSION = "0\.1\.9"/);
   assert.match(ops, /sameJob/);
   assert.match(ops, /isTerminalOutcome/);
   assert.match(ops, /lastFinishedAt >= activeStartedAt/);
@@ -104,15 +116,16 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.8 search-input recovery with existing guards", async () => {
+test("download route packages v0.1.9 home bootstrap with existing guards", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.8"/);
+  assert.match(route, /const VERSION = "0\.1\.9"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
     "a6-role-marker-v016.js",
+    "home-bootstrap-v019.js",
     "content-shopling-v018.js",
   ]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

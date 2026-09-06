@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling Stock State Sync",
   "short_name": "Stock State Sync",
-  "version": "0.1.8",
-  "description": "옵션상품은 A6 상태변경 후 A21 goods key 옵션송신, 단품은 A4 상품상태 변경 후 A21 상품판매상태송신으로 Shopling/마켓 품절·판매중 상태만 안전하게 반영합니다. v0.1.8은 A6 검색항목 변경 후 레거시 검색 입력칸이 늦게 나타나거나 text 외 input 타입인 경우도 안전하게 탐색합니다.",
+  "version": "0.1.9",
+  "description": "옵션상품은 A6 상태변경 후 A21 goods key 옵션송신, 단품은 A4 상품상태 변경 후 A21 상품판매상태송신으로 Shopling/마켓 품절·판매중 상태만 안전하게 반영합니다. v0.1.9은 Shopling 메인 대시보드에서도 [A]상품 상위메뉴를 먼저 열어 A6/A4/A21로 즉시 진입하고, 상위메뉴 탐색 실패를 12초 내 명시적으로 종료합니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
@@ -31,7 +31,7 @@
     },
     {
       "matches": ["https://a.shopling.co.kr/*"],
-      "js": ["menu-guard-v014.js", "menu-main-click-v015.js", "a6-role-marker-v016.js", "content-shopling-v018.js"],
+      "js": ["menu-guard-v014.js", "menu-main-click-v015.js", "a6-role-marker-v016.js", "home-bootstrap-v019.js", "content-shopling-v018.js"],
       "all_frames": true,
       "run_at": "document_idle"
     }
