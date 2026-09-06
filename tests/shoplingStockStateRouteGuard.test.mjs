@@ -4,7 +4,7 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.5 package keeps A4/A6/A21 worker and adds the real-A6 role marker before the worker", async () => {
+test("v0.1.5 package bridges legacy Shopling menu clicks and marks the real A6 frame before the worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   assert.equal(manifest.version, "0.1.5");
   assert.equal(manifest.background.service_worker, "background-v013.js");
@@ -13,7 +13,12 @@ test("v0.1.5 package keeps A4/A6/A21 worker and adds the real-A6 role marker bef
     entry.matches?.includes("https://a.shopling.co.kr/*") &&
     entry.js?.includes("content-shopling-v013.js"),
   );
-  assert.deepEqual(shopling?.js, ["menu-guard-v014.js", "a6-role-marker-v015.js", "content-shopling-v013.js"]);
+  assert.deepEqual(shopling?.js, [
+    "menu-guard-v014.js",
+    "menu-main-click-v015.js",
+    "a6-role-marker-v015.js",
+    "content-shopling-v013.js",
+  ]);
   assert.equal(shopling?.all_frames, true);
 });
 
@@ -62,6 +67,16 @@ test("v0.1.4 guard no longer rewrites querySelectorAll and therefore cannot hide
   assert.match(content, /document\.querySelectorAll\("a,\[onclick\],li,td,span,div"\)/);
 });
 
+test("v0.1.5 routes A4/A6/A21 menu element.click through the existing MAIN-world click bridge", async () => {
+  const bridge = await readFile(`${root}/menu-main-click-v015.js`, "utf8");
+  assert.match(bridge, /HTMLElement\.prototype\.click/);
+  assert.match(bridge, /commerce-os-stock-main-click/);
+  assert.match(bridge, /옵션대량수정/);
+  assert.match(bridge, /상품조회수정/);
+  assert.match(bridge, /쇼핑몰상품수정/);
+  assert.match(bridge, /nativeClick\.call\(this\)/);
+});
+
 test("v0.1.5 marks only the real A6 work frame so pre-search A6 is recognized without misclassifying the menu frame", async () => {
   const marker = await readFile(`${root}/a6-role-marker-v015.js`, "utf8");
   assert.match(marker, /옵션대량수정/);
@@ -80,13 +95,14 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.5 A6 marker with the reviewed stock-state worker files", async () => {
+test("download route packages v0.1.5 menu bridge and A6 marker with reviewed stock-state worker files", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
   assert.match(route, /const VERSION = "0\.1\.5"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
     "menu-guard-v014.js",
+    "menu-main-click-v015.js",
     "a6-role-marker-v015.js",
     "content-shopling-v013.js",
   ]) {
