@@ -44,26 +44,30 @@ test("completed canonical read covers a reset through analysisAsOf even when no 
   );
 });
 
-test("zero inventory requests stockout and confirmed inbound requests on-sale recovery", async () => {
+test("zero inventory requests stockout and confirmed inbound requests on-sale recovery through the v0.1.3 routes", async () => {
   const { inventory, syncRoute } = await sources();
   assert.match(
     inventory,
     /quantityOnHand > 0 \? "ON_SALE" : "SOLD_OUT"/,
   );
   assert.match(syncRoute, /A6_OPTION_STATUS/);
-  assert.match(syncRoute, /A22_OPTION_TRANSMIT/);
-  assert.match(syncRoute, /A21_PRODUCT_SALE_STATUS/);
+  assert.match(syncRoute, /A21_GOODS_KEY_OPTION_SEND/);
+  assert.match(syncRoute, /A4_PRODUCT_STATUS/);
+  assert.match(syncRoute, /A21_GOODS_KEY_PRODUCT_SALE_STATUS/);
   assert.match(
     syncRoute,
-    /row\.productKind === "OPTION"[\s\S]*A22_OPTION_TRANSMIT[\s\S]*A21_PRODUCT_SALE_STATUS/,
+    /row\.productKind === "OPTION"[\s\S]*A6_OPTION_STATUS[\s\S]*A21_GOODS_KEY_OPTION_SEND[\s\S]*A4_PRODUCT_STATUS[\s\S]*A21_GOODS_KEY_PRODUCT_SALE_STATUS/,
   );
+  assert.doesNotMatch(syncRoute, /A22_OPTION_TRANSMIT/);
 });
 
-test("single products require a model number before A21 execution", async () => {
-  const { inventory, panel } = await sources();
+test("single products keep the model-number inventory guard while Shopling execution routes A4 to A21", async () => {
+  const { inventory, panel, syncRoute } = await sources();
   assert.match(inventory, /reset\.productKind === "SINGLE" && !modelNo/);
   assert.match(panel, /productKind === "SINGLE" && !modelNo\.trim\(\)/);
-  assert.match(panel, /단품은 A22가 아니라 A21 판매상태 송신을 사용합니다/);
+  assert.match(panel, /단품은 A4 상품상태 변경 후 A21 상품판매상태 송신을 사용합니다/);
+  assert.match(syncRoute, /A4_PRODUCT_STATUS/);
+  assert.match(syncRoute, /A21_GOODS_KEY_PRODUCT_SALE_STATUS/);
 });
 
 test("external Shopling write is separated from the physical stockout fact", async () => {

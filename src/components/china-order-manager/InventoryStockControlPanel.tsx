@@ -114,8 +114,8 @@ function kindLabel(value: ProductKind) {
 
 function routeLabel(job: SyncJob) {
   return job.productKind === "OPTION"
-    ? `A6 ${statusLabel(job.desiredStatus)} → A22 상품옵션전송`
-    : `A6 ${statusLabel(job.desiredStatus)} → A21 상품판매상태 ${statusLabel(job.desiredStatus)} 송신`;
+    ? `A6 ${statusLabel(job.desiredStatus)} → A21 goods key 옵션송신`
+    : `A4 ${statusLabel(job.desiredStatus)} → A21 상품판매상태 ${statusLabel(job.desiredStatus)} 송신`;
 }
 
 export function InventoryStockControlPanel() {
@@ -344,7 +344,7 @@ export function InventoryStockControlPanel() {
       return;
     }
     if (productKind === "SINGLE" && !modelNo.trim()) {
-      setNotice("단품은 A21 검색에 사용할 모델번호가 필요합니다.");
+      setNotice("단품은 기준정보 확인용 모델번호가 필요합니다.");
       return;
     }
     if (!report) {
@@ -551,7 +551,7 @@ export function InventoryStockControlPanel() {
               Shopling 품절·판매중 동기화 대기
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              입고확정으로 정확재고가 1개 이상이 되면 자동으로 판매중 복구 작업이 생성됩니다. 단품은 A22가 아니라 A21 판매상태 송신을 사용합니다.
+              Shopling/마켓에는 재고수량을 맞추지 않고 품절·판매중 상태만 전송합니다. 옵션상품은 A6 상태변경 후 A21 goods key 옵션송신, 단품은 A4 상품상태 변경 후 A21 상품판매상태 송신을 사용합니다.
             </p>
           </div>
           <span
