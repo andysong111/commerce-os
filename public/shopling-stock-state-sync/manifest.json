@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Commerce OS · Shopling Stock State Sync",
   "short_name": "Stock State Sync",
-  "version": "0.2.1",
-  "description": "A4/A6/A21 고정 작업탭을 가격조정 확장의 검증된 all-frame 탐색·작업탭 새로고침·동적 worker 주입 방식으로 직접 찾아 품절·판매중 상태만 처리합니다.",
+  "version": "0.2.2",
+  "description": "A4/A6/A21 고정 작업탭을 유지한 채 가격조정 확장의 all-frame 직접 탐색·동적 worker 주입 방식으로 품절·판매중 상태만 처리합니다. 작업탭 전체 새로고침은 하지 않습니다.",
   "permissions": ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"],
   "host_permissions": [
     "https://a.shopling.co.kr/*",
