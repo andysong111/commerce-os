@@ -5,17 +5,16 @@ import { strToU8, zipSync } from "fflate";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VERSION = "0.1.9";
+const VERSION = "0.2.0";
 const ROOT = "shopling-stock-state-sync";
 const FILES = [
   "manifest.json",
-  "background-v013.js",
-  "content-ops-v013.js",
+  "background-v020.js",
+  "content-ops-v020.js",
   "main-shopling.js",
   "menu-guard-v014.js",
   "menu-main-click-v015.js",
   "a6-role-marker-v016.js",
-  "home-bootstrap-v019.js",
   "content-shopling-v018.js",
   "popup.html",
   "popup.js",
@@ -52,26 +51,14 @@ export async function GET() {
           all_frames?: boolean;
         }>;
       };
-      if (manifest.manifest_version !== 3) {
-        throw new Error("shopling_stock_state_manifest_v3_required");
-      }
-      if (manifest.version !== VERSION) {
-        throw new Error("shopling_stock_state_manifest_version_mismatch");
-      }
-      if (manifest.background?.service_worker !== "background-v013.js") {
-        throw new Error("shopling_stock_state_background_required");
-      }
-      if (manifest.action?.default_popup !== "popup.html") {
-        throw new Error("shopling_stock_state_popup_required");
-      }
+      if (manifest.manifest_version !== 3) throw new Error("shopling_stock_state_manifest_v3_required");
+      if (manifest.version !== VERSION) throw new Error("shopling_stock_state_manifest_version_mismatch");
+      if (manifest.background?.service_worker !== "background-v020.js") throw new Error("shopling_stock_state_background_required");
+      if (manifest.action?.default_popup !== "popup.html") throw new Error("shopling_stock_state_popup_required");
       for (const permission of ["storage", "tabs", "windows", "scripting", "webNavigation", "alarms"]) {
-        if (!manifest.permissions?.includes(permission)) {
-          throw new Error(`shopling_stock_state_permission_missing:${permission}`);
-        }
+        if (!manifest.permissions?.includes(permission)) throw new Error(`shopling_stock_state_permission_missing:${permission}`);
       }
-      if (manifest.permissions?.includes("debugger")) {
-        throw new Error("shopling_stock_state_debugger_forbidden");
-      }
+      if (manifest.permissions?.includes("debugger")) throw new Error("shopling_stock_state_debugger_forbidden");
       if (
         !manifest.host_permissions?.includes("https://a.shopling.co.kr/*") ||
         !manifest.host_permissions?.includes("https://commerce-os-ops-center.vercel.app/*")
@@ -86,16 +73,12 @@ export async function GET() {
           script.js?.includes("menu-guard-v014.js") &&
           script.js?.includes("menu-main-click-v015.js") &&
           script.js?.includes("a6-role-marker-v016.js") &&
-          script.js?.includes("home-bootstrap-v019.js") &&
-          script.js?.includes("content-shopling-v018.js"),
+          script.js?.includes("content-shopling-v018.js") &&
+          !script.js?.includes("home-bootstrap-v019.js"),
       );
-      const ops = manifest.content_scripts?.find((script) => script.js?.includes("content-ops-v013.js"));
-      if (!main || !shopling || !ops) {
-        throw new Error("shopling_stock_state_content_scripts_missing");
-      }
-      if (shopling.all_frames !== true) {
-        throw new Error("shopling_stock_state_shopling_all_frames_required");
-      }
+      const ops = manifest.content_scripts?.find((script) => script.js?.includes("content-ops-v020.js"));
+      if (!main || !shopling || !ops) throw new Error("shopling_stock_state_content_scripts_missing");
+      if (shopling.all_frames !== true) throw new Error("shopling_stock_state_shopling_all_frames_required");
     }
     entries[fileName] = strToU8(source);
   }
