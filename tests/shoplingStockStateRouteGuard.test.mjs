@@ -4,26 +4,26 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.7 package preserves Shopling routes and terminal-state retry recovery", async () => {
+test("v0.1.8 package preserves Shopling routes and terminal-state retry recovery", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.7");
+  assert.equal(manifest.version, "0.1.8");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
-    entry.matches?.includes("https://a.shopling.co.kr/*") && entry.js?.includes("content-shopling-v013.js"),
+    entry.matches?.includes("https://a.shopling.co.kr/*") && entry.js?.includes("content-shopling-v018.js"),
   );
   assert.deepEqual(shopling?.js, [
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
     "a6-role-marker-v016.js",
-    "content-shopling-v013.js",
+    "content-shopling-v018.js",
   ]);
   assert.equal(shopling?.all_frames, true);
 });
 
 test("option products still use A6 then A21 goods-key option send and never A22", async () => {
   const background = await readFile(`${root}/background-v013.js`, "utf8");
-  const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
+  const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   const readme = await readFile(`${root}/README.txt`, "utf8");
   assert.match(background, /productKind === "OPTION" \? "A6" : "A4"/);
   assert.match(background, /A21 goods key .*옵션송신/);
@@ -35,7 +35,7 @@ test("option products still use A6 then A21 goods-key option send and never A22"
 
 test("single products still use A4 product status then A21 product sale-status transmission", async () => {
   const background = await readFile(`${root}/background-v013.js`, "utf8");
-  const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
+  const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   assert.match(background, /active\.job\.productKind === "OPTION" \? "A21_LIST" : "A4"/);
   assert.match(content, /runA4/);
   assert.match(content, /상품판매상태송신/);
@@ -43,9 +43,10 @@ test("single products still use A4 product status then A21 product sale-status t
 
 test("A4/A21 require exact numeric goods key and exact one-row selection", async () => {
   const background = await readFile(`${root}/background-v013.js`, "utf8");
-  const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
+  const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
   assert.match(background, /STOCK_SYNC_GOODS_KEY_REQUIRED/);
   assert.match(content, /searchGoodsKey/);
+  assert.match(content, /샵플링상품코드/);
   assert.match(content, /A4_EXACT_ROW_SELECTION_FAILED/);
   assert.match(content, /A21_EXACT_ROW_SELECTION_FAILED/);
   assert.match(content, /selected\.count !== 1/);
@@ -71,8 +72,23 @@ test("pre-search A6 is identified by actual search-form evidence", async () => {
   assert.match(marker, /일괄 상태변경/);
 });
 
-test("v0.1.7 stale retry recovery requires same job, terminal result, and result time after active start", async () => {
+test("v0.1.8 waits for legacy A6 search input and accepts non-text editable input types", async () => {
+  const content = await readFile(`${root}/content-shopling-v018.js`, "utf8");
+  assert.match(content, /function editableSearchInputs/);
+  assert.match(content, /querySelectorAll\("input,textarea"\)/);
+  assert.match(content, /await waitFor\(\(\) => \{/);
+  assert.match(content, /6_000, 120/);
+  assert.match(content, /SEARCH_INPUT_SET_FAILED/);
+  assert.match(content, /searchInputDiagnostics/);
+  assert.match(content, /input\.closest\("tr"\) === row/);
+  assert.match(content, /vertical <= 18/);
+  assert.match(content, /샵플링상품코드/);
+  assert.match(content, /상태\\s\*일괄변경/);
+});
+
+test("v0.1.8 keeps stale retry recovery requiring same job and terminal result time", async () => {
   const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
+  assert.match(ops, /const VERSION = "0\.1\.8"/);
   assert.match(ops, /sameJob/);
   assert.match(ops, /isTerminalOutcome/);
   assert.match(ops, /lastFinishedAt >= activeStartedAt/);
@@ -88,16 +104,16 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.7 retry recovery with the existing A6 marker", async () => {
+test("download route packages v0.1.8 search-input recovery with existing guards", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.7"/);
+  assert.match(route, /const VERSION = "0\.1\.8"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
     "a6-role-marker-v016.js",
-    "content-shopling-v013.js",
+    "content-shopling-v018.js",
   ]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
