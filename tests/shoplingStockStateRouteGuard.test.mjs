@@ -20,13 +20,13 @@ test("exact goods-key and single-row gates stay in the mutation template", async
   assert.match(b, /PRE_SUBMIT_TIMEOUT_MS = 60_000/); assert.match(b, /STOCK_SYNC_OPPOSITE_JOB_BLOCKED/);
 });
 
-test("ZIP generates v0.3.1 price-engine search-result package and checks all declared files", async () => {
+test("ZIP generates v0.3.2 price-engine A6 status-control package and checks all declared files", async () => {
   const r = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(r, /const VERSION = "0\.3\.1"/);
+  assert.match(r, /const VERSION = "0\.3\.2"/);
   assert.match(r, /buildStockWorkerV030/);
   assert.match(r, /content-shopling-v030\.js/);
   assert.match(r, /background-v030\.js/);
   assert.match(r, /missing_packaged_file/);
   assert.match(r, /workerSha256/);
-  assert.match(r, /PRICE_ENGINE_ALL_FRAME_SEARCH_RESULT_V031/);
+  assert.match(r, /PRICE_ENGINE_ALL_FRAME_A6_STATUS_CONTROL_V032/);
 });
