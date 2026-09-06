@@ -8,6 +8,7 @@ const jsFiles = [
   "content-ops-v013.js",
   "main-shopling.js",
   "menu-guard-v014.js",
+  "menu-main-click-v015.js",
   "a6-role-marker-v015.js",
   "content-shopling-v013.js",
   "popup.js",
@@ -48,8 +49,13 @@ test("jobs require goods key and multiple goods keys are serialized", async () =
   assert.match(background, /continueNextGoodsKey/);
 });
 
-test("A6 role marker runs before the existing Shopling worker", async () => {
+test("menu MAIN-world bridge and A6 role marker run before the existing Shopling worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   const shopling = manifest.content_scripts.find((entry) => entry.js?.includes("content-shopling-v013.js"));
-  assert.deepEqual(shopling?.js, ["menu-guard-v014.js", "a6-role-marker-v015.js", "content-shopling-v013.js"]);
+  assert.deepEqual(shopling?.js, [
+    "menu-guard-v014.js",
+    "menu-main-click-v015.js",
+    "a6-role-marker-v015.js",
+    "content-shopling-v013.js",
+  ]);
 });
