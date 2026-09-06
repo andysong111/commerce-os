@@ -13,6 +13,7 @@ const FILES = [
   "content-ops-v013.js",
   "main-shopling.js",
   "menu-guard-v014.js",
+  "menu-main-click-v015.js",
   "a6-role-marker-v015.js",
   "content-shopling-v013.js",
   "popup.html",
@@ -82,6 +83,7 @@ export async function GET() {
       const shopling = manifest.content_scripts?.find(
         (script) =>
           script.js?.includes("menu-guard-v014.js") &&
+          script.js?.includes("menu-main-click-v015.js") &&
           script.js?.includes("a6-role-marker-v015.js") &&
           script.js?.includes("content-shopling-v013.js"),
       );
