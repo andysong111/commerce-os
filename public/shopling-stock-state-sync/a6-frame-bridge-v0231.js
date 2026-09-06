@@ -1,5 +1,5 @@
 (() => {
-  const MARKER_ID = "commerce-os-stock-a6-frame-bridge-v0231";
+  const MARKER_ID = "commerce-os-stock-a6-frame-bridge-v0232";
   const norm = (value) => String(value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
   const compact = (value) => norm(value).replace(/\s+/g, "");
 
@@ -10,23 +10,12 @@
     );
   }
 
-  function hasSearchFormEvidence() {
-    const controls = [...document.querySelectorAll("input,textarea")];
-    return controls.some((control) => {
-      const hint = norm(`${control.getAttribute?.("placeholder") || ""} ${control.name || ""} ${control.id || ""}`);
-      return /상품검색코드|자사상품코드|검색|search|query/i.test(hint);
-    });
-  }
-
-  function hasA6PageEvidence() {
-    const path = String(location.pathname || "").toLowerCase();
-    const text = norm(document.body?.innerText || document.body?.textContent || "");
-    return /prodbulkoptlst\.phtml/i.test(path) || /\[A6\]|옵션대량수정/i.test(text);
-  }
-
   function ensureMarker() {
     if (!document.body || document.getElementById(MARKER_ID)) return false;
-    if (!hasA6PageEvidence() || !hasA6SearchControl() || !hasSearchFormEvidence()) return false;
+    // Shopling A6 is split across legacy frames. The visible title/path/search-input hint can
+    // live in another frame, but the exact "옵션자체관리코드" search option is the stable
+    // A6-specific control. Use only that unique control as the frame role signal.
+    if (!hasA6SearchControl()) return false;
     const marker = document.createElement("span");
     marker.id = MARKER_ID;
     marker.setAttribute("aria-hidden", "true");
