@@ -14,21 +14,33 @@ const jsFiles = [
   "popup.js",
 ];
 
-test("stock-state extension v0.1.6 is Manifest V3 and excludes debugger", async () => {
+test("stock-state extension v0.1.7 is Manifest V3 and excludes debugger", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.6");
+  assert.equal(manifest.version, "0.1.7");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.ok(manifest.permissions.includes("webNavigation"));
+  assert.ok(manifest.permissions.includes("storage"));
   assert.ok(!manifest.permissions.includes("debugger"));
 });
 
-test("all shipped v0.1.6 JavaScript parses", async () => {
+test("all shipped v0.1.7 JavaScript parses", async () => {
   for (const fileName of jsFiles) {
     const source = await readFile(`${root}/${fileName}`, "utf8");
     assert.doesNotThrow(() => new Function(source), fileName);
   }
+});
+
+test("v0.1.7 clears only a same-job RUNNING state that is older than its terminal last result", async () => {
+  const ops = await readFile(`${root}/content-ops-v013.js`, "utf8");
+  assert.match(ops, /commerceOsShoplingStockStateSyncV013/);
+  assert.match(ops, /staleTerminalRunning/);
+  assert.match(ops, /String\(active\.job\.jobId\) === String\(lastResult\.jobId\)/);
+  assert.match(ops, /lastFinishedAt >= activeStartedAt/);
+  assert.match(ops, /\["SUCCEEDED", "FAILED", "UNCERTAIN"\]/);
+  assert.match(ops, /chrome\.storage\.local\.remove\(STATE_KEY\)/);
+  assert.doesNotMatch(ops, /STOCK_SYNC_STOP/);
 });
 
 test("route contract remains option A6->A21 option send and single A4->A21 sale-status", async () => {
