@@ -4,16 +4,16 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.4 package keeps A4/A6/A21 worker and swaps only the menu guard", async () => {
+test("v0.1.5 package keeps A4/A6/A21 worker and adds the real-A6 role marker before the worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.4");
+  assert.equal(manifest.version, "0.1.5");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
     entry.matches?.includes("https://a.shopling.co.kr/*") &&
     entry.js?.includes("content-shopling-v013.js"),
   );
-  assert.deepEqual(shopling?.js, ["menu-guard-v014.js", "content-shopling-v013.js"]);
+  assert.deepEqual(shopling?.js, ["menu-guard-v014.js", "a6-role-marker-v015.js", "content-shopling-v013.js"]);
   assert.equal(shopling?.all_frames, true);
 });
 
@@ -62,6 +62,16 @@ test("v0.1.4 guard no longer rewrites querySelectorAll and therefore cannot hide
   assert.match(content, /document\.querySelectorAll\("a,\[onclick\],li,td,span,div"\)/);
 });
 
+test("v0.1.5 marks only the real A6 work frame so pre-search A6 is recognized without misclassifying the menu frame", async () => {
+  const marker = await readFile(`${root}/a6-role-marker-v015.js`, "utf8");
+  assert.match(marker, /옵션대량수정/);
+  assert.match(marker, /옵션수량변경/);
+  assert.match(marker, /검색항목/);
+  assert.match(marker, /일괄 상태변경/);
+  assert.match(marker, /aria-hidden/);
+  assert.match(marker, /left = "-100000px"/);
+});
+
 test("timeout and failed-result rules remain fail-closed", async () => {
   const background = await readFile(`${root}/background-v013.js`, "utf8");
   assert.match(background, /submitted \? "UNCERTAIN" : "FAILED"/);
@@ -70,13 +80,14 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.4 guard with the reviewed v0.1.3 worker files", async () => {
+test("download route packages v0.1.5 A6 marker with the reviewed stock-state worker files", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.4"/);
+  assert.match(route, /const VERSION = "0\.1\.5"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
     "menu-guard-v014.js",
+    "a6-role-marker-v015.js",
     "content-shopling-v013.js",
   ]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
