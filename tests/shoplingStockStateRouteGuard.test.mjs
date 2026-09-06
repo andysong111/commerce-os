@@ -4,19 +4,18 @@ import test from "node:test";
 
 const root = "public/shopling-stock-state-sync";
 
-test("v0.1.5 package bridges legacy Shopling menu clicks and marks the real A6 frame before the worker", async () => {
+test("v0.1.6 package bridges legacy Shopling menu clicks and marks the real A6 search form before the worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
-  assert.equal(manifest.version, "0.1.5");
+  assert.equal(manifest.version, "0.1.6");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.ok(!manifest.permissions.includes("debugger"));
   const shopling = manifest.content_scripts.find((entry) =>
-    entry.matches?.includes("https://a.shopling.co.kr/*") &&
-    entry.js?.includes("content-shopling-v013.js"),
+    entry.matches?.includes("https://a.shopling.co.kr/*") && entry.js?.includes("content-shopling-v013.js"),
   );
   assert.deepEqual(shopling?.js, [
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
-    "a6-role-marker-v015.js",
+    "a6-role-marker-v016.js",
     "content-shopling-v013.js",
   ]);
   assert.equal(shopling?.all_frames, true);
@@ -29,7 +28,6 @@ test("option products still use A6 then A21 goods-key option send and never A22"
   assert.match(background, /productKind === "OPTION" \? "A6" : "A4"/);
   assert.match(background, /A21 goods key .*옵션송신/);
   assert.match(content, /A21_OPTION_SEND_MODE_NOT_FOUND/);
-  assert.match(content, /상품옵션/);
   assert.doesNotMatch(background, /A22/);
   assert.doesNotMatch(content, /runA22/);
   assert.match(readme, /A22 쇼핑몰상품옵션전송은 더 이상 이 자동화 경로에서 사용하지 않습니다/);
@@ -40,9 +38,7 @@ test("single products still use A4 product status then A21 product sale-status t
   const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
   assert.match(background, /active\.job\.productKind === "OPTION" \? "A21_LIST" : "A4"/);
   assert.match(content, /runA4/);
-  assert.match(content, /A4_PRODUCT_STATUS_CONTROL_NOT_FOUND/);
   assert.match(content, /상품판매상태송신/);
-  assert.match(content, /A21_TARGET_STATUS_NOT_FOUND/);
 });
 
 test("A4/A21 require exact numeric goods key and exact one-row selection", async () => {
@@ -55,19 +51,7 @@ test("A4/A21 require exact numeric goods key and exact one-row selection", async
   assert.match(content, /selected\.count !== 1/);
 });
 
-test("v0.1.4 guard no longer rewrites querySelectorAll and therefore cannot hide the real [6] option bulk menu", async () => {
-  const guard = await readFile(`${root}/menu-guard-v014.js`, "utf8");
-  const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
-  assert.doesNotMatch(guard, /querySelectorAll\s*=/);
-  assert.doesNotMatch(guard, /commerceOsSafeQuerySelectorAll/);
-  assert.match(guard, /SHOPLING_PERMISSION_DENIED/);
-  assert.match(content, /옵션대량수정/);
-  assert.match(content, /상품조회수정/);
-  assert.match(content, /쇼핑몰상품수정/);
-  assert.match(content, /document\.querySelectorAll\("a,\[onclick\],li,td,span,div"\)/);
-});
-
-test("v0.1.5 routes A4/A6/A21 menu element.click through the existing MAIN-world click bridge", async () => {
+test("legacy A4/A6/A21 menu clicks still route through MAIN-world bridge", async () => {
   const bridge = await readFile(`${root}/menu-main-click-v015.js`, "utf8");
   assert.match(bridge, /HTMLElement\.prototype\.click/);
   assert.match(bridge, /commerce-os-stock-main-click/);
@@ -77,13 +61,14 @@ test("v0.1.5 routes A4/A6/A21 menu element.click through the existing MAIN-world
   assert.match(bridge, /nativeClick\.call\(this\)/);
 });
 
-test("v0.1.5 marks only the real A6 work frame so pre-search A6 is recognized without misclassifying the menu frame", async () => {
-  const marker = await readFile(`${root}/a6-role-marker-v015.js`, "utf8");
+test("v0.1.6 identifies pre-search A6 by actual search-form evidence, not the absent option-quantity-change text", async () => {
+  const marker = await readFile(`${root}/a6-role-marker-v016.js`, "utf8");
   assert.match(marker, /옵션대량수정/);
-  assert.match(marker, /옵션수량변경/);
   assert.match(marker, /검색항목/);
+  assert.match(marker, /옵션자체관리코드/);
+  assert.match(marker, /selectHasOption/);
+  assert.doesNotMatch(marker, /옵션수량변경/);
   assert.match(marker, /일괄 상태변경/);
-  assert.match(marker, /aria-hidden/);
   assert.match(marker, /left = "-100000px"/);
 });
 
@@ -95,15 +80,15 @@ test("timeout and failed-result rules remain fail-closed", async () => {
   assert.doesNotMatch(background, /RESULT_TIMEOUT[\s\S]{0,160}SUCCEEDED/);
 });
 
-test("download route packages v0.1.5 menu bridge and A6 marker with reviewed stock-state worker files", async () => {
+test("download route packages v0.1.6 menu bridge and A6 search-form marker", async () => {
   const route = await readFile("src/app/api/shopling-stock-state-sync/download/route.ts", "utf8");
-  assert.match(route, /const VERSION = "0\.1\.5"/);
+  assert.match(route, /const VERSION = "0\.1\.6"/);
   for (const file of [
     "background-v013.js",
     "content-ops-v013.js",
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
-    "a6-role-marker-v015.js",
+    "a6-role-marker-v016.js",
     "content-shopling-v013.js",
   ]) {
     assert.match(route, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

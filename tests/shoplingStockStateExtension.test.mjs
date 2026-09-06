@@ -9,29 +9,29 @@ const jsFiles = [
   "main-shopling.js",
   "menu-guard-v014.js",
   "menu-main-click-v015.js",
-  "a6-role-marker-v015.js",
+  "a6-role-marker-v016.js",
   "content-shopling-v013.js",
   "popup.js",
 ];
 
-test("stock-state extension v0.1.5 is Manifest V3 and excludes debugger", async () => {
+test("stock-state extension v0.1.6 is Manifest V3 and excludes debugger", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, "0.1.5");
+  assert.equal(manifest.version, "0.1.6");
   assert.equal(manifest.background.service_worker, "background-v013.js");
   assert.equal(manifest.action.default_popup, "popup.html");
   assert.ok(manifest.permissions.includes("webNavigation"));
   assert.ok(!manifest.permissions.includes("debugger"));
 });
 
-test("all shipped v0.1.5 JavaScript parses", async () => {
+test("all shipped v0.1.6 JavaScript parses", async () => {
   for (const fileName of jsFiles) {
     const source = await readFile(`${root}/${fileName}`, "utf8");
     assert.doesNotThrow(() => new Function(source), fileName);
   }
 });
 
-test("route contract is option A6->A21 option send and single A4->A21 sale-status", async () => {
+test("route contract remains option A6->A21 option send and single A4->A21 sale-status", async () => {
   const background = await readFile(`${root}/background-v013.js`, "utf8");
   const content = await readFile(`${root}/content-shopling-v013.js`, "utf8");
   assert.match(background, /firstStage = normalized\.job\.productKind === "OPTION" \? "A6" : "A4"/);
@@ -49,13 +49,13 @@ test("jobs require goods key and multiple goods keys are serialized", async () =
   assert.match(background, /continueNextGoodsKey/);
 });
 
-test("menu MAIN-world bridge and A6 role marker run before the existing Shopling worker", async () => {
+test("menu MAIN-world bridge and corrected A6 role marker run before the existing Shopling worker", async () => {
   const manifest = JSON.parse(await readFile(`${root}/manifest.json`, "utf8"));
   const shopling = manifest.content_scripts.find((entry) => entry.js?.includes("content-shopling-v013.js"));
   assert.deepEqual(shopling?.js, [
     "menu-guard-v014.js",
     "menu-main-click-v015.js",
-    "a6-role-marker-v015.js",
+    "a6-role-marker-v016.js",
     "content-shopling-v013.js",
   ]);
 });
