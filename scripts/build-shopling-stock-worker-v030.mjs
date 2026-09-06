@@ -1,11 +1,12 @@
 // Compose the unchanged mutation template with the tested 2024 search policy.
-// v0.3.0 only changes worker identity, direct role recognition and immediate message acknowledgement.
+// v0.3.1 keeps the price-engine workspace and aligns A6 result-row detection with
+// the proven A21 price worker: legacy result rows do not need HTMLElement visibility gating.
 export function buildStockWorkerV030(base, policy) {
   function once(source, before, after) {
     if (source.split(before).length !== 2) throw new Error(`stock_worker_template_mismatch:${before.slice(0,70)}`);
     return source.replace(before, after);
   }
-  let source = once(base, 'const VERSION = "0.1.8";', 'const VERSION = "0.3.0";\n  if (globalThis.__commerceStockWorkerV030) return;\n  globalThis.__commerceStockWorkerV030 = true;\n  let executionContext = {};');
+  let source = once(base, 'const VERSION = "0.1.8";', 'const VERSION = "0.3.1";\n  if (globalThis.__commerceStockWorkerV031) return;\n  globalThis.__commerceStockWorkerV031 = true;\n  let executionContext = {};');
   const start = '  async function searchExact(fieldLabel, token) {';
   const end = '  async function searchGoodsKey(goodsKey) {';
   if (source.split(start).length !== 2 || source.split(end).length !== 2) throw new Error('stock_search_template_mismatch');
@@ -15,10 +16,21 @@ export function buildStockWorkerV030(base, policy) {
       getField: (label) => selectWithOption(label)[0] || null,
       selectField: selectByText, findInput: findSearchInput, setInput,
       clickSearch, rows: matchingRows, waitFor, sleep,
+      resultCount: () => {
+        const match = bodyText().match(/총\\s*조회수\\s*[:：]?\\s*([\\d,]+)\\s*건/i);
+        return match ? Number(match[1].replace(/,/g, "")) : null;
+      },
     });
   }\n\n` + source.slice(source.indexOf(end));
   source = once(source, '    const job = message.job || {};', '    const job = message.job || {};\n    executionContext = { jobId: job.jobId, executionId: job.executionId, stage: message.stage };');
   source = once(source, '${job.jobId || "unknown"}:${stage}:${goodsKey}:${location.href}', '${job.jobId || "unknown"}:${job.executionId || ""}:${stage}:${goodsKey}:${location.href}');
+  // Price-resend worker does not reject a legacy <tr> just because getBoundingClientRect/offsetParent is odd.
+  // Keep exact-token + checkbox gates, only remove the visibility prerequisite.
+  source = once(
+    source,
+    '      .filter((row) => visible(row) && regex.test(norm(row.textContent).toUpperCase()))',
+    '      .filter((row) => regex.test(norm(row.textContent).toUpperCase()))',
+  );
   // Do not depend on A6 title/menu text living in the same legacy frame. The unique search option is the role contract.
   source = once(source, 'if (/옵션대량수정/i.test(text) && /(일괄\\s*상태변경|상태\\s*일괄변경)/i.test(text)) return "A6";', 'if (selectWithOption("옵션자체관리코드").length) return "A6";');
   source = once(source, '    const href = String(location.href || "");', `    const href = String(location.href || "");

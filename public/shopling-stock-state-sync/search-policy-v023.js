@@ -43,6 +43,16 @@
     if (evidence.start !== START || evidence.end !== end) return { ok: false, code: "SEARCH_DATE_VERIFY_FAILED", message: "2024-01-01~오늘 검색기간 설정값 검증에 실패했습니다.", evidence };
     return { ok: true, evidence };
   }
+  function resultEvidence(api) {
+    const total = typeof api.resultCount === "function" ? api.resultCount() : null;
+    return { totalResultCount: Number.isFinite(total) ? total : null };
+  }
+  async function awaitRows(token, api, timeoutMs) {
+    return api.waitFor(() => {
+      const found = api.rows(token);
+      return found.length ? found : null;
+    }, timeoutMs, 200);
+  }
   async function search(fieldLabel, token, api) {
     let field = api.getField(fieldLabel);
     if (!field) return { ok: false, code: "SEARCH_FIELD_NOT_FOUND", message: `${fieldLabel} 검색항목을 찾지 못했습니다.` };
@@ -57,11 +67,19 @@
     const currentPeriod = pair ? { start: digits(pair[0].value), end: digits(pair[1].value) } : null;
     const selectedLabel = norm(field.options?.[field.selectedIndex]?.textContent);
     const queryMatches = input && norm(input.value).toUpperCase() === norm(token).toUpperCase() && selectedLabel === fieldLabel && inDateRange(currentPeriod);
-    // A search may reload only the inner frame. Resume that submitted query instead of submitting forever.
+    // Shopling may reload only the inner frame. In that resumed document, wait long enough for the
+    // legacy result table to repaint; v0.3.0's 2.5s resume window could fail while the exact row was visibly loading.
     const resumed = ticket && ticket.documentToken !== documentToken && Date.now() - ticket.at < 90_000 && queryMatches;
     if (resumed || (completed.has(scope) && queryMatches)) {
-      const rows = await api.waitFor(() => { const found = api.rows(token); return found.length ? found : null; }, 2_500, 150);
-      if (!rows?.length) return { ok: false, code: "EXACT_RESULT_NOT_FOUND", message: `${token} 정확 일치 검색결과가 없습니다. 검색기간: 2024-01-01~${todayKst()}`, evidence: currentPeriod };
+      const rows = await awaitRows(token, api, 20_000);
+      if (!rows?.length) {
+        const evidence = { ...currentPeriod, ...resultEvidence(api) };
+        const code = Number(evidence.totalResultCount || 0) > 0 ? "EXACT_RESULT_ROW_NOT_BOUND" : "EXACT_RESULT_NOT_FOUND";
+        const message = Number(evidence.totalResultCount || 0) > 0
+          ? `${token} 조회결과 ${evidence.totalResultCount}건은 확인했지만 정확 행을 worker가 연결하지 못했습니다.`
+          : `${token} 정확 일치 검색결과가 없습니다. 검색기간: 2024-01-01~${todayKst()}`;
+        return { ok: false, code, message, evidence };
+      }
       completed.set(scope, true);
       return { ok: true, rows, fieldLabel, period: currentPeriod };
     }
@@ -70,7 +88,6 @@
     if (!input || !api.setInput(input, token)) return { ok: false, code: "SEARCH_INPUT_SET_FAILED", message: `${fieldLabel} 검색어 ${token}을 입력하지 못했습니다.` };
     const period = applyPeriod(input.form || form, api.setInput);
     if (!period.ok) return period;
-    // Some old date widgets redraw their paired input on change; read the live controls again.
     await api.sleep(120);
     const livePair = datePair(input.form || form);
     if (!livePair || digits(livePair[0].value) !== START || digits(livePair[1].value) !== todayKst()) {
@@ -79,9 +96,15 @@
     try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), documentToken, period: period.evidence })); }
     catch { return { ok: false, code: "SEARCH_CONTINUATION_STORAGE_FAILED", message: "검색 후 화면 복구정보를 저장하지 못해 실행을 차단했습니다." }; }
     if (!api.clickSearch(input)) return { ok: false, code: "SEARCH_BUTTON_NOT_FOUND", message: "검색 버튼을 찾지 못했습니다." };
-    // [] is truthy: never use it as a successful wait predicate.
-    const rows = await api.waitFor(() => { const found = api.rows(token); return found.length ? found : null; }, 20_000, 250);
-    if (!rows?.length) return { ok: false, code: "EXACT_RESULT_NOT_FOUND", message: `${token} 정확 일치 검색결과가 없습니다. 검색기간: 2024-01-01~${todayKst()}`, evidence: period.evidence };
+    const rows = await awaitRows(token, api, 30_000);
+    if (!rows?.length) {
+      const evidence = { ...period.evidence, ...resultEvidence(api) };
+      const code = Number(evidence.totalResultCount || 0) > 0 ? "EXACT_RESULT_ROW_NOT_BOUND" : "EXACT_RESULT_NOT_FOUND";
+      const message = Number(evidence.totalResultCount || 0) > 0
+        ? `${token} 조회결과 ${evidence.totalResultCount}건은 확인했지만 정확 행을 worker가 연결하지 못했습니다.`
+        : `${token} 정확 일치 검색결과가 없습니다. 검색기간: 2024-01-01~${todayKst()}`;
+      return { ok: false, code, message, evidence };
+    }
     completed.set(scope, true);
     return { ok: true, rows, fieldLabel, period: period.evidence };
   }
